@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy KTS
 
 on:
   workflow_dispatch:
@@ -6,9 +6,12 @@ on:
     branches:
       - main
 
+concurrency:
+  group: kts-production-deploy
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  PM2_PROCESS_NAME: kts-next-admin
 
 jobs:
   deploy:
@@ -19,45 +22,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Validate deployment secrets
-        run: |
-          test -n "${{ secrets.VPS_HOST }}" || (echo "Missing repository secret: VPS_HOST" && exit 1)
-          test -n "${{ secrets.VPS_USER }}" || (echo "Missing repository secret: VPS_USER" && exit 1)
-          test -n "${{ secrets.VPS_PROJECT_PATH }}" || (echo "Missing repository secret: VPS_PROJECT_PATH" && exit 1)
-          test -n "${{ secrets.VPS_SSH_KEY }}" || (echo "Missing repository secret: VPS_SSH_KEY" && exit 1)
-
       - name: Configure SSH
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/kts_deploy
+          chmod 600 ~/.ssh/kts_deploy
           ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Prepare target directory
-        run: |
-          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "mkdir -p '${{ secrets.VPS_PROJECT_PATH }}'"
 
       - name: Sync files to server
         run: |
+          set -euo pipefail
           rsync -az --delete \
-            --exclude ".git" \
-            --exclude ".github" \
-            --exclude "node_modules" \
-            --exclude ".next" \
-            --exclude ".env.local" \
-            --exclude "public/uploads" \
-            -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.env*' \
+            --exclude='.next/' \
+            --exclude='node_modules/' \
+            --exclude='public/uploads/' \
+            -e "ssh -i ~/.ssh/kts_deploy -o IdentitiesOnly=yes" \
             ./ "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PROJECT_PATH }}/"
 
       - name: Build and restart on server
         run: |
-          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
-            set -euo pipefail
-            cd "${{ secrets.VPS_PROJECT_PATH }}"
-            npm ci --include=dev
-            npm run build
-            pm2 restart "${{ env.PM2_PROCESS_NAME }}" --update-env
-            pm2 status "${{ env.PM2_PROCESS_NAME }}"
-          EOF
+          set -euo pipefail
+          ssh -i ~/.ssh/kts_deploy -o IdentitiesOnly=yes \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "cd '${{ secrets.VPS_PROJECT_PATH }}' && npm ci --include=dev && npm run build && pm2 startOrRestart ecosystem.config.cjs --update-env"
