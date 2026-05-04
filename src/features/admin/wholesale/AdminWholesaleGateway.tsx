@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
+import { AdminWholesaleAnalytics } from './AdminWholesaleAnalytics';
 
 type Manager = {
   id: number;
@@ -462,6 +463,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         </div>
 
         {status ? <p className={styles.status}>{status}</p> : null}
+
+        <AdminWholesaleAnalytics />
 
         <h3>Добавить менеджера</h3>
         <div className={styles.wholesaleRow}>
