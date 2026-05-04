@@ -1,0 +1,81 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(187, 180, 220, 0.86);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+
+  padding: $apx-16;
+}
+
+.modal {
+  width: 100%;
+  max-width: var(--popup-w, #{$apx-900});
+  background: #fff;
+  position: relative;
+  box-shadow: 0 $apx-20 $apx-60 rgba(0,0,0,.25);
+  border-radius: $apx-30;
+
+}
+
+.scrollable {
+  max-height: calc(100dvh - #{$apx-120});
+  overflow: auto;
+}
+
+.close {
+  position: absolute;
+  top: $apx-12;
+  right: $apx-12;
+
+  background: none;
+  border: 0;
+  font-size: $apx-24;
+  line-height: 1;
+  cursor: pointer;
+  color: #ededed;
+  
+}
+
+.content {
+  padding: 0 0 $apx-18;
+}
+
+@media (max-width: 1024px) {
+  .overlay { padding: $apx-l-16; }
+
+  .modal  {
+    max-width: var(--popup-w, #{$apx-l-900});
+    border-radius: $apx-l-25;
+    box-shadow: 0 $apx-l-20 $apx-l-60 rgba(0,0,0,.25);
+  }
+
+  .scrollable { max-height: calc(100dvh - #{$apx-l-120}); }
+
+  .close { top: $apx-l-10; right: $apx-l-10; font-size: $apx-l-22; }
+
+  .content { padding: 0; }
+}
+
+@media (max-width: 450px) {
+  .overlay { padding: $apx-m-12; }
+
+  .modal  {
+    max-width: var(--popup-w, #{$apx-m-400});
+    border-radius: $apx-m-12;
+    box-shadow: 0 $apx-m-16 $apx-m-44 rgba(0,0,0,.25);
+  }
+
+  .scrollable { max-height: calc(100dvh - #{$apx-m-96}); }
+
+  .close { top: $apx-m-8; right: $apx-m-8; font-size: $apx-m-20; }
+
+  .content { 
+    padding: 0; 
+  }
+}

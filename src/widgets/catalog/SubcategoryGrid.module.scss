@@ -1,0 +1,107 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.grid {
+
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: $apx-20;
+
+}
+
+.card {
+
+  position: relative;
+  display: flex; 
+  align-items: center;
+
+  height: $apx-138;
+  padding: $apx-16;
+
+  border: $apx-1 solid #B1B1B1;
+  border-radius: $apx-12;
+  background: #F1F3F6;
+
+  color: #111;
+  text-decoration: none;
+  font-weight: 700;
+  text-transform: uppercase;
+  line-height: 1.2;
+
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+
+}
+
+/* Ховер — только для десктопов */
+@media (min-width: 1025px) and (hover: hover) and (pointer: fine) {
+
+  .card:hover {
+
+    border-color: #dcdcf2;
+    box-shadow: 0 $apx-8 $apx-18 rgba(18, 22, 44, .06);
+    transform: translateY(-2px);
+    background-color: #EAE6FF;
+
+  }
+
+}
+
+.cardText {
+
+  font-size: $apx-20;
+  font-weight: 600;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+
+}
+
+.empty {
+
+  padding: $apx-16;
+  color: #666;
+
+}
+
+@media (max-width: 1024px) {
+
+  .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: $apx-l-14; }
+
+  .card {
+
+    min-height: $apx-l-64;
+    padding: $apx-l-14 $apx-l-36 $apx-l-14 $apx-l-14;
+    border-radius: $apx-l-12;
+
+    &::after {
+
+      right: $apx-l-12;
+      width: $apx-l-8; height: $apx-l-8;
+      border-width: $apx-l-2;
+
+    }
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $apx-m-12; margin-bottom: $apx-m-20;}
+
+  .card {
+
+    min-height: $apx-m-80;
+    padding: $apx-m-12 $apx-m-30 $apx-m-12 $apx-m-12;
+    border-radius: $apx-m-12;
+    font-size: $apx-m-12;
+
+  }
+
+  .cardText {
+
+    font-size: $apx-m-14;
+
+  }
+
+}

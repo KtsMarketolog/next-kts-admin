@@ -1,0 +1,458 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.aboutKts {
+
+  max-width: $apx-1274;
+  margin: 0 auto;
+
+  h2 {
+
+    font-weight: 700;
+    font-size: $apx-53;
+    line-height: 1.1;
+    letter-spacing: 0; 
+    text-align: center;
+
+    margin-bottom: $apx-40;
+    padding-bottom: $apx-40;
+    border-bottom: $apx-1 solid #D9D9D9;
+    color: var(--hero-title-color);
+
+  }
+  .grid {
+
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: $apx-34;
+
+  }
+
+  .bigCard {
+
+    position: relative;
+    min-width: $apx-613;
+    max-width: $apx-613;
+    min-height: $apx-566;
+    background: linear-gradient(179.92deg, #240C96 27.06%, #604FAD 99.93%);
+
+    border-radius: $apx-15;
+
+    .arrowHorizontal {
+
+      width: $apx-318;
+      height: $apx-21;
+
+      position: absolute;
+      right: $apx-230;
+      bottom: $apx-160;
+      pointer-events: none;
+
+    }
+
+    .arrowVertical {
+
+      width: $apx-21;
+      height: $apx-318;
+
+      position: absolute;
+      right: $apx-160;
+      top: $apx-50;
+      pointer-events: none;
+      
+    }
+
+    .net {
+
+      width: 65%;
+      height: 65%;
+
+      position: absolute;
+      bottom: 0;
+      right: 0;
+     
+      opacity: 0.55;
+      z-index: 1;
+      pointer-events: none;
+      filter: blur(0.3px);
+
+    }
+
+    .title {
+
+      font-size: $apx-60;
+      font-weight: 700;
+      line-height: 1.1;
+      color: #fff;
+
+      position: relative;
+      z-index: 1;
+      padding: $apx-120 $apx-60 $apx-60 $apx-60;
+
+    }
+
+  }
+
+  .facts {
+
+    display: flex;
+    flex-direction: column;
+    gap: $apx-34;
+    
+  }
+
+  .fact {
+
+    position: relative;
+    display: grid;
+    grid-template-columns: $apx-259 auto;
+    gap: $apx-32;
+    background-color: #E9E6F4;
+    align-items: center;
+    
+    border-radius: $apx-15;
+    min-height: $apx-166;
+    max-height: $apx-166;
+    padding-left: $apx-90;
+    overflow: hidden;
+
+    .number {
+
+      font-size: $apx-50;
+      font-weight: 700;
+      line-height: 1.1;
+      color: #3B394E;
+      white-space: nowrap;
+      justify-self: end;
+
+
+    }
+
+    .desc {
+      
+      font-size: $apx-26;
+      font-weight: 500;
+      line-height: 1.1;
+      color: #3B394E;
+
+    }
+
+    .icon {
+
+      position: absolute;
+      left: -5%;
+      top: 50%;
+      transform: translateY(-50%);
+      
+
+      min-width: $apx-113;
+      min-height: $apx-101;
+      pointer-events: none;
+      z-index: 1;
+
+    }
+
+  }
+}
+
+/* Начальные состояния */
+.bigCard {
+
+  opacity: 0;
+  transform: translateX(-80px);
+  transition: transform 0.8s ease, opacity 0.8s ease;
+  
+}
+
+.bigCard.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Для правых блоков */
+.fact {
+  opacity: 0;
+  transform: translateX(80px);
+  transition: transform 0.8s ease, opacity 0.8s ease;
+}
+
+/* Плавная задержка */
+.factVisible1 {
+  opacity: 1;
+  transform: translateX(0);
+  transition-delay: 0.3s;
+}
+
+.factVisible2 {
+  opacity: 1;
+  transform: translateX(0);
+  transition-delay: 0.6s;
+}
+
+.factVisible3 {
+  opacity: 1;
+  transform: translateX(0);
+  transition-delay: 0.9s;
+}
+
+
+@media (max-width: 1024px) {
+
+  .aboutKts {
+
+    max-width: 100%;
+    padding: $apx-l-75 0;
+    padding-top: 0;
+
+    h2 {
+
+      font-size: $apx-l-53;
+      margin-bottom: $apx-l-40;
+      padding-bottom: $apx-l-40;
+      border-bottom: $apx-l-1 solid #D9D9D9;
+
+    }
+
+    .grid {
+
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: $apx-34;
+
+    }
+
+    .bigCard {
+
+      min-width: $apx-l-568;
+      max-width: $apx-l-568;
+      min-height: $apx-l-566;
+      border-radius: $apx-l-15;
+
+      .arrowHorizontal {
+
+        width: $apx-l-318;
+        height: $apx-l-21;
+
+        position: absolute;
+        right: $apx-l-190;
+        bottom: $apx-l-160;
+
+      }
+
+      .arrowVertical {
+
+        width: $apx-l-21;
+        height: $apx-l-318;
+
+        position: absolute;
+        right: $apx-l-120;
+        top: $apx-l-50;
+        
+      }
+
+      .net {
+
+        width: 65%;
+        height: 65%;
+
+        position: absolute;
+        bottom: 0;
+        right: 0;
+      
+        opacity: 0.55;
+        z-index: 1;
+        pointer-events: none;
+        filter: blur(0.3px);
+
+      }
+
+      .title {
+
+        font-size: $apx-l-60;
+        padding: $apx-l-100 $apx-l-60 $apx-l-60 $apx-l-60;
+
+      }
+
+    }
+
+    .facts {
+
+      gap: $apx-l-34;
+      
+    }
+
+    .fact {
+
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: $apx-l-5;
+      
+      border-radius: $apx-l-15;
+      padding: $apx-l-31 $apx-l-5 $apx-l-64 $apx-l-54;
+      min-height: $apx-l-166;
+      max-height: $apx-l-166;
+      padding-left: $apx-50;
+
+      .number {
+
+        font-size: $apx-l-50;
+
+      }
+
+      .desc {
+        
+        font-size: $apx-l-20;
+        line-height: 1.1;
+        color: #3B394E;
+
+      }
+
+      .icon {
+
+        position: absolute;
+        left: 72%;
+        top: 50%;
+
+        min-width: $apx-l-113;
+        min-height: $apx-l-101;
+        pointer-events: none;
+        z-index: 1;
+
+      }
+
+    }
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .aboutKts {
+
+    padding: $apx-m-50 0;
+
+    h2 {
+
+      font-size: $apx-m-40;
+      margin-bottom: $apx-m-20;
+      padding-bottom: $apx-m-20;
+      border-bottom: $apx-m-1 solid #D9D9D9;
+
+    }
+
+    .grid {
+
+      grid-template-columns: 1fr;
+      gap: $apx-24;
+
+    }
+
+    .bigCard {
+
+      min-width: 100%;
+      max-width: 100%;
+      min-height: $apx-m-343;
+      border-radius: $apx-m-30;
+      margin-bottom: $apx-m-20;
+
+      .arrowHorizontal {
+
+        width: $apx-m-221;
+        height: $apx-m-21;
+
+        position: absolute;
+        right: $apx-m-104;
+        bottom: $apx-m-60;
+
+      }
+
+      .arrowVertical {
+
+        width: $apx-m-21;
+        height: $apx-m-221;
+
+        position: absolute;
+        right: $apx-m-64;
+        top: $apx-m-40;
+        
+      }
+
+      .net {
+
+        width: 65%;
+        height: 65%;
+
+        position: absolute;
+        bottom: 0;
+        right: 0;
+      
+        opacity: 0.55;
+
+      }
+
+      .title {
+
+        font-size: $apx-m-42;
+        padding: $apx-m-80 $apx-m-49 $apx-m-49 $apx-m-49;
+
+      }
+
+    }
+
+    .facts {
+
+      gap: $apx-m-24;
+      
+    }
+
+    .fact {
+      
+      position: relative;
+      display: grid;
+      grid-template-columns:minmax(0,86px) 1fr;
+      gap: $apx-m-90;
+      align-items: center;
+      
+      border-radius: $apx-m-11;
+      padding: $apx-m-36 $apx-m-5 $apx-m-36 $apx-m-30;
+      min-height: $apx-m-117;
+      max-height: $apx-m-117;
+      padding-left: $apx-m-12;
+
+      .number {
+
+        font-size: $apx-m-28;
+        justify-self: start;
+        text-align:right;
+        min-width: $apx-m-140;
+
+      }
+
+      .desc {
+        
+        font-size: $apx-m-20;
+        color: #3B394E;
+        z-index: 1;
+
+      }
+
+      .icon {
+
+        position: absolute;
+        left: 83.5%;
+        top: 50%;
+
+        min-width: $apx-m-73;
+        min-height: $apx-m-73;
+        pointer-events: none;
+        z-index: 1;
+
+      }
+
+    }
+
+  }
+
+}

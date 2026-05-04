@@ -1,0 +1,108 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.pad {
+
+  padding-top: $apx-134;
+
+}
+
+.bg {
+
+  position: relative;
+  max-width: $apx-1594;
+  margin: 0 auto;
+  margin-bottom: $apx-60;
+
+  background: url("/img/klimatika/bg-hero.jpg") no-repeat left top;
+  background-size: cover;
+  border-radius: $apx-40;
+
+}
+
+.hero {
+
+  color: #fff;
+  min-height: $apx-723;
+  padding-top: $apx-50;
+  padding-left: $apx-28;
+
+}
+
+.title {
+
+  font-size: $apx-70;
+  font-weight: 500;
+  line-height: 1.3;
+
+}
+
+/* ===== Tablet ===== */
+@media (max-width: 1024px) {
+
+  .pad {
+
+    padding-top: $apx-l-142;
+
+  }
+
+  .bg {
+
+    max-width: $apx-l-979;
+    border-radius: $apx-l-55;
+    margin-bottom: $apx-l-50;
+
+    background: url("/img/klimatika/bg-hero-tablet.jpg") no-repeat left top;
+    background-size: cover;
+
+  }
+
+  .hero {
+
+    min-height: $apx-l-723;
+    padding-top: $apx-l-50;
+    padding-left: $apx-l-28;
+
+  }
+
+  .title {
+
+    font-size: $apx-l-50;
+
+  }
+
+}
+
+/* ===== Mobile ===== */
+@media (max-width: 450px) {
+
+  .pad {
+
+    padding-top: $apx-m-110;
+
+  }
+
+  .bg {
+
+    margin-bottom: $apx-m-30;
+    border-radius: $apx-m-30;
+
+    background: url("/img/klimatika/bg-hero-mobile.jpg") no-repeat center;
+    background-size: cover;
+
+  }
+
+  .hero {
+
+    min-height: $apx-m-424;
+    padding-top: $apx-m-46;
+    padding-left: $apx-m-28;
+
+  }
+
+  .title {
+
+    font-size: $apx-m-20;
+
+  }
+
+}

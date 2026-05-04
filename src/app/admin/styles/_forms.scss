@@ -1,0 +1,130 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: minmax($apx-260, 1fr) auto;
+  gap: $apx-12;
+  align-items: end;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 600;
+  }
+
+  button {
+    min-width: $apx-128;
+  }
+}
+.checkbox {
+  display: flex;
+  gap: $apx-8;
+  align-items: center;
+  color: #4b4e61;
+
+  input[type="checkbox"] {
+    flex: 0 0 $apx-18;
+    width: $apx-18;
+    height: $apx-18;
+    min-width: $apx-18;
+    min-height: $apx-18 !important;
+    padding: 0;
+    border-radius: $apx-3;
+    accent-color: #260b86;
+    cursor: pointer;
+  }
+}
+
+.fileInput {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: $apx-42;
+  border: $apx-1 dashed #a9abc0;
+  border-radius: $apx-8;
+  color: #3f3d74;
+  cursor: pointer;
+
+  input {
+    display: none;
+  }
+}
+
+.hiddenAdminControl {
+  display: none;
+}
+
+.page input,
+.page select {
+  min-height: $apx-42;
+  border: $apx-1 solid #d8d9e4;
+  border-radius: $apx-8;
+  padding: 0 $apx-12;
+  font: inherit;
+
+  &:read-only {
+    background: #f7f8fb;
+    color: #6f7182;
+    cursor: default;
+
+    &:focus {
+      border-color: #d8d9e4;
+      outline: none;
+      box-shadow: none;
+    }
+  }
+}
+
+.page textarea {
+  min-height: $apx-260;
+  border: $apx-1 solid #d8d9e4;
+  border-radius: $apx-8;
+  padding: $apx-12;
+  font: inherit;
+  resize: vertical;
+}
+
+.page button {
+  min-height: $apx-42;
+  border: 0;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-18;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: wait;
+  }
+}
+
+.secondary {
+  background: #e9eaf2 !important;
+  color: #242633 !important;
+}
+
+.danger {
+  background: #b42318 !important;
+}
+
+.savedButton {
+  background: #15803d !important;
+  color: #fff !important;
+}
+
+.compactButton {
+  justify-self: center;
+  width: fit-content;
+}
+
+.sidebar button:not(.navActive) {
+  background: #f4f5f7 !important;
+  color: #4b4e61 !important;
+}

@@ -1,0 +1,535 @@
+/* MainPromo.module.scss */
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.heroBanner {
+  padding-top: $apx-134;
+  display: flex;
+  justify-content: center;
+  position: relative;
+  /* курсор больше не общий “рука” — только на кликабельных слайдах */
+  cursor: default;
+}
+
+.scrollWrapper {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: $apx-40;
+
+  &::-webkit-scrollbar { display: none; }
+}
+
+.slide {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  box-sizing: border-box;
+  display: flex;
+}
+
+.visual {
+  background: var(--hero-bg);
+  position: relative;
+  border-radius: $apx-40;
+  overflow: hidden;
+  background-size: cover;
+  background-position: $apx-1 center;
+  background-repeat: no-repeat;
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  min-height: $apx-722;
+  padding: $apx-40;
+}
+
+/* аккуратно: курсор “рука” только там, где реально кликабельно */
+.isClickable {
+  cursor: pointer;
+}
+
+.bgPicture,
+.bgImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  // object-fit: cover;
+   object-fit:fill;
+  object-position: $apx-1 center;
+  z-index: 0;
+}
+
+/* ======= ЕДИНЫЙ стиль для контента всех слайдов ======= */
+.contentCardBase {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: $apx-28;
+  max-width: $apx-900;
+  color: var(--hero-title-color);
+}
+
+.textWrap {
+  display: flex;
+  flex-direction: column;
+  gap: $apx-14;
+}
+
+.contentCardBase h1 {
+  font-size: $apx-72;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0;
+  margin: 0;
+  color: var(--hero-title-color, #fff);
+}
+
+.subTitle {
+  font-size: $apx-50;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--hero-title-color, #fff);
+}
+
+/* КНОПКИ — оставляем как отдельный блок (можно менять раскладку на брейкпоинтах) */
+.buttonsBase {
+  display: flex;
+  gap: $apx-20;
+
+  a { display: inline-flex; }
+  button { height: $apx-70; }
+}
+
+/* QR (оставляем как было по смыслу, но без привязки к .scrollWrapper) */
+.qrCodTg {
+  position: absolute;
+  bottom: $apx-310;
+  left: $apx-40;
+  text-align: center;
+
+  img { width: $apx-236; height: $apx-225; }
+}
+
+.customList{
+
+  li{
+    margin-left: $apx-40;
+  }
+
+}
+
+
+/* extraSvg оставляем как было */
+.extraSvg {
+  position: absolute;
+  bottom: 0;
+  left: $apx-5;
+  width: $apx-1271;
+  height: auto;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ======= Модификаторы слайдов (оставляем, но теперь они НЕ задают раскладку) ======= */
+.slideOne { /* legacy modifier */ }
+
+.slideTwo { /* legacy modifier */ }
+
+.slideTwo {
+  .buttonsBase {
+    display: none;
+  }
+
+  .textWrap {
+  display: none;
+}
+}
+
+.slideThree { /* legacy modifier */ }
+
+.slideFour {
+  /* ранее тут прятались кнопки и была особая раскладка.
+     теперь раскладка единая — отличия делаем через Slide.actions */
+}
+
+/* ======= Action-кнопки поверх слайда ======= */
+.slideAction {
+  position: absolute;
+  z-index: 2;
+
+  a { display: block; }
+}
+
+/* пример позиционирования для мобилки (можно добавлять сколько угодно таких классов) */
+.actionPosMobileCenter {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: $apx-m-30;
+}
+
+/* ======= Пагинация ======= */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: $apx-16;
+  margin-top: $apx-32;
+}
+
+.dot {
+  width: $apx-14;
+  height: $apx-14;
+  border-radius: 50%;
+  background-color: #d9d9d9;
+  transition: all 0.3s ease;
+  cursor: pointer;
+
+  &.active {
+    width: $apx-70;
+    border-radius: $apx-50;
+    background-color: #333;
+  }
+}
+
+/* ======= Попап ======= */
+.promoImage {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: $apx-12 $apx-12 0 0;
+  margin: 0 0 $apx-16;
+}
+
+.promoBody {
+  padding: $apx-20 $apx-22 $apx-24;
+  font-size: $apx-16;
+  line-height: 1.2;
+  letter-spacing: 0;
+  color: #6F6C8F;
+
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  max-width: 100%;
+
+  h3 {
+    font-size: $apx-30;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: 0;
+    color: #323232;
+    margin-bottom: $apx-12;
+  }
+}
+
+.checklist {
+  list-style: none;
+  padding-left: 0;
+  margin: $apx-12 0 $apx-16;
+
+  li {
+    position: relative;
+    padding-left: $apx-30;
+    margin: $apx-6 0;
+    line-height: 1.45;
+  }
+
+  li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.2em;
+    width: $apx-20;
+    height: $apx-20;
+    background: url("data:image/svg+xml;utf8,\
+    <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'>\
+    <rect x='0.5' y='0.5' width='23' height='23' rx='4' fill='%23E8F8EE' stroke='%2300B050'/>\
+    <path d='M7 12.5l3.2 3.2 6.8-6.8' stroke='%2300B050' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/>\
+    </svg>") no-repeat center / contain;
+  }
+}
+
+.promoPopup {
+  --popup-w: #{$apx-900};
+}
+
+.titleSlide6{
+  color: #6F6C8F !important;
+}
+
+.subtitleSlide6,.customList{
+  color: #66628E !important;
+}
+
+/* ======= Tablet ======= */
+@media (max-width: 1024px) {
+  .heroBanner {
+    padding-top: $apx-l-164;
+    margin-bottom: 0;
+  }
+
+  .visual {
+    border-radius: $apx-l-40;
+    min-height: $apx-l-722;
+    padding: $apx-l-40;
+  }
+
+  .extraSvg {
+    left: $apx-l-7;
+    top: $apx-l-10;
+    width: $apx-l-675;
+    height: $apx-l-675;
+  }
+
+  .contentCardBase {
+    max-width: $apx-l-720;
+    gap: $apx-l-18;
+  }
+
+  .contentCardBase h1 {
+    font-size: $apx-l-50;
+  }
+
+  .subTitle {
+    font-size: $apx-l-35;
+  }
+
+  .buttonsBase {
+    gap: $apx-l-20;
+    button { height: $apx-l-70; }
+  }
+
+  .qrCodTg {
+    bottom: $apx-l-350;
+    left: $apx-l-40;
+    img { width: $apx-l-200; height: $apx-l-200; }
+  }
+
+  .dot {
+    width: $apx-l-14;
+    height: $apx-l-14;
+    &.active { width: $apx-l-70; }
+  }
+
+  .promoImage {
+    border-radius: $apx-l-12 $apx-l-12 0 0;
+    margin: 0 0 $apx-l-12;
+  }
+
+  .promoBody {
+    padding: $apx-l-16;
+    font-size: $apx-l-16;
+
+    h3 {
+      font-size: $apx-l-30;
+      margin-bottom: $apx-l-12;
+    }
+  }
+
+  .customList{
+
+    li{
+      margin-left: $apx-l-40;
+    }
+
+  }
+
+  .promoBodySlideMod4 { font-size: $apx-l-13; }
+  .promoBodySlideMod6 { font-size: $apx-l-13; }
+
+  .checklist {
+    margin: $apx-l-10 0 $apx-l-14;
+
+    li {
+      padding-left: $apx-l-28;
+      margin: $apx-l-6 0;
+    }
+
+    li::before {
+      width: $apx-l-18;
+      height: $apx-l-18;
+      top: 0.2em;
+    }
+  }
+
+  .promoPopup { --popup-w: #{$apx-l-720}; }
+
+  .titleSlide6{
+    font-size: $apx-l-28 !important;
+  }
+
+}
+
+/* ======= Mobile ======= */
+@media (max-width: 450px) {
+  .heroBanner {
+    padding-top: $apx-m-110;
+    margin-bottom: $apx-m-40;
+  }
+
+  .scrollWrapper {
+    gap: $apx-m-16;
+    min-height: $apx-m-445;
+  }
+
+  .visual {
+    border-radius: $apx-m-30;
+    min-height: $apx-m-445;
+    padding: $apx-m-40 $apx-m-20 $apx-m-30;
+  }
+
+  /* единое поведение картинок на мобилке для ВСЕХ */
+  .bgImage {
+    object-fit:fill;
+    width: 100%;
+    height: $apx-m-445;
+  }
+
+  .contentCardBase {
+    max-width: $apx-m-360;
+    gap: $apx-m-16;
+  }
+
+  .contentCardBase h1 {
+    font-size: $apx-m-24;
+    color: #fff;
+  }
+
+  .subTitle {
+    font-size: $apx-m-22;
+    font-weight: 500;
+    color: #fff;
+  }
+
+  /* кнопки — в колонку, одинаково для всех */
+  .buttonsBase {
+    flex-direction: column;
+    gap: $apx-m-12;
+
+    a { width: 100%; }
+    button {
+      width: 100%;
+      height: $apx-m-60;
+      border-radius: $apx-m-15;
+      text-transform: uppercase;
+    }
+  }
+
+  /* qr на мобилке скрываем как раньше */
+  .qrCodTg { display: none; }
+
+  .pagination {
+    gap: $apx-m-12;
+    margin-top: $apx-m-20;
+  }
+
+  .dot {
+    width: $apx-m-8;
+    height: $apx-m-8;
+    &.active { width: $apx-m-50; }
+  }
+
+  .promoImage {
+    border-radius: $apx-m-12 $apx-m-12 0 0;
+    margin: 0 0 $apx-m-10;
+  }
+
+  .promoBody {
+    padding: $apx-m-2 $apx-m-12 $apx-m-22 $apx-m-12;
+    font-size: $apx-m-16;
+
+    h3 {
+      font-size: $apx-m-28;
+      margin-bottom: $apx-m-12;
+    }
+  }
+
+ .slideTwo {
+
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: $apx-m-59;
+    padding-bottom: $apx-m-22;
+
+    .contentCardBase {
+      justify-content: space-between;
+      height: 100%;
+      color: #fff;
+      max-width: $apx-m-360;
+      text-align: center;
+    }
+
+    .contentCardBase h1 {
+      font-size: $apx-m-24;
+      margin-bottom: $apx-m-21;
+      color: #fff;
+    }
+
+    .subTitle {
+      font-size: $apx-m-22;
+      font-weight: 500;
+      color: #fff;
+    }
+
+
+    .buttonsBase {
+      display: flex;    
+      flex-direction: column;
+      gap: $apx-m-12;
+
+      a { display: block; width: 100%; }
+
+      button {
+        width: 100%;
+        border-radius: $apx-m-15;
+        height: $apx-m-60;
+        text-transform: uppercase;
+        margin-bottom: $apx-m-6; /* как раньше */
+      }
+    }
+
+     .textWrap {
+    display: flex;
+    flex-direction: column;
+  }
+  }
+
+  .customList{
+
+    li{
+      margin-left: $apx-m-30;
+    }
+
+  }
+
+  .promoBodySlideMod4 { font-size: $apx-m-18; }
+
+  .promoBodySlideMod6 {
+    font-size: $apx-m-17;
+
+    strong { display: none; }
+  }
+
+  .checklist {
+    margin: $apx-m-8 0 $apx-m-12;
+
+    li {
+      padding-left: $apx-m-24;
+      margin: $apx-m-4 0;
+    }
+
+    li::before {
+      width: $apx-m-16;
+      height: $apx-m-16;
+      top: 0.15em;
+    }
+  }
+
+  .promoPopup { --popup-w: #{$apx-m-360}; }
+
+  .titleSlide6{
+    font-size: $apx-m-25 !important;
+  }
+}

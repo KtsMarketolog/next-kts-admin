@@ -1,0 +1,5 @@
+/* src/app/catalog/loading.module.scss */
+.wrap { padding: 20px; }
+.titleSkel { height: 28px; width: 220px; margin-bottom: 16px; background: #f2f2f2; border-radius: 6px; }
+.grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
+.card { height: 140px; background: #f2f2f2; border-radius: 12px; }

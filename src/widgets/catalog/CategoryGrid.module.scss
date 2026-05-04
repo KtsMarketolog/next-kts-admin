@@ -1,0 +1,190 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.grid {
+
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-20;
+
+}
+
+.card {
+
+  min-height: $apx-220;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  overflow: hidden;
+
+  border: $apx-1 solid #e7e7ee;
+  border-radius: $apx-14;
+  background: #fff;
+  padding: $apx-20;
+  padding-top: $apx-41;
+  transition: box-shadow .2s ease, transform .15s ease, border-color .15s;
+
+}
+
+@media (min-width: 1025px) {
+
+  .card:hover {
+
+    box-shadow: 0 $apx-10 $apx-24 rgba(0,0,0,.06);
+    transform: translateY(-2px);
+    border-color: #dcdcf2;
+    background-color: #EAE6FF;
+
+  }
+
+}
+
+.text { 
+
+  z-index: 1; 
+  max-width: 86%;
+
+ }
+
+.title {
+
+  margin: 0 0 $apx-8;
+  font-size: $apx-20;
+  font-weight: 800;
+  text-transform: uppercase;
+  line-height: 1.15;
+  width: $apx-200;
+
+}
+
+.subtitle {
+
+  margin: 0;
+  color: #6c6c80;
+  font-size: $apx-16;
+  font-weight: 500;
+  width: $apx-190;
+
+}
+
+.picture {
+
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: $apx-100;
+  height: $apx-100;
+
+  & > :global(span) {
+
+    width: 100%;
+    height: 100%;
+    position: absolute !important;
+    inset: 0;
+
+  }
+
+  :global(img) {
+
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .grid {
+
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: $apx-l-20;
+
+  }
+
+  .card {
+
+    min-height: $apx-l-220;
+    border-radius: $apx-l-10;
+    padding: $apx-l-10;
+
+  }
+
+  .title {
+
+    margin: 0 0 $apx-l-8;
+    font-size: $apx-l-16;
+    width: 100%;
+
+  }
+
+  .subtitle {
+
+    font-size: $apx-l-16;
+    font-weight: 500;
+    line-height: 1.2;
+    width: $apx-l-190;
+
+  }
+
+  .picture {
+
+    right: $apx-l-12;
+    bottom: $apx-l-8;
+    width: $apx-l-130;
+    height: $apx-l-80;
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .grid {
+
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $apx-m-12;
+
+  }
+
+  .card {
+
+    min-height: $apx-m-220;
+    padding: $apx-m-12;
+    border-radius: $apx-m-12;
+
+  }
+
+  .text { 
+
+    max-width: 100%;
+  
+  }
+
+  .title {
+
+    margin: 0 0 $apx-m-6;
+    font-size: $apx-m-14;
+    width: 100%;   
+    line-height: 1.15;
+
+  }
+
+  .subtitle {
+
+    font-size: $apx-m-12;
+    width: 100%;
+
+  }
+
+  .picture {
+
+    right: $apx-m-10;
+    bottom: $apx-m-6;
+    width: $apx-m-150;
+    height: $apx-m-100;
+
+  }
+
+}

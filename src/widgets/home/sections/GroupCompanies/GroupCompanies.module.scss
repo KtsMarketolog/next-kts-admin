@@ -1,0 +1,195 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.groupCompanies {
+
+  text-align: center;
+  padding: $apx-130 0 $apx-110;
+
+  h2 {
+
+    font-size: $apx-40;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0;
+    margin-bottom: $apx-32;
+    padding-bottom: $apx-40;
+    border-bottom: $apx-1 solid #D9D9D9;
+    color: var(--hero-title-color);
+
+    span {
+
+      font-weight: 700;
+      font-size: $apx-53;
+      margin-top: $apx-15;
+      display: block;
+
+    }
+
+  }
+
+  .list {
+
+    display: flex;
+    justify-content: space-between;
+    gap: $apx-25;
+    flex-wrap: nowrap;
+
+  }
+
+  .company {
+
+    box-sizing: border-box;
+
+    border: $apx-3 solid #1B0389;
+    border-radius: $apx-21;
+    background-color: #fff;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    max-width: $apx-298;
+    min-width: $apx-298;
+    min-height: $apx-156;
+
+    opacity: 1;
+    transition: transform 0.4s ease, box-shadow 0.4s ease;
+
+    &:hover {
+
+      transform: scale(1.1);
+      z-index: 10;
+
+    }
+
+    a,
+    .disabled {
+
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+    }
+  }
+
+  .logo {
+
+    display: block;
+    width: 100%;
+    height: auto;
+
+    max-width: 85%;
+    max-height: 85%;
+
+    object-fit: contain;
+
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .groupCompanies {
+
+    h2 {
+
+      font-size: $apx-l-40;
+      margin-bottom: $apx-l-32;
+      padding-bottom: $apx-l-49;
+      border-bottom: $apx-l-1 solid #D9D9D9;
+
+      span {
+
+        font-weight: 700;
+        font-size: $apx-l-53;
+        margin-top: $apx-l-15;
+
+      }
+
+    }
+
+    .list {
+
+      gap: $apx-l-14;
+      flex-wrap: nowrap;
+      justify-content: space-between;
+
+    }
+
+    .company {
+
+      border: $apx-l-2 solid #1B0389;
+      border-radius: $apx-l-21;
+
+      flex: 1 1 0;
+      max-width: none;
+      min-width: 0; 
+
+      min-height: $apx-l-163;
+      padding: $apx-l-44 $apx-l-22;
+
+      &:hover {
+
+        transform: none;
+
+      }
+
+    }
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .groupCompanies {
+
+    padding-top: 0;
+    padding-bottom: 0;
+
+    h2 {
+
+      font-size: $apx-m-20;
+      margin-bottom: $apx-m-20;
+      padding-bottom: $apx-m-20;
+      border-bottom: $apx-m-1 solid #D9D9D9;
+
+      span {
+
+        font-weight: 700;
+        font-size: $apx-m-40;
+        margin-top: $apx-m-15;
+
+      }
+
+    }
+
+    .list {
+
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: $apx-m-20;
+
+    }
+
+    .company {
+
+      border: $apx-m-1 solid #1B0389;
+      border-radius: $apx-m-21;
+
+      width: 100%;
+      max-width: none;
+      min-width: 0;
+
+      min-height: $apx-m-123;
+
+      opacity: 1;
+      padding: 0;
+
+    }
+
+  }
+
+}

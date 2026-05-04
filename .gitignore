@@ -23,6 +23,10 @@
 # misc
 .DS_Store
 *.pem
+.strapi-export/
+catalog-import.sql
+kts-catalog-deploy.tar.gz
+strapi-export.tar.gz
 
 # debug
 npm-debug.log*

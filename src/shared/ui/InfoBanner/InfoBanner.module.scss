@@ -1,0 +1,258 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.banner {
+
+  width: 100%;
+
+  .bgGradient {
+
+    position: relative;
+    padding: $apx-80 $apx-60 $apx-76;
+    border-radius: 0;
+    overflow: hidden;
+
+    background: url("/img/about/bg-about-banner.jpg") no-repeat left top;
+    background-size: cover;
+
+
+    &[data-variant="uniray"] {
+
+      background-image: url("/img/klimatika/bg-klimatika-banner.jpg");
+
+    }
+
+  }
+
+  .content {
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: $apx-13;
+    color: #fff;
+    text-align: center;
+
+  }
+
+  .title {
+
+    font-size: $apx-53;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    text-transform: uppercase;
+
+  }
+
+  .desc {
+
+    font-size: $apx-18;
+    font-weight: 300;
+    line-height: 1;
+
+  }
+
+  .buttons {
+
+    margin-top: $apx-22;
+    display: flex;
+    gap: $apx-27;
+
+  }
+
+  .buttonLinkFix {
+
+    color: #1B0389;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+
+
+    text-align: center !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+  }
+
+  .icon {
+
+    position: absolute;
+    left: $apx-1510;
+
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .banner {
+
+    width: $apx-l-988;
+    margin: 0 auto;
+    padding: $apx-l-50 $apx-l-2;
+
+    .bgGradient {
+
+      padding: $apx-l-40 $apx-l-14 $apx-l-51;
+      border-radius: $apx-l-15;
+
+      background: url("/img/about/bg-about-banner-tablet.jpg") no-repeat left top;
+      background-size: cover;
+
+      &[data-variant="uniray"] {
+
+        background-image: url("/img/klimatika/bg-klimatika-banner-tablet.jpg");
+
+      }
+
+    }
+
+    .content {
+
+      gap: $apx-l-13;
+      margin-bottom: 0;
+
+    }
+
+    .title {
+
+      font-size: $apx-l-53;
+      line-height: 1.3;
+      white-space: normal;
+
+      br { display: none; }
+
+    }
+
+    .desc {
+
+      max-width: $apx-l-530;
+      font-size: $apx-l-18;
+
+    }
+
+    .bgGradient[data-variant="uniray"] {
+      
+      .title {
+
+        font-size: $apx-l-36;
+
+      }
+
+      .desc {
+
+        font-size: $apx-l-14;
+
+      }
+
+    }
+
+    .buttons {
+
+      margin-top: $apx-l-22;
+      gap: $apx-l-27;
+
+    }
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .banner {
+
+    width: $apx-m-400;
+    margin: 0 auto;
+    padding: $apx-m-40 $apx-m-6 $apx-m-30;
+
+    .bgGradient {
+
+      padding: $apx-m-40 $apx-m-20;
+      border-radius: $apx-m-15;
+
+      background: url("/img/about/bg-about-banner-mobile.jpg") no-repeat left top;
+      background-size: cover;
+
+      &[data-variant="uniray"] {
+
+        background-image: url("/img/klimatika/bg-klimatika-banner-mobile.jpg");
+
+      }
+
+    }
+
+    .content {
+
+      gap: $apx-m-13;
+
+    }
+
+    .title {
+
+      font-size: $apx-m-30;
+      line-height: 1.3;
+      white-space: normal;
+
+    }
+
+    .desc {
+
+      font-size: $apx-m-18;
+      line-height: 1.2;
+
+    }
+
+    .buttons {
+
+      margin-top: $apx-m-22;
+      display: flex;
+      flex-direction: column;
+      gap: $apx-m-20;
+
+    }
+
+    .bgGradient[data-variant="uniray"] {
+
+      padding-top: $apx-m-90;
+      padding-left: $apx-m-24;
+
+      .content {
+
+        align-items: flex-start;
+        gap: $apx-m-30;
+
+      }
+
+      .title {
+
+        max-width: $apx-m-212;
+        font-size: $apx-m-20;
+
+      }
+
+      .desc {
+
+        font-size: $apx-m-14;
+
+      }
+
+      .buttons {
+
+        align-items: flex-start;
+
+        a {
+
+          width: 100%;
+          max-width: $apx-m-258;
+
+        }
+
+      }
+
+    }
+
+  }
+
+}

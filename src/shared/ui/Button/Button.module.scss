@@ -1,0 +1,180 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.button {
+  
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 500;
+  font-size: $apx-18;
+  padding: $apx-16 $apx-44;
+  border-radius: $apx-14;
+  cursor: pointer;
+  transition: background .2s, color .2s, border .2s;
+  outline: none;
+  border: none;
+  display: inline-block;
+  line-height: 1.1;
+  white-space: nowrap;
+
+  &.primary {
+
+    font-weight: 500;
+    font-size: $apx-18;
+    line-height: 1;
+    letter-spacing: 0;
+    color: #66628E;
+
+    background-color: #fff;
+    border: none;
+    border: $apx-2 solid #A49AD0;
+    border-radius: $apx-10;
+    padding: $apx-14 $apx-76;
+
+      &.withBg {
+
+        background-color: #1B0389;
+        color: #FFFFFF;
+        border: none;
+
+      }
+
+      &:hover { 
+
+        background-color: #8D81C4;
+        border-color: #fff;
+        color: #fff;
+
+      }
+
+  }
+  
+  &.secondary {
+
+    font-weight: 600;
+    font-size: $apx-16;
+    line-height: 1;
+    letter-spacing: 0;
+    color: #1B0389;
+
+    background-color: #fff;
+    border: none;
+    border-radius: $apx-7;
+    padding: $apx-23 $apx-58;
+
+
+    &:hover {
+
+      background-color: #f7f7ff;
+
+    }
+
+  }
+
+  &.purple {
+
+    font-weight: 600;
+    font-size: $apx-16;
+    line-height: 1;
+    letter-spacing: 0;
+    color: #FFFFFF;
+
+    background: none;
+    border: $apx-1 solid #FFFFFF;
+    border-radius: $apx-7;
+    padding: $apx-23 $apx-40;
+
+    &:hover {
+
+
+    }
+
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .button {
+
+    font-size: $apx-l-18;
+    padding: $apx-l-16 $apx-l-44;
+    border-radius: $apx-l-14;
+
+    &.primary {
+
+      font-size: $apx-l-18;
+      border: $apx-l-2 solid #A49AD0;
+      border-radius: $apx-l-10;
+      padding: $apx-l-14 $apx-l-76;
+      background-color: transparent;
+
+    }
+
+    &.secondary {
+
+      font-size: $apx-l-16;
+      border-radius: $apx-l-7;
+      padding: $apx-l-23 $apx-l-58;
+    
+    }
+
+    &.purple {
+
+      font-size: $apx-l-16;
+
+      background: none;
+      border: $apx-l-1 solid #FFFFFF;
+      border-radius: $apx-l-7;
+      padding: $apx-l-23 $apx-l-40;
+
+    }
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .button {
+
+    font-size: $apx-m-12;
+    padding: $apx-m-8 $apx-m-18;
+    border-radius: $apx-m-14;
+
+    &.primary {
+
+      font-size: $apx-m-12;
+      font-weight: 600;
+      border: $apx-m-2 solid #A49AD0;
+      border-radius: $apx-m-49;
+      padding: $apx-m-8 $apx-m-18;
+
+       &.withBg {
+
+        background-color: #4E32CD;
+
+      }
+
+    }
+
+    &.secondary {
+
+      font-size: $apx-m-16;
+      border-radius: $apx-m-7;
+      padding: $apx-m-23 $apx-m-109;
+    
+    }
+
+     &.purple {
+
+      font-size: $apx-m-16;
+
+      background: none;
+      border: $apx-m-1 solid #FFFFFF;
+      border-radius: $apx-m-7;
+      padding: $apx-m-23 $apx-m-91;
+
+    }
+
+  }
+
+}

@@ -1,0 +1,355 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.analyticsSection {
+  display: grid;
+  gap: $apx-18;
+}
+
+.analyticsManagerMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+  margin-top: $apx-10;
+
+  span {
+    border: $apx-1 solid #e1e3ef;
+    border-radius: $apx-999;
+    background: #f7f8fc;
+    color: #4b4e61;
+    padding: $apx-6 $apx-10;
+    font-size: $apx-12;
+    font-weight: 700;
+  }
+}
+
+.analyticsToolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $apx-12;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  background: #fbfcff;
+  padding: $apx-12;
+
+  > span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+}
+
+.analyticsPeriod {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+
+  button {
+    min-height: $apx-36;
+  }
+}
+
+.analyticsPeriodActive {
+  background: #260b86 !important;
+  color: #fff !important;
+}
+
+.analyticsKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-14;
+}
+
+.analyticsKpiCard {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: $apx-10;
+  min-height: $apx-150;
+  border: $apx-1 solid #e3e5ef;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: $apx-18;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: $apx-5;
+    background: var(--analytics-accent, #260b86);
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-42;
+    line-height: 1;
+  }
+
+  p {
+    margin: 0;
+    color: #4b4e61;
+    font-size: $apx-13;
+    line-height: 1.45;
+  }
+}
+
+.analyticsToneBlue {
+  --analytics-accent: #2563eb;
+}
+
+.analyticsToneGreen {
+  --analytics-accent: #15803d;
+}
+
+.analyticsToneRed {
+  --analytics-accent: #dc2626;
+}
+
+.analyticsToneViolet {
+  --analytics-accent: #6d28d9;
+}
+
+.analyticsSplit {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $apx-14;
+}
+
+.analyticsPanel {
+  display: grid;
+  gap: $apx-14;
+  border: $apx-1 solid #e3e5ef;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: $apx-18;
+}
+
+.analyticsPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: $apx-12;
+
+  h3 {
+    margin: 0;
+    color: #242633;
+    font-size: $apx-20;
+  }
+
+  span {
+    color: #77798a;
+    font-size: $apx-12;
+    font-weight: 700;
+  }
+}
+
+.analyticsList {
+  display: grid;
+  gap: $apx-10;
+  margin: 0;
+
+  div {
+    display: grid;
+    grid-template-columns: minmax($apx-170, 0.45fr) minmax(0, 1fr);
+    gap: $apx-12;
+    border-bottom: $apx-1 solid #eff0f6;
+    padding-bottom: $apx-10;
+  }
+
+  div:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  dt {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+
+  dd {
+    margin: 0;
+    color: #242633;
+    font-size: $apx-14;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+}
+
+.analyticsQualityGrid,
+.analyticsPublicGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-10;
+
+  div {
+    display: grid;
+    gap: $apx-6;
+    border: $apx-1 solid #eceef6;
+    border-radius: $apx-8;
+    background: #f8f9fc;
+    padding: $apx-14;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-24;
+    line-height: 1.15;
+  }
+}
+
+.analyticsPublicGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.analyticsBadgesRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-6;
+  align-items: center;
+}
+
+.analyticsBadgeOrange,
+.analyticsBadgeWarning,
+.analyticsBadgeDanger {
+  display: inline-flex;
+  align-items: center;
+  min-height: $apx-26;
+  border-radius: $apx-999;
+  padding: 0 $apx-10;
+  font-size: $apx-12;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.analyticsBadgeOrange {
+  background: #fff4e5;
+  color: #b45309;
+}
+
+.analyticsBadgeWarning {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.analyticsBadgeDanger {
+  background: #fee2e2;
+  color: #b42318;
+}
+
+.analyticsTopList {
+  display: grid;
+  gap: $apx-8;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    flex: 0 0 auto;
+    color: #260b86;
+  }
+}
+
+.analyticsTopItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-220, auto) auto;
+  justify-content: space-between;
+  align-items: center;
+  gap: $apx-12;
+  width: 100%;
+  min-height: $apx-44;
+  border-radius: $apx-8;
+  background: #e9eaf2;
+  padding: 0 $apx-18;
+  text-align: left;
+}
+
+.analyticsTopViewedAt {
+  color: #6f7182 !important;
+  font-size: $apx-12 !important;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 1024px) {
+  .analyticsKpiGrid,
+  .analyticsQualityGrid,
+  .analyticsPublicGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analyticsSplit {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 800px) {
+  .analyticsToolbar,
+  .analyticsPanelHeader,
+  .analyticsList div {
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsToolbar,
+  .analyticsPanelHeader {
+    display: grid;
+  }
+
+  .analyticsPeriod,
+  .analyticsPeriod button,
+  .analyticsKpiGrid,
+  .analyticsQualityGrid,
+  .analyticsPublicGrid {
+    width: 100%;
+  }
+
+  .analyticsPeriod {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsKpiGrid,
+  .analyticsQualityGrid,
+  .analyticsPublicGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsKpiCard {
+    min-height: $apx-m-128;
+
+    strong {
+      font-size: $apx-m-36;
+    }
+  }
+
+  .analyticsTopItem {
+    grid-template-columns: 1fr;
+    justify-items: start;
+    padding: $apx-m-10 $apx-m-12;
+  }
+
+  .analyticsTopViewedAt {
+    text-align: left;
+    white-space: normal;
+  }
+}

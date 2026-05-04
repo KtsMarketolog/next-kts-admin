@@ -1,0 +1,9 @@
+import { FC, SVGProps } from 'react';
+
+export const Origami3: FC<SVGProps<SVGSVGElement>> = ( props ) => (
+
+  <svg width="125" height="118" viewBox="0 0 131 103" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M128.439 59.1742L79.875 12.25439M128.439 59.1742C110.442 65.7149 74.046 79.2735 72.446 81.1815M128.439 59.1742L108.693 130.316L72.446 81.1815M70.6865 78.7965L3 95.6983L33.6504 39.8039M70.6865 78.7965L33.6504 39.8039M70.6865 78.7965L79.875 12.25439M70.6865 78.7965L72.446 81.1815M33.6504 39.8039L79.875 12.25439" stroke="#BBB4DC" strokeWidth="3"/>
+  </svg>
+
+);

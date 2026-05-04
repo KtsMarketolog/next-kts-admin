@@ -1,0 +1,417 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.promotionsBlock {
+
+  max-width: $apx-1274;
+  margin: 0 auto;
+  padding: $apx-130 0;
+
+  .title {
+
+    font-weight: 700;
+    font-size: $apx-53;
+    line-height: 1;
+    letter-spacing: 0;
+    text-align: center;
+    text-transform: uppercase;
+    color: var(--hero-title-color);
+
+    padding-bottom: $apx-40;
+    margin-bottom: $apx-40;
+    border-bottom: $apx-1 solid #D9D9D9;
+
+  }
+
+  .titleArrow{
+
+    display: none;
+
+  }
+
+  .grid {
+
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: $apx-40;
+ 
+  }
+
+  .card {
+
+    border-radius: $apx-15;
+    
+  }
+
+  .card:nth-child(1) {
+
+    grid-column: 1; 
+    grid-row: 1;  
+    background-image: url('/img/promotions/promotion1.png'); 
+    background-repeat: no-repeat;
+    background-position: left bottom;
+    background-size: $apx-291 $apx-259;
+    width: $apx-291;
+    height: $apx-259;
+
+  }
+  .card:nth-child(2) { 
+
+    grid-column: 2; 
+    grid-row: 1;
+    background-image: url('/img/promotions/promotion2.png'); 
+    background-repeat: no-repeat;
+    background-position: left bottom;
+    background-size: $apx-292 $apx-259;
+    width: $apx-292;
+    height: $apx-259;
+
+  }
+  .card:nth-child(3) { 
+
+    grid-column: 3 / span 2; 
+    grid-row: 1; 
+
+    background-image: url('/img/promotions/promotion3.png'); 
+    background-repeat: no-repeat;
+    background-position: left bottom;
+    background-size: $apx-609 $apx-259;
+    width: $apx-609;
+    height: $apx-259;
+
+
+  }
+  .card:nth-child(4) { 
+
+    grid-column: 1 / span 2; 
+    grid-row: 2; 
+
+    background-image: url('/img/promotions/promotion4.png'); 
+    background-repeat: no-repeat;
+    background-position: left bottom;
+    background-size: $apx-625 $apx-259;
+    width: $apx-625;
+    height: $apx-259;
+
+  }
+  .card:nth-child(5) {
+
+    grid-column: 3 / span 2; 
+    grid-row: 2; 
+
+    background-image: url('/img/promotions/promotion5.png'); 
+    background-repeat: no-repeat;
+    background-position: left bottom;
+    background-size: $apx-607 $apx-259;
+    width: $apx-607;
+    height: $apx-259;
+
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .promotionsBlock {
+
+    max-width: 100%;
+    margin: 0 auto;
+    padding: $apx-l-75 0;
+    padding-top: 0;
+    padding-left: $apx-l-10;
+
+    overflow-x: hidden;
+
+    .title {
+
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      max-width: $apx-l-988;
+      font-weight: 700;
+      font-size: $apx-l-53;
+      line-height: 1;
+      letter-spacing: 0;
+      text-align: center;
+      text-transform: uppercase;
+
+      padding-left: $apx-l-40;
+      padding-right: $apx-l-40;
+      padding-bottom: $apx-l-40;
+      margin-bottom: $apx-l-40;
+      border-bottom: $apx-l-1 solid #D9D9D9;
+
+    }
+
+    .titleArrow {
+    
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: center center;
+
+      cursor: pointer;
+      transition: transform 0.3s ease;
+
+      &.rotated {
+
+        transform: rotate(180deg);
+        
+      }
+
+    }
+
+    .grid {
+      
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: $apx-l-40;
+      -webkit-overflow-scrolling: touch;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      transition: margin 0.15s;
+      margin-right: -$apx-l-30;
+      padding-right: $apx-l-30;
+  
+    }
+
+    .grid.scrolled {
+
+      margin-left: -16px;
+      margin-right: -16px;
+
+    }
+
+    .grid::-webkit-scrollbar {
+
+      display: none;
+
+    }
+
+    .card {
+
+      border-radius: $apx-l-15;
+
+    }
+
+    .card:nth-child(1) {
+
+      grid-column: 1; 
+      grid-row: 1;  
+      background-image: url('/img/promotions/promotion1.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-l-291 $apx-l-259;
+      width: $apx-l-291;
+      height: $apx-l-259;
+
+    }
+
+    .card:nth-child(2) { 
+
+      grid-column: 2; 
+      grid-row: 1;
+      background-image: url('/img/promotions/promotion2.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-l-292 $apx-l-259;
+      width: $apx-l-292;
+      height: $apx-l-259;
+
+    }
+
+    .card:nth-child(3) { 
+
+      grid-column: 3 / span 2; 
+      grid-row: 1; 
+
+      background-image: url('/img/promotions/promotion3.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-l-609 $apx-l-259;
+      width: $apx-l-609;
+      height: $apx-l-259;
+
+    }
+
+    .card:nth-child(4) { 
+
+      grid-column: 1 / span 2; 
+      grid-row: 2; 
+
+      background-image: url('/img/promotions/promotion4.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-l-625 $apx-l-259;
+      width: $apx-l-625;
+      height: $apx-l-259;
+
+    }
+
+    .card:nth-child(5) {
+
+      grid-column: 3 / span 2; 
+      grid-row: 2; 
+
+      background-image: url('/img/promotions/promotion5.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-l-607 $apx-l-259;
+      width: $apx-l-607;
+      height: $apx-l-259;
+
+    }
+
+  }
+  
+}
+
+@media (max-width: 450px) {
+
+   .promotionsBlock {
+
+    max-width: 100%;
+    margin: 0 auto;
+    padding: $apx-m-50 0;
+    padding-top: $apx-m-20;
+    padding-left: $apx-m-8;
+
+    overflow-x: hidden;
+
+    .title {
+
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      max-width: $apx-m-372;
+      font-size: $apx-m-40;
+      line-height: 1.1;
+      text-align:left;
+      text-transform: uppercase;
+
+      padding-bottom: $apx-m-20;
+      margin: 0 auto;
+      margin-bottom: $apx-m-20;
+      border-bottom: $apx-m-1 solid #D9D9D9;
+
+    }
+
+    .titleArrow {
+    
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: center center;
+
+      cursor: pointer;
+      transition: transform 0.3s ease;
+
+      &.rotated {
+
+        transform: rotate(180deg);
+        
+      }
+
+    }
+
+    .grid {
+      
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: $apx-m-10;
+      -webkit-overflow-scrolling: touch;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      transition: margin 0.15s;
+      margin-right: -$apx-m-30;
+      padding-right: $apx-m-26;
+
+    }
+
+    .grid::-webkit-scrollbar {
+
+      display: none;
+
+    }
+
+    .card {
+
+      border-radius: $apx-m-15;
+
+    }
+
+    .card:nth-child(1) {
+
+      grid-column: 1; 
+      grid-row: 1;  
+      background-image: url('/img/promotions/mobilePromotion1.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-m-280 $apx-m-259;
+      width: $apx-m-280;
+      height: $apx-m-259;
+
+    }
+
+    .card:nth-child(2) { 
+
+      grid-column: 2; 
+      grid-row: 1;
+      background-image: url('/img/promotions/mobilePromotion2.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-m-292 $apx-m-259;
+      width: $apx-m-292;
+      height: $apx-m-259;
+
+    }
+
+    .card:nth-child(3) { 
+
+      grid-column: 3 / span 2; 
+      grid-row: 1; 
+
+      background-image: url('/img/promotions/mobilePromotion3.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-m-400 $apx-m-259;
+      width: $apx-m-400;
+      height: $apx-m-259;
+
+    }
+
+    .card:nth-child(4) { 
+
+      grid-column: 1 / span 2; 
+      grid-row: 2; 
+
+      background-image: url('/img/promotions/mobilePromotion4.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-m-279 $apx-m-395;
+      width: $apx-m-279;
+      height: $apx-m-395;
+
+    }
+
+    .card:nth-child(5) {
+
+      grid-column: 2 / span 2; 
+      grid-row: 2; 
+
+      background-image: url('/img/promotions/mobilePromotion5.png'); 
+      background-repeat: no-repeat;
+      background-position: left bottom;
+      background-size: $apx-m-400 $apx-m-395;
+      width: $apx-m-400;
+      height: $apx-m-395;
+
+    }
+
+  }
+
+}
+

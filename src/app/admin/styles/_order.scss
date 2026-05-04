@@ -1,0 +1,142 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.orderPanel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-10;
+  align-items: center;
+  overflow: visible;
+  padding: $apx-4 0 $apx-18;
+  margin-bottom: $apx-4;
+}
+
+.orderItem {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: auto $apx-82 auto;
+  gap: $apx-8;
+  align-items: center;
+  border-radius: $apx-10;
+  padding: $apx-6;
+  background: #f7f4f1;
+  cursor: grab;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.orderItemDragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+  box-shadow: 0 $apx-14 $apx-34 rgba(38, 11, 134, 0.16);
+}
+
+.orderDrag {
+  color: #c97431;
+  font-size: $apx-16;
+  line-height: 1;
+  letter-spacing: -0.18em;
+  user-select: none;
+}
+
+.orderThumb {
+  width: $apx-82;
+  height: $apx-44;
+  overflow: hidden;
+  border: $apx-2 solid #e0342f;
+  border-radius: $apx-8;
+  background: #f4f5f7;
+  display: grid;
+  place-items: center;
+  color: #6f7182;
+  font-size: $apx-13;
+  font-weight: 700;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+}
+
+.orderNumber {
+  min-width: $apx-20;
+  color: #6f7182;
+  font-size: $apx-12;
+  font-weight: 700;
+  text-align: center;
+}
+
+.brandCategoryOrderItem {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: auto minmax($apx-130, max-content) $apx-28;
+  gap: $apx-10;
+  align-items: center;
+  border-radius: $apx-10;
+  padding: $apx-6 $apx-10;
+  background: #f7f4f1;
+  cursor: grab;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.brandCategoryOrderThumb {
+  min-width: $apx-130;
+  max-width: $apx-190;
+  min-height: $apx-48;
+  height: auto;
+  overflow: hidden;
+  border: $apx-2 solid #e0342f;
+  border-radius: $apx-8;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  color: #4b4e61;
+  font-size: $apx-11;
+  font-weight: 700;
+  line-height: 1.05;
+  text-align: center;
+  padding: $apx-6 $apx-12;
+}
+
+.brandCategoryOrderThumb + .orderNumber {
+  min-width: $apx-24;
+  padding-left: $apx-2;
+}
+
+.newsOrderPanel {
+  @extend .orderPanel;
+}
+
+.newsOrderItem {
+  @extend .orderItem;
+}
+
+.newsOrderItemDragging {
+  @extend .orderItemDragging;
+}
+
+.newsOrderDrag {
+  @extend .orderDrag;
+}
+
+.newsOrderThumb {
+  @extend .orderThumb;
+}
+
+.newsOrderNumber {
+  @extend .orderNumber;
+}

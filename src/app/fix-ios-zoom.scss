@@ -1,0 +1,56 @@
+/* iOS: отключаем автозум при фокусе, поднимая базовый размер */
+html { -webkit-text-size-adjust: 100%; }
+
+/* Всё кликабельное — не меньше 16px на мобилках/планшетах */
+@media (max-width: 1024px) {
+
+  input, select, textarea, button {
+    
+    font-size: 16px !important;
+
+  }
+
+  /* react-select: инпут и значение внутри контрола */
+  .rp__control,
+  .rp__single-value,
+  .rp__option,
+  .rp__placeholder,
+  .rp__value-container,
+  .rp__input input {
+
+    font-size: 16px !important;
+    line-height: 1.2 !important;
+
+  }
+
+  /* правый инпут телефона */
+  .phoneGroup .local input {
+
+    font-size: 16px !important;
+
+  }
+
+}
+
+/* Доп. таргет именно iOS Safari */
+@supports (-webkit-touch-callout: none) {
+
+  input, select, textarea, button {
+
+    font-size: 16px !important;
+
+  }
+
+  .rp__control,
+  .rp__single-value,
+  .rp__option,
+  .rp__placeholder,
+  .rp__value-container,
+  .rp__input input,
+  .phoneGroup .local input {
+
+    font-size: 16px !important;
+
+  }
+
+}

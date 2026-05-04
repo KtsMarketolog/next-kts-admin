@@ -1,0 +1,211 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.partnersBanner {
+
+  width: 100%;
+
+  .bgGradient {
+
+    position: relative;
+    padding: $apx-80 $apx-60 $apx-76;
+    border-radius: $apx-10;
+    background: url("/img/over/bg-diler.jpg") no-repeat left top;
+    background-size: cover; 
+
+    position: relative;
+    overflow: hidden; 
+    
+  }
+
+  .content {
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: $apx-13;
+    color: #fff;
+    text-align: center;
+
+  }
+
+  .subTitle {
+
+    font-size: $apx-18;
+    font-weight: 300;
+    line-height: 1;
+    letter-spacing: 0;
+
+  }
+
+  .title {
+
+    font-size: $apx-53;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0;
+    white-space: nowrap;
+    text-transform: uppercase;
+
+  }
+
+  .desc {
+
+    font-size: $apx-18;
+    font-weight: 300;
+    line-height: 1;
+    letter-spacing: 0;
+
+  }
+
+  .buttons {
+    
+    margin-top: $apx-22;
+    display: flex;
+    gap: $apx-27;
+
+    button{
+
+      background-color: #fff;
+      transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+
+      
+      &:hover{
+        
+        background-color: #8D81C4;
+        border-color: transparent;
+        
+      }
+      
+    }
+
+  }
+
+  .icon{
+    position: absolute;
+    left: $apx-1510;
+
+    svg{
+    max-width: $apx-617;
+    max-height: $apx-385;
+
+    }
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .partnersBanner {
+
+    width: $apx-l-988;
+    margin: 0 auto;
+    padding: $apx-l-50 $apx-l-2;
+
+    .bgGradient {
+
+      position: relative;
+      padding: $apx-l-40 $apx-l-14 $apx-l-51;
+      border-radius: $apx-l-15;
+      
+    }
+
+    .content {
+
+      gap: $apx-l-13;
+      margin-bottom: 0;
+
+    }
+
+    .subTitle {
+
+      font-size: $apx-l-18;
+
+    }
+
+    .title {
+
+      font-size: $apx-l-53;
+      line-height: 1.3;
+      white-space: normal;
+
+      br{
+
+        display: none;
+
+      }
+
+    }
+
+    .desc {
+
+      font-size: $apx-l-18;
+
+    }
+
+    .buttons {
+
+      margin-top: $apx-l-22;
+      display: flex;
+      gap: $apx-l-27;
+
+    }
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .partnersBanner {
+
+    width: $apx-m-400;
+    margin: 0 auto;
+    padding: $apx-m-40 $apx-m-6;
+    padding-bottom: $apx-m-30;
+
+    .bgGradient {
+
+      position: relative;
+      padding: $apx-m-40 $apx-m-20;
+      border-radius: $apx-m-15;
+      
+    }
+
+    .content {
+
+      gap: $apx-m-13;
+
+    }
+
+    .subTitle {
+
+      font-size: $apx-m-18;
+
+    }
+
+    .title {
+
+      font-size: $apx-m-30;
+      line-height: 1.3;
+
+    }
+
+    .desc {
+
+      font-size: $apx-m-18;
+
+    }
+
+    .buttons {
+
+      margin-top: $apx-m-22;
+      display: flex;
+      flex-direction: column;
+      gap: $apx-m-20;
+
+    }
+
+  }
+
+}

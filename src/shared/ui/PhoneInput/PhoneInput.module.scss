@@ -1,0 +1,314 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+
+.phoneGroup { -webkit-text-size-adjust: 100%;  text-size-adjust: 100%; }
+.phoneGroup {
+  display: flex;
+  align-items: center;
+  gap: $apx-10;
+  width: $apx-311;
+
+  :is(input) { width: $apx-54 !important; }
+
+}
+
+.phoneGroup :global(.rp__control) {
+
+  flex: 0 0 $apx-86;
+
+}
+
+.phoneGroup :global(.rp__control),
+.phoneGroup :global(.rp__menu),
+.phoneGroup :global(.rp__option),
+.phoneGroup :global(.rp__single-value) {
+
+  font-size: $apx-16;
+  color: #B1B1B1;
+
+}
+
+.phoneGroup :global(.rp__value-container) {
+
+  padding: 0 $apx-12 !important;
+
+}
+
+.phoneGroup :global(.rp__single-value) {
+
+  font-size: $apx-16;
+  color: #B1B1B1;
+  line-height: 1; 
+
+}
+
+.phoneGroup :global(.rp__indicator) {
+
+  padding: 0 !important;
+
+}
+
+.phoneGroup :global(.rp__dropdown-indicator) {
+
+  padding: 0 !important;
+
+}
+
+.phoneGroup :global(.rp__value-container),
+.phoneGroup :global(.rp__single-value),
+.phoneGroup :global(.rp__placeholder) {
+
+  font-size: $apx-16 !important;
+  line-height: 1 !important;
+
+}
+
+
+.local {
+
+  position: relative;
+  flex: 1 1 auto;
+
+}
+
+.icon {
+
+  position: absolute;
+  left: $apx-14;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: .6;
+  pointer-events: none;
+  font-size: $apx-18;
+
+}
+
+.local input {
+
+  height: $apx-60;
+  width: 100% !important;
+  padding: 0 $apx-16 0 $apx-38;
+  background: #303639;
+  border: $apx-1 solid rgba(160,130,220,.3);
+  border-radius: $apx-16;
+  color: #B1B1B1;
+  font-size: $apx-16;
+  font-family: inherit;
+  outline: none;
+  transition: box-shadow .2s ease, border-color .2s ease;
+
+  &::placeholder {
+
+    color: #8a8f93;
+    background: url('/img/form/phone.svg') no-repeat left center;
+    background-size: $apx-20 $apx-20;
+    padding-left: $apx-26;
+
+  }
+
+  &:focus::placeholder {
+    color: transparent;
+    background-image: none;
+    padding-left: 0;
+  }
+
+  &:focus::-webkit-input-placeholder {
+    color: transparent;
+    background-image: none;
+    padding-left: 0;
+  }
+
+  &:not(:placeholder-shown)::placeholder {
+    color: transparent;
+    background-image: none;
+    padding-left: 0;
+  }
+
+  &:hover { 
+
+    border-color: rgba(160,130,220,.5);
+
+   }
+
+  &:focus {
+
+    border-color: #a082dc;
+    box-shadow: 0 0 0 $apx-3 rgba(160,130,220,.25);
+
+  }
+
+}
+
+.phoneGroup :global(.rp__menu) {
+
+  border: none !important;
+  box-shadow: 0 0 $apx-12 rgba(0,0,0,.25);
+
+}
+
+.phoneGroup :global(.rp__menu-list) {
+
+  padding: 0;
+
+
+}
+.phoneGroup :global(.rp__indicator-separator) { display: none; }
+
+@media (max-width: 1024px) {
+
+  .phoneGroup { 
+
+    width: $apx-l-311; 
+    gap: $apx-l-8; 
+    :is(input) { min-width: $apx-l-54 !important; }
+
+  }
+  
+  .phoneGroup :global(.rp__control) { flex-basis: $apx-l-80; }
+  .phoneGroup :global(.rp__single-value) {
+
+    color: #B1B1B1;
+    line-height: 1; 
+
+  }
+  
+
+  .phoneGroup :global(.rp__control),
+  .phoneGroup :global(.rp__value-container),
+  .phoneGroup :global(.rp__single-value),
+  .phoneGroup :global(.rp__placeholder) {
+    font-size: $apx-l-16 !important;
+  }
+
+  // ВЫПАДАЮЩЕЕ МЕНЮ (только список вариантов)
+  .phoneGroup :global(.rp__menu) {
+
+    font-size: $apx-l-16 !important; 
+    background: #303639 !important;
+    border: none !important;
+    box-shadow: 0 0 $apx-l-12 rgba(0,0,0,.25) !important;
+
+  }
+
+  .phoneGroup :global(.rp__menu-list) {
+
+    padding: $apx-l-4 0 !important;
+
+  }
+
+  .phoneGroup :global(.rp__option) {
+
+    font-size: inherit !important; 
+    line-height: 1.2 !important;
+    padding: $apx-l-8 $apx-l-12 !important;  
+    color: #B1B1B1 !important;
+    background: transparent !important;
+
+  }
+
+  .phoneGroup :global(.rp__option--is-focused) {
+
+    background: #3f4650 !important;
+    
+  }
+
+  .local input {
+
+    height: $apx-l-60;
+    border-radius: $apx-l-16;
+    font-size: $apx-l-16;
+    padding: 0 $apx-l-16 0 $apx-l-38;
+
+    &::placeholder {
+
+      background-size: $apx-l-20 $apx-l-20;
+      padding-left: $apx-l-26;
+
+    }
+
+  }
+
+  .icon { left: $apx-l-12; font-size: $apx-l-18; }
+
+}
+
+@media (max-width: 450px) {
+
+  .phoneGroup { width: 100%; 
+    
+    gap: $apx-m-10; 
+
+    :is(input) { width: $apx-m-54 !important; }
+    
+  }
+  .phoneGroup :global(.rp__control) { flex-basis: $apx-m-72; }
+  .phoneGroup :global(.rp__single-value) {
+
+    color: #B1B1B1;
+    line-height: 1; 
+    padding-left: $apx-m-6 !important;
+
+  }
+
+  .phoneGroup :global(.rp__value-container),
+  .phoneGroup :global(.rp__single-value),
+  .phoneGroup :global(.rp__placeholder) {
+    
+    font-size: $apx-m-18 !important;
+    line-height: 1.1 !important;
+    width: $apx-m-84 !important;
+
+  }
+
+  // ВЫПАДАЮЩЕЕ МЕНЮ (только список вариантов)
+  .phoneGroup :global(.rp__menu) {
+
+    font-size: $apx-m-16 !important; 
+    background: #303639 !important;
+    border: none !important;
+    box-shadow: 0 0 $apx-m-12 rgba(0,0,0,.25) !important;
+
+  }
+
+  .phoneGroup :global(.rp__menu-list) {
+
+    padding: $apx-l-4 0 !important;
+
+  }
+
+  .phoneGroup :global(.rp__option) {
+
+    font-size: inherit !important; 
+    line-height: 1.2 !important;
+    padding: $apx-m-8 $apx-m-12 !important;  
+    color: #B1B1B1 !important;
+    background: transparent !important;
+
+  }
+
+  .phoneGroup :global(.rp__option--is-focused) {
+
+    background: #3f4650 !important;
+
+  }
+
+  .local input {
+
+    height: $apx-m-60;
+    border-radius: $apx-m-16;
+    font-size: $apx-m-16;
+    padding: 0 $apx-m-16 0 $apx-m-38;
+    min-width: $apx-m-270 !important;
+
+    &::placeholder {
+
+      background-size: $apx-m-20 $apx-m-20;
+      padding-left: $apx-m-26;
+
+    }
+
+  }
+
+  .icon { left: $apx-m-10; font-size: $apx-m-18; }
+
+}

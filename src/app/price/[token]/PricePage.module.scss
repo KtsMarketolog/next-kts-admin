@@ -1,0 +1,153 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.page {
+  min-height: 100vh;
+  background: #f4f5f7;
+  padding: $apx-150 $apx-24 $apx-70;
+  color: #242633;
+}
+
+.shell {
+  width: min($apx-1360, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: $apx-24;
+}
+
+.hero,
+.category {
+  background: #fff;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-14;
+  padding: $apx-24;
+}
+
+.hero {
+  display: grid;
+  gap: $apx-8;
+
+  p {
+    margin: 0;
+    color: #6f7182;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: $apx-36;
+    line-height: 1.15;
+  }
+}
+
+.category {
+  display: grid;
+  gap: $apx-16;
+
+  h2 {
+    margin: 0;
+    font-size: $apx-26;
+  }
+}
+
+.products {
+  display: grid;
+  gap: $apx-14;
+}
+
+.product {
+  display: grid;
+  grid-template-columns: $apx-180 minmax(0, 1fr) minmax($apx-300, 0.8fr);
+  gap: $apx-18;
+  align-items: start;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-12;
+  padding: $apx-14;
+}
+
+.imageBox {
+  min-height: $apx-130;
+  display: grid;
+  place-items: center;
+  border-radius: $apx-10;
+  background: #eef0f5;
+  overflow: hidden;
+  color: #77798a;
+  font-size: $apx-13;
+
+  img {
+    width: 100%;
+    height: $apx-130;
+    object-fit: contain;
+    display: block;
+  }
+}
+
+.productInfo {
+  display: grid;
+  gap: $apx-8;
+
+  h3 {
+    margin: 0;
+    font-size: $apx-20;
+    line-height: 1.25;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    line-height: 1.45;
+  }
+}
+
+.prices {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: $apx-14;
+
+  th,
+  td {
+    border-bottom: $apx-1 solid #e6e7ef;
+    padding: $apx-10 $apx-8;
+    text-align: left;
+  }
+
+  th {
+    color: #6f7182;
+    font-weight: 700;
+  }
+}
+
+.empty {
+  margin: 0;
+  color: #6f7182;
+}
+
+@media (max-width: 800px) {
+  .page {
+    padding: $apx-m-120 $apx-m-16 $apx-m-50;
+  }
+
+  .shell {
+    gap: $apx-m-18;
+  }
+
+  .hero,
+  .category {
+    border-radius: $apx-m-12;
+    padding: $apx-m-18;
+  }
+
+  .hero h1 {
+    font-size: $apx-m-30;
+  }
+
+  .product {
+    grid-template-columns: 1fr;
+    gap: $apx-m-14;
+    border-radius: $apx-m-12;
+    padding: $apx-m-12;
+  }
+
+  .imageBox img {
+    height: $apx-m-160;
+  }
+}

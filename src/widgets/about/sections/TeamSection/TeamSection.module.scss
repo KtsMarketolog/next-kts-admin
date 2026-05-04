@@ -1,0 +1,568 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.teamSection {
+  
+  width: 100%;
+
+  .bgGradient {
+
+    position: relative;
+    background: #EEF2FF;
+    padding: $apx-80 $apx-10;
+    overflow: hidden;
+
+  }
+
+  .content {
+
+    display: flex;
+    flex-direction: column;
+    gap: $apx-40;
+    max-width: $apx-1802;
+    margin: 0 auto;
+
+  }
+
+  .title {
+
+    font-size: $apx-40;
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: 0;
+    color: #321D95;
+    text-transform: uppercase;
+
+    span {
+
+      color: #BBB4DC;
+
+    }
+
+  }
+
+  /* ТОП-ЛИДЕР */
+  .topLeader {
+
+    display: flex;
+    justify-content: center;
+
+    .mainCard {
+
+      position: relative;
+      display: flex;
+      flex-direction: row;
+      background: url("/img/about/bg-team.jpg") no-repeat left top;
+      background-size: cover; 
+
+      border-radius: $apx-20;
+      padding: $apx-23 $apx-70;
+      color: #fff;
+      min-width: $apx-1802;
+      min-height: $apx-394;
+
+      img {
+
+        position: absolute;
+        width: $apx-364;
+        height: $apx-515;
+
+        border-radius: $apx-10;
+        object-fit: cover;
+        top: 34.6%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+              
+      }
+
+      .info {
+
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: stretch;
+        width: 100%;
+        gap: $apx-40;
+
+        .left {
+
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+
+          h3 {
+
+            font-size: $apx-26;
+            font-weight: 800;
+            line-height: 1.1;
+            letter-spacing: 0;
+            text-transform: uppercase;
+
+          }
+
+          p {
+            
+            max-width: $apx-430;
+            font-size: $apx-26;
+            line-height: 1.2;
+            letter-spacing: 0;
+
+          }
+
+        }
+
+        .right {
+          
+          display: flex; 
+
+          .tags {
+
+            display: flex;
+            flex-direction: column;
+            gap: $apx-27;
+            align-items: flex-end;
+
+            li {
+
+              background-color: #FFFFFF;
+              border-radius: $apx-15;
+              padding: $apx-7 $apx-14 ;
+              font-size: $apx-26;
+              white-space: nowrap;
+
+              color: #170F49;
+
+               list-style: none; 
+
+            }
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+
+  /* БЛОК РУКОВОДИТЕЛЕЙ */
+  .subLeaders {
+
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: $apx-20;
+
+    .card {
+
+      background: #fff;
+      border-radius: $apx-15;
+      padding: $apx-20;
+      text-align: center;
+      transition: background-color 0.3s ease;
+
+       &:hover {
+
+        img {
+
+          transform: scale(1.05);
+          background-color: #0F11BD;
+
+        }
+
+      }
+      
+      img {
+        
+        width: 100%;
+        max-height: $apx-450;
+        border-radius: $apx-15;
+        object-fit: cover;
+        margin-bottom: $apx-21;
+        background-color: #F1F3F6;
+        transition: transform 0.4s ease;
+
+      }
+
+      .name {
+
+        font-weight: 600;
+        font-size: $apx-18;
+        color: #323232;
+        margin-bottom: $apx-14;
+
+      }
+
+      .role {
+
+        font-size: $apx-14;
+        color: #474464;
+
+      }
+
+    }
+
+  }
+
+  /* ЭКСПЕРТЫ */
+  .experts {
+
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: $apx-20;
+
+    .expertCard {
+
+      background-color: #fff;
+      border-radius: $apx-10;
+      padding: $apx-20;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+
+       &:hover {
+
+        img {
+
+          transform: scale(1.05);
+          background-color: #1D0489;
+
+        }
+
+      }
+
+      img {
+        
+        max-width: $apx-353;
+        min-width: $apx-353;
+
+        border-radius: $apx-10;
+        margin-bottom: $apx-15;
+        transition: transform 0.4s ease;
+        background: #F1F3F6;
+        border-radius: $apx-15;
+
+      }
+
+      .info{
+
+        display: flex;
+        flex-direction: column;
+        margin-top: auto; 
+        padding-top: $apx-30;
+
+      }
+
+      .name {
+
+        font-weight: 600;
+        font-size: $apx-18;
+        margin-bottom: $apx-30;
+        
+      }
+
+      .tagsRow {
+
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: $apx-6;
+        margin: $apx-10 0;
+
+        span {
+         
+          flex: 0 0 auto;  
+          max-width: $apx-320;
+          background: #590D6E;
+          width: auto; 
+          color: #fff;
+          border-radius: $apx-15;
+          padding: $apx-8 $apx-14;
+          font-size: $apx-26;
+          line-height: 1.2;
+          letter-spacing: 0;
+          
+        }
+
+      }
+
+      .phone{
+
+        font-size: $apx-24;
+        color: #474464;
+        margin-bottom: $apx-10;
+
+      }
+
+
+      .email {
+
+        font-size: $apx-15;
+        color: #524F6E;
+
+      }
+
+    }
+
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .teamSection {
+  
+    width: 100%;
+
+    .bgGradient {
+
+      position: relative;
+      background: #EEF2FF;
+      padding: $apx-l-40 $apx-l-10;
+      overflow: hidden;
+
+    }
+
+    .content {
+
+      display: flex;
+      flex-direction: column;
+      gap: $apx-l-40;
+      max-width: 100%;
+      margin: 0 auto;
+
+    }
+
+    .title {
+
+      font-size: $apx-l-40;
+      line-height: 1.1;
+
+    }
+
+  /* ТОП-ЛИДЕР */
+    .topLeader {
+
+      .mainCard {
+
+        position: relative;
+        display: flex;
+        flex-direction: row;
+        background: url("/img/about/bg-team-tablet.jpg") no-repeat left top;
+        background-size: cover; 
+        border-radius: $apx-l-20;
+        padding: $apx-l-23 $apx-l-70;
+        color: #fff;
+        min-width: 100%;
+        min-height: $apx-l-394;
+
+        img {
+
+          position: absolute;
+          width: $apx-l-317;
+          height: $apx-l-449;
+          border-radius: $apx-l-10;
+          object-fit: cover;
+          top: 43%;
+          left: 82%;
+          transform: translate(-50%, -50%);
+                
+        }
+
+        .info {
+
+          display: flex;
+          flex-direction: row;
+          justify-content: space-between;
+          align-items: stretch;
+          width: 100%;
+          gap: $apx-l-40;
+
+          .left {
+
+            h3 {
+
+              font-size: $apx-l-26;
+
+            }
+
+            p {
+              
+              max-width: $apx-l-430;
+              font-size: $apx-l-26;
+
+            }
+
+          }
+
+          .right {
+            
+            display: none; 
+
+          }
+
+        }
+
+    }
+
+  }
+
+  /* БЛОК РУКОВОДИТЕЛЕЙ */
+  .subLeaders {
+
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: $apx-l-20;
+
+    .card {
+
+      border-radius: $apx-l-15;
+      padding: $apx-l-20;
+
+      
+      img {
+        
+        max-height: $apx-l-226;
+        border-radius: $apx-l-15;
+        margin-bottom: $apx-l-21;
+
+      }
+
+      .name {
+
+        max-width: $apx-l-150;
+        font-weight: 600;
+        font-size: $apx-l-24;
+        margin: 0 auto;
+        margin-bottom: $apx-l-14;
+
+      }
+
+      .role {
+
+        max-width: $apx-l-200;
+        margin: 0 auto;
+        font-size: $apx-l-24;
+        color: #474464;
+
+      }
+
+    }
+
+  }
+
+  /* ЭКСПЕРТЫ */
+  .experts {
+
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: $apx-l-20;
+
+    .expertCard {
+
+      display: grid;
+      grid-template-columns: $apx-l-170 1fr;
+      grid-template-rows: auto auto auto;
+      gap: $apx-l-27;
+      background: #fff;
+      border-radius: $apx-l-10;
+      padding: $apx-l-20;
+
+      img {
+        
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        max-width: $apx-l-170;
+        min-width: $apx-l-170;
+        min-height: $apx-l-207;
+        border-radius: $apx-l-15;
+        object-fit: cover;
+
+      }
+
+      .info{
+
+        grid-column: 1 / span 2;;
+        grid-row: 3; 
+        display: flex;
+        flex-direction: column;
+        gap: $apx-l-20;
+        align-self: start;
+
+      }
+
+        .name,
+        .tagsRow {
+
+          grid-column: 2;
+
+        }
+
+
+      .name {
+
+        max-width: $apx-l-140;
+        grid-row: 1;
+        font-weight: 800;
+        font-size: $apx-l-20;
+        line-height: 1.2;
+        align-self: start;
+        text-align: left;
+        padding-top: $apx-l-40;
+          
+      }
+
+      .tagsRow {
+
+        grid-row: 2;
+        display: flex;
+        flex-direction: column;
+        gap: $apx-l-6;
+        align-items: flex-start;
+
+        span {
+        
+          background: #590D6E;
+          color: #fff;
+          border-radius: $apx-l-15;
+          padding: $apx-l-8 $apx-l-14;
+          font-size: $apx-l-16;
+          text-align: left;
+
+        }
+
+      }
+
+      .phone, .email {
+
+        width: 100%;
+        font-size: $apx-l-16;
+        letter-spacing: 1.2;
+        text-align: left;
+
+      }
+
+      .phone{
+
+        
+        
+        color: #474464;
+        margin-bottom: 0;
+
+      }
+
+
+      .email {
+
+        color: #524F6E;
+
+      }
+
+    }
+
+  }
+
+}
+
+
+}

@@ -1,0 +1,180 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+@use "./styles/layout";
+@use "./styles/forms";
+@use "./styles/order";
+@use "./styles/cards";
+@use "./styles/analytics";
+
+@media (max-width: 1024px) {
+  .page {
+    padding: $apx-l-24;
+    padding-top: $apx-l-120;
+  }
+
+  .topbar {
+    margin: 0 auto $apx-l-20;
+    max-width: $apx-l-1400;
+
+    p {
+      margin: 0 0 $apx-l-4;
+      font-size: $apx-l-14;
+    }
+
+    h1 {
+      font-size: $apx-l-30;
+    }
+  }
+
+  .section {
+    margin: 0 auto $apx-l-20;
+    border-radius: $apx-l-8;
+    padding: $apx-l-20;
+
+    h2 {
+      margin: 0 0 $apx-l-16;
+      font-size: $apx-l-22;
+    }
+  }
+
+  .adminShell {
+    grid-template-columns: $apx-l-220 minmax(0, 1fr);
+    gap: $apx-l-20;
+    max-width: $apx-l-1400;
+  }
+
+  .sidebar {
+    top: $apx-l-20;
+    gap: $apx-l-8;
+    border-radius: $apx-l-8;
+    padding: $apx-l-14;
+  }
+
+  .addCard,
+  .slideCard,
+  .newsCard,
+  .brandCard {
+    gap: $apx-l-14;
+    border-radius: $apx-l-8;
+    padding: $apx-l-14;
+  }
+
+  .cardActions,
+  .cardMeta {
+    grid-template-columns: minmax($apx-l-160, 1fr) minmax($apx-l-160, 1fr) $apx-l-110 auto auto auto;
+    gap: $apx-l-8;
+    padding-top: $apx-l-8;
+  }
+
+  .page input,
+  .page select,
+  .page button,
+  .fileInput {
+    min-height: $apx-l-42;
+    border-radius: $apx-l-8;
+  }
+
+  .page input,
+  .page select {
+    padding: 0 $apx-l-12;
+  }
+
+  .page textarea {
+    min-height: $apx-l-220;
+    border-radius: $apx-l-8;
+    padding: $apx-l-12;
+  }
+}
+@media (max-width: 800px) {
+  .page {
+    padding: $apx-m-16;
+    padding-top: $apx-m-120;
+  }
+
+  .topbar,
+  .inlineForm,
+  .adminShell,
+  .infoGrid {
+    display: grid;
+  }
+
+  .infoGrid {
+    grid-template-columns: 1fr;
+
+    button {
+      justify-self: stretch;
+      width: 100%;
+    }
+  }
+
+  .adminShell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+  }
+
+  .dashboardGrid {
+    grid-template-columns: 1fr;
+    gap: $apx-m-14;
+    margin-bottom: $apx-m-20;
+  }
+
+  .dashboardCard {
+    min-height: $apx-m-190;
+    border-radius: $apx-m-12;
+    padding: $apx-m-18;
+
+    h2 {
+      margin-bottom: $apx-m-10;
+      font-size: $apx-m-24;
+    }
+
+    p {
+      font-size: $apx-m-14;
+    }
+  }
+
+  .sectionHeader {
+    display: grid;
+    gap: $apx-m-12;
+    margin-bottom: $apx-m-18;
+  }
+
+  .topbarActions {
+    display: grid;
+    gap: $apx-m-8;
+
+    button {
+      width: 100%;
+    }
+  }
+
+  .cardBlock {
+    grid-template-columns: 1fr;
+  }
+
+  .addCard,
+  .slideCard,
+  .cardActions,
+  .cardMeta,
+  .newsCard,
+  .brandCard,
+  .brandRow,
+  .wholesaleRow,
+  .wholesaleEditorGrid,
+  .discountBox,
+  .priceProduct,
+  .priceProductInfo,
+  .variantTable {
+    grid-template-columns: 1fr;
+  }
+
+  .variantRow {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: $apx-m-6;
+    border-top: $apx-m-1 solid #e6e7ef;
+    padding-top: $apx-m-8;
+  }
+}

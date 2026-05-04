@@ -1,0 +1,155 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.authPage {
+  min-height: calc(100vh - $apx-120);
+  display: grid;
+  place-items: center;
+  padding: $apx-150 $apx-24 $apx-80;
+  background: #f4f5f7;
+}
+
+.panel {
+  width: min($apx-780, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: $apx-28;
+  align-items: center;
+  background: #fff;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-16;
+  padding: $apx-28;
+  box-shadow: 0 $apx-24 $apx-70 rgba(25, 28, 45, 0.1);
+}
+
+.intro {
+  display: grid;
+  gap: $apx-10;
+
+  h1 {
+    margin: 0;
+    color: #242633;
+    font-size: $apx-28;
+    line-height: 1.1;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-14;
+    line-height: 1.45;
+  }
+}
+
+.backLink {
+  width: fit-content;
+  min-height: $apx-40;
+  display: inline-flex;
+  align-items: center;
+  border: $apx-1 solid #c9bfef;
+  border-radius: $apx-8;
+  padding: 0 $apx-16;
+  color: #260b86;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.form {
+  display: grid;
+  gap: $apx-12;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $apx-8;
+  padding: $apx-6;
+  background: #f4f5f7;
+  border-radius: $apx-12;
+}
+
+.tab {
+  min-height: $apx-42;
+  border: 0;
+  border-radius: $apx-8;
+  background: transparent;
+  color: #4b4e61;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tabActive {
+  background: #260b86;
+  color: #fff;
+}
+
+.field {
+  display: grid;
+  gap: $apx-6;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 600;
+  }
+
+  input {
+    min-height: $apx-44;
+    border: $apx-1 solid #d8d9e4;
+    border-radius: $apx-8;
+    padding: 0 $apx-12;
+    font: inherit;
+  }
+}
+
+.submit {
+  min-height: $apx-46;
+  border: 0;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+}
+
+.status {
+  margin: 0;
+  color: #b42318;
+  font-size: $apx-13;
+  font-weight: 600;
+}
+
+@media (max-width: 800px) {
+  .authPage {
+    min-height: calc(100vh - $apx-m-100);
+    padding: $apx-m-120 $apx-m-16 $apx-m-50;
+  }
+
+  .panel {
+    grid-template-columns: 1fr;
+    gap: $apx-m-22;
+    border-radius: $apx-m-14;
+    padding: $apx-m-20;
+  }
+
+  .intro {
+    gap: $apx-m-8;
+
+    h1 {
+      font-size: $apx-m-26;
+    }
+
+    p {
+      font-size: $apx-m-14;
+    }
+  }
+
+  .tabs {
+    gap: $apx-m-8;
+    padding: $apx-m-6;
+  }
+}

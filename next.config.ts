@@ -1,7 +1,55 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  reactStrictMode: true,
+  compress: true,
+  poweredByHeader: false,
+  outputFileTracingRoot: __dirname,
+  experimental: {
+    optimizePackageImports: ["react-select", "@emotion/react"],
+  },
+  images: {
+    formats: ["image/avif", "image/webp"],
+    remotePatterns: [
+      { protocol: "https", hostname: "api.kts-impex.ru", pathname: "/uploads/**" },
+      { protocol: "http", hostname: "api.kts-impex.ru", pathname: "/uploads/**" },
+    ],
+  },
+  headers: async () => {
+    const securityHeaders = [
+      { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "X-Frame-Options", value: "SAMEORIGIN" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+      {
+        key: "Content-Security-Policy",
+        value: [
+          "default-src 'self'",
+          "base-uri 'self'",
+          "frame-ancestors 'self'",
+          "object-src 'none'",
+          "img-src 'self' data: blob: https://api.kts-impex.ru http://api.kts-impex.ru",
+          "font-src 'self' data:",
+          "style-src 'self' 'unsafe-inline'",
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+          "connect-src 'self' https://api.kts-impex.ru http://api.kts-impex.ru",
+          "form-action 'self'",
+        ].join("; "),
+      },
+    ];
+
+    return [
+      {
+        source: "/:path*",
+        headers: securityHeaders,
+      },
+      {
+        source: "/:all*(js|css|png|jpg|jpeg|gif|svg|webp|avif|woff2|ico)",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

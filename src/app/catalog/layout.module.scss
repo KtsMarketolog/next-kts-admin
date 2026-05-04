@@ -1,0 +1,74 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.catalogLayout {
+
+  display: grid;
+  grid-template-columns: $apx-290 1fr;
+  gap: $apx-20;
+  padding-top: $apx-140;
+
+}
+
+.sidebar {
+
+  border-radius: $apx-8;
+
+}
+
+.content {
+
+  min-height: $apx-400;
+
+}
+
+@media (max-width: 1024px) {
+
+  .catalogLayout {
+
+    display: grid;
+    grid-template-columns: $apx-l-290 1fr;
+    gap: $apx-l-18;
+    padding-top: $apx-l-140;
+    margin-bottom: $apx-l-50;    
+
+  }
+
+  .sidebar {
+
+    border-radius: $apx-l-8;
+
+  }
+
+  .content {
+
+    min-height: $apx-l-400;
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .catalogLayout {
+
+    grid-template-columns: 1fr;   
+    gap: $apx-m-12;
+    padding-top: $apx-m-100;    
+    margin-bottom: $apx-m-50;    
+
+  }
+
+  .sidebar {
+
+    border-radius: $apx-m-8;
+    order: -1;
+
+  }
+
+  .content {
+
+    min-height: $apx-m-300;
+
+  }
+
+}

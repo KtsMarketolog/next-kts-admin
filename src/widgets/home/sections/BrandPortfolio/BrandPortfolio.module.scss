@@ -1,0 +1,412 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.brandPortfolio {
+
+  width: 100%;
+  margin-bottom: $apx-100;
+
+
+  .title {
+
+    font-weight: 700;
+    font-size: $apx-53;
+    line-height: 1.1;
+    letter-spacing: 0;
+    text-align: center;
+    text-transform: uppercase;
+    color: #323232;
+
+    max-width: $apx-1601;
+    padding-bottom: $apx-40;
+    margin: 0 auto;
+    margin-bottom: $apx-80;
+    border-bottom: $apx-1 solid #D9D9D9;
+
+  }
+
+  .titleArrow{
+
+    display: none;
+
+  }
+
+  .tabsWrapper {
+
+    background: #F2F0FF;
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: $apx-20 0;
+    margin-bottom: $apx-40;
+
+
+  }
+
+  .tabs {
+
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: $apx-20;
+    max-width: $apx-1596;
+    margin: 0 auto;
+    padding-left: $apx-11;
+    padding-right: $apx-11;
+    
+  }
+
+  .tabButton {
+
+    font-size: $apx-14;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0;
+    color: #66628E;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+
+    max-width: $apx-170;
+    min-height: $apx-62;
+    padding: $apx-12 $apx-20;
+    border-radius: $apx-50;
+    transition: all 0.3s;
+
+    &:hover {
+
+      background: rgba(90, 80, 200, 0.1);
+
+    }
+
+  }
+
+  .active {
+
+    background: #8D81C4;
+    color: #fff;
+
+  }
+
+  .grid {
+
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax($apx-239, 1fr));
+    gap: $apx-25;
+    
+  }
+
+  .card {
+
+    background: #fff;
+    border-radius: $apx-12;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: $apx-20;
+    box-shadow: $apx-4 $apx-4 $apx-22 0 rgba(27, 3, 137, 0.07);
+    transition: transform 0.4s ease, box-shadow 0.4s ease; 
+
+    &:hover {
+
+      transform: scale(1.15);
+      z-index: 10;
+
+    }
+
+    svg,
+    img {
+
+      max-width: 100%;
+      max-height: $apx-80;
+      object-fit: contain;
+
+    }
+
+  }
+
+  .placeholder {
+    grid-column: 1 / -1;
+    text-align: center;
+    font-size: $apx-20;
+    color: #666;
+    padding: $apx-40 0;
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .brandPortfolio {
+
+    margin-bottom: $apx-l-80;
+
+
+    .title {
+
+      font-weight: 700;
+      font-size: $apx-l-53;
+      line-height: 1.1;
+      letter-spacing: 0;
+
+      max-width: $apx-l-979;
+      padding-bottom: $apx-l-40;
+      margin: 0 auto;
+      margin-bottom: $apx-l-40;
+      border-bottom: $apx-1 solid #D9D9D9;
+
+    }
+
+    .tabsWrapper {
+
+      background: none;
+      width: 100%;
+      position: relative;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: $apx-l-20 0;
+      margin-bottom: $apx-l-40;
+
+
+    }
+
+    .tabs {
+
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: $apx-l-12;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 0;
+
+    }
+
+    .tabButton {
+
+      font-size: $apx-l-14;
+      background-color: #F2F0FF;
+
+      max-width: $apx-l-235;
+      min-height: $apx-l-70;
+      padding: $apx-l-12 $apx-l-20;
+      border-radius: $apx-l-50;
+      transition: all 0.3s;
+      
+
+      &:hover {
+
+        background: rgba(90, 80, 200, 0.1);
+
+      }
+
+    }
+
+    .active {
+
+      background: #8D81C4;
+      color: #fff;
+
+    }
+
+    .grid {
+
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+    
+      
+    }
+
+    .card {
+      background: #fff;
+      border-radius: $apx-l-12;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: $apx-l-14;
+      box-shadow: $apx-l-4 $apx-l-4 $apx-l-22 0 rgba(27, 3, 137, 0.07);
+
+      width: $apx-l-230;
+      max-width: 100%;
+
+      &:hover {
+
+        transform: none;
+
+      }
+      
+
+      svg,
+      img {
+
+        max-width: 100%;
+        max-height: $apx-l-80;
+        object-fit: contain;
+
+      }
+
+    }
+
+    .placeholder {
+      grid-column: 1 / -1;
+      text-align: center;
+      font-size: $apx-l-20;
+      color: #666;
+      padding: $apx-l-40 0;
+    }
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .brandPortfolio {
+
+    margin-bottom: $apx-m-71;
+
+    .title {
+
+      display: flex;
+      align-items: flex-end;
+
+      font-size: $apx-m-40;
+      text-align: left;
+      max-width: $apx-m-372;
+
+      margin: 0 auto;
+      padding-bottom: $apx-m-20;
+      margin-bottom: $apx-m-40;
+      border-bottom: $apx-m-1 solid #D9D9D9;
+
+    }
+
+    .titleArrow {
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: center center;
+
+      cursor: pointer;
+      transition: transform 0.3s ease;
+
+      &.rotated {
+
+        transform: rotate(180deg);
+      }
+
+    }
+
+    .tabsWrapper {
+
+      background: none;
+      width: 100%;
+      position: relative;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0;
+      margin-bottom: $apx-m-20;
+
+    }
+
+    .tabs {
+
+      display: flex;
+      justify-content:left;
+      flex-wrap: nowrap;
+      gap: $apx-m-10;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 0;
+      padding-left: $apx-m-14;
+      padding-right: $apx-m-14;
+
+      -webkit-overflow-scrolling: touch;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+
+      &::-webkit-scrollbar {
+
+        display: none;
+
+      }
+
+    }
+
+    .tabButton {
+
+      font-size: $apx-m-14;
+      background-color: #F2F0FF;
+
+      max-width: $apx-m-170;
+      min-width: $apx-m-170;
+      max-height: $apx-m-70;
+      min-height: $apx-m-70;
+      padding: 0 $apx-m-30;
+      border-radius: $apx-m-50;
+      transition: all 0.3s;
+
+      &:hover {
+
+        background: rgba(90, 80, 200, 0.1);
+
+      }
+
+    }
+
+    .active {
+
+      background: #8D81C4;
+      color: #fff;
+
+    }
+
+    .grid {
+
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      row-gap: $apx-m-17;
+      column-gap: $apx-m-19;
+    
+    }
+
+    .card {
+
+      background: #fff;
+      border-radius: $apx-m-12;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: $apx-m-14;
+      box-shadow: $apx-m-4 $apx-m-4 $apx-m-22 0 rgba(27, 3, 137, 0.07);
+
+      width: 100%;
+
+      svg,
+      img {
+
+        max-width: 100%;
+        max-height: $apx-m-98;
+        object-fit: contain;
+
+      }
+
+    }
+
+    .placeholder {
+
+      grid-column: 1 / -1;
+      text-align: center;
+      font-size: $apx-m-20;
+      color: #666;
+      padding: $apx-m-40 0;
+
+    }
+
+  }
+  
+}

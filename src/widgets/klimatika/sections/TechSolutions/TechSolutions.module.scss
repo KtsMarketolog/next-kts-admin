@@ -1,0 +1,674 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.techSolutions {
+
+  width: 100%;
+  background-color: #EEF2FF;
+  padding-top: $apx-106;
+  padding-bottom: $apx-32;
+
+}
+
+.title {
+
+  font-weight: 700;
+  font-size: $apx-53;
+  line-height: 1.25;
+  text-transform: uppercase;
+  color: #232D53;
+  
+  padding-left: $apx-176;
+  padding-bottom: $apx-40;
+  margin: 0 auto $apx-38;
+  
+
+}
+
+/* Верхняя карточка */
+.topCard {
+
+  position: relative;
+  background: url('/img/klimatika/tech-solutions/bg-top-card.jpg') center / cover no-repeat;
+
+  height: $apx-394;
+  padding: $apx-50 $apx-50 $apx-50 $apx-120;
+  margin-left: $apx-55;
+  margin-right: $apx-55;
+  margin-bottom: $apx-50;
+  border-radius: $apx-10;
+
+}
+
+.topCardText {
+
+  max-width: $apx-400;
+  color: #fff;
+  line-height: 1.3;
+
+}
+
+.topCardTitle {
+
+  font-weight: 700;
+  font-size: $apx-24;
+  text-transform: uppercase;
+  margin: 0 0 $apx-64;
+
+}
+
+.topCardDesc {
+
+  font-weight: 500;
+  font-size: $apx-24;
+  margin: 0;
+
+}
+
+.topCardMedia {
+
+  position: absolute;
+  right: 14%;
+  bottom: -9%;
+
+  img {
+
+    width: $apx-537;
+    height: $apx-616;
+    display: block;
+    object-fit: contain;
+
+  }
+
+}
+
+/* 3 карточки (интерфейсы) */
+.interfaces {
+
+  margin-left: $apx-55;
+  margin-right: $apx-55;
+  margin-bottom: $apx-107;
+
+}
+
+.interfacesTrack {
+
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $apx-20;
+
+}
+
+.interfaceCard {
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  
+  height: $apx-497;
+
+  border-radius: $apx-20;
+  padding: $apx-28;
+  padding-top: $apx-300;
+  overflow: hidden;
+  background: url('/img/klimatika/tech-solutions/bg-interface-card.svg') center / cover no-repeat;
+
+}
+
+.interfaceIcon {
+
+  position: absolute;
+  top: $apx-70;
+  left: 50%;
+  transform: translateX(-50%);
+
+  width: $apx-240;
+  height: $apx-218;
+  object-fit: contain;
+
+}
+
+.interfaceContent {
+
+  width: $apx-530;
+  height: 100%;
+
+}
+
+.interfaceTitle {
+
+  font-weight: 700;
+  font-size: $apx-24;
+  line-height: 1.3;
+  color: #fff;
+  margin-bottom: $apx-7;
+
+}
+
+.interfaceText {
+
+  font-weight: 400;
+  font-size: $apx-24;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.95);
+  margin: 0;
+
+}
+
+/* Нижняя схема (bg-tech-scheme) */
+.scheme {
+
+  overflow: hidden;
+  height: $apx-1071;
+
+  background-image: url('/img/klimatika/tech-solutions/bg-tech-scheme.jpg');
+  background-size: cover;
+  background-repeat: no-repeat;
+  
+} 
+
+.schemeInner {
+
+  position: relative;
+  height: 100%;
+
+}
+
+/* Выноски */
+.callout {
+
+  position: absolute;
+  max-width: $apx-360;
+  color: #fff;
+
+}
+
+.calloutTitle {
+
+  font-weight: 700;
+  font-size: $apx-24;
+  line-height: 1.3;
+  margin-bottom:$apx-30;
+
+}
+
+.calloutTitleRightTop {
+
+  font-weight: 700;
+  font-size: $apx-24;
+  line-height: 1.3;
+  margin-bottom:$apx-5;
+
+}
+
+.calloutText {
+
+  font-weight: 400;
+  font-size: $apx-24;
+  line-height: 1.3;
+  margin: 0;
+
+}
+
+.calloutTextRightTop {
+
+  font-weight: 400;
+  font-size: $apx-22;
+  line-height: 1.3;
+  margin: 0;
+
+}
+
+.calloutDesc {
+
+  font-weight: 700;
+  font-size: $apx-20;
+  line-height: 1.2;
+  margin-top: $apx-5;
+
+}
+
+/* позиции */
+.calloutLeftTop {
+
+  left: $apx-38;
+  top: $apx-224;
+
+}
+
+.calloutRightTop {
+
+  right: $apx-43;
+  top: $apx-42;
+  text-align: right;
+  
+}
+
+.calloutRightBottom {
+
+  bottom: $apx-30;
+  right: $apx-43;
+  text-align: right;
+
+}
+
+/* TABLET */
+@media (max-width: 1024px) {
+
+  .techSolutions { 
+    
+    margin-bottom: 0; 
+    padding-bottom: 0;
+  
+  }
+
+  .title {
+
+    font-size: $apx-l-53;
+    padding: 0;
+    text-align: center;
+    margin-bottom: $apx-l-40;
+
+  }
+
+  .topCard {
+
+    grid-template-columns: 1fr $apx-l-360;
+    background: url('/img/klimatika/tech-solutions/bg-top-card-tablet.jpg') center / cover no-repeat;
+    height: $apx-l-394;
+    padding: $apx-l-33 $apx-l-33 $apx-l-33 $apx-l-49;
+    border-radius: $apx-l-10;
+
+    margin-left: $apx-l-10;
+    margin-right: $apx-l-10;
+    margin-bottom: $apx-l-46;
+
+  }
+
+  .topCardText {
+
+    max-width: $apx-l-380;
+    
+  }
+  
+  .topCardTitle {
+    
+    font-size: $apx-l-24;
+    margin: 0 0 $apx-l-36;
+    
+  }
+  
+  .topCardDesc {
+
+    font-weight: 300;
+    font-size: $apx-l-24;
+
+  }
+
+  .topCardMedia {
+
+    position: absolute;
+    right: -2%;
+    bottom: -9%;
+
+    img {
+
+      width: $apx-l-462;
+      height: $apx-l-530;
+      display: block;
+      object-fit: contain;
+
+    }
+
+  }
+
+  .interfaces {
+
+    margin-left: $apx-l-10;
+    margin-right: $apx-l-10;
+    margin-bottom: $apx-l-40;
+    
+  }
+  
+  .interfacesTrack {
+
+    display: flex;
+    flex-wrap: nowrap;
+    gap: $apx-l-26;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    scroll-snap-type: x mandatory;
+
+    &::-webkit-scrollbar { 
+      
+      display: none; 
+    
+    }
+
+  }
+
+  .interfaceCard {
+
+    flex: 0 0 $apx-l-400;
+    height: $apx-l-497;
+
+    padding: $apx-l-22;
+    padding-top: $apx-l-300;
+    border-radius: $apx-l-20;
+
+  }
+
+  .interfaceIcon {
+
+    top: $apx-l-82;
+    width: $apx-l-240;
+    height: $apx-l-218;
+
+  }
+
+  .interfaceContent {
+
+    width: 100%;
+    height: 100%;
+
+  }
+
+  .interfaceTitle {
+
+    font-size: $apx-l-20;
+    margin-bottom: $apx-l-14;
+
+  }
+
+  .interfaceText {
+
+    font-size: $apx-l-20;
+    margin: 0;
+
+  }
+
+  .scheme {
+
+    padding: $apx-l-30;
+    border-radius: $apx-l-10;
+
+    background-image: url('/img/klimatika/tech-solutions/bg-tech-scheme-tablet.jpg');
+    background-position: center;
+    background-size: contain;
+    background-repeat: no-repeat;
+
+    height: $apx-l-1071;
+
+  }
+
+  .schemeInner {
+
+    position: relative;
+    height: 100%;
+
+  }
+
+  /* Выноски */
+  .callout {
+
+    position: absolute;
+    max-width: $apx-l-302;
+    color: #fff;
+
+  }
+
+  .calloutTitle {
+
+    font-size: $apx-l-20;
+    margin-bottom:$apx-l-30;
+
+  }
+
+  .calloutTitleRightTop {
+
+    font-size: $apx-l-20;
+    margin-bottom:$apx-l-5;
+
+  }
+
+  .calloutText {
+
+    font-size: $apx-l-18;
+
+  }
+
+  .calloutTextRightTop {
+
+    font-size: $apx-l-20;
+
+  }
+
+  .calloutDesc {
+
+    font-size: $apx-l-18;
+    margin-top: $apx-l-5;
+
+  }
+
+  /* позиции */
+  .calloutLeftTop {
+
+    left: -1%;
+    top: $apx-l-164;
+
+  }
+
+  .calloutRightTop {
+
+    min-width: $apx-l-398;
+
+    right: -1%;
+    top: $apx-l-1;
+    
+  }
+
+  .calloutRightBottom {
+
+    bottom: $apx-l-110;
+    right: -1%;
+
+  }
+
+
+}
+
+/* MOBILE */
+@media (max-width: 450px) {
+
+  .techSolutions {
+
+    padding-top: $apx-m-60;
+    padding-bottom: $apx-m-20;
+    padding-bottom: 0;
+
+  }
+
+  .title { 
+
+    font-size: $apx-m-25;
+    margin-bottom: $apx-m-43;
+
+  }
+
+  /* Верхняя карточка */
+  .topCard {
+
+    height: $apx-m-360;
+    padding: $apx-m-20;
+    margin-left: $apx-m-10;
+    margin-right: $apx-m-10;
+    margin-bottom: $apx-m-17;
+
+    background: url('/img/klimatika/tech-solutions/bg-top-card-mobile.jpg') center / cover no-repeat;
+
+  }
+
+  .topCardTitle {
+
+    font-size: $apx-m-14;
+    margin-bottom: $apx-m-35;
+    
+  }
+  
+  .topCardDesc {
+
+    width: $apx-m-170;
+    font-size: $apx-m-12;
+    
+  }
+
+  .topCardMedia {
+
+    position: absolute;
+    right: -7%;
+    bottom: 4%;
+
+    img {
+
+      width: $apx-m-240;
+      height: $apx-m-280;
+      display: block;
+      object-fit: contain;
+
+    }
+
+  }
+
+  /* Интерфейсы */
+  .interfaces {
+
+    margin-left: $apx-m-10;
+    margin-right: $apx-m-10;
+    margin-bottom: $apx-m-20;
+
+  }
+
+  
+  .interfacesTrack {
+
+    gap: $apx-m-16;
+
+  }
+
+  .interfaceCard {
+
+    flex: 0 0 $apx-m-200;
+    height: $apx-m-242;
+    padding: $apx-m-18;
+    padding-top: $apx-m-90;
+    text-align: center;
+
+  }
+
+  .interfaceIcon {
+
+    top: $apx-m-12;
+    width: $apx-m-90;
+    height: $apx-m-80;
+
+  }
+
+  .interfaceTitle {
+
+    font-size: $apx-m-14;
+
+  }
+
+  .interfaceText {
+
+    font-size: $apx-m-12;
+
+  }
+
+  /* Схема */
+  .scheme {
+    
+    height: $apx-m-400;
+    padding: $apx-m-13;
+    margin-bottom: 0;
+
+    background-image: url('/img/klimatika/tech-solutions/bg-tech-scheme-mobile.jpg');
+    background-size: contain;
+    background-repeat: no-repeat;
+
+  }
+
+  /* Выноски */
+  .callout {
+
+    max-width: $apx-m-244;
+    margin-bottom: $apx-m-20;
+    color: #fff;
+
+  }
+
+ .calloutTitle {
+
+    font-size: $apx-m-12;
+    line-height: 1.4;
+    margin-bottom:$apx-m-5;
+
+  }
+
+  .calloutTitleRightTop {
+
+    min-width: $apx-m-244;
+    font-size: $apx-m-12;
+    margin-bottom:$apx-m-5;
+
+  }
+
+  .calloutText {
+
+    font-size: $apx-m-12;
+    line-height: 1.4;
+
+  }
+
+  .calloutTextRightTop {
+
+    font-size: $apx-m-10;
+
+  }
+
+  .calloutDesc {
+
+    font-size: $apx-m-10;
+    line-height: 1.3;
+    margin-top: $apx-m-5;
+
+  }
+
+  /* позиции */
+  .calloutLeftTop {
+
+    width: $apx-m-120;
+    left: $apx-m-1;
+    top: $apx-m-76;
+
+  }
+
+  .calloutRightTop {
+
+    right: $apx-m-3;
+    top: $apx-m-4;
+    text-align: right;
+    
+  }
+
+  .calloutRightBottom {
+
+    min-width: $apx-m-280;
+    right: $apx-m-3;
+    bottom: $apx-m-1;
+    text-align: right;
+
+  }
+
+}

@@ -1,0 +1,276 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.grid {
+
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $apx-16;
+
+}
+
+.card {
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+
+  border: $apx-1 solid #e6e8ee;
+  border-radius: $apx-12;
+  background: #F1F3F6;
+  padding: $apx-16;
+  transition: transform .12s ease, box-shadow .12s ease, background .12s ease, border-color .12s ease;
+
+}
+
+.header {
+
+  display: grid;
+  grid-template-columns: 1fr max-content;
+  align-items: start;
+  gap: $apx-12;
+
+}
+
+.title {
+
+  margin: 0;
+  font-size: $apx-16;
+  font-weight: 600;
+  line-height: 1.1;
+  text-transform: uppercase;
+  color: #474464;
+  word-break: break-word
+
+}
+
+.brandBadge {
+
+  display: inline-block;
+  padding: $apx-8 $apx-12;
+  border-radius: $apx-8;
+  background: #ffffff;
+  border: $apx-1 solid #deddf3;
+
+  font-weight: 600;
+  font-size: $apx-18;
+  color: #2b285f;
+  text-transform: uppercase;
+
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+}
+
+.meta {
+
+  margin-top: auto;
+  padding-top: $apx-8;
+
+}
+
+.row {
+
+  display: flex;
+  align-items: flex-start;
+  gap: $apx-8;
+  margin-bottom: 0;
+  min-height: 2em;
+
+}
+
+.metaLabel {
+
+  color: #6c6c80;
+  font-weight: 600;
+  font-size: $apx-14;
+  white-space: nowrap;
+
+}
+
+.metaValue {
+
+  color: #2b2b35;
+  font-weight: 700;
+  font-size: $apx-14;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+
+}
+
+.tags {
+
+  display: flex;
+  flex-direction: column;
+  gap: $apx-4;
+
+}
+
+.tag {
+
+  display: block;
+  color: #5a5c7a;
+  font-size: $apx-14;
+  font-weight: 600;
+
+}
+
+.link {
+
+  position: absolute;
+  inset: 0;
+  border-radius: $apx-12;
+
+}
+
+.empty {
+
+  padding: $apx-12 0;
+  color: #777;
+
+}
+
+@media (min-width: 1025px) {
+
+  .card:hover {
+
+    transform: translateY(-1px);
+    box-shadow: 0 $apx-10 $apx-24 rgba(18,22,44,.06);
+    border-color: #dcdcf2;
+    background: #ece9ff;
+
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .grid {
+
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: $apx-l-16;
+
+  }
+
+  .card {
+
+    border: $apx-l-1 solid #e6e8ee;
+    border-radius: $apx-l-12;
+    padding: $apx-l-16;
+
+  }
+
+  .header { 
+
+    gap: $apx-l-12; 
+
+  }
+
+  .title { 
+
+    font-size: 
+    $apx-l-16; 
+
+  }
+
+  .brandBadge {
+
+    font-size: $apx-l-12;
+    padding: $apx-l-8 $apx-l-12;
+    border-radius: $apx-l-8;
+    border-width: $apx-l-1;
+
+  }
+
+  .meta { 
+
+    padding-top: $apx-l-8; 
+    
+  }
+
+  .row {
+
+    gap: $apx-l-8;
+    min-height: 2.3em;
+
+  }
+
+  .metaLabel,
+  .metaValue,
+  .tag { 
+
+    font-size: $apx-l-14; 
+
+  }
+
+  .tags { 
+
+    gap: $apx-l-4; 
+
+  }
+
+  .link { 
+
+    border-radius: 
+    $apx-l-12; 
+
+  }
+
+  .empty { 
+
+    padding: $apx-l-12 0; 
+
+  }
+}
+
+@media (max-width: 450px) {
+
+  .grid { 
+
+    grid-template-columns: 1fr; 
+    gap: $apx-m-12;
+
+  }
+  .card { 
+
+    padding: $apx-m-14; 
+    border-radius: 
+    $apx-m-12; 
+
+  }
+  .title { 
+
+    font-size: 
+    $apx-m-16; 
+
+  }
+
+  .brandBadge { 
+
+    font-size: $apx-m-12; 
+    padding: $apx-m-8 
+    $apx-m-12; 
+    border-radius: 
+    $apx-m-8; 
+
+  }
+
+  .meta { 
+
+    padding-top: 
+    $apx-m-8; 
+
+  }
+  .metaLabel, .metaValue, .tag { 
+
+    font-size: $apx-m-14; 
+
+  }
+
+  .row { 
+
+    min-height: 2.3em; 
+  }
+
+}

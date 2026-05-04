@@ -1,0 +1,174 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.pad{
+
+  padding-top: $apx-134;
+
+}
+
+.bgGradient{
+
+  position: relative;
+  max-width: $apx-1594;
+
+  background: url("/img/about/bg-main-block.png") no-repeat left top;
+  background-size: cover; 
+  border-radius: $apx-50;
+  margin: 0 auto;
+  margin-bottom: $apx-60;
+
+  .aboutMainSvg {
+
+    position: absolute;
+    left: 0;
+    top: $apx-96;
+    width: $apx-150;
+    height: $apx-900;
+    pointer-events: none; 
+    
+  }
+
+}
+
+.aboutHero {
+
+  width: 100%;
+  color: #fff;
+  text-align: center;
+  
+  max-width: $apx-1596;
+  min-height: $apx-994;
+  padding-top: $apx-120;
+  padding-bottom: $apx-137;
+
+}
+
+.title {
+
+  font-size: $apx-150;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0;
+  margin-bottom: $apx-55;
+   
+}
+
+.desc {
+
+  min-width: $apx-1272;
+  font-size: $apx-40;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+  max-width: $apx-800;
+  margin: 0 auto;
+
+}
+
+@media (max-width: 1024px) {
+
+  .pad{
+
+    padding-top: $apx-l-142;
+    
+  }
+  
+  .bgGradient{
+
+    background: url("/img/about/bg-main-block-tablet.png") no-repeat left top;
+    background-size: cover; 
+
+    .aboutMainSvg {
+
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: $apx-l-100;
+      height: $apx-l-722;
+      pointer-events: none; 
+      
+    }
+
+    max-width: $apx-l-979;
+    margin-bottom: $apx-l-40;
+    border-radius: $apx-l-30;
+    padding-left: $apx-l-70;
+    padding-right: $apx-l-70;
+
+  }
+
+  .aboutHero {
+
+    min-height: $apx-l-722;
+    border-radius: 0;
+    
+    padding-top: $apx-l-89;
+    padding-bottom: $apx-l-103;
+
+  }
+
+  .title {
+
+    font-size: $apx-l-100;
+    margin-bottom: $apx-l-80;
+    
+  }
+
+  .desc {
+
+    min-width: $apx-l-754;
+    max-width: $apx-l-754;
+    font-size: $apx-l-24;
+    margin: 0 auto;
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .pad{
+
+    padding-top: $apx-m-110;
+    
+  }
+
+  .bgGradient{
+
+    background: url("/img/about/bg-main-block-mobile.png") no-repeat left top;
+    background-size: cover; 
+
+    margin-bottom: $apx-m-30;
+    padding-left: 0;
+    padding-right: 0;
+
+  }
+
+ .aboutHero {
+
+    min-height: $apx-m-424;
+    max-width: $apx-m-400;
+    border-radius: $apx-m-30;
+    
+    padding-top: $apx-m-50;
+    padding-bottom: $apx-m-64;
+
+  }
+
+  .title {
+
+    font-size: $apx-m-44;
+    margin-bottom: $apx-m-93;
+    
+  }
+
+  .desc {
+
+    min-width: $apx-m-360;
+    max-width: $apx-m-360;
+    font-size: $apx-m-14;
+    margin: 0 auto;
+
+  }
+
+}

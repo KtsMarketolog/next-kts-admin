@@ -1,0 +1,381 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.newsBlock {
+
+  max-width: $apx-1274;
+  margin: 0 auto;
+  padding: $apx-130 0;
+
+ .cardLink {
+  display: block;
+  height: 100%;
+}
+
+  .title {
+
+    font-weight: 700;
+    font-size: $apx-50;
+    line-height: 1;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    color: var(--hero-title-color);
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding-bottom: $apx-40;
+    margin-bottom: $apx-40;
+    border-bottom: $apx-1 solid #D9D9D9;
+  }
+
+  .titleArrow {
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform-origin: center center;
+    cursor: pointer;
+    display: none;
+
+  }
+
+  .grid {
+
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: $apx-40;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+
+  }
+
+  .grid::-webkit-scrollbar {
+
+    display: none;
+
+  }
+
+  .card {
+
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: $apx-20;
+
+    .date {
+
+      font-weight: 400;
+      font-size: $apx-16;
+      line-height: 1;
+      letter-spacing: 0;
+      color: #3B394E;
+
+    }
+
+    .cardImage {
+
+      img {
+        width: 100%;
+        border-radius: $apx-10;
+        object-fit: cover;
+      }
+
+    }
+
+    .cardTitle {
+
+      font-weight: 600;
+      font-size: $apx-18;
+      line-height: 1;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      color: #3B394E;
+     
+    }
+
+  }
+
+  .moreButton {
+
+    display: flex;
+    justify-content: center;
+    margin-top: $apx-60;
+
+
+    button {
+
+      min-width: $apx-399;
+      max-width: $apx-399;
+ 
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: 0;
+      font-size: $apx-16;
+
+      padding: $apx-23;
+      border: $apx-1 solid #000;
+      background: transparent;
+      cursor: pointer;
+      border-radius: $apx-7;
+
+    }
+
+  }
+
+}
+
+@media (max-width: 1024px) {
+
+  .newsBlock {
+
+    max-width: 100%;
+    margin: 0 auto;
+    padding: $apx-l-80 0;
+    padding-left: $apx-l-8;
+    padding-right: 0;
+
+    .title {
+
+      max-width: $apx-l-904;
+      margin: 0 auto;
+      font-weight: 700;
+      font-size: $apx-l-50;
+      line-height: 1;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      color: var(--hero-title-color);
+
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      padding-bottom: $apx-l-40;
+      margin-bottom: $apx-l-40;
+      border-bottom: $apx-l-1 solid #D9D9D9;
+    }
+
+    .titleArrow {
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: center center;
+      cursor: pointer;
+
+    }
+
+    .grid {
+
+      display: flex;
+      gap: $apx-40;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+
+    }
+
+    .grid.scrolled {
+
+      margin-left: -16px;
+      margin-right: -16px;
+      padding-right: $apx-l-28;
+
+    }
+
+    .grid::-webkit-scrollbar {
+
+      display: none;
+
+    }
+
+    .card {
+
+      display: flex;
+      flex-direction: column;
+      gap: $apx-l-20;
+      min-width: $apx-l-400;
+      max-width: $apx-l-400;
+
+      .date {
+
+        font-size: $apx-l-16;
+
+      }
+
+      .cardImage {
+
+        img {
+
+          width: 100%;
+          border-radius: $apx-l-10;
+          object-fit: cover;
+
+        }
+
+      }
+
+      .cardTitle {
+
+        font-weight: 600;
+        font-size: $apx-l-18;
+      
+      }
+
+    }
+
+    .moreButton {
+
+      display: flex;
+      justify-content: center;
+      margin-top: $apx-l-60;
+
+      button {
+
+        min-width: $apx-l-904;
+        max-width: $apx-l-904;
+  
+        font-size: $apx-l-16;
+
+        padding: $apx-l-23;
+        border: none;
+        background-color: #D7D5E6;
+        cursor: pointer;
+        border-radius: $apx-l-7;
+        color: #323232;
+
+      }
+
+    }
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+    .newsBlock {
+
+      max-width: 100%;
+      margin: 0 auto;
+      padding: $apx-m-50 0;
+      padding-left: $apx-m-8;
+      padding-right: 0;
+
+      .title {
+
+        max-width: $apx-m-384;
+        font-size: $apx-m-40;
+        
+        margin: 0;
+        padding-bottom: $apx-m-20;
+        margin-bottom: $apx-m-20;
+        border-bottom: $apx-m-1 solid #D9D9D9;
+
+      }
+
+    .titleArrow {
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: center center;
+      cursor: pointer;
+
+    }
+
+    .grid {
+
+      display: flex;
+      gap: $apx-m-20;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+
+    }
+
+    .grid.scrolled {
+
+      margin-left: -16px;
+      margin-right: -16px;
+      padding-right: $apx-m-28;
+
+    }
+
+    .grid::-webkit-scrollbar {
+
+      display: none;
+
+    }
+
+    .card {
+
+      display: flex;
+      flex-direction: column;
+      gap: $apx-m-20;
+      min-width: $apx-m-330;
+      max-width: $apx-m-330;
+
+      .date {
+
+        font-size: $apx-m-16;
+
+      }
+
+      .cardImage {
+        
+          max-width: $apx-m-330;
+        img {
+
+          width: 100%;
+          max-width: $apx-m-330;
+          border-radius: $apx-m-10;
+          object-fit: cover;
+
+        }
+
+      }
+
+      .cardTitle {
+
+        max-width: $apx-m-330;
+        font-weight: 700;
+        font-size: $apx-m-20;
+        line-height: 1;
+        letter-spacing: 0;
+        text-transform: uppercase;
+        color: #3B394E;
+      
+      }
+
+    }
+
+    .moreButton {
+
+      display: flex;
+      justify-content: center;
+      margin-top: $apx-m-40;
+
+      button {
+
+        min-width: $apx-m-380;
+        max-width: $apx-m-400;
+  
+        font-size: $apx-m-16;
+
+        padding: $apx-m-23;
+        margin-right: $apx-m-8;
+        border: none;
+        background-color: #D7D5E6;
+        cursor: pointer;
+        border-radius: $apx-m-7;
+        color: #323232;
+
+      }
+
+    }
+
+  }
+
+}

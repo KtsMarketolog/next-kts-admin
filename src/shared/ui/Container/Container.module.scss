@@ -1,0 +1,36 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.container {
+
+  max-width: $apx-1600;     
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: $apx-18;   
+  padding-right: $apx-18;       
+  width: 100%;
+
+}
+
+@media (max-width: 1024px) {
+
+  .container {
+
+    max-width: $apx-l-988;
+    padding-left: $apx-l-2;
+    padding-right: $apx-l-2;
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .container {
+
+    max-width: $apx-m-400;
+    padding-left: $apx-m-8;
+    padding-right: $apx-m-8;
+
+  }
+
+}

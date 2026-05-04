@@ -1,0 +1,200 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.page {
+  min-height: 100vh;
+  background: #f4f5f7;
+  color: #242633;
+  padding: $apx-140 $apx-32 $apx-32 $apx-32;
+  font-family: var(--font-montserrat), sans-serif;
+}
+
+.login {
+  width: min($apx-420, 100%);
+  margin: 12vh auto 0;
+  background: #fff;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-8;
+  padding: $apx-28;
+  display: grid;
+  gap: $apx-16;
+  box-shadow: 0 $apx-18 $apx-60 rgba(25, 28, 45, 0.08);
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 auto $apx-24;
+  max-width: $apx-1500;
+
+  p {
+    margin: 0 0 $apx-4;
+    color: #6f7182;
+    font-size: $apx-14;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: $apx-32;
+  }
+}
+
+.topbarActions {
+  display: flex;
+  gap: $apx-10;
+  align-items: center;
+}
+
+.section {
+  max-width: 100%;
+  margin: 0 auto $apx-24;
+  background: #fff;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-8;
+  padding: $apx-24;
+
+  h2 {
+    margin: 0 0 $apx-18;
+    font-size: $apx-22;
+  }
+}
+
+.status {
+  max-width: $apx-1500;
+  position: fixed;
+  top: $apx-18;
+  left: 50%;
+  z-index: 1000;
+  width: min($apx-1500, calc(100% - $apx-32));
+  margin: 0;
+  padding: $apx-12 $apx-16;
+  border-radius: $apx-8;
+  background: #ece8ff;
+  color: #260b86;
+  box-shadow: 0 $apx-16 $apx-44 rgba(38, 11, 134, 0.14);
+  transform: translateX(-50%);
+}
+
+.inlineForm {
+  display: flex;
+  gap: $apx-12;
+}
+
+.adminShell {
+  display: grid;
+  grid-template-columns: $apx-240 minmax(0, 1fr);
+  gap: $apx-24;
+  max-width: $apx-1500;
+  margin: 0 auto;
+}
+
+.sidebar {
+  position: sticky;
+  top: $apx-24;
+  align-self: start;
+  display: grid;
+  gap: $apx-8;
+  background: #fff;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-8;
+  padding: $apx-16;
+
+  p {
+    margin: 0 0 $apx-8;
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  button {
+    justify-content: flex-start;
+    background: transparent;
+    color: #4b4e61;
+    text-align: left;
+  }
+}
+
+.navActive {
+  background: #260b86 !important;
+  color: #fff !important;
+}
+
+.content {
+  min-width: 0;
+}
+
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $apx-18;
+  max-width: $apx-1500;
+  margin: 0 auto $apx-24;
+}
+
+.dashboardCard {
+  min-height: $apx-210;
+  display: grid;
+  align-content: space-between;
+  gap: $apx-28;
+  background: #fff;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-12;
+  padding: $apx-24;
+
+  h2 {
+    margin: 0 0 $apx-12;
+    color: #242633;
+    font-size: $apx-26;
+    line-height: 1.15;
+  }
+
+  p {
+    margin: 0;
+    color: #4b4e61;
+    font-size: $apx-14;
+    line-height: 1.45;
+  }
+
+  button {
+    width: 100%;
+  }
+}
+
+.dashboardCardDisabled {
+  opacity: 0.62;
+
+  button {
+    cursor: not-allowed;
+  }
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: $apx-16;
+  align-items: flex-start;
+  margin-bottom: $apx-22;
+
+  p {
+    margin: 0 0 $apx-4;
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  h2 {
+    margin: 0;
+  }
+}
+
+.headingMeta {
+  display: inline-flex;
+  margin-left: $apx-14;
+  color: #6f7182;
+  font-size: $apx-18;
+  font-weight: 600;
+}

@@ -1,0 +1,258 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+/* Заголовок над сеткой */
+.heading {
+  margin: 0 0 $apx-12;
+  font-size: $apx-16;
+  font-weight: 400;
+  color: #000000;
+  text-transform: uppercase;
+}
+
+/* ====== сетка ====== */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $apx-16;
+
+  /* растягиваем элементы по высоте, чтобы карточки были одинаковыми */
+  align-items: stretch;
+}
+
+/* ====== карточка ====== */
+.card {
+  /* Управляемая высота блоков через CSS-переменные */
+  --cover-h: #{$apx-237}; /* высота зоны с логотипом/картинкой */
+  --body-h: #{$apx-96};   /* высота серого блока снизу */
+
+  position: relative;
+  border: $apx-1 solid #e8e8f2;
+  border-radius: $apx-12;
+  background: #f5f6fb;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+
+  /* итоговая одинаковая высота всех карточек */
+  height: calc(var(--cover-h) + var(--body-h));
+}
+
+/* ====== верхняя зона (картинка/лого) ====== */
+.cover {
+  height: var(--cover-h);
+  background-color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+}
+
+/* ====== низ карточки (контент) ====== */
+.body {
+  height: var(--body-h);       /* одинаковая высота серой зоны */
+  overflow: hidden;            /* лишнее скрываем, чтобы не ломать высоту */
+  padding: $apx-14 $apx-16 $apx-16;
+  background: #F1F3F6;
+  border-top: $apx-1 solid #ededf7;
+  display: flex;
+  flex-direction: column;
+  gap: $apx-10;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+
+/* Меняем фон .body при ховере на всю карточку */
+.card:hover .body { /* перенесено в десктопный блок ниже */ }
+
+/* Заголовок */
+.title {
+  margin: 0;
+  font-size: $apx-16;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #2b285f;
+  text-transform: uppercase;
+}
+
+.titleLink {
+  color: inherit;
+  text-decoration: none;
+  /* :hover перенесён в десктопный блок */
+}
+
+/* Список категорий (ссылки) */
+.subs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $apx-6;
+}
+
+.subLink {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: $apx-8;
+  line-height: 1.2;
+  font-size: $apx-14;
+  color: #394056;
+  text-decoration: none;
+  padding-left: $apx-14;
+
+  &::before {
+    content: '';
+    width: $apx-6;
+    height: $apx-6;
+    border-radius: 50%;
+    background: #a8a2ff;
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  /* :hover перенесён в десктопный блок */
+}
+
+/* Пустое состояние */
+.empty {
+  padding: $apx-12 0;
+  color: #777;
+}
+
+/* ====== ХОВЕРЫ — ТОЛЬКО ДЛЯ ДЕСКТОПОВ С МЫШЬЮ ====== */
+@media (min-width: 1025px) and (hover: hover) and (pointer: fine) {
+  .card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 $apx-8 $apx-20 rgba(0, 0, 0, .06);
+    background: #eef0f9;
+  }
+
+  .body:hover {
+    background-color: #EAE6FF;
+  }
+
+  .card:hover .body {
+    background-color: #EAE6FF;
+  }
+
+  .titleLink:hover { text-decoration: underline; }
+  .subLink:hover { color: #4d46c2; }
+}
+
+/* ====== адаптив ====== */
+
+/* Планшет ≤1024px — те же размеры, но через $apx-l-* */
+@media (max-width: 1024px) {
+  .heading {
+    margin: 0 0 $apx-l-12;
+    font-size: $apx-l-16;
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $apx-l-16;
+  }
+
+  .card {
+    --cover-h: #{$apx-l-237};
+    --body-h: #{$apx-l-96};
+
+    border: $apx-l-1 solid #e8e8f2;
+    border-radius: $apx-l-12;
+  }
+
+  .body {
+    padding: $apx-l-14 $apx-l-16 $apx-l-16;
+    border-top: $apx-l-1 solid #ededf7;
+    gap: $apx-l-10;
+  }
+
+  .title { font-size: $apx-l-16; }
+
+  .subs { gap: $apx-l-6; }
+
+  .subLink {
+    gap: $apx-l-8;
+    font-size: $apx-l-14;
+    padding-left: $apx-l-14;
+
+    &::before {
+      width: $apx-l-6;
+      height: $apx-l-6;
+      border-radius: $apx-l-6;
+    }
+  }
+
+  .empty { padding: $apx-l-12 0; }
+}
+
+@media (max-width: 450px) {
+  .heading {
+    margin: 0 0 $apx-m-12;
+    font-size: $apx-m-16;
+  }
+
+  .grid {
+    grid-template-columns: 1fr 1fr;
+    gap: $apx-m-12;
+  }
+
+  .cover {
+    height: var(--cover-h);
+    background-color: #fff;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+  }
+
+  .card {
+    --cover-h: #{$apx-m-106};
+    --body-h: #{$apx-m-96};
+
+    border: $apx-m-1 solid #e8e8f2;
+    border-radius: $apx-m-12;
+    min-height: calc(var(--cover-h) + var(--body-h));
+    height: auto;
+  }
+
+  .body {
+    padding: $apx-m-14 $apx-m-16 $apx-m-16;
+    border-top: $apx-m-1 solid #ededf7;
+    gap: $apx-m-10;
+    min-height: var(--body-h);
+    height: auto;
+    overflow: visible;
+  }
+
+  .title { font-size: $apx-m-16; }
+
+  .subs { gap: $apx-m-6; }
+
+  .subLink {
+    gap: $apx-m-8;
+    font-size: $apx-m-14;
+    padding-left: $apx-m-14;
+
+    &::before {
+      width: $apx-m-6;
+      height: $apx-m-6;
+      border-radius: $apx-m-6;
+    }
+  }
+
+  .empty { padding: $apx-m-12 0; }
+}

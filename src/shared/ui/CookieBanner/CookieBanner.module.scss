@@ -1,0 +1,138 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.banner {
+
+  position: fixed;
+  left: $apx-16;
+  right: $apx-16;
+  bottom: $apx-16;
+  z-index: 1000;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $apx-16;
+
+  padding: $apx-16 $apx-18;
+  border-radius: $apx-16;
+
+  background: rgba(255, 255, 255, 0.96);
+  border: $apx-1 solid rgba(164, 154, 208, 0.55);
+  box-shadow: 0 $apx-10 $apx-30 rgba(27, 3, 137, 0.18);
+
+  backdrop-filter: blur($apx-10);
+  -webkit-backdrop-filter: blur($apx-10);
+
+}
+
+.content {
+
+  display: flex;
+  align-items: center;
+  gap: $apx-12;
+  min-width: 0;
+
+}
+
+.text {
+
+  margin: 0;
+
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 500;
+  font-size: $apx-14;
+  line-height: 1.35;
+
+  color: #323232;
+  max-width: $apx-620;
+
+}
+
+.actions {
+
+  display: flex;
+  align-items: center;
+  gap: $apx-10;
+  flex-shrink: 0;
+
+}
+
+@media (max-width: 1024px) {
+
+  .banner {
+
+    left: $apx-l-16;
+    right: $apx-l-16;
+    bottom: $apx-l-16;
+
+    padding: $apx-l-14 $apx-l-16;
+    border-radius: $apx-l-16;
+    gap: $apx-l-14;
+
+  }
+
+  .text {
+
+    font-size: $apx-l-14;
+    max-width: $apx-l-560;
+
+  }
+
+  .actions {
+
+    gap: $apx-l-10;
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .banner {
+
+    left: $apx-m-12;
+    right: $apx-m-12;
+    bottom: $apx-m-12;
+
+    flex-direction: column;
+    align-items: stretch;
+
+    padding: $apx-m-12;
+    border-radius: $apx-m-14;
+    gap: $apx-m-12;
+
+  }
+
+  .text {
+
+    font-size: $apx-m-12;
+    max-width: 100%;
+
+  }
+
+  .actions {
+
+    width: 100%;
+    justify-content: space-between;
+    gap: $apx-m-10;
+
+  }
+
+  .banner .actions :global(button) {
+    border-radius: $apx-m-6 !important;
+    padding: $apx-m-10 $apx-m-18 !important;
+  }
+
+  .banner .actions :global(button.primary) {
+    background-color: transparent !important;
+    color: #66628E !important;
+    border: $apx-m-2 solid #A49AD0 !important;
+  }
+
+  .banner .actions :global(button.primary.withBg) {
+    background-color: #1B0389 !important;
+    color: #ffffff !important;
+    border: none !important;
+  }
+
+}

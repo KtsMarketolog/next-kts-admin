@@ -1,0 +1,405 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.slides {
+  display: grid;
+  gap: $apx-18;
+}
+
+.newsList {
+  display: grid;
+  gap: $apx-16;
+  margin-top: $apx-18;
+}
+.newsCard {
+  display: grid;
+  grid-template-columns: minmax($apx-260, $apx-360) minmax(0, 1fr);
+  gap: $apx-16;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  padding: $apx-16;
+}
+
+.brandAdminBlock {
+  display: grid;
+  gap: $apx-14;
+  margin-top: $apx-18;
+
+  h3 {
+    margin: 0;
+    font-size: $apx-18;
+  }
+}
+
+.brandList {
+  display: grid;
+  gap: $apx-10;
+}
+
+.brandRow {
+  display: grid;
+  grid-template-columns: minmax($apx-180, 1fr) minmax($apx-160, 0.8fr) $apx-110 auto auto auto;
+  gap: $apx-10;
+  align-items: center;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  padding: $apx-12;
+}
+
+.brandCard {
+  display: grid;
+  grid-template-columns: minmax($apx-220, $apx-320) minmax(0, 1fr);
+  gap: $apx-16;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  padding: $apx-16;
+}
+
+.newsPreview {
+  display: grid;
+  gap: $apx-10;
+  align-content: start;
+
+  img {
+    width: 100%;
+    height: auto;
+    border-radius: $apx-8;
+    display: block;
+  }
+
+  > span {
+    min-height: $apx-140;
+    border-radius: $apx-8;
+    background: #eef0f5;
+    color: #77798a;
+    display: grid;
+    place-items: center;
+  }
+}
+
+.newsFields {
+  display: grid;
+  gap: $apx-10;
+  align-content: start;
+}
+
+.titleTextarea {
+  min-height: $apx-64 !important;
+  height: auto;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+.addressTextarea {
+  min-height: $apx-64 !important;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+.addCard,
+.slideCard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $apx-16;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  padding: $apx-16;
+  margin-bottom: $apx-18;
+}
+
+.cardBlock {
+  display: grid;
+  gap: $apx-14;
+  align-items: start;
+}
+
+.preview {
+  position: relative;
+  background: #eef0f5;
+  border-radius: $apx-8;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: #77798a;
+
+  img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+}
+
+.removeImage {
+  position: absolute;
+  top: $apx-10;
+  right: $apx-10;
+  width: $apx-34;
+  min-height: $apx-34 !important;
+  height: $apx-34;
+  border: 0;
+  border-radius: $apx-999;
+  background: rgba(180, 35, 24, 0.9) !important;
+  color: #fff;
+  padding: 0 !important;
+  font-size: $apx-30;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.previewStack {
+  display: grid;
+  gap: $apx-12;
+  align-content: start;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-10;
+  padding: $apx-12;
+
+  > strong {
+    color: #242633;
+    font-size: $apx-15;
+  }
+}
+
+.previewGroups {
+  display: grid;
+  gap: $apx-18;
+  align-content: start;
+
+  .previewStack + .previewStack {
+    margin-top: $apx-10;
+    border-top: $apx-3 solid #260b86;
+  }
+}
+
+.previewItem {
+  display: grid;
+  gap: $apx-6;
+
+  > span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 600;
+  }
+}
+
+.fields {
+  display: grid;
+  gap: $apx-10;
+  align-content: start;
+}
+
+.popupFields {
+  display: grid;
+  gap: $apx-10;
+  border: $apx-1 solid #d9d4ff;
+  border-top: $apx-4 solid #260b86;
+  border-radius: $apx-10;
+  background: #fbfaff;
+  padding: $apx-16;
+
+  h3 {
+    margin: 0;
+    font-size: $apx-18;
+  }
+}
+
+.actions {
+  display: flex;
+  gap: $apx-10;
+}
+
+.cardActions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax($apx-180, 1fr) minmax($apx-180, 1fr) $apx-120 auto auto auto;
+  gap: $apx-10;
+  align-items: center;
+  padding-top: $apx-8;
+}
+
+.cardMeta {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax($apx-180, 1fr) minmax($apx-180, 1fr) $apx-120 auto auto;
+  gap: $apx-10;
+  align-items: center;
+  padding-top: $apx-8;
+}
+
+.wholesaleRow {
+  display: grid;
+  grid-template-columns: minmax($apx-170, 1fr) minmax($apx-140, 0.8fr) minmax($apx-170, 1fr) minmax($apx-140, 0.8fr) auto auto;
+  gap: $apx-10;
+  align-items: center;
+  margin: $apx-14 0 $apx-24;
+}
+
+.tableWrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.adminTable {
+  width: 100%;
+  border-collapse: collapse;
+
+  th,
+  td {
+    border-bottom: $apx-1 solid #e6e7ef;
+    padding: $apx-10;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    color: #6f7182;
+    font-size: $apx-12;
+    text-transform: uppercase;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+  }
+}
+
+.tableActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+}
+
+.countCell {
+  vertical-align: middle !important;
+}
+
+.textButton {
+  min-height: auto !important;
+  height: auto;
+  border: 0;
+  background: transparent !important;
+  color: #260b86 !important;
+  padding: 0 !important;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: $apx-3;
+  cursor: pointer;
+}
+
+.wholesaleEditorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $apx-12;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+  }
+
+  .checkbox {
+    display: inline-flex;
+    justify-content: flex-start;
+    align-items: center;
+    align-self: center;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 600;
+  }
+}
+
+.wholesaleWide {
+  grid-column: 1 / -1;
+}
+
+.discountBox {
+  display: grid;
+  grid-template-columns: minmax($apx-180, $apx-320) minmax($apx-120, $apx-220) minmax($apx-180, 1fr);
+  gap: $apx-10;
+  align-items: end;
+  margin: $apx-18 0;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-10;
+  padding: $apx-14;
+
+  span {
+    color: #242633;
+    font-weight: 600;
+  }
+}
+
+.mutedText {
+  color: #6f7182;
+  margin: $apx-18 0;
+}
+
+.priceCategory {
+  display: grid;
+  gap: $apx-12;
+  margin: $apx-22 0;
+
+  h3 {
+    margin: 0;
+    font-size: $apx-22;
+    text-transform: uppercase;
+  }
+}
+
+.priceProduct {
+  display: grid;
+  grid-template-columns: minmax($apx-260, $apx-360) minmax(0, 1fr);
+  gap: $apx-18;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-10;
+  padding: $apx-14;
+}
+
+.priceProductInfo {
+  display: grid;
+  grid-template-columns: $apx-72 minmax(0, 1fr);
+  gap: $apx-12;
+  align-content: start;
+
+  img,
+  > span {
+    width: $apx-72;
+    height: $apx-72;
+    border-radius: $apx-8;
+    background: #eef0f5;
+    object-fit: contain;
+    display: grid;
+    place-items: center;
+    color: #6f7182;
+    font-size: $apx-11;
+  }
+
+  p {
+    margin: $apx-4 0 0;
+    color: #6f7182;
+    font-size: $apx-12;
+  }
+}
+
+.variantTable {
+  display: grid;
+  grid-template-columns: minmax($apx-120, 1fr) minmax($apx-90, 0.6fr) minmax($apx-140, 1fr) minmax($apx-120, auto);
+  gap: $apx-8 $apx-12;
+  align-items: center;
+
+  > div:nth-child(-n + 4) {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+}
+
+.variantRow {
+  display: contents;
+}
+

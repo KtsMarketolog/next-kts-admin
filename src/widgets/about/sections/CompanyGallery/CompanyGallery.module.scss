@@ -1,0 +1,219 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.companyGallery {
+
+  max-width: $apx-1596;
+  margin: 0 auto;
+  margin-bottom: $apx-119;
+
+  .grid {
+
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-areas:
+      "big big"
+      "left right"
+      "bottom-left bottom-right";
+    row-gap: $apx-32;
+    column-gap: $apx-30;
+
+  }
+
+  .card {
+
+    border-radius: $apx-12;
+    overflow: hidden;
+
+    img {
+
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+
+    }
+
+  }
+
+  .big {
+
+    grid-area: big;
+
+  }
+
+  /* Горизонтальный скролл на планшете */
+  .scrollWrapper {
+
+    grid-column: 1 / span 2;
+    display: flex;
+    gap: $apx-l-20;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    transition: margin 0.15s;
+
+    &.scrolled {
+
+      margin-left: -16px;
+      margin-right: -16px;
+      
+    }
+
+    &::-webkit-scrollbar {
+
+      display: none;
+
+    }
+
+  }
+
+  .scrollCard {
+
+    flex: 0 0 80%;
+    border-radius: $apx-l-12;
+    overflow: hidden;
+
+    img {
+
+      width: 100%;
+      display: block;
+      object-fit: cover;
+
+    }
+
+  }
+ 
+}
+
+@media (max-width: 1024px) {
+
+  .companyGallery {
+
+    max-width: 100%;
+    padding:  0 $apx-l-14;
+    margin-bottom: $apx-l-77;
+
+    .grid {
+
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        "big"
+        "scroll";
+      row-gap: $apx-l-20;
+      column-gap: 0;
+
+    }
+  
+  }
+
+   .pagination {
+
+    display: flex;
+    justify-content: center;
+    margin-top: $apx-l-40;
+    gap: $apx-l-16;
+    
+  }
+
+  .dot {
+
+    width: $apx-l-14;
+    height: $apx-l-14;
+
+    border-radius: $apx-l-50;
+    background-color: #D9D9D9;
+    transition: all 0.3s ease;
+    cursor: pointer;
+
+  }
+
+  .dot.active {
+
+    width: $apx-l-140;
+    background-color: #D9D9D9;
+
+  }
+
+}
+
+@media (max-width: 450px) {
+
+  .companyGallery {
+
+    padding: 0 $apx-m-14;
+    margin-bottom: $apx-m-30;
+
+    .grid {
+
+      display: block;
+
+    }
+
+    .scrollWrapper {
+
+      display: flex;
+      gap: $apx-m-12;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar {
+
+        display: none;
+
+      }
+
+    }
+    
+     .pagination {
+
+      display: flex;
+      justify-content: center;
+      margin-top: $apx-m-12;
+      gap: $apx-m-20;
+      
+    }
+
+     .dot {
+
+      width: $apx-m-8;
+      height: $apx-m-8;
+
+      border-radius: $apx-m-50;
+      background-color: #D9D9D9;
+      transition: all 0.3s ease;
+      cursor: pointer;
+
+    }
+
+    .dot.active {
+
+      width: $apx-m-80;
+      background-color: #D9D9D9;
+
+    }
+
+    .scrollCard {
+      
+      flex: 0 0 100%;
+      max-width: 100%;
+      height: $apx-m-398;
+      border-radius: $apx-m-55;
+      overflow: hidden;
+      
+       
+
+      img {
+
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+
+      }
+
+    }
+
+  }
+
+}

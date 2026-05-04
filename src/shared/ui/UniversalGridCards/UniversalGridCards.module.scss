@@ -1,0 +1,226 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.section {
+  padding: $apx-60 0;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  padding-top: 0;
+}
+
+.h2 {
+  text-align: center;
+  font-size: $apx-53;
+  font-weight: 700;
+  margin-bottom: $apx-50;
+  color: var(--hero-title-color);
+
+  padding-bottom: $apx-40;
+  border-bottom: $apx-1 solid #D9D9D9;
+
+  br {
+    display: none;
+  }
+
+  span {
+    display: inline;
+    font-weight: 800;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: $apx-25;
+
+  grid-auto-rows: $apx-285;
+
+  grid-auto-flow: row;
+
+  align-items: stretch;
+
+  background: url('/img/klimatika/app-areas/area-bg.jpg') no-repeat center center;
+  background-size: cover;
+
+  border-radius: $apx-15;
+  padding: $apx-92 $apx-121 $apx-44;
+}
+
+.card {
+  --col: var(--col-desktop);
+  --row: var(--row-desktop);
+
+  grid-column: span var(--col);
+  grid-row: span var(--row);
+
+  height: $apx-285;
+  min-height: $apx-285;
+  max-height: $apx-285;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+
+  overflow: hidden;
+
+  border-radius: $apx-20;
+  background-color: rgba(255, 255, 255, 0.92);
+
+  background-image: var(--bg-image);
+  background-repeat: var(--bg-repeat);
+  background-position: var(--bg-pos);
+  background-size: var(--bg-size);
+
+  padding: $apx-30 $apx-30 $apx-10; 
+
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+
+  &:hover {
+    transform: scale(1.2);
+    box-shadow: 0 $apx-10 $apx-20 rgba(0, 0, 0, 0.15);
+    z-index: 10;
+  }
+}
+
+.cardTitle {
+  font-size: $apx-20;
+  font-weight: 700;
+  line-height: 1.3;
+  text-transform: uppercase;
+  color: #232D53;
+  margin-bottom: $apx-15;
+}
+
+.cardDesc {
+  font-size: $apx-13;
+  line-height: 1.2;
+  color: #4a4f6a;
+  overflow: hidden;
+}
+
+@media (max-width: 1024px) {
+  .section {
+  padding: $apx-l-90 0;
+  padding-top: 0;
+
+  }
+
+  .h2 {
+    font-size: $apx-l-53;
+    margin-bottom: $apx-l-40;
+
+    padding-bottom: $apx-l-40;
+    border-bottom: $apx-l-1 solid #D9D9D9;
+  }
+
+  .grid {
+    gap: $apx-l-18;
+    border-radius: $apx-l-15;
+    padding: $apx-l-24 $apx-l-170;
+
+    background-image: url('/img/klimatika/app-areas/area-bg-tablet.jpg');
+    background-position: center;
+    background-size: cover;
+
+    grid-auto-rows: $apx-l-285;
+
+    grid-template-areas:
+      "a1 a1 a1 a1 a1 a1 a2 a2 a2 a2 a2 a2"
+      "a3 a3 a3 a3 a3 a3 a3 a3 a3 a3 a3 a3"
+      "a6 a6 a6 a6 a6 a6 a7 a7 a7 a7 a7 a7"
+      "a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5"
+      "a8 a8 a8 a8 a8 a8 a9 a9 a9 a9 a9 a9"
+      "a4 a4 a4 a4 a4 a4 a4 a4 a4 a4 a4 a4";
+  }
+
+  .card {
+    grid-column: auto;
+    grid-row: auto;
+
+    height: $apx-l-285;
+    min-height: $apx-l-285;
+    max-height: $apx-l-285;
+
+    border-radius: $apx-l-18;
+    padding: $apx-l-26 $apx-l-26 $apx-l-32;
+
+    background-image: var(--bg-image-tablet, var(--bg-image));
+
+    &:hover {
+      transform: none;
+      box-shadow: none;
+      z-index: auto;
+    }
+  }
+
+  .cardTitle {
+    font-size: $apx-l-20;
+    margin-bottom: $apx-l-20;
+  }
+
+  .cardDesc {
+    font-size: $apx-l-14;
+  }
+
+  /* areas mapping по DOM-порядку */
+  .card:nth-child(1) { grid-area: a1; }
+  .card:nth-child(2) { grid-area: a2; }
+  .card:nth-child(3) { grid-area: a3; }
+  .card:nth-child(4) { grid-area: a4; }
+  .card:nth-child(5) { grid-area: a5; }
+  .card:nth-child(6) { grid-area: a6; }
+  .card:nth-child(7) { grid-area: a7; }
+  .card:nth-child(8) { grid-area: a8; }
+  .card:nth-child(9) { grid-area: a9; }
+
+  .cardTitle { font-size: $apx-l-16; }
+  .cardDesc  { font-size: $apx-l-14; }
+}
+
+@media (max-width: 450px) {
+
+  .grid {
+    gap: $apx-m-14;
+    border-radius: $apx-m-9;
+    padding: $apx-m-10;
+
+    background-image: url('/img/klimatika/app-areas/area-bg-mobile.jpg');
+    background-position: center;
+    background-size: cover;
+
+    /* высота каждой строки отдельно */
+    grid-template-rows:
+      $apx-m-241  /* row 1: a1 + a2 */
+      $apx-m-166  /* row 2: a3 */
+      $apx-m-285  /* row 3: a6 + a7 */
+      $apx-m-196  /* row 4: a5 */
+      $apx-m-235  /* row 5: a8 + a9 */
+      $apx-m-188; /* row 6: a4 */
+
+    grid-template-areas:
+      "a1 a1 a1 a1 a1 a1 a2 a2 a2 a2 a2 a2"
+      "a3 a3 a3 a3 a3 a3 a3 a3 a3 a3 a3 a3"
+      "a6 a6 a6 a6 a6 a6 a7 a7 a7 a7 a7 a7"
+      "a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5"
+      "a8 a8 a8 a8 a8 a8 a9 a9 a9 a9 a9 a9"
+      "a4 a4 a4 a4 a4 a4 a4 a4 a4 a4 a4 a4";
+  }
+
+  .card {
+    grid-column: auto;
+    grid-row: auto;
+
+    height: 100%;
+    min-height: 0; 
+    max-height: none;
+
+    border-radius: $apx-m-16;
+    padding: $apx-m-10 $apx-m-10 $apx-m-10;
+
+    background-image: var(--bg-image-mobile, var(--bg-image-tablet, var(--bg-image)));
+    overflow: hidden;
+  }
+
+  .cardTitle { font-size: $apx-m-13; margin-bottom: $apx-m-20; } .cardDesc { font-size: $apx-m-11; }
+}
