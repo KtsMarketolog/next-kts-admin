@@ -35,7 +35,7 @@ export default async function PricePage({ params }: PricePageProps) {
             {priceList.clientName ? <p>Клиент: {priceList.clientName}</p> : null}
             {priceList.validUntil ? <p>Действует до: {priceList.validUntil}</p> : null}
           </div>
-          <a className={styles.pdfButton} href={`/api/price/${priceList.token}/pdf`}>
+          <a className={styles.pdfButton} href={`/price/${priceList.token}/pdf`}>
             Скачать PDF
           </a>
         </section>

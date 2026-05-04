@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   compress: true,
   poweredByHeader: false,
+  serverExternalPackages: ["pdfkit"],
   outputFileTracingRoot: __dirname,
   experimental: {
     optimizePackageImports: ["react-select", "@emotion/react"],

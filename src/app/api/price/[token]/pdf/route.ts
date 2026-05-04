@@ -9,6 +9,9 @@ type Context = {
   params: Promise<{ token: string }>;
 };
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 const SESSION_COOKIE = 'kts_price_analytics_sid';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 365;
 
@@ -38,51 +41,68 @@ function safeFilename(value: string) {
     .slice(0, 80);
 }
 
-function fontPath() {
-  const candidates = [
+function resolveExistingFile(candidates: string[]) {
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function fontPaths() {
+  const regular = resolveExistingFile([
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf',
     '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf',
     'C:/Windows/Fonts/arial.ttf',
-  ];
-  return candidates.find((candidate) => existsSync(candidate));
+  ]);
+  const bold = resolveExistingFile([
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+    '/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf',
+    'C:/Windows/Fonts/arialbd.ttf',
+  ]);
+
+  return { regular, bold };
 }
 
 function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWholesalePriceList>>>) {
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 42 });
     const chunks: Buffer[] = [];
-    const regularFont = fontPath();
-    if (regularFont) doc.font(regularFont);
+    const fonts = fontPaths();
+    const regularFont = fonts.regular ? 'Regular' : 'Helvetica';
+    const boldFont = fonts.bold ? 'Bold' : regularFont;
+    if (fonts.regular) doc.registerFont(regularFont, fonts.regular);
+    if (fonts.bold) doc.registerFont(boldFont, fonts.bold);
 
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(20).text(priceList.title || 'Индивидуальный прайс', { align: 'left' });
+    doc.font(boldFont).fontSize(20).text(priceList.title || 'Индивидуальный прайс', { align: 'left' });
     doc.moveDown(0.4);
-    if (priceList.clientName) doc.fontSize(11).text(`Клиент: ${priceList.clientName}`);
-    if (priceList.validUntil) doc.fontSize(11).text(`Действует до: ${priceList.validUntil}`);
+    if (priceList.clientName) doc.font(regularFont).fontSize(11).text(`Клиент: ${priceList.clientName}`);
+    if (priceList.validUntil) doc.font(regularFont).fontSize(11).text(`Действует до: ${priceList.validUntil}`);
     doc.moveDown(1);
 
     if (priceList.categories.length === 0) {
-      doc.fontSize(12).text('В прайс пока не добавлены товары.');
+      doc.font(regularFont).fontSize(12).text('В прайс пока не добавлены товары.');
       doc.end();
       return;
     }
 
     for (const category of priceList.categories) {
-      doc.fontSize(15).text(category.title, { underline: true });
+      doc.font(boldFont).fontSize(15).text(category.title, { underline: true });
       doc.moveDown(0.4);
       for (const product of category.products) {
-        doc.fontSize(12).text(product.title, { continued: false });
-        if (product.sku) doc.fontSize(9).fillColor('#666').text(`Артикул: ${product.sku}`).fillColor('#000');
+        doc.font(boldFont).fontSize(12).text(product.title, { continued: false });
+        if (product.sku) doc.font(regularFont).fontSize(9).fillColor('#666').text(`Артикул: ${product.sku}`).fillColor('#000');
         for (const variant of product.variants) {
           const parts = [
             variant.title,
             priceList.showRetailPrices ? `розница: ${variant.retailPrice ?? '—'}` : '',
             `опт: ${variant.wholesalePrice ?? '—'}`,
           ].filter(Boolean);
-          doc.fontSize(10).text(`• ${parts.join(' | ')}`);
+          doc.font(regularFont).fontSize(10).text(`• ${parts.join(' | ')}`);
         }
         doc.moveDown(0.5);
         if (doc.y > 760) doc.addPage();
@@ -127,7 +147,7 @@ export async function GET(request: Request, context: Context) {
 
   const headers = new Headers({
     'Content-Type': 'application/pdf',
-    'Content-Disposition': `attachment; filename="${safeFilename(priceList.title) || `price-${priceList.id}`}.pdf"`,
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${safeFilename(priceList.title) || `price-${priceList.id}`}.pdf`)}`,
     'Cache-Control': 'private, no-store',
   });
   if (!existingSessionId) headers.set('Set-Cookie', sessionCookie(sessionId));
