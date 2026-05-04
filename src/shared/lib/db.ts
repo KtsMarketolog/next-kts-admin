@@ -56,5 +56,11 @@ export type {
   WholesalePriceListItemInput,
   WholesalePriceListSummary,
 } from './db/wholesaleAdminRepo';
-export { getPublicWholesalePriceList } from './db/wholesaleRepo';
-export type { PublicWholesaleCategory, PublicWholesalePriceList, PublicWholesaleProduct, PublicWholesaleVariant } from './db/wholesaleRepo';
+export { getPublicWholesalePriceList, getPublicWholesaleRequestItems } from './db/wholesaleRepo';
+export type {
+  PublicWholesaleCategory,
+  PublicWholesalePriceList,
+  PublicWholesaleProduct,
+  PublicWholesaleRequestItem,
+  PublicWholesaleVariant,
+} from './db/wholesaleRepo';

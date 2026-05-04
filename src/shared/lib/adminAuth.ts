@@ -92,6 +92,14 @@ export async function requireWholesaleAdmin() {
   return null;
 }
 
+export async function requireWholesaleAdminSession() {
+  const session = await getAdminSession();
+  if (session?.role !== 'admin' && session?.role !== 'wholesale_admin') {
+    return { denied: Response.json({ error: 'Unauthorized' }, { status: 401 }), session: null };
+  }
+  return { denied: null, session };
+}
+
 export async function requireEmployee() {
   const session = await getAdminSession();
   if (!session) {

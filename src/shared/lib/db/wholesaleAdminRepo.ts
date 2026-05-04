@@ -2795,7 +2795,11 @@ async function replaceWholesalePriceListItems(id: number, items: WholesalePriceL
       `insert into wholesale_price_list_items (
          price_list_id, wholesale_product_id, wholesale_variant_id, custom_wholesale_price, visible, sort_order
        )
-       values ($1, $2, $3, nullif($4, '')::numeric, $5, $6)`,
+       select $1, p.id, v.id, nullif($4, '')::numeric, $5, $6
+       from wholesale_products p
+       left join wholesale_product_variants v on v.id = $3 and v.product_id = p.id
+       where p.id = $2
+         and ($3::bigint is null or v.id is not null)`,
       [id, item.productId, item.variantId, item.customWholesalePrice ?? '', item.visible, item.sortOrder],
     );
   }

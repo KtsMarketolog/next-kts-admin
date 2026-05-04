@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import { shortToken } from '@/shared/lib/wholesaleSecurity';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
 import { AdminWholesaleAnalytics } from './AdminWholesaleAnalytics';
 
@@ -590,7 +591,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                   <td><strong>{item.title}</strong><br /><span>Позиций: {item.itemCount}</span></td>
                   <td>{item.clientName || '—'}</td>
                   <td>{item.managerName || '—'}</td>
-                  <td>{item.token}</td>
+                  <td>{shortToken(item.token)}</td>
                   <td>{formatDate(item.createdAt)}</td>
                   <td>{renderLastPriceChange(item)}</td>
                   <td>{item.validUntil || '—'}</td>
@@ -655,7 +656,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                   <td><strong>{item.title}</strong><br /><span>Позиций: {item.itemCount}</span></td>
                   <td>{item.clientName || '—'}</td>
                   <td>{item.managerName || '—'}</td>
-                  <td>{item.token}</td>
+                  <td>{shortToken(item.token)}</td>
                   <td>{formatDate(item.createdAt)}</td>
                   <td>{renderLastPriceChange(item)}</td>
                   <td>{item.validUntil || '—'}</td>

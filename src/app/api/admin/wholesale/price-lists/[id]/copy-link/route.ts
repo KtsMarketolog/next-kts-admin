@@ -1,4 +1,5 @@
 import { requireEmployee } from '@/shared/lib/adminAuth';
+import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { getWholesalePriceListEditor, trackAnalyticsEvent } from '@/shared/lib/db';
 
 type Context = {
@@ -12,6 +13,8 @@ function actorType(role: 'admin' | 'wholesale_admin' | 'manager') {
 export async function POST(request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
+  const limited = await enforceAdminActionRateLimit(session, 'price_public_link_copied', 200);
+  if (limited) return limited;
 
   const { id } = await context.params;
   const numericId = Number(id);

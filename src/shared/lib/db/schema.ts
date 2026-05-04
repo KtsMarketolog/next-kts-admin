@@ -223,6 +223,13 @@ export async function ensureSiteSchema() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists rate_limit_buckets (
+      key text primary key,
+      count integer not null default 0,
+      reset_at timestamptz not null,
+      updated_at timestamptz not null default now()
+    );
+
     alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_lists add column if not exists comment text not null default '';
     alter table admin_users add column if not exists role text not null default 'admin';
@@ -281,6 +288,7 @@ export async function ensureSiteSchema() {
     create index if not exists wholesale_analytics_events_actor_idx on wholesale_analytics_events(actor_type, created_at desc);
     create index if not exists wholesale_analytics_events_session_idx on wholesale_analytics_events(session_id, created_at desc);
     create index if not exists wholesale_analytics_events_token_idx on wholesale_analytics_events(token, created_at desc);
+    create index if not exists rate_limit_buckets_reset_idx on rate_limit_buckets(reset_at);
   `);
 
   await query(`alter table hero_slides add column if not exists tablet_image_url text`);
@@ -306,6 +314,13 @@ export async function ensureSiteSchema() {
   await query(`create index if not exists wholesale_analytics_events_actor_idx on wholesale_analytics_events(actor_type, created_at desc)`);
   await query(`create index if not exists wholesale_analytics_events_session_idx on wholesale_analytics_events(session_id, created_at desc)`);
   await query(`create index if not exists wholesale_analytics_events_token_idx on wholesale_analytics_events(token, created_at desc)`);
+  await query(`create table if not exists rate_limit_buckets (
+    key text primary key,
+    count integer not null default 0,
+    reset_at timestamptz not null,
+    updated_at timestamptz not null default now()
+  )`);
+  await query(`create index if not exists rate_limit_buckets_reset_idx on rate_limit_buckets(reset_at)`);
 
   await seedSiteSettings();
   await seedHeroSlides();

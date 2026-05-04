@@ -1,9 +1,11 @@
 import { existsSync } from 'fs';
-import { randomUUID } from 'crypto';
 import PDFDocument from 'pdfkit';
 
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { getPublicWholesalePriceList, trackAnalyticsEvent } from '@/shared/lib/db';
+import { readPricePdfCache, writePricePdfCache } from '@/shared/lib/pricePdfCache';
+import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
+import { checkDbRateLimit } from '@/shared/lib/rateLimit';
 
 type Context = {
   params: Promise<{ token: string }>;
@@ -12,25 +14,17 @@ type Context = {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const SESSION_COOKIE = 'kts_price_analytics_sid';
-const SESSION_MAX_AGE = 60 * 60 * 24 * 365;
+const PDF_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const PDF_SESSION_LIMIT = 20;
+const PDF_USER_LIMIT = 40;
+const PDF_GLOBAL_LIMIT = 300;
+const MAX_CONCURRENT_PDF_GENERATIONS = 3;
+
+let activePdfGenerations = 0;
 
 function getHeaderIp(headersList: Headers) {
   const forwardedFor = headersList.get('x-forwarded-for')?.split(',')[0]?.trim();
   return forwardedFor || headersList.get('x-real-ip') || 'unknown';
-}
-
-function cookieValue(request: Request, name: string) {
-  const cookie = request.headers.get('cookie') || '';
-  return cookie
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${name}=`))
-    ?.slice(name.length + 1);
-}
-
-function sessionCookie(value: string) {
-  return `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${SESSION_MAX_AGE}; SameSite=Lax; Secure; HttpOnly`;
 }
 
 function safeFilename(value: string) {
@@ -39,6 +33,16 @@ function safeFilename(value: string) {
     .replace(/[^a-zа-я0-9]+/giu, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 80);
+}
+
+async function createPdfWithSlot(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWholesalePriceList>>>) {
+  if (activePdfGenerations >= MAX_CONCURRENT_PDF_GENERATIONS) return null;
+  activePdfGenerations += 1;
+  try {
+    return await createPdf(priceList);
+  } finally {
+    activePdfGenerations -= 1;
+  }
 }
 
 function resolveExistingFile(candidates: string[]) {
@@ -119,13 +123,46 @@ export async function GET(request: Request, context: Context) {
   const priceList = await getPublicWholesalePriceList(token);
   if (!priceList) return Response.json({ error: 'Not found' }, { status: 404 });
 
-  const existingSessionId = cookieValue(request, SESSION_COOKIE);
-  const sessionId = existingSessionId || randomUUID();
+  const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
+  const sessionId = publicSession.sessionId;
   const adminSession = await getAdminSession();
   const actorType = adminSession?.role === 'manager' ? 'manager' : adminSession ? 'admin' : 'client';
   const actorUserId = adminSession?.role === 'manager' ? adminSession.managerId : null;
 
-  const pdf = await createPdf(priceList);
+  const limitKey =
+    actorUserId && actorType !== 'client'
+      ? `pdf:user:${actorUserId}`
+      : `pdf:price:${priceList.id}:session:${sessionId}`;
+  const [mainLimit, globalLimit] = await Promise.all([
+    checkDbRateLimit(limitKey, actorUserId ? PDF_USER_LIMIT : PDF_SESSION_LIMIT, PDF_LIMIT_WINDOW_MS),
+    checkDbRateLimit('pdf:global', PDF_GLOBAL_LIMIT, PDF_LIMIT_WINDOW_MS),
+  ]);
+
+  if (!mainLimit.allowed || !globalLimit.allowed) {
+    const retryAfter = Math.max(mainLimit.retryAfter, globalLimit.retryAfter);
+    const response = Response.json(
+      { error: 'Too many PDF downloads' },
+      { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+    );
+    applySessionCookie(response.headers, publicSession);
+    return response;
+  }
+
+  const cachedPdf = await readPricePdfCache(priceList);
+  let pdf: Uint8Array | null = cachedPdf ? new Uint8Array(cachedPdf) : null;
+  if (!pdf) {
+    const generatedPdf = await createPdfWithSlot(priceList);
+    if (!generatedPdf) {
+      const response = Response.json(
+        { error: 'PDF generation is busy' },
+        { status: 429, headers: { 'Retry-After': '15' } },
+      );
+      applySessionCookie(response.headers, publicSession);
+      return response;
+    }
+    pdf = new Uint8Array(generatedPdf);
+    await writePricePdfCache(priceList, generatedPdf);
+  }
 
   await trackAnalyticsEvent({
     eventType: 'public_price_pdf_downloaded',
@@ -150,7 +187,9 @@ export async function GET(request: Request, context: Context) {
     'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${safeFilename(priceList.title) || `price-${priceList.id}`}.pdf`)}`,
     'Cache-Control': 'private, no-store',
   });
-  if (!existingSessionId) headers.set('Set-Cookie', sessionCookie(sessionId));
+  applySessionCookie(headers, publicSession);
 
-  return new Response(new Uint8Array(pdf), { headers });
+  const body = new ArrayBuffer(pdf.byteLength);
+  new Uint8Array(body).set(pdf);
+  return new Response(body, { headers });
 }

@@ -53,6 +53,16 @@ function hashIp(ip?: string | null) {
   return createHash('sha256').update(`${salt}:${normalized}`).digest('hex');
 }
 
+function truncate(value: string | null | undefined, maxLength: number) {
+  return (value ?? '').slice(0, maxLength);
+}
+
+function safeMetadata(metadata: Record<string, unknown> | null | undefined) {
+  const json = JSON.stringify(metadata ?? {});
+  if (json.length <= 8000) return json;
+  return JSON.stringify({ truncated: true });
+}
+
 export async function trackAnalyticsEvent(input: TrackAnalyticsEventInput) {
   try {
     await ensureSiteSchema();
@@ -81,12 +91,12 @@ export async function trackAnalyticsEvent(input: TrackAnalyticsEventInput) {
         input.clientId ?? null,
         input.priceListId ?? null,
         input.shareLinkId ?? null,
-        input.token ?? '',
-        input.sessionId ?? '',
+        truncate(input.token, 160),
+        truncate(input.sessionId, 160),
         hashIp(input.ip),
-        input.userAgent ?? '',
-        input.referer ?? '',
-        JSON.stringify(input.metadata ?? {}),
+        truncate(input.userAgent, 500),
+        truncate(input.referer, 500),
+        safeMetadata(input.metadata),
       ],
     );
   } catch (error) {

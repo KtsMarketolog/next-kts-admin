@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 
-import { checkRateLimit, getClientIp } from '@/shared/lib/rateLimit';
+import { applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
+import { checkDbRateLimit } from '@/shared/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
 const MAX_ATTACHMENT_SIZE = 8 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_FIELD_LENGTH = 2000;
+const PUBLIC_FORM_SESSION_COOKIE = 'kts_public_form_sid';
 
 const ALLOWED_ATTACHMENT_TYPES = new Set([
   'application/pdf',
@@ -23,16 +25,22 @@ const ALLOWED_ATTACHMENT_TYPES = new Set([
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'rtf', 'jpg', 'jpeg', 'png', 'webp']);
 
 export async function POST(req: Request) {
-  const ip = getClientIp(req);
-  const rateLimit = checkRateLimit(`partner-request:${ip}`, 5, 10 * 60 * 1000);
-  if (!rateLimit.allowed) {
-    return NextResponse.json(
+  const formSession = getOrCreateSessionCookie(req, PUBLIC_FORM_SESSION_COOKIE);
+  const [sessionLimit, globalLimit] = await Promise.all([
+    checkDbRateLimit(`partner-request:session:${formSession.sessionId}`, 5, 10 * 60 * 1000),
+    checkDbRateLimit('partner-request:global', 100, 10 * 60 * 1000),
+  ]);
+  if (!sessionLimit.allowed || !globalLimit.allowed) {
+    const retryAfter = Math.max(sessionLimit.retryAfter, globalLimit.retryAfter);
+    const response = NextResponse.json(
       { ok: false, error: 'TOO_MANY_REQUESTS' },
       {
         status: 429,
-        headers: { 'Retry-After': String(rateLimit.retryAfter) },
+        headers: { 'Retry-After': String(retryAfter) },
       },
     );
+    applySessionCookie(response.headers, formSession);
+    return response;
   }
 
   try {
@@ -60,7 +68,9 @@ export async function POST(req: Request) {
 
     const email = fields.email || '';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ ok: false, error: 'INVALID_EMAIL' }, { status: 400 });
+      const response = NextResponse.json({ ok: false, error: 'INVALID_EMAIL' }, { status: 400 });
+      applySessionCookie(response.headers, formSession);
+      return response;
     }
 
     const transporter = nodemailer.createTransport({
@@ -108,14 +118,20 @@ export async function POST(req: Request) {
       replyTo: email,
     });
 
-    return NextResponse.json({ ok: true });
+    const response = NextResponse.json({ ok: true });
+    applySessionCookie(response.headers, formSession);
+    return response;
   } catch (err) {
     if (err instanceof PublicFormError) {
-      return NextResponse.json({ ok: false, error: err.message }, { status: err.status });
+      const response = NextResponse.json({ ok: false, error: err.message }, { status: err.status });
+      applySessionCookie(response.headers, formSession);
+      return response;
     }
 
     console.error('MAIL_FAILED', err);
-    return NextResponse.json({ ok: false, error: 'MAIL_FAILED' }, { status: 500 });
+    const response = NextResponse.json({ ok: false, error: 'MAIL_FAILED' }, { status: 500 });
+    applySessionCookie(response.headers, formSession);
+    return response;
   }
 }
 

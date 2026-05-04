@@ -1,31 +1,19 @@
-import { randomUUID } from 'crypto';
-
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { getPublicWholesalePriceList, query, recordWholesalePriceView } from '@/shared/lib/db';
+import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
+import { checkDbRateLimit } from '@/shared/lib/rateLimit';
 
 type Context = {
   params: Promise<{ token: string }>;
 };
 
-const SESSION_COOKIE = 'kts_price_analytics_sid';
-const SESSION_MAX_AGE = 60 * 60 * 24 * 365;
+const VIEW_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const VIEW_SESSION_LIMIT = 30;
+const VIEW_GLOBAL_LIMIT = 1500;
 
 function getHeaderIp(headersList: Headers) {
   const forwardedFor = headersList.get('x-forwarded-for')?.split(',')[0]?.trim();
   return forwardedFor || headersList.get('x-real-ip') || 'unknown';
-}
-
-function cookieValue(request: Request, name: string) {
-  const cookie = request.headers.get('cookie') || '';
-  return cookie
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${name}=`))
-    ?.slice(name.length + 1);
-}
-
-function sessionCookie(value: string) {
-  return `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${SESSION_MAX_AGE}; SameSite=Lax; Secure; HttpOnly`;
 }
 
 export async function POST(request: Request, context: Context) {
@@ -33,8 +21,19 @@ export async function POST(request: Request, context: Context) {
   const priceList = await getPublicWholesalePriceList(token);
   if (!priceList) return Response.json({ error: 'Not found' }, { status: 404 });
 
-  const existingSessionId = cookieValue(request, SESSION_COOKIE);
-  const sessionId = existingSessionId || randomUUID();
+  const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
+  const sessionId = publicSession.sessionId;
+  const [sessionLimit, globalLimit] = await Promise.all([
+    checkDbRateLimit(`public_price:token:${priceList.token}:session:${sessionId}`, VIEW_SESSION_LIMIT, VIEW_LIMIT_WINDOW_MS),
+    checkDbRateLimit('public_price:global', VIEW_GLOBAL_LIMIT, VIEW_LIMIT_WINDOW_MS),
+  ]);
+
+  if (!sessionLimit.allowed || !globalLimit.allowed) {
+    const response = Response.json({ ok: true, limited: true });
+    applySessionCookie(response.headers, publicSession);
+    return response;
+  }
+
   const adminSession = await getAdminSession();
   const actorType = adminSession?.role === 'manager' ? 'manager' : adminSession ? 'admin' : 'client';
   const actorUserId = adminSession?.role === 'manager' ? adminSession.managerId : null;
@@ -62,14 +61,7 @@ export async function POST(request: Request, context: Context) {
     console.error('Failed to record wholesale price view', error);
   });
 
-  return Response.json(
-    { ok: true },
-    existingSessionId
-      ? undefined
-      : {
-          headers: {
-            'Set-Cookie': sessionCookie(sessionId),
-          },
-        },
-  );
+  const response = Response.json({ ok: true });
+  applySessionCookie(response.headers, publicSession);
+  return response;
 }
