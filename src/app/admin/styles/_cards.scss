@@ -230,7 +230,7 @@
 
 .wholesaleRow {
   display: grid;
-  grid-template-columns: minmax($apx-170, 1fr) minmax($apx-140, 0.8fr) minmax($apx-170, 1fr) minmax($apx-140, 0.8fr) auto auto;
+  grid-template-columns: minmax($apx-160, 1fr) minmax($apx-130, 0.8fr) minmax($apx-160, 1fr) minmax($apx-150, 0.9fr) minmax($apx-130, 0.8fr) auto auto;
   gap: $apx-10;
   align-items: center;
   margin: $apx-14 0 $apx-24;

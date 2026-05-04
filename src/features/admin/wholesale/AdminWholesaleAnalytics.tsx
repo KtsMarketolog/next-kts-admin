@@ -31,6 +31,7 @@ type ManagerRow = {
   name: string;
   login: string;
   email: string;
+  phone: string;
   isActive: boolean;
   totalPrices: number;
   activePrices: number;
@@ -592,6 +593,7 @@ function ManagersTab({ analytics, routerPush }: { analytics: Analytics; routerPu
             <tr>
               <th>Менеджер</th>
               <th>Email</th>
+              <th>Телефон</th>
               <th>Прайсов</th>
               <th>Активных</th>
               <th>Просроченных</th>
@@ -617,6 +619,7 @@ function ManagersTab({ analytics, routerPush }: { analytics: Analytics; routerPu
                   </div>
                 </td>
                 <td>{manager.email || '—'}</td>
+                <td>{manager.phone || '—'}</td>
                 <td>{manager.totalPrices}</td>
                 <td>{manager.activePrices}</td>
                 <td>{manager.expiredPrices}</td>
@@ -634,7 +637,7 @@ function ManagersTab({ analytics, routerPush }: { analytics: Analytics; routerPu
                 </td>
               </tr>
             ))}
-            {analytics.managers.length === 0 ? <tr><td colSpan={14}>Нет данных за выбранный период</td></tr> : null}
+            {analytics.managers.length === 0 ? <tr><td colSpan={15}>Нет данных за выбранный период</td></tr> : null}
           </tbody>
         </table>
       </div>

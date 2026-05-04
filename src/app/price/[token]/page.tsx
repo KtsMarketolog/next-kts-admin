@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 
 import { getPublicWholesalePriceList } from '@/shared/lib/db';
+import { phoneHref } from '@/shared/lib/phone';
 
 import { PriceAnalyticsTracker } from './PriceAnalyticsTracker';
 import { PriceRequestForm } from './PriceRequestForm';
@@ -18,6 +19,8 @@ export default async function PricePage({ params }: PricePageProps) {
 
   if (!priceList) notFound();
 
+  const hasManagerContact = Boolean(priceList.managerName || priceList.managerPhone || priceList.managerEmail);
+
   return (
     <main className={styles.page}>
       <PriceAnalyticsTracker token={priceList.token} />
@@ -29,9 +32,19 @@ export default async function PricePage({ params }: PricePageProps) {
             {priceList.clientName ? <p>Клиент: {priceList.clientName}</p> : null}
             {priceList.validUntil ? <p>Действует до: {priceList.validUntil}</p> : null}
           </div>
-          <a className={styles.pdfButton} href={`/price/${priceList.token}/pdf`}>
-            Скачать PDF
-          </a>
+          <div className={styles.heroSide}>
+            {hasManagerContact ? (
+              <aside className={styles.managerContact}>
+                <span>Ваш менеджер по прайсу</span>
+                {priceList.managerName ? <strong>{priceList.managerName}</strong> : null}
+                {priceList.managerPhone ? <a href={phoneHref(priceList.managerPhone)}>{priceList.managerPhone}</a> : null}
+                {priceList.managerEmail ? <a href={`mailto:${priceList.managerEmail}`}>{priceList.managerEmail}</a> : null}
+              </aside>
+            ) : null}
+            <a className={styles.pdfButton} href={`/price/${priceList.token}/pdf`}>
+              Скачать PDF
+            </a>
+          </div>
         </section>
 
         {priceList.categories.length === 0 ? (

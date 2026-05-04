@@ -26,7 +26,7 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: $apx-8;
+  gap: $apx-18;
 
   p {
     margin: 0;
@@ -37,6 +37,43 @@
     margin: 0;
     font-size: $apx-36;
     line-height: 1.15;
+  }
+}
+
+.heroSide {
+  display: grid;
+  justify-items: end;
+  gap: $apx-12;
+}
+
+.managerContact {
+  display: grid;
+  justify-items: end;
+  gap: $apx-4;
+  min-width: $apx-230;
+  border: $apx-1 solid #e1e3ef;
+  border-radius: $apx-10;
+  background: #f8f9fd;
+  padding: $apx-14 $apx-16;
+  text-align: right;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1.25;
+  }
+
+  a {
+    color: #260b86;
+    font-size: $apx-14;
+    font-weight: 700;
+    text-decoration: none;
   }
 }
 
@@ -223,6 +260,18 @@
 
   .hero {
     display: grid;
+  }
+
+  .heroSide {
+    justify-items: stretch;
+  }
+
+  .managerContact {
+    justify-items: start;
+    min-width: 0;
+    text-align: left;
+    border-radius: $apx-m-10;
+    padding: $apx-m-14;
   }
 
   .hero h1 {

@@ -9,6 +9,7 @@ export type WholesaleManager = {
   name: string;
   login: string;
   email: string;
+  phone: string;
   isActive: boolean;
   priceListCount: number;
   lastChangedAt: string | null;
@@ -29,6 +30,7 @@ export type WholesaleManagerProfile = {
   name: string;
   login: string;
   email: string;
+  phone: string;
   isActive: boolean;
 };
 
@@ -102,6 +104,7 @@ export type WholesaleManagerAnalytics = {
     name: string;
     login: string;
     email: string;
+    phone: string;
     role: string;
     lastLoginAt: string | null;
   };
@@ -313,6 +316,7 @@ export type WholesaleAdminAnalyticsManager = {
   name: string;
   login: string;
   email: string;
+  phone: string;
   isActive: boolean;
   totalPrices: number;
   activePrices: number;
@@ -510,6 +514,7 @@ type ManagerRow = {
   name: string;
   login: string;
   email: string;
+  phone: string;
   is_active: boolean;
   price_list_count: string;
   last_changed_at: string | null;
@@ -792,6 +797,7 @@ function mapManager(row: ManagerRow): WholesaleManager {
     name: row.name,
     login: row.login,
     email: row.email,
+    phone: row.phone,
     isActive: row.is_active,
     priceListCount: Number(row.price_list_count),
     lastChangedAt: row.last_changed_at,
@@ -827,6 +833,7 @@ export async function getWholesaleManagers() {
       m.name,
       m.login,
       m.email,
+      m.phone,
       m.is_active,
       count(pl.id)::text as price_list_count,
       last_event.created_at::text as last_changed_at,
@@ -882,9 +889,10 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
     name: string;
     login: string;
     email: string;
+    phone: string;
     is_active: boolean;
   }>(
-    `select id::text, name, login, email, is_active
+    `select id::text, name, login, email, phone, is_active
      from wholesale_managers
      where id = $1
      limit 1`,
@@ -897,6 +905,7 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
     name: row.name,
     login: row.login,
     email: row.email,
+    phone: row.phone,
     isActive: row.is_active,
   };
 }
@@ -905,22 +914,23 @@ export async function createWholesaleManager(input: {
   name: string;
   login: string;
   email: string;
+  phone: string;
   passwordHash: string;
   isActive: boolean;
 }) {
   await ensureSiteSchema();
   const result = await query<{ id: string }>(
-    `insert into wholesale_managers (name, login, email, password_hash, is_active, password_changed_at)
-     values ($1, $2, $3, $4, $5, now())
+    `insert into wholesale_managers (name, login, email, phone, password_hash, is_active, password_changed_at)
+     values ($1, $2, $3, $4, $5, $6, now())
      returning id`,
-    [input.name, normalizeLogin(input.login), input.email, input.passwordHash, input.isActive],
+    [input.name, normalizeLogin(input.login), input.email, input.phone, input.passwordHash, input.isActive],
   );
   return Number(result.rows[0].id);
 }
 
 export async function updateWholesaleManager(
   id: number,
-  input: { name: string; login: string; email: string; passwordHash?: string; isActive: boolean },
+  input: { name: string; login: string; email: string; phone: string; passwordHash?: string; isActive: boolean },
 ) {
   await ensureSiteSchema();
   await query(
@@ -928,12 +938,13 @@ export async function updateWholesaleManager(
      set name = $2,
          login = $3,
          email = $4,
-         password_hash = case when $5::text is null then password_hash else $5 end,
-         password_changed_at = case when $5::text is null then password_changed_at else now() end,
-         is_active = $6,
+         phone = $5,
+         password_hash = case when $6::text is null then password_hash else $6 end,
+         password_changed_at = case when $6::text is null then password_changed_at else now() end,
+         is_active = $7,
          updated_at = now()
      where id = $1`,
-    [id, input.name, normalizeLogin(input.login), input.email, input.passwordHash ?? null, input.isActive],
+    [id, input.name, normalizeLogin(input.login), input.email, input.phone, input.passwordHash ?? null, input.isActive],
   );
 }
 
@@ -1401,6 +1412,7 @@ export async function getWholesaleManagerAnalytics(
     name: string;
     login: string;
     email: string;
+    phone: string;
     last_login_at: string | null;
   }>(
     `select
@@ -1408,6 +1420,7 @@ export async function getWholesaleManagerAnalytics(
        m.name,
        m.login,
        m.email,
+       m.phone,
        last_login.created_at::text as last_login_at
      from wholesale_managers m
      left join lateral (
@@ -1601,6 +1614,7 @@ export async function getWholesaleManagerAnalytics(
       login: managerRow.login,
       email: managerRow.email,
       role: 'Менеджер',
+      phone: managerRow.phone,
       lastLoginAt: managerRow.last_login_at,
     },
     summary: {
@@ -2099,6 +2113,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     name: string;
     login: string;
     email: string;
+    phone: string;
     is_active: boolean;
     last_login_at: string | null;
   };
@@ -2139,6 +2154,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
        m.name,
        m.login,
        m.email,
+       m.phone,
        m.is_active,
        login_events.last_login_at::text
      from wholesale_managers m
@@ -2446,6 +2462,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
         name: manager.name,
         login: manager.login,
         email: manager.email,
+        phone: manager.phone,
         isActive: manager.is_active,
         totalPrices: managerRows.length,
         activePrices: managerRows.filter((row) => row.is_active).length,

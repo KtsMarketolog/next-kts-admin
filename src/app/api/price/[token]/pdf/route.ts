@@ -87,6 +87,13 @@ function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWho
     doc.moveDown(0.4);
     if (priceList.clientName) doc.font(regularFont).fontSize(11).text(`Клиент: ${priceList.clientName}`);
     if (priceList.validUntil) doc.font(regularFont).fontSize(11).text(`Действует до: ${priceList.validUntil}`);
+    if (priceList.managerName || priceList.managerPhone || priceList.managerEmail) {
+      doc.moveDown(0.4);
+      doc.font(boldFont).fontSize(11).text('Ваш менеджер по прайсу');
+      if (priceList.managerName) doc.font(regularFont).fontSize(10).text(priceList.managerName);
+      if (priceList.managerPhone) doc.font(regularFont).fontSize(10).text(priceList.managerPhone);
+      if (priceList.managerEmail) doc.font(regularFont).fontSize(10).text(priceList.managerEmail);
+    }
     doc.moveDown(1);
 
     if (priceList.categories.length === 0) {

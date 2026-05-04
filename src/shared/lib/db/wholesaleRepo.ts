@@ -30,6 +30,9 @@ export type PublicWholesalePriceList = {
   token: string;
   clientName: string;
   managerId: number | null;
+  managerName: string;
+  managerEmail: string;
+  managerPhone: string;
   validUntil: string | null;
   updatedAt: string;
   showRetailPrices: boolean;
@@ -42,6 +45,9 @@ type PriceListRow = {
   token: string;
   client_name: string;
   manager_id: string | null;
+  manager_name: string | null;
+  manager_email: string | null;
+  manager_phone: string | null;
   valid_until: string | null;
   updated_at: string;
   show_retail_prices: boolean;
@@ -76,9 +82,21 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
   if (!/^[a-zA-Z0-9_-]{1,160}$/.test(normalizedToken)) return null;
 
   const priceList = await query<PriceListRow>(
-    `select id::text, title, token, client_name, manager_id::text, valid_until::text, updated_at::text, show_retail_prices
-     from wholesale_price_lists
-     where token = $1 and is_active = true
+    `select
+       pl.id::text,
+       pl.title,
+       pl.token,
+       pl.client_name,
+       pl.manager_id::text,
+       m.name as manager_name,
+       m.email as manager_email,
+       m.phone as manager_phone,
+       pl.valid_until::text,
+       pl.updated_at::text,
+       pl.show_retail_prices
+     from wholesale_price_lists pl
+     left join wholesale_managers m on m.id = pl.manager_id
+     where pl.token = $1 and pl.is_active = true
      limit 1`,
     [normalizedToken],
   );
@@ -168,6 +186,9 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
     token: priceListRow.token,
     clientName: priceListRow.client_name,
     managerId: priceListRow.manager_id ? Number(priceListRow.manager_id) : null,
+    managerName: priceListRow.manager_name ?? '',
+    managerEmail: priceListRow.manager_email ?? '',
+    managerPhone: priceListRow.manager_phone ?? '',
     validUntil: priceListRow.valid_until,
     updatedAt: priceListRow.updated_at,
     showRetailPrices: priceListRow.show_retail_prices,

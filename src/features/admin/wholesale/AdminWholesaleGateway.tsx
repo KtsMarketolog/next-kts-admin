@@ -13,6 +13,7 @@ type Manager = {
   name: string;
   login: string;
   email: string;
+  phone: string;
   isActive: boolean;
   priceListCount: number;
   password?: string;
@@ -89,12 +90,14 @@ type CurrentManager = {
   name: string;
   login: string;
   email: string;
+  phone: string;
 };
 
 const emptyManager = {
   name: '',
   login: '',
   email: '',
+  phone: '',
   password: '',
   isActive: true,
 };
@@ -472,6 +475,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           <input value={managerDraft.name} onChange={(event) => setManagerDraft({ ...managerDraft, name: event.target.value })} placeholder="Имя менеджера" autoComplete="off" />
           <input value={managerDraft.login} onChange={(event) => setManagerDraft({ ...managerDraft, login: event.target.value })} placeholder="Логин" autoComplete="new-password" />
           <input value={managerDraft.email} onChange={(event) => setManagerDraft({ ...managerDraft, email: event.target.value })} placeholder="Email" autoComplete="new-password" />
+          <input value={managerDraft.phone} onChange={(event) => setManagerDraft({ ...managerDraft, phone: event.target.value })} placeholder="Телефон" autoComplete="tel" />
           <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} placeholder="Пароль" autoComplete="new-password" />
           <label className={styles.checkbox}>
             <input type="checkbox" checked={managerDraft.isActive} onChange={(event) => setManagerDraft({ ...managerDraft, isActive: event.target.checked })} />
@@ -490,6 +494,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                 <th>Имя</th>
                 <th>Логин</th>
                 <th>Email</th>
+                <th>Телефон</th>
                 <th>Новый пароль</th>
                 <th>Прайсов</th>
                 <th>Активен</th>
@@ -503,6 +508,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                   <td><input value={manager.name} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, name: event.target.value } : item))} /></td>
                   <td><input value={manager.login} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, login: event.target.value } : item))} /></td>
                   <td><input value={manager.email} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, email: event.target.value } : item))} /></td>
+                  <td><input value={manager.phone} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, phone: event.target.value } : item))} /></td>
                   <td><input type="password" value={manager.password ?? ''} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, password: event.target.value } : item))} placeholder="Не менять" /></td>
                   <td className={styles.countCell}>
                     <button

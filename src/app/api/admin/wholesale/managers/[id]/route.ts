@@ -24,6 +24,7 @@ export async function PUT(request: Request, context: Context) {
   const name = normalizeTextField(body.name, 120);
   const login = normalizeTextField(body.login, 80);
   const email = normalizeTextField(body.email, 160);
+  const phone = normalizeTextField(body.phone, 60);
   const password = typeof body.password === 'string' ? body.password : '';
 
   if (!name || !login) {
@@ -40,6 +41,7 @@ export async function PUT(request: Request, context: Context) {
     name,
     login,
     email,
+    phone,
     passwordHash: password ? hashPassword(password) : undefined,
     isActive: Boolean(body.isActive ?? true),
   });
@@ -57,7 +59,7 @@ export async function PUT(request: Request, context: Context) {
     ip: getClientIp(request),
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { login, email, isActive: Boolean(body.isActive ?? true) },
+    metadata: { login, email, phone, isActive: Boolean(body.isActive ?? true) },
   });
 
   return Response.json({ ok: true });

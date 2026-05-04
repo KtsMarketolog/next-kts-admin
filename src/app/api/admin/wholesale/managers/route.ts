@@ -24,6 +24,7 @@ export async function POST(request: Request) {
   const name = normalizeTextField(body.name, 120);
   const login = normalizeTextField(body.login, 80);
   const email = normalizeTextField(body.email, 160);
+  const phone = normalizeTextField(body.phone, 60);
   const password = typeof body.password === 'string' ? body.password : '';
 
   if (!name || !login || !password) {
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
     name,
     login,
     email,
+    phone,
     passwordHash: hashPassword(password),
     isActive: Boolean(body.isActive ?? true),
   });
@@ -52,7 +54,7 @@ export async function POST(request: Request) {
     ip: getClientIp(request),
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { login, email },
+    metadata: { login, email, phone },
   });
 
   return Response.json({ id });

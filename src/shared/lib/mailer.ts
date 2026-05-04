@@ -6,6 +6,12 @@ function requireEnv(name: string) {
   return value;
 }
 
+function smtpPassword() {
+  const value = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
+  if (!value) throw new Error('SMTP_PASSWORD is not configured');
+  return value;
+}
+
 export async function sendSystemMail(input: { to: string; subject: string; text: string; html: string }) {
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -13,7 +19,7 @@ export async function sendSystemMail(input: { to: string; subject: string; text:
     secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : true,
     auth: {
       user: requireEnv('SMTP_USER'),
-      pass: requireEnv('SMTP_PASSWORD'),
+      pass: smtpPassword(),
     },
   });
 

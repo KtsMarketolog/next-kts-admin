@@ -68,6 +68,7 @@ type ManagerAnalytics = {
     name: string;
     login: string;
     email: string;
+    phone: string;
     role: string;
     lastLoginAt: string | null;
   };
@@ -398,6 +399,7 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
           <div className={styles.analyticsManagerMeta}>
             <span>{analytics.manager.name}</span>
             {analytics.manager.email ? <span>{analytics.manager.email}</span> : null}
+            {analytics.manager.phone ? <span>{analytics.manager.phone}</span> : null}
             <span>{analytics.manager.role}</span>
             <span>Последний вход: {formatDate(analytics.manager.lastLoginAt)}</span>
           </div>

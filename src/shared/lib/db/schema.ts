@@ -139,6 +139,7 @@ export async function ensureSiteSchema() {
       name text not null default '',
       login text not null unique,
       email text not null default '',
+      phone text not null default '',
       password_hash text not null default '',
       is_active boolean not null default true,
       password_changed_at timestamptz,
@@ -284,6 +285,7 @@ export async function ensureSiteSchema() {
     alter table admin_users add column if not exists email text not null default '';
     alter table admin_users add column if not exists role text not null default 'admin';
     alter table admin_users add column if not exists password_changed_at timestamptz;
+    alter table wholesale_managers add column if not exists phone text not null default '';
     alter table wholesale_managers add column if not exists password_hash text not null default '';
     alter table wholesale_managers add column if not exists password_changed_at timestamptz;
     alter table wholesale_price_list_events add column if not exists actor_role text not null default '';
@@ -368,6 +370,7 @@ export async function ensureSiteSchema() {
   await query(`alter table admin_users add column if not exists email text not null default ''`);
   await query(`alter table admin_users add column if not exists role text not null default 'admin'`);
   await query(`alter table admin_users add column if not exists password_changed_at timestamptz`);
+  await query(`alter table wholesale_managers add column if not exists phone text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists password_hash text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists password_changed_at timestamptz`);
   await query(`alter table wholesale_price_list_events add column if not exists actor_role text not null default ''`);
