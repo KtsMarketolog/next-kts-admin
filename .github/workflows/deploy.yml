@@ -64,4 +64,4 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/kts_deploy -o IdentitiesOnly=yes \
             "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "set -euo pipefail && cd '${{ secrets.VPS_PROJECT_PATH }}' && npm ci --include=dev && npm run build && (command -v pm2 >/dev/null || npm install -g pm2) && pm2 startOrRestart ecosystem.config.cjs --update-env"
+            "set -eu && cd '${{ secrets.VPS_PROJECT_PATH }}' && npm ci --include=dev && npm run build && (command -v pm2 >/dev/null || npm install -g pm2) && pm2 startOrRestart ecosystem.config.cjs --update-env"
