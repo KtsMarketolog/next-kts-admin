@@ -17,7 +17,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Validate deployment secrets
+        run: |
+          test -n "${{ secrets.VPS_HOST }}" || (echo "Missing repository secret: VPS_HOST" && exit 1)
+          test -n "${{ secrets.VPS_USER }}" || (echo "Missing repository secret: VPS_USER" && exit 1)
+          test -n "${{ secrets.VPS_PROJECT_PATH }}" || (echo "Missing repository secret: VPS_PROJECT_PATH" && exit 1)
+          test -n "${{ secrets.VPS_SSH_KEY }}" || (echo "Missing repository secret: VPS_SSH_KEY" && exit 1)
 
       - name: Configure SSH
         run: |
