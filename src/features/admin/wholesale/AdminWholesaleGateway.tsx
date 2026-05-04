@@ -449,6 +449,66 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     }, 2200);
   };
 
+  const renderPriceListCards = (emptyText: string) => (
+    <div className={styles.priceListCards}>
+      {priceLists.map((item) => (
+        <article className={styles.priceListCard} key={item.id}>
+          <div className={styles.priceListMain}>
+            <div className={styles.priceListTitle}>
+              <strong>{item.title}</strong>
+              <span>Позиций: {item.itemCount}</span>
+            </div>
+            <div className={styles.priceListField}>
+              <span>Клиент</span>
+              <strong>{item.clientName || '—'}</strong>
+            </div>
+            <div className={styles.priceListField}>
+              <span>Менеджер</span>
+              <strong>{item.managerName || '—'}</strong>
+            </div>
+            <div className={styles.priceListField}>
+              <span>Ссылка</span>
+              <code>{shortToken(item.token)}</code>
+            </div>
+          </div>
+          <div className={styles.priceListMeta}>
+            <div className={styles.priceListField}>
+              <span>Дата создания</span>
+              <strong>{formatDate(item.createdAt)}</strong>
+            </div>
+            <div className={styles.priceListField}>
+              <span>Последнее изменение</span>
+              <strong>{renderLastPriceChange(item)}</strong>
+            </div>
+            <div className={styles.priceListField}>
+              <span>Действует до</span>
+              <strong>{item.validUntil || '—'}</strong>
+            </div>
+            <div className={styles.priceListField}>
+              <span>Статус</span>
+              <strong className={item.isActive ? styles.priceStatusActive : styles.priceStatusHidden}>
+                {item.isActive ? 'Активен' : 'Скрыт'}
+              </strong>
+            </div>
+            <div className={styles.priceListActions}>
+              <button onClick={() => router.push(`/admin/wholesale/${item.id}/edit`)}>Изменить</button>
+              <button className={styles.secondary} onClick={() => window.open(`/price/${item.token}`, '_blank')}>Открыть</button>
+              <button
+                className={`${styles.secondary} ${copiedToken === item.token ? styles.savedButton : ''}`}
+                type="button"
+                onClick={() => copyLink(item)}
+              >
+                {copiedToken === item.token ? 'Скопировано' : 'Скопировать'}
+              </button>
+              <button className={styles.danger} onClick={() => deletePriceList(item.id)}>Удалить</button>
+            </div>
+          </div>
+        </article>
+      ))}
+      {priceLists.length === 0 ? <p className={styles.mutedText}>{emptyText}</p> : null}
+    </div>
+  );
+
   if (screen === 'managerAnalytics' && managerAnalyticsId) {
     return <AdminManagerAnalytics managerId={managerAnalyticsId} />;
   }
@@ -579,49 +639,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
         {status ? <p className={styles.status}>{status}</p> : null}
 
-        <div className={styles.tableWrap}>
-          <table className={styles.adminTable}>
-            <thead>
-              <tr>
-                <th>Название</th>
-                <th>Клиент</th>
-                <th>Менеджер</th>
-                <th>Ссылка</th>
-                <th>Дата создания</th>
-                <th>Последнее изменение</th>
-                <th>Действует до</th>
-                <th>Статус</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {priceLists.map((item) => (
-                <tr key={item.id}>
-                  <td><strong>{item.title}</strong><br /><span>Позиций: {item.itemCount}</span></td>
-                  <td>{item.clientName || '—'}</td>
-                  <td>{item.managerName || '—'}</td>
-                  <td>{shortToken(item.token)}</td>
-                  <td>{formatDate(item.createdAt)}</td>
-                  <td>{renderLastPriceChange(item)}</td>
-                  <td>{item.validUntil || '—'}</td>
-                  <td>{item.isActive ? 'Активен' : 'Скрыт'}</td>
-                  <td className={styles.tableActions}>
-                    <button onClick={() => router.push(`/admin/wholesale/${item.id}/edit`)}>Изменить</button>
-                    <button className={styles.secondary} onClick={() => window.open(`/price/${item.token}`, '_blank')}>Открыть</button>
-                    <button
-                      className={`${styles.secondary} ${copiedToken === item.token ? styles.savedButton : ''}`}
-                      type="button"
-                      onClick={() => copyLink(item)}
-                    >
-                      {copiedToken === item.token ? 'Скопировано' : 'Скопировать'}
-                    </button>
-                    <button className={styles.danger} onClick={() => deletePriceList(item.id)}>Удалить</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {renderPriceListCards('У менеджера пока нет прайсов.')}
       </section>
     );
   }
@@ -644,54 +662,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
         {status ? <p className={styles.status}>{status}</p> : null}
 
-        <div className={styles.tableWrap}>
-          <table className={styles.adminTable}>
-            <thead>
-              <tr>
-                <th>Название</th>
-                <th>Клиент</th>
-                <th>Менеджер</th>
-                <th>Ссылка</th>
-                <th>Дата создания</th>
-                <th>Последнее изменение</th>
-                <th>Действует до</th>
-                <th>Статус</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {priceLists.map((item) => (
-                <tr key={item.id}>
-                  <td><strong>{item.title}</strong><br /><span>Позиций: {item.itemCount}</span></td>
-                  <td>{item.clientName || '—'}</td>
-                  <td>{item.managerName || '—'}</td>
-                  <td>{shortToken(item.token)}</td>
-                  <td>{formatDate(item.createdAt)}</td>
-                  <td>{renderLastPriceChange(item)}</td>
-                  <td>{item.validUntil || '—'}</td>
-                  <td>{item.isActive ? 'Активен' : 'Скрыт'}</td>
-                  <td className={styles.tableActions}>
-                    <button onClick={() => router.push(`/admin/wholesale/${item.id}/edit`)}>Изменить</button>
-                    <button className={styles.secondary} onClick={() => window.open(`/price/${item.token}`, '_blank')}>Открыть</button>
-                    <button
-                      className={`${styles.secondary} ${copiedToken === item.token ? styles.savedButton : ''}`}
-                      type="button"
-                      onClick={() => copyLink(item)}
-                    >
-                      {copiedToken === item.token ? 'Скопировано' : 'Скопировать'}
-                    </button>
-                    <button className={styles.danger} onClick={() => deletePriceList(item.id)}>Удалить</button>
-                  </td>
-                </tr>
-              ))}
-              {priceLists.length === 0 ? (
-                <tr>
-                  <td colSpan={9}>У менеджера пока нет прайсов.</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        {renderPriceListCards('У менеджера пока нет прайсов.')}
       </section>
     );
   }

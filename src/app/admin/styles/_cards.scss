@@ -399,6 +399,110 @@
   }
 }
 
+.priceListCards {
+  display: grid;
+  gap: $apx-12;
+}
+
+.priceListCard {
+  display: grid;
+  gap: $apx-12;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+}
+
+.priceListMain,
+.priceListMeta {
+  display: grid;
+  gap: $apx-10;
+  align-items: center;
+}
+
+.priceListMain {
+  grid-template-columns: minmax($apx-210, 1.2fr) minmax($apx-170, 0.9fr) minmax($apx-170, 0.9fr) minmax($apx-140, 0.7fr);
+}
+
+.priceListMeta {
+  grid-template-columns: minmax($apx-150, 0.8fr) minmax($apx-210, 1fr) minmax($apx-130, 0.7fr) minmax($apx-110, 0.6fr) minmax($apx-390, 1.4fr);
+  padding-top: $apx-12;
+  border-top: $apx-1 solid #edf0f6;
+}
+
+.priceListTitle,
+.priceListField {
+  display: grid;
+  gap: $apx-5;
+  min-width: 0;
+
+  > span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-15;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  code {
+    width: fit-content;
+    max-width: 100%;
+    border-radius: $apx-7;
+    background: #f2f3f8;
+    color: #3f3d74;
+    padding: $apx-6 $apx-8;
+    font-family: inherit;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+}
+
+.priceListTitle {
+  strong {
+    font-size: $apx-17;
+  }
+
+  > span {
+    text-transform: none;
+    font-weight: 600;
+  }
+}
+
+.priceStatusActive,
+.priceStatusHidden {
+  width: fit-content;
+  border-radius: $apx-999;
+  padding: $apx-5 $apx-10;
+  font-size: $apx-13 !important;
+}
+
+.priceStatusActive {
+  background: #e8f7ef;
+  color: #15803d !important;
+}
+
+.priceStatusHidden {
+  background: #f2f3f8;
+  color: #6f7182 !important;
+}
+
+.priceListActions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: $apx-8;
+
+  button {
+    min-width: $apx-116;
+  }
+}
+
 .wholesaleEditorGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -461,11 +565,23 @@
     grid-column: 1 / -1;
     justify-content: flex-start;
   }
+
+  .priceListMain,
+  .priceListMeta {
+    grid-template-columns: repeat(2, minmax($apx-180, 1fr));
+  }
+
+  .priceListActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 720px) {
   .managerFields,
-  .managerControls {
+  .managerControls,
+  .priceListMain,
+  .priceListMeta {
     grid-template-columns: 1fr;
   }
 
@@ -476,6 +592,15 @@
   }
 
   .managerActions {
+    display: grid;
+    grid-template-columns: 1fr;
+
+    button {
+      width: 100%;
+    }
+  }
+
+  .priceListActions {
     display: grid;
     grid-template-columns: 1fr;
 
