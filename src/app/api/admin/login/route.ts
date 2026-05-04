@@ -1,5 +1,5 @@
 import { createAdminSession, createEmployeeSession, validateAdminPassword, verifyPassword } from '@/shared/lib/adminAuth';
-import { getAdminUserByLogin, getWholesaleManagerByLogin, recordWholesaleManagerLogin } from '@/shared/lib/db';
+import { getAdminUserByLogin, getWholesaleManagerByLogin, recordWholesaleManagerLogin, trackAnalyticsEvent } from '@/shared/lib/db';
 import { checkRateLimit, getClientIp, getRateLimitStatus, resetRateLimit } from '@/shared/lib/rateLimit';
 
 const LOGIN_LIMIT = 8;
@@ -31,12 +31,29 @@ export async function POST(request: Request) {
   if (adminUser?.isActive && adminUser.passwordHash && verifyPassword(password, adminUser.passwordHash)) {
     resetRateLimit(rateLimitKey);
     await createAdminSession(adminUser.role);
+    await trackAnalyticsEvent({
+      eventType: 'manager_login',
+      actorType: 'admin',
+      actorUserId: adminUser.id,
+      ip,
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      metadata: { role: adminUser.role, login: adminUser.login },
+    });
     return Response.json({ ok: true, role: adminUser.role });
   }
 
   if (validateAdminPassword(password)) {
     resetRateLimit(rateLimitKey);
     await createAdminSession();
+    await trackAnalyticsEvent({
+      eventType: 'manager_login',
+      actorType: 'admin',
+      ip,
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      metadata: { role: 'admin' },
+    });
     return Response.json({ ok: true, role: 'admin' });
   }
 
@@ -54,6 +71,8 @@ export async function POST(request: Request) {
   await recordWholesaleManagerLogin(manager.id, {
     ip,
     userAgent: request.headers.get('user-agent'),
+    referer: request.headers.get('referer'),
+    actorType: 'manager',
   }).catch((error) => {
     console.error('Failed to record manager login', error);
   });

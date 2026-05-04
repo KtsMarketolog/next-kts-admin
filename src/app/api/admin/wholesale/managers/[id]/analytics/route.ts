@@ -1,5 +1,5 @@
 import { requireWholesaleAdmin } from '@/shared/lib/adminAuth';
-import { getWholesaleManagerAnalytics, type WholesaleManagerAnalyticsPeriod } from '@/shared/lib/db';
+import { getWholesaleManagerAnalyticsExtended, type WholesaleManagerAnalyticsPeriod } from '@/shared/lib/db';
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -21,7 +21,7 @@ export async function GET(request: Request, context: Context) {
   }
 
   const url = new URL(request.url);
-  const analytics = await getWholesaleManagerAnalytics(managerId, parsePeriod(url.searchParams.get('period')));
+  const analytics = await getWholesaleManagerAnalyticsExtended(managerId, parsePeriod(url.searchParams.get('period')));
   if (!analytics) {
     return Response.json({ error: 'Manager not found' }, { status: 404 });
   }

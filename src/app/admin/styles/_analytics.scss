@@ -61,6 +61,44 @@
   gap: $apx-14;
 }
 
+.analyticsTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+  border-bottom: $apx-1 solid #e6e7ef;
+  padding-bottom: $apx-10;
+}
+
+.analyticsTab,
+.analyticsTabActive {
+  min-height: $apx-38;
+  border: $apx-1 solid #e1e3ef;
+  border-radius: $apx-8;
+  padding: 0 $apx-14;
+  font-size: $apx-13;
+  font-weight: 800;
+}
+
+.analyticsTab {
+  background: #f2f3f8;
+  color: #242633;
+}
+
+.analyticsTabActive {
+  background: #260b86;
+  color: #fff;
+}
+
+.analyticsFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-10;
+
+  select {
+    width: min($apx-260, 100%);
+  }
+}
+
 .analyticsKpiCard {
   position: relative;
   overflow: hidden;
@@ -316,6 +354,7 @@
   }
 
   .analyticsPeriod,
+  .analyticsTabs,
   .analyticsPeriod button,
   .analyticsKpiGrid,
   .analyticsQualityGrid,
@@ -324,6 +363,12 @@
   }
 
   .analyticsPeriod {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsTabs,
+  .analyticsFilters {
     display: grid;
     grid-template-columns: 1fr;
   }

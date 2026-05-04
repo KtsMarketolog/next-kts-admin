@@ -1,5 +1,6 @@
 import type { AdminSession } from '@/shared/lib/adminAuth';
 
+import { trackAnalyticsEvent, type AnalyticsActorType, type AnalyticsEventType } from './analyticsRepo';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
@@ -105,13 +106,41 @@ export type WholesaleManagerAnalytics = {
     totalPrices: number;
     activePrices: number;
     expiredPrices: number;
+    expiringSoon7Days?: number;
+    expiringSoon30Days?: number;
     pricesLast7Days: number;
     pricesLast30Days: number;
     periodPrices: number;
     averageItemsPerPrice: number;
+    medianItemsPerPrice?: number;
     emptyPrices: number;
     pricesWithoutClient: number;
     pricesWithoutExpiration: number;
+    stalePrices30Days?: number;
+    pricesWithoutViews?: number;
+    qualityScore?: number;
+    disabledPrices?: number;
+    pricesWithoutPdfDownloads?: number;
+  };
+  managerActivity?: {
+    loginsLast7Days: number;
+    loginsLast30Days: number;
+    loginsInSelectedPeriod: number;
+    activeDaysInSelectedPeriod: number;
+    actionsLast7Days: number;
+    actionsLast30Days: number;
+    actionsInSelectedPeriod: number;
+    lastAction: {
+      eventType: string;
+      priceTitle: string;
+      clientName: string;
+      createdAt: string;
+    } | null;
+    createdPrices: number;
+    updatedPrices: number;
+    activatedPrices: number;
+    deactivatedPrices: number;
+    deletedPrices: number;
   };
   lastCreatedPrice: {
     id: number;
@@ -123,27 +152,115 @@ export type WholesaleManagerAnalytics = {
   recentChanges: WholesaleManagerAnalyticsChange[];
   publicViews: {
     total: number;
+    uniqueVisitors?: number;
     last7Days: number;
     last30Days: number;
     periodViews: number;
+    repeatViews?: number;
     lastViewAt: string | null;
+    pricesWithoutViews?: number;
+    averageViewsPerPrice?: number;
     topPrices: Array<{
       priceId: number;
       title: string;
+      clientName?: string;
       views: number;
+      uniqueVisitors?: number;
       lastViewAt: string | null;
     }>;
+    recentViews?: WholesaleManagerAnalyticsEvent[];
+    pricesWithoutViewsList?: WholesaleManagerAnalyticsProblemPrice[];
   };
+  pdf?: {
+    totalDownloads: number;
+    downloadsLast7Days: number;
+    downloadsLast30Days: number;
+    downloadsInSelectedPeriod: number;
+    uniqueDownloaders: number;
+    lastDownloadAt: string | null;
+    pricesWithDownloads: number;
+    pricesWithoutDownloads: number;
+    topDownloadedPrices: Array<{
+      priceId: number;
+      title: string;
+      clientName: string;
+      downloads: number;
+      uniqueDownloaders: number;
+      views: number;
+      lastDownloadAt: string | null;
+    }>;
+    recentDownloads: WholesaleManagerAnalyticsEvent[];
+    clientsWithPdfDownloads: Array<{
+      clientId: string;
+      clientName: string;
+      priceId: number;
+      priceTitle: string;
+      downloads: number;
+      lastDownloadAt: string | null;
+    }>;
+  };
+  clients?: {
+    totalClients: number;
+    clientsWithPrices: number;
+    clientsWithViews: number;
+    clientsWithoutViews: number;
+    clientsWithPdfDownloads: number;
+    hotClients: WholesaleManagerAnalyticsClient[];
+    topClientsByViews: WholesaleManagerAnalyticsClient[];
+    clientsWithoutRecentActivity: WholesaleManagerAnalyticsClient[];
+  };
+  funnel?: {
+    createdPrices: number;
+    activePublicLinks: number;
+    openedPrices: number;
+    pricesWithRepeatViews: number;
+    pdfDownloadedPrices: number;
+    contactClicks: number;
+  };
+  priceInsights?: {
+    expiringSoon: WholesaleManagerAnalyticsProblemPrice[];
+    pricesWithoutViews: WholesaleManagerAnalyticsProblemPrice[];
+    topViewedPrices: Array<{
+      priceId: number;
+      title: string;
+      clientName: string;
+      views: number;
+      uniqueVisitors: number;
+      pdfDownloads: number;
+      lastViewAt: string | null;
+    }>;
+    mostChangedPrices: Array<{
+      priceId: number;
+      title: string;
+      clientName: string;
+      changes: number;
+      lastChangedAt: string | null;
+      lastChangedBy: string;
+    }>;
+    largestPrice: { id: number; title: string; itemCount: number } | null;
+    smallestNonEmptyPrice: { id: number; title: string; itemCount: number } | null;
+  };
+  recentEvents?: WholesaleManagerAnalyticsEvent[];
 };
 
-export type WholesaleManagerAnalyticsProblem = 'EMPTY' | 'NO_CLIENT' | 'NO_EXPIRATION' | 'EXPIRED';
+export type WholesaleManagerAnalyticsProblem =
+  | 'EMPTY'
+  | 'NO_CLIENT'
+  | 'NO_EXPIRATION'
+  | 'EXPIRED'
+  | 'EXPIRING_SOON'
+  | 'STALE'
+  | 'NO_VIEWS';
 
 export type WholesaleManagerAnalyticsProblemPrice = {
   id: number;
   title: string;
   clientName: string;
   createdAt: string;
+  updatedAt?: string;
   validUntil: string | null;
+  views?: number;
+  pdfDownloads?: number;
   problems: WholesaleManagerAnalyticsProblem[];
 };
 
@@ -155,6 +272,37 @@ export type WholesaleManagerAnalyticsChange = {
   changedBy: string;
   createdAt: string;
   details: string;
+};
+
+export type WholesaleManagerAnalyticsEvent = {
+  id: number;
+  eventType: string;
+  actorType: string;
+  priceId: number | null;
+  priceTitle: string;
+  clientId: string;
+  clientName: string;
+  managerName: string;
+  createdAt: string;
+  details: string;
+  sessionId: string;
+  referer: string;
+};
+
+export type WholesaleManagerAnalyticsClient = {
+  clientId: string;
+  clientName: string;
+  priceId: number | null;
+  priceTitle: string;
+  priceCount: number;
+  viewsLast24Hours: number;
+  viewsLast7Days: number;
+  views: number;
+  uniqueVisitors: number;
+  pdfDownloads: number;
+  lastActivityAt: string | null;
+  lastPriceCreatedAt: string | null;
+  status: string;
 };
 
 type ManagerRow = {
@@ -212,20 +360,45 @@ type AnalyticsProblemRow = {
   client_name: string;
   valid_until: string | null;
   created_at: string;
+  updated_at: string;
   item_count: string;
+  views: string;
+  pdf_downloads: string;
 };
 
 type AnalyticsSummaryRow = {
   total_prices: string;
   active_prices: string;
   expired_prices: string;
+  expiring_soon_7_days: string;
+  expiring_soon_30_days: string;
   prices_last_7_days: string;
   prices_last_30_days: string;
   period_prices: string;
   average_items_per_price: string | null;
+  median_items_per_price: string | null;
   empty_prices: string;
   prices_without_client: string;
   prices_without_expiration: string;
+  stale_prices_30_days: string;
+  prices_without_views: string;
+  disabled_prices: string;
+  prices_without_pdf_downloads: string;
+};
+
+type AnalyticsEventRow = {
+  id: string;
+  event_type: string;
+  actor_type: string;
+  price_id: string | null;
+  price_title: string | null;
+  client_id: string | null;
+  client_name: string | null;
+  manager_name: string | null;
+  created_at: string;
+  details: string | null;
+  session_id: string | null;
+  referer: string | null;
 };
 
 function normalizeLogin(login: string) {
@@ -240,6 +413,23 @@ function periodSqlInterval(period: WholesaleManagerAnalyticsPeriod) {
   if (period === '7d') return '7 days';
   if (period === '30d') return '30 days';
   return null;
+}
+
+function actorTypeFromRole(role: AdminSession['role'] | 'admin'): AnalyticsActorType {
+  return role === 'manager' ? 'manager' : 'admin';
+}
+
+function actionEventType(action: string): AnalyticsEventType {
+  if (action === 'create') return 'price_created';
+  if (action === 'delete') return 'price_deleted';
+  if (action === 'enable') return 'price_activated';
+  if (action === 'disable') return 'price_deactivated';
+  return 'price_updated';
+}
+
+function clientIdFromName(clientName?: string | null) {
+  const value = clientName?.trim();
+  return value ? value.toLowerCase() : null;
 }
 
 function actorMeta(session?: AdminSession | null) {
@@ -286,23 +476,71 @@ function mapAnalyticsChange(row: AnalyticsChangeRow): WholesaleManagerAnalyticsC
 function mapProblemPrice(row: AnalyticsProblemRow): WholesaleManagerAnalyticsProblemPrice {
   const problems: WholesaleManagerAnalyticsProblem[] = [];
   const itemCount = Number(row.item_count);
+  const views = Number(row.views ?? 0);
   const validUntil = row.valid_until ? new Date(row.valid_until) : null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const expiringSoonDate = new Date(today);
+  expiringSoonDate.setDate(expiringSoonDate.getDate() + 7);
+  const updatedAt = new Date(row.updated_at ?? row.created_at);
+  const staleDate = new Date();
+  staleDate.setDate(staleDate.getDate() - 30);
 
   if (itemCount === 0) problems.push('EMPTY');
   if (!row.client_name.trim()) problems.push('NO_CLIENT');
   if (!row.valid_until) problems.push('NO_EXPIRATION');
   if (validUntil && validUntil < today) problems.push('EXPIRED');
+  if (validUntil && validUntil >= today && validUntil <= expiringSoonDate) problems.push('EXPIRING_SOON');
+  if (!Number.isNaN(updatedAt.getTime()) && updatedAt < staleDate) problems.push('STALE');
+  if (views === 0) problems.push('NO_VIEWS');
 
   return {
     id: Number(row.id),
     title: row.title || 'Без названия',
     clientName: row.client_name,
     createdAt: row.created_at,
+    updatedAt: row.updated_at ?? row.created_at,
     validUntil: row.valid_until,
+    views,
+    pdfDownloads: Number(row.pdf_downloads ?? 0),
     problems,
   };
+}
+
+function mapAnalyticsEvent(row: AnalyticsEventRow): WholesaleManagerAnalyticsEvent {
+  return {
+    id: Number(row.id),
+    eventType: row.event_type,
+    actorType: row.actor_type,
+    priceId: row.price_id ? Number(row.price_id) : null,
+    priceTitle: row.price_title || 'Без названия',
+    clientId: row.client_id || '',
+    clientName: row.client_name || '',
+    managerName: row.manager_name || '',
+    createdAt: row.created_at,
+    details: row.details || '',
+    sessionId: row.session_id || '',
+    referer: row.referer || '',
+  };
+}
+
+function qualityScore(input: {
+  emptyPrices: number;
+  pricesWithoutClient: number;
+  pricesWithoutExpiration: number;
+  expiredPrices: number;
+  pricesWithoutViews: number;
+  stalePrices30Days: number;
+}) {
+  const score =
+    100 -
+    Math.min(input.emptyPrices * 20, 40) -
+    Math.min(input.pricesWithoutClient * 15, 30) -
+    Math.min(input.pricesWithoutExpiration * 10, 20) -
+    Math.min(input.expiredPrices * 15, 30) -
+    Math.min(input.pricesWithoutViews * 5, 20) -
+    Math.min(input.stalePrices30Days * 5, 20);
+  return Math.max(0, Math.min(100, score));
 }
 
 async function insertPriceListEvent(input: PriceListEventInput) {
@@ -334,6 +572,18 @@ async function insertPriceListEvent(input: PriceListEventInput) {
       input.details ?? '',
     ],
   );
+  await trackAnalyticsEvent({
+    eventType: actionEventType(input.action),
+    actorType: actorTypeFromRole(input.actorRole),
+    actorUserId: input.actorManagerId,
+    managerId: input.ownerManagerId,
+    priceListId: input.priceListId,
+    metadata: {
+      title: input.title,
+      action: input.action,
+      details: input.details ?? '',
+    },
+  });
 }
 
 function mapManager(row: ManagerRow): WholesaleManager {
@@ -712,6 +962,18 @@ export async function createWholesalePriceList(
     action: 'create',
     details: 'Прайс создан',
   });
+  await trackAnalyticsEvent({
+    eventType: 'price_public_link_created',
+    actorType: actorTypeFromRole(actor.actorRole),
+    actorUserId: actor.actorManagerId,
+    managerId,
+    priceListId: id,
+    token: input.token,
+    metadata: {
+      title: input.title,
+      clientName: input.clientName,
+    },
+  });
   return id;
 }
 
@@ -737,6 +999,14 @@ export async function updateWholesalePriceList(
   );
   const previousRow = previous.rows[0];
   if (!previousRow) return;
+  const previousItems = await query<{ count: string }>(
+    `select count(*)::text as count
+     from wholesale_price_list_items
+     where price_list_id = $1 and visible = true`,
+    [id],
+  );
+  const previousVisibleItems = Number(previousItems.rows[0]?.count ?? 0);
+  const nextVisibleItems = input.items.filter((item) => item.visible).length;
 
   await query(
     `update wholesale_price_lists
@@ -774,6 +1044,52 @@ export async function updateWholesalePriceList(
     action: priceListAction(previousRow, input),
     details: priceListDetails(previousRow, input),
   });
+  const baseEvent = {
+    actorType: actorTypeFromRole(actor.actorRole),
+    actorUserId: actor.actorManagerId,
+    managerId,
+    priceListId: id,
+    token: input.token,
+  };
+  if ((previousRow.client_name || '') !== input.clientName) {
+    await trackAnalyticsEvent({
+      ...baseEvent,
+      eventType: 'price_client_changed',
+      clientId: clientIdFromName(input.clientName),
+      metadata: { from: previousRow.client_name, to: input.clientName, title: input.title },
+    });
+  }
+  if ((previousRow.valid_until || '') !== (input.validUntil || '')) {
+    await trackAnalyticsEvent({
+      ...baseEvent,
+      eventType: 'price_expiration_changed',
+      metadata: { from: previousRow.valid_until, to: input.validUntil || null, title: input.title },
+    });
+  }
+  if (nextVisibleItems > previousVisibleItems) {
+    await trackAnalyticsEvent({
+      ...baseEvent,
+      eventType: 'price_items_added',
+      metadata: {
+        added: nextVisibleItems - previousVisibleItems,
+        from: previousVisibleItems,
+        to: nextVisibleItems,
+        title: input.title,
+      },
+    });
+  }
+  if (nextVisibleItems < previousVisibleItems) {
+    await trackAnalyticsEvent({
+      ...baseEvent,
+      eventType: 'price_items_removed',
+      metadata: {
+        removed: previousVisibleItems - nextVisibleItems,
+        from: previousVisibleItems,
+        to: nextVisibleItems,
+        title: input.title,
+      },
+    });
+  }
 }
 
 export async function deleteWholesalePriceList(id: number, session?: AdminSession | null) {
@@ -810,7 +1126,7 @@ export async function deleteWholesalePriceList(id: number, session?: AdminSessio
 
 export async function recordWholesaleManagerLogin(
   managerId: number,
-  input: { ip?: string | null; userAgent?: string | null },
+  input: { ip?: string | null; userAgent?: string | null; referer?: string | null; actorType?: 'admin' | 'manager' },
 ) {
   await ensureSiteSchema();
   await query(
@@ -818,12 +1134,31 @@ export async function recordWholesaleManagerLogin(
      values ($1, $2, $3)`,
     [managerId, input.ip ?? '', input.userAgent ?? ''],
   );
+  await trackAnalyticsEvent({
+    eventType: 'manager_login',
+    actorType: input.actorType ?? 'manager',
+    actorUserId: managerId,
+    managerId,
+    ip: input.ip,
+    userAgent: input.userAgent,
+    referer: input.referer,
+  });
 }
 
 export async function recordWholesalePriceView(
   priceListId: number,
   token: string,
-  input: { ip?: string | null; userAgent?: string | null; referer?: string | null },
+  input: {
+    ip?: string | null;
+    userAgent?: string | null;
+    referer?: string | null;
+    sessionId?: string | null;
+    actorType?: 'admin' | 'manager' | 'client';
+    actorUserId?: number | null;
+    managerId?: number | null;
+    clientName?: string | null;
+    reopened?: boolean;
+  },
 ) {
   await ensureSiteSchema();
   await query(
@@ -831,6 +1166,22 @@ export async function recordWholesalePriceView(
      values ($1, $2, $3, $4, $5)`,
     [priceListId, token, input.ip ?? '', input.userAgent ?? '', input.referer ?? ''],
   );
+  await trackAnalyticsEvent({
+    eventType: input.reopened ? 'public_price_reopened' : 'public_price_opened',
+    actorType: input.actorType ?? 'client',
+    actorUserId: input.actorUserId,
+    managerId: input.managerId,
+    clientId: clientIdFromName(input.clientName),
+    priceListId,
+    token,
+    sessionId: input.sessionId,
+    ip: input.ip,
+    userAgent: input.userAgent,
+    referer: input.referer,
+    metadata: {
+      clientName: input.clientName ?? '',
+    },
+  });
 }
 
 export async function getWholesaleManagerAnalytics(
@@ -1082,6 +1433,440 @@ export async function getWholesaleManagerAnalytics(
         lastViewAt: row.last_view_at,
       })),
     },
+  };
+}
+
+export async function getWholesaleManagerAnalyticsExtended(
+  managerId: number,
+  period: WholesaleManagerAnalyticsPeriod = '30d',
+): Promise<WholesaleManagerAnalytics | null> {
+  const base = await getWholesaleManagerAnalytics(managerId, period);
+  if (!base) return null;
+
+  const interval = periodSqlInterval(period);
+  const priceStats = await query<{
+    id: string;
+    title: string;
+    client_name: string;
+    token: string;
+    valid_until: string | null;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+    item_count: string;
+    views: string;
+    views_last_7_days: string;
+    views_last_30_days: string;
+    views_period: string;
+    last_view_at: string | null;
+    unique_visitors: string;
+    repeat_views: string;
+    pdf_downloads: string;
+    pdf_last_7_days: string;
+    pdf_last_30_days: string;
+    pdf_period: string;
+    unique_downloaders: string;
+    last_pdf_at: string | null;
+    change_count: string;
+    last_changed_at: string | null;
+    last_changed_by: string | null;
+  }>(
+    `select
+       pl.id::text,
+       coalesce(nullif(pl.title, ''), 'Без названия') as title,
+       pl.client_name,
+       pl.token,
+       pl.valid_until::text,
+       pl.is_active,
+       pl.created_at::text,
+       pl.updated_at::text,
+       coalesce(items.item_count, 0)::text as item_count,
+       coalesce(views.views, 0)::text as views,
+       coalesce(views.views_last_7_days, 0)::text as views_last_7_days,
+       coalesce(views.views_last_30_days, 0)::text as views_last_30_days,
+       coalesce(views.views_period, 0)::text as views_period,
+       views.last_view_at::text,
+       coalesce(view_events.unique_visitors, 0)::text as unique_visitors,
+       coalesce(view_events.repeat_views, 0)::text as repeat_views,
+       coalesce(pdf.pdf_downloads, 0)::text as pdf_downloads,
+       coalesce(pdf.pdf_last_7_days, 0)::text as pdf_last_7_days,
+       coalesce(pdf.pdf_last_30_days, 0)::text as pdf_last_30_days,
+       coalesce(pdf.pdf_period, 0)::text as pdf_period,
+       coalesce(pdf.unique_downloaders, 0)::text as unique_downloaders,
+       pdf.last_pdf_at::text,
+       coalesce(changes.change_count, 0)::text as change_count,
+       changes.last_changed_at::text,
+       changes.last_changed_by
+     from wholesale_price_lists pl
+     left join lateral (
+       select count(*)::integer as item_count
+       from wholesale_price_list_items i
+       where i.price_list_id = pl.id and i.visible = true
+     ) items on true
+     left join lateral (
+       select
+         count(*)::integer as views,
+         count(*) filter (where created_at >= now() - interval '7 days')::integer as views_last_7_days,
+         count(*) filter (where created_at >= now() - interval '30 days')::integer as views_last_30_days,
+         count(*) filter (where ($2::text is null or created_at >= now() - $2::interval))::integer as views_period,
+         max(created_at) as last_view_at
+       from wholesale_price_view_logs v
+       where v.price_list_id = pl.id
+     ) views on true
+     left join lateral (
+       select
+         count(distinct nullif(session_id, ''))::integer as unique_visitors,
+         count(*) filter (where event_type = 'public_price_reopened')::integer as repeat_views
+       from wholesale_analytics_events e
+       where e.price_list_id = pl.id
+         and e.actor_type = 'client'
+         and e.event_type in ('public_price_opened', 'public_price_reopened')
+         and ($2::text is null or e.created_at >= now() - $2::interval)
+     ) view_events on true
+     left join lateral (
+       select
+         count(*)::integer as pdf_downloads,
+         count(*) filter (where created_at >= now() - interval '7 days')::integer as pdf_last_7_days,
+         count(*) filter (where created_at >= now() - interval '30 days')::integer as pdf_last_30_days,
+         count(*) filter (where ($2::text is null or created_at >= now() - $2::interval))::integer as pdf_period,
+         count(distinct nullif(session_id, ''))::integer as unique_downloaders,
+         max(created_at) as last_pdf_at
+       from wholesale_analytics_events e
+       where e.price_list_id = pl.id
+         and e.actor_type = 'client'
+         and e.event_type = 'public_price_pdf_downloaded'
+     ) pdf on true
+     left join lateral (
+       select
+         count(*)::integer as change_count,
+         max(e.created_at) as last_changed_at,
+         (array_agg(coalesce(nullif(e.actor_label, ''), actor.name, e.actor_role) order by e.created_at desc, e.id desc))[1] as last_changed_by
+       from wholesale_price_list_events e
+       left join wholesale_managers actor on actor.id = e.manager_id
+       where e.price_list_id = pl.id
+     ) changes on true
+     where pl.manager_id = $1
+     order by pl.updated_at desc, pl.id desc`,
+    [managerId, interval],
+  );
+
+  const rows = priceStats.rows;
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayTime = today.getTime();
+  const validTime = (value: string | null) => (value ? new Date(`${value}T00:00:00`).getTime() : null);
+  const itemCounts = rows.map((row) => Number(row.item_count)).sort((a, b) => a - b);
+  const medianItemsPerPrice =
+    itemCounts.length === 0
+      ? 0
+      : itemCounts.length % 2
+        ? itemCounts[Math.floor(itemCounts.length / 2)]
+        : (itemCounts[itemCounts.length / 2 - 1] + itemCounts[itemCounts.length / 2]) / 2;
+  const expiredPrices = rows.filter((row) => {
+    const value = validTime(row.valid_until);
+    return value !== null && value < todayTime;
+  }).length;
+  const expiringSoon7Days = rows.filter((row) => {
+    const value = validTime(row.valid_until);
+    return value !== null && value >= todayTime && value <= todayTime + 7 * day;
+  }).length;
+  const expiringSoon30Days = rows.filter((row) => {
+    const value = validTime(row.valid_until);
+    return value !== null && value >= todayTime && value <= todayTime + 30 * day;
+  }).length;
+  const stalePrices30Days = rows.filter((row) => new Date(row.updated_at).getTime() < now - 30 * day).length;
+  const pricesWithoutViews = rows.filter((row) => Number(row.views) === 0).length;
+  const pricesWithoutPdfDownloads = rows.filter((row) => Number(row.pdf_downloads) === 0).length;
+  const extendedProblems = rows
+    .map((row) =>
+      mapProblemPrice({
+        id: row.id,
+        title: row.title,
+        client_name: row.client_name,
+        valid_until: row.valid_until,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        item_count: row.item_count,
+        views: row.views,
+        pdf_downloads: row.pdf_downloads,
+      }),
+    )
+    .filter((price) => price.problems.length > 0);
+
+  const activity = await query<{
+    logins_last_7_days: string;
+    logins_last_30_days: string;
+    logins_period: string;
+    active_days_period: string;
+    actions_last_7_days: string;
+    actions_last_30_days: string;
+    actions_period: string;
+    created_prices: string;
+    updated_prices: string;
+    activated_prices: string;
+    deactivated_prices: string;
+    deleted_prices: string;
+  }>(
+    `select
+       count(*) filter (where event_type = 'manager_login' and created_at >= now() - interval '7 days')::text as logins_last_7_days,
+       count(*) filter (where event_type = 'manager_login' and created_at >= now() - interval '30 days')::text as logins_last_30_days,
+       count(*) filter (where event_type = 'manager_login' and ($2::text is null or created_at >= now() - $2::interval))::text as logins_period,
+       count(distinct created_at::date) filter (where $2::text is null or created_at >= now() - $2::interval)::text as active_days_period,
+       count(*) filter (where event_type <> 'manager_login' and created_at >= now() - interval '7 days')::text as actions_last_7_days,
+       count(*) filter (where event_type <> 'manager_login' and created_at >= now() - interval '30 days')::text as actions_last_30_days,
+       count(*) filter (where event_type <> 'manager_login' and ($2::text is null or created_at >= now() - $2::interval))::text as actions_period,
+       count(*) filter (where event_type = 'price_created')::text as created_prices,
+       count(*) filter (where event_type = 'price_updated')::text as updated_prices,
+       count(*) filter (where event_type = 'price_activated')::text as activated_prices,
+       count(*) filter (where event_type = 'price_deactivated')::text as deactivated_prices,
+       count(*) filter (where event_type = 'price_deleted')::text as deleted_prices
+     from wholesale_analytics_events
+     where manager_id = $1
+       and actor_type in ('admin', 'manager')`,
+    [managerId, interval],
+  );
+
+  const recentEventsResult = await query<AnalyticsEventRow>(
+    `select
+       e.id::text,
+       e.event_type,
+       e.actor_type,
+       e.price_list_id::text as price_id,
+       coalesce(nullif(pl.title, ''), e.metadata->>'title', 'Без названия') as price_title,
+       e.client_id,
+       coalesce(nullif(pl.client_name, ''), e.metadata->>'clientName', '') as client_name,
+       coalesce(m.name, '') as manager_name,
+       e.created_at::text,
+       coalesce(nullif(e.metadata->>'details', ''), e.metadata::text) as details,
+       e.session_id,
+       e.referer
+     from wholesale_analytics_events e
+     left join wholesale_price_lists pl on pl.id = e.price_list_id
+     left join wholesale_managers m on m.id = e.manager_id
+     where e.manager_id = $1
+       and ($2::text is null or e.created_at >= now() - $2::interval)
+     order by e.created_at desc, e.id desc
+     limit 50`,
+    [managerId, interval],
+  );
+  const recentEvents = recentEventsResult.rows.map(mapAnalyticsEvent);
+  const recentViews = recentEvents.filter((event) => ['public_price_opened', 'public_price_reopened'].includes(event.eventType));
+  const recentDownloads = recentEvents.filter((event) => event.eventType === 'public_price_pdf_downloaded');
+  const lastAction = recentEvents.find((event) => event.actorType === 'admin' || event.actorType === 'manager') ?? null;
+
+  const topViewed = [...rows].filter((row) => Number(row.views) > 0).sort((a, b) => Number(b.views) - Number(a.views));
+  const topDownloaded = [...rows]
+    .filter((row) => Number(row.pdf_downloads) > 0)
+    .sort((a, b) => Number(b.pdf_downloads) - Number(a.pdf_downloads));
+  const mostChanged = [...rows].filter((row) => Number(row.change_count) > 0).sort((a, b) => Number(b.change_count) - Number(a.change_count));
+
+  const clientMap = new Map<string, WholesaleManagerAnalyticsClient>();
+  for (const row of rows) {
+    const clientName = row.client_name.trim();
+    if (!clientName) continue;
+    const key = clientName.toLowerCase();
+    const current =
+      clientMap.get(key) ??
+      ({
+        clientId: key,
+        clientName,
+        priceId: Number(row.id),
+        priceTitle: row.title,
+        priceCount: 0,
+        viewsLast24Hours: 0,
+        viewsLast7Days: 0,
+        views: 0,
+        uniqueVisitors: 0,
+        pdfDownloads: 0,
+        lastActivityAt: null,
+        lastPriceCreatedAt: null,
+        status: 'Не открывал',
+      } satisfies WholesaleManagerAnalyticsClient);
+    current.priceCount += 1;
+    current.views += Number(row.views);
+    current.viewsLast7Days += Number(row.views_last_7_days);
+    current.uniqueVisitors += Number(row.unique_visitors);
+    current.pdfDownloads += Number(row.pdf_downloads);
+    const lastActivity = [row.last_view_at, row.last_pdf_at].filter(Boolean).sort().at(-1) ?? null;
+    if (lastActivity && (!current.lastActivityAt || lastActivity > current.lastActivityAt)) {
+      current.lastActivityAt = lastActivity;
+      current.priceId = Number(row.id);
+      current.priceTitle = row.title;
+    }
+    if (!current.lastPriceCreatedAt || row.created_at > current.lastPriceCreatedAt) current.lastPriceCreatedAt = row.created_at;
+    clientMap.set(key, current);
+  }
+
+  const views24 = await query<{ client_id: string; views: string }>(
+    `select coalesce(nullif(e.client_id, ''), lower(pl.client_name)) as client_id, count(*)::text as views
+     from wholesale_analytics_events e
+     left join wholesale_price_lists pl on pl.id = e.price_list_id
+     where e.manager_id = $1
+       and e.actor_type = 'client'
+       and e.event_type in ('public_price_opened', 'public_price_reopened')
+       and e.created_at >= now() - interval '24 hours'
+     group by coalesce(nullif(e.client_id, ''), lower(pl.client_name))`,
+    [managerId],
+  );
+  for (const row of views24.rows) {
+    const client = clientMap.get(row.client_id);
+    if (client) client.viewsLast24Hours = Number(row.views);
+  }
+  const clients = Array.from(clientMap.values()).map((client) => {
+    let status = 'Не открывал';
+    if (client.views > 0) status = 'Смотрел';
+    if (client.pdfDownloads > 0) status = 'Скачал PDF';
+    if (client.viewsLast24Hours >= 2 || client.viewsLast7Days >= 3 || client.pdfDownloads > 0) status = 'Горячий';
+    return { ...client, status };
+  });
+
+  const totalViews = rows.reduce((sum, row) => sum + Number(row.views), 0);
+  const totalPdf = rows.reduce((sum, row) => sum + Number(row.pdf_downloads), 0);
+  const activityRow = activity.rows[0];
+  const quality = qualityScore({
+    emptyPrices: base.summary.emptyPrices,
+    pricesWithoutClient: base.summary.pricesWithoutClient,
+    pricesWithoutExpiration: base.summary.pricesWithoutExpiration,
+    expiredPrices,
+    pricesWithoutViews,
+    stalePrices30Days,
+  });
+
+  return {
+    ...base,
+    summary: {
+      ...base.summary,
+      expiredPrices,
+      expiringSoon7Days,
+      expiringSoon30Days,
+      medianItemsPerPrice: Number(medianItemsPerPrice.toFixed(1)),
+      stalePrices30Days,
+      pricesWithoutViews,
+      qualityScore: quality,
+      disabledPrices: rows.length - rows.filter((row) => row.is_active).length,
+      pricesWithoutPdfDownloads,
+    },
+    managerActivity: {
+      loginsLast7Days: Number(activityRow?.logins_last_7_days ?? 0),
+      loginsLast30Days: Number(activityRow?.logins_last_30_days ?? 0),
+      loginsInSelectedPeriod: Number(activityRow?.logins_period ?? 0),
+      activeDaysInSelectedPeriod: Number(activityRow?.active_days_period ?? 0),
+      actionsLast7Days: Number(activityRow?.actions_last_7_days ?? 0),
+      actionsLast30Days: Number(activityRow?.actions_last_30_days ?? 0),
+      actionsInSelectedPeriod: Number(activityRow?.actions_period ?? 0),
+      lastAction: lastAction ? { eventType: lastAction.eventType, priceTitle: lastAction.priceTitle, clientName: lastAction.clientName, createdAt: lastAction.createdAt } : null,
+      createdPrices: Number(activityRow?.created_prices ?? 0),
+      updatedPrices: Number(activityRow?.updated_prices ?? 0),
+      activatedPrices: Number(activityRow?.activated_prices ?? 0),
+      deactivatedPrices: Number(activityRow?.deactivated_prices ?? 0),
+      deletedPrices: Number(activityRow?.deleted_prices ?? 0),
+    },
+    problemPrices: extendedProblems,
+    publicViews: {
+      ...base.publicViews,
+      total: totalViews,
+      uniqueVisitors: rows.reduce((sum, row) => sum + Number(row.unique_visitors), 0),
+      last7Days: rows.reduce((sum, row) => sum + Number(row.views_last_7_days), 0),
+      last30Days: rows.reduce((sum, row) => sum + Number(row.views_last_30_days), 0),
+      periodViews: rows.reduce((sum, row) => sum + Number(row.views_period), 0),
+      repeatViews: rows.reduce((sum, row) => sum + Number(row.repeat_views), 0),
+      lastViewAt: rows.map((row) => row.last_view_at).filter(Boolean).sort().at(-1) ?? null,
+      pricesWithoutViews,
+      averageViewsPerPrice: rows.length ? Number((totalViews / rows.length).toFixed(1)) : 0,
+      topPrices: topViewed.slice(0, 5).map((row) => ({
+        priceId: Number(row.id),
+        title: row.title,
+        clientName: row.client_name,
+        views: Number(row.views),
+        uniqueVisitors: Number(row.unique_visitors),
+        lastViewAt: row.last_view_at,
+      })),
+      recentViews,
+      pricesWithoutViewsList: extendedProblems.filter((price) => price.problems.includes('NO_VIEWS')),
+    },
+    pdf: {
+      totalDownloads: totalPdf,
+      downloadsLast7Days: rows.reduce((sum, row) => sum + Number(row.pdf_last_7_days), 0),
+      downloadsLast30Days: rows.reduce((sum, row) => sum + Number(row.pdf_last_30_days), 0),
+      downloadsInSelectedPeriod: rows.reduce((sum, row) => sum + Number(row.pdf_period), 0),
+      uniqueDownloaders: rows.reduce((sum, row) => sum + Number(row.unique_downloaders), 0),
+      lastDownloadAt: rows.map((row) => row.last_pdf_at).filter(Boolean).sort().at(-1) ?? null,
+      pricesWithDownloads: rows.filter((row) => Number(row.pdf_downloads) > 0).length,
+      pricesWithoutDownloads: pricesWithoutPdfDownloads,
+      topDownloadedPrices: topDownloaded.slice(0, 5).map((row) => ({
+        priceId: Number(row.id),
+        title: row.title,
+        clientName: row.client_name,
+        downloads: Number(row.pdf_downloads),
+        uniqueDownloaders: Number(row.unique_downloaders),
+        views: Number(row.views),
+        lastDownloadAt: row.last_pdf_at,
+      })),
+      recentDownloads,
+      clientsWithPdfDownloads: clients
+        .filter((client) => client.pdfDownloads > 0 && client.priceId)
+        .slice(0, 10)
+        .map((client) => ({
+          clientId: client.clientId,
+          clientName: client.clientName,
+          priceId: client.priceId ?? 0,
+          priceTitle: client.priceTitle,
+          downloads: client.pdfDownloads,
+          lastDownloadAt: client.lastActivityAt,
+        })),
+    },
+    clients: {
+      totalClients: clients.length,
+      clientsWithPrices: clients.length,
+      clientsWithViews: clients.filter((client) => client.views > 0).length,
+      clientsWithoutViews: clients.filter((client) => client.views === 0).length,
+      clientsWithPdfDownloads: clients.filter((client) => client.pdfDownloads > 0).length,
+      hotClients: clients.filter((client) => client.status === 'Горячий').slice(0, 10),
+      topClientsByViews: [...clients].sort((a, b) => b.views - a.views).slice(0, 10),
+      clientsWithoutRecentActivity: clients.filter((client) => client.views === 0).slice(0, 20),
+    },
+    funnel: {
+      createdPrices: rows.length,
+      activePublicLinks: rows.filter((row) => row.is_active).length,
+      openedPrices: rows.filter((row) => Number(row.views) > 0).length,
+      pricesWithRepeatViews: rows.filter((row) => Number(row.repeat_views) > 0).length,
+      pdfDownloadedPrices: rows.filter((row) => Number(row.pdf_downloads) > 0).length,
+      contactClicks: recentEvents.filter((event) => ['public_price_phone_clicked', 'public_price_email_clicked'].includes(event.eventType)).length,
+    },
+    priceInsights: {
+      expiringSoon: extendedProblems.filter((price) => price.problems.includes('EXPIRING_SOON')),
+      pricesWithoutViews: extendedProblems.filter((price) => price.problems.includes('NO_VIEWS')),
+      topViewedPrices: topViewed.slice(0, 10).map((row) => ({
+        priceId: Number(row.id),
+        title: row.title,
+        clientName: row.client_name,
+        views: Number(row.views),
+        uniqueVisitors: Number(row.unique_visitors),
+        pdfDownloads: Number(row.pdf_downloads),
+        lastViewAt: row.last_view_at,
+      })),
+      mostChangedPrices: mostChanged.slice(0, 10).map((row) => ({
+        priceId: Number(row.id),
+        title: row.title,
+        clientName: row.client_name,
+        changes: Number(row.change_count),
+        lastChangedAt: row.last_changed_at,
+        lastChangedBy: row.last_changed_by || 'Не указано',
+      })),
+      largestPrice: rows.length
+        ? [...rows].sort((a, b) => Number(b.item_count) - Number(a.item_count)).map((row) => ({ id: Number(row.id), title: row.title, itemCount: Number(row.item_count) }))[0]
+        : null,
+      smallestNonEmptyPrice:
+        rows.filter((row) => Number(row.item_count) > 0).length > 0
+          ? [...rows]
+              .filter((row) => Number(row.item_count) > 0)
+              .sort((a, b) => Number(a.item_count) - Number(b.item_count))
+              .map((row) => ({ id: Number(row.id), title: row.title, itemCount: Number(row.item_count) }))[0]
+          : null,
+    },
+    recentEvents,
   };
 }
 

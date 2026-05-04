@@ -28,6 +28,7 @@ export type PublicWholesalePriceList = {
   title: string;
   token: string;
   clientName: string;
+  managerId: number | null;
   validUntil: string | null;
   showRetailPrices: boolean;
   categories: PublicWholesaleCategory[];
@@ -38,6 +39,7 @@ type PriceListRow = {
   title: string;
   token: string;
   client_name: string;
+  manager_id: string | null;
   valid_until: string | null;
   show_retail_prices: boolean;
 };
@@ -60,7 +62,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
   await ensureSiteSchema();
 
   const priceList = await query<PriceListRow>(
-    `select id::text, title, token, client_name, valid_until::text, show_retail_prices
+    `select id::text, title, token, client_name, manager_id::text, valid_until::text, show_retail_prices
      from wholesale_price_lists
      where token = $1 and is_active = true
      limit 1`,
@@ -149,6 +151,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
     title: priceListRow.title,
     token: priceListRow.token,
     clientName: priceListRow.client_name,
+    managerId: priceListRow.manager_id ? Number(priceListRow.manager_id) : null,
     validUntil: priceListRow.valid_until,
     showRetailPrices: priceListRow.show_retail_prices,
     categories: Array.from(categoriesById.values()),

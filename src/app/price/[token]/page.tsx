@@ -1,8 +1,8 @@
-import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 
-import { getPublicWholesalePriceList, recordWholesalePriceView } from '@/shared/lib/db';
+import { getPublicWholesalePriceList } from '@/shared/lib/db';
 
+import { PriceAnalyticsTracker } from './PriceAnalyticsTracker';
 import styles from './PricePage.module.scss';
 
 type PricePageProps = {
@@ -16,11 +16,6 @@ function formatPrice(value: string | null) {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(number);
 }
 
-function getHeaderIp(headersList: Headers) {
-  const forwardedFor = headersList.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return forwardedFor || headersList.get('x-real-ip') || 'unknown';
-}
-
 export const dynamic = 'force-dynamic';
 
 export default async function PricePage({ params }: PricePageProps) {
@@ -29,23 +24,20 @@ export default async function PricePage({ params }: PricePageProps) {
 
   if (!priceList) notFound();
 
-  const headersList = await headers();
-  await recordWholesalePriceView(priceList.id, priceList.token, {
-    ip: getHeaderIp(headersList),
-    userAgent: headersList.get('user-agent'),
-    referer: headersList.get('referer'),
-  }).catch((error) => {
-    console.error('Failed to record wholesale price view', error);
-  });
-
   return (
     <main className={styles.page}>
+      <PriceAnalyticsTracker token={priceList.token} />
       <div className={styles.shell}>
         <section className={styles.hero}>
-          <p>Индивидуальный прайс</p>
-          <h1>{priceList.title}</h1>
-          {priceList.clientName ? <p>Клиент: {priceList.clientName}</p> : null}
-          {priceList.validUntil ? <p>Действует до: {priceList.validUntil}</p> : null}
+          <div>
+            <p>Индивидуальный прайс</p>
+            <h1>{priceList.title}</h1>
+            {priceList.clientName ? <p>Клиент: {priceList.clientName}</p> : null}
+            {priceList.validUntil ? <p>Действует до: {priceList.validUntil}</p> : null}
+          </div>
+          <a className={styles.pdfButton} href={`/api/price/${priceList.token}/pdf`}>
+            Скачать PDF
+          </a>
         </section>
 
         {priceList.categories.length === 0 ? (

@@ -433,13 +433,14 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     }
   };
 
-  const copyLink = async (token: string) => {
-    const url = `${window.location.origin}/price/${token}`;
+  const copyLink = async (item: PriceList) => {
+    const url = `${window.location.origin}/price/${item.token}`;
     await navigator.clipboard.writeText(url);
-    setCopiedToken(token);
+    void fetch(`/api/admin/wholesale/price-lists/${item.id}/copy-link`, { method: 'POST' });
+    setCopiedToken(item.token);
     showStatus('Ссылка скопирована');
     window.setTimeout(() => {
-      setCopiedToken((current) => (current === token ? null : current));
+      setCopiedToken((current) => (current === item.token ? null : current));
     }, 2200);
   };
 
@@ -597,7 +598,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                     <button
                       className={`${styles.secondary} ${copiedToken === item.token ? styles.savedButton : ''}`}
                       type="button"
-                      onClick={() => copyLink(item.token)}
+                      onClick={() => copyLink(item)}
                     >
                       {copiedToken === item.token ? 'Скопировано' : 'Скопировать'}
                     </button>
@@ -662,7 +663,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                     <button
                       className={`${styles.secondary} ${copiedToken === item.token ? styles.savedButton : ''}`}
                       type="button"
-                      onClick={() => copyLink(item.token)}
+                      onClick={() => copyLink(item)}
                     >
                       {copiedToken === item.token ? 'Скопировано' : 'Скопировать'}
                     </button>

@@ -1,5 +1,7 @@
 export { query } from './db/client';
 export { ensureSiteSchema } from './db/schema';
+export { trackAnalyticsEvent } from './db/analyticsRepo';
+export type { AnalyticsActorType, AnalyticsEventType, TrackAnalyticsEventInput } from './db/analyticsRepo';
 export { getAdminUserByLogin } from './db/adminUsersRepo';
 export type { AdminUserAuth } from './db/adminUsersRepo';
 export { getPhoneSetting, getSiteSettings, updatePhoneSetting, updateSiteSettings } from './db/settingsRepo';
@@ -31,6 +33,7 @@ export {
   getWholesaleManagerById,
   getWholesaleManagerByLogin,
   getWholesaleManagerAnalytics,
+  getWholesaleManagerAnalyticsExtended,
   getWholesaleManagers,
   getWholesalePriceListEditor,
   getWholesalePriceLists,
