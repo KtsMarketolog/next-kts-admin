@@ -487,69 +487,72 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         </div>
 
         <h3>Менеджеры и статистика</h3>
-        <div className={styles.tableWrap}>
-          <table className={styles.adminTable}>
-            <thead>
-              <tr>
-                <th>Имя</th>
-                <th>Логин</th>
-                <th>Email</th>
-                <th>Телефон</th>
-                <th>Новый пароль</th>
-                <th>Прайсов</th>
-                <th>Активен</th>
-                <th>Аналитика</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {managers.map((manager) => (
-                <tr key={manager.id}>
-                  <td><input value={manager.name} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, name: event.target.value } : item))} /></td>
-                  <td><input value={manager.login} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, login: event.target.value } : item))} /></td>
-                  <td><input value={manager.email} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, email: event.target.value } : item))} /></td>
-                  <td><input value={manager.phone} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, phone: event.target.value } : item))} /></td>
-                  <td><input type="password" value={manager.password ?? ''} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, password: event.target.value } : item))} placeholder="Не менять" /></td>
-                  <td className={styles.countCell}>
-                    <button
-                      className={styles.textButton}
-                      type="button"
-                      onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}`)}
-                    >
-                      {manager.priceListCount}
-                    </button>
-                  </td>
-                  <td><input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} /></td>
-                  <td>
-                    <button
-                      className={styles.secondary}
-                      type="button"
-                      onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}/analytics`)}
-                    >
-                      Аналитика
-                    </button>
-                  </td>
-                  <td className={styles.tableActions}>
-                    <button
-                      className={styles.secondary}
-                      type="button"
-                      onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}`)}
-                    >
-                      Прайсы
-                    </button>
-                    <button
-                      className={savedManagerId === manager.id ? styles.savedButton : undefined}
-                      disabled={busy}
-                      onClick={() => saveManager(manager)}
-                    >
-                      {savedManagerId === manager.id ? 'Сохранено' : 'Сохранить'}
-                    </button>
-                    <button className={styles.danger} disabled={busy} onClick={() => deleteManager(manager.id)}>Удалить</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className={styles.managerCards}>
+          {managers.map((manager) => (
+            <article className={styles.managerCard} key={manager.id}>
+              <div className={styles.managerFields}>
+                <label>
+                  <span>Имя</span>
+                  <input value={manager.name} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, name: event.target.value } : item))} />
+                </label>
+                <label>
+                  <span>Логин</span>
+                  <input value={manager.login} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, login: event.target.value } : item))} />
+                </label>
+                <label>
+                  <span>Email</span>
+                  <input value={manager.email} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, email: event.target.value } : item))} />
+                </label>
+                <label>
+                  <span>Телефон</span>
+                  <input value={manager.phone} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, phone: event.target.value } : item))} />
+                </label>
+                <label>
+                  <span>Новый пароль</span>
+                  <input type="password" value={manager.password ?? ''} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, password: event.target.value } : item))} placeholder="Не менять" />
+                </label>
+              </div>
+              <div className={styles.managerControls}>
+                <button
+                  className={styles.managerMetric}
+                  type="button"
+                  onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}`)}
+                >
+                  <span>Прайсов</span>
+                  <strong>{manager.priceListCount}</strong>
+                </button>
+                <label className={styles.managerActive}>
+                  <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
+                  <span>Активен</span>
+                </label>
+                <div className={styles.managerActions}>
+                  <button
+                    className={styles.secondary}
+                    type="button"
+                    onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}/analytics`)}
+                  >
+                    Аналитика
+                  </button>
+                  <button
+                    className={styles.secondary}
+                    type="button"
+                    onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}`)}
+                  >
+                    Прайсы
+                  </button>
+                  <button
+                    className={savedManagerId === manager.id ? styles.savedButton : undefined}
+                    disabled={busy}
+                    onClick={() => saveManager(manager)}
+                  >
+                    {savedManagerId === manager.id ? 'Сохранено' : 'Сохранить'}
+                  </button>
+                  <button className={styles.danger} disabled={busy} onClick={() => deleteManager(manager.id)}>Удалить</button>
+                </div>
+              </div>
+            </article>
+          ))}
+          {managers.length === 0 ? <p className={styles.mutedText}>Менеджеров пока нет</p> : null}
         </div>
       </section>
     );

@@ -289,6 +289,116 @@
   cursor: pointer;
 }
 
+.managerCards {
+  display: grid;
+  gap: $apx-12;
+}
+
+.managerCard {
+  display: grid;
+  gap: $apx-12;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+}
+
+.managerFields {
+  display: grid;
+  grid-template-columns:
+    minmax($apx-160, 1.1fr)
+    minmax($apx-130, 0.8fr)
+    minmax($apx-190, 1.1fr)
+    minmax($apx-170, 0.95fr)
+    minmax($apx-160, 0.9fr);
+  gap: $apx-10;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  input {
+    width: 100%;
+  }
+}
+
+.managerControls {
+  display: grid;
+  grid-template-columns: minmax($apx-120, max-content) minmax($apx-120, max-content) minmax(0, 1fr);
+  gap: $apx-10;
+  align-items: center;
+  padding-top: $apx-10;
+  border-top: $apx-1 solid #edf0f6;
+}
+
+.managerMetric {
+  min-height: $apx-42 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: $apx-10;
+  width: fit-content;
+  border: $apx-1 solid #e1e3ee !important;
+  background: #f6f7fb !important;
+  color: #242633 !important;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #260b86;
+    font-size: $apx-18;
+    line-height: 1;
+  }
+}
+
+.managerActive {
+  display: inline-flex;
+  align-items: center;
+  gap: $apx-8;
+  width: fit-content;
+  min-height: $apx-42;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-8;
+  background: #f6f7fb;
+  padding: 0 $apx-12;
+  color: #242633;
+  font-weight: 700;
+
+  input[type="checkbox"] {
+    flex: 0 0 $apx-18;
+    width: $apx-18;
+    height: $apx-18;
+    min-width: $apx-18;
+    min-height: $apx-18 !important;
+    padding: 0;
+    border-radius: $apx-3;
+    accent-color: #260b86;
+  }
+}
+
+.managerActions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: $apx-8;
+
+  button {
+    min-width: $apx-108;
+  }
+}
+
 .wholesaleEditorGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -336,6 +446,43 @@
 .mutedText {
   color: #6f7182;
   margin: $apx-18 0;
+}
+
+@media (max-width: 1180px) {
+  .managerFields {
+    grid-template-columns: repeat(2, minmax($apx-180, 1fr));
+  }
+
+  .managerControls {
+    grid-template-columns: repeat(2, max-content);
+  }
+
+  .managerActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .managerFields,
+  .managerControls {
+    grid-template-columns: 1fr;
+  }
+
+  .managerMetric,
+  .managerActive {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .managerActions {
+    display: grid;
+    grid-template-columns: 1fr;
+
+    button {
+      width: 100%;
+    }
+  }
 }
 
 .priceCategory {
