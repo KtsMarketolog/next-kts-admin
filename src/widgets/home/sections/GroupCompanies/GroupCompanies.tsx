@@ -19,7 +19,7 @@ export const GroupCompanies = async () => {
     <section className={styles.groupCompanies}>
       <Container>
         <h2>
-          Входит в группу компаний23<br />
+          Входит в группу компаний<br />
           <span>РОСХОЛОД</span>
         </h2>
 
