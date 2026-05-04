@@ -27,6 +27,8 @@
 catalog-import.sql
 kts-catalog-deploy.tar.gz
 strapi-export.tar.gz
+.cache/
+backups/
 
 # debug
 npm-debug.log*

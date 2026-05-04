@@ -3,6 +3,7 @@ import PDFDocument from 'pdfkit';
 
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { getPublicWholesalePriceList, trackAnalyticsEvent } from '@/shared/lib/db';
+import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { readPricePdfCache, writePricePdfCache } from '@/shared/lib/pricePdfCache';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
@@ -181,6 +182,24 @@ export async function GET(request: Request, context: Context) {
       clientName: priceList.clientName,
     },
   });
+  if (actorType !== 'client') {
+    await recordSecurityEvent({
+      eventType: 'admin_pdf_downloaded',
+      actorType: actorType === 'manager' ? 'manager' : adminSession?.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+      adminUserId: adminSession?.adminUserId,
+      managerId: actorType === 'manager' ? adminSession?.managerId : priceList.managerId,
+      sessionId: adminSession?.sessionId,
+      entityType: 'wholesale_price_list',
+      entityId: priceList.id,
+      ip: getHeaderIp(request.headers),
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      metadata: {
+        title: priceList.title,
+        clientName: priceList.clientName,
+      },
+    });
+  }
 
   const headers = new Headers({
     'Content-Type': 'application/pdf',

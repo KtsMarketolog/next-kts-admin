@@ -32,6 +32,9 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
   const [mode, setMode] = useState<LoginMode>(defaultMode);
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [twoFactorChallengeId, setTwoFactorChallengeId] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorEmail, setTwoFactorEmail] = useState('');
   const [priceToken, setPriceToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
@@ -43,14 +46,28 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
     const res = await fetch('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ login, password }),
+      body: JSON.stringify(twoFactorChallengeId ? { twoFactorChallengeId, twoFactorCode } : { login, password }),
     });
 
     const data = await res.json().catch(() => ({}));
     setBusy(false);
 
+    if (data.twoFactorRequired && data.challengeId) {
+      setTwoFactorChallengeId(data.challengeId);
+      setTwoFactorEmail(typeof data.email === 'string' ? data.email : '');
+      setPassword('');
+      setStatus(data.email ? `Код отправлен на ${data.email}` : 'Введите код подтверждения');
+      return;
+    }
+
     if (!res.ok) {
-      setStatus(res.status === 429 ? 'Слишком много попыток. Попробуйте позже.' : 'Неверный логин или пароль');
+      setStatus(
+        res.status === 429
+          ? 'Слишком много попыток. Попробуйте позже.'
+          : twoFactorChallengeId
+            ? 'Неверный код подтверждения'
+            : 'Неверный логин или пароль',
+      );
       return;
     }
 
@@ -109,6 +126,9 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
               onClick={() => {
                 setMode('client');
                 setStatus('');
+                setTwoFactorChallengeId('');
+                setTwoFactorCode('');
+                setTwoFactorEmail('');
               }}
             >
               Клиент
@@ -119,6 +139,9 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
               onClick={() => {
                 setMode('employee');
                 setStatus('');
+                setTwoFactorChallengeId('');
+                setTwoFactorCode('');
+                setTwoFactorEmail('');
               }}
             >
               Сотрудник
@@ -134,6 +157,32 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
                 placeholder="Например, https://t-kts.ru/price/..."
               />
             </label>
+          ) : twoFactorChallengeId ? (
+            <>
+              <label className={styles.field}>
+                <span>Код подтверждения</span>
+                <input
+                  value={twoFactorCode}
+                  onChange={(event) => setTwoFactorCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="6 цифр"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                />
+              </label>
+              {twoFactorEmail ? <p className={styles.status}>Код отправлен на {twoFactorEmail}</p> : null}
+              <button
+                type="button"
+                className={styles.tab}
+                onClick={() => {
+                  setTwoFactorChallengeId('');
+                  setTwoFactorCode('');
+                  setTwoFactorEmail('');
+                  setStatus('');
+                }}
+              >
+                Ввести пароль заново
+              </button>
+            </>
           ) : (
             <>
               <label className={styles.field}>

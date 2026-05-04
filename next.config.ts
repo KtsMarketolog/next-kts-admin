@@ -17,6 +17,10 @@ const nextConfig: NextConfig = {
     ],
   },
   headers: async () => {
+    const scriptSrc =
+      process.env.NODE_ENV === "production"
+        ? "script-src 'self' 'unsafe-inline'"
+        : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
     const securityHeaders = [
       { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
       { key: "X-Content-Type-Options", value: "nosniff" },
@@ -32,9 +36,13 @@ const nextConfig: NextConfig = {
           "object-src 'none'",
           "img-src 'self' data: blob: https://api.kts-impex.ru http://api.kts-impex.ru",
           "font-src 'self' data:",
+          "media-src 'self' data: blob:",
           "style-src 'self' 'unsafe-inline'",
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+          scriptSrc,
           "connect-src 'self' https://api.kts-impex.ru http://api.kts-impex.ru",
+          "frame-src 'self'",
+          "worker-src 'self' blob:",
+          "manifest-src 'self'",
           "form-action 'self'",
         ].join("; "),
       },

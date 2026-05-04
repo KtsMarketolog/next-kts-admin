@@ -1,31 +1,46 @@
 import { cookies } from 'next/headers';
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 
+import { getAdminSessionSecret } from './authSecret';
+import { createStoredAdminSession, getStoredAdminSession, revokeStoredAdminSession } from './db/adminSessionsRepo';
+
 const COOKIE_NAME = 'kts_admin_session';
 const PASSWORD_KEYLEN = 64;
 
 export type AdminSession = {
   role: 'admin' | 'wholesale_admin' | 'manager';
+  adminUserId?: number;
   managerId?: number;
+  sessionId?: string;
 };
 
-function secret() {
-  return process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_PASSWORD || 'dev-secret';
-}
+type CreateSessionOptions = {
+  adminUserId?: number | null;
+  ip?: string | null;
+  userAgent?: string | null;
+};
 
 function sign(value: string) {
-  return createHmac('sha256', secret()).update(value).digest('hex');
+  return createHmac('sha256', getAdminSessionSecret()).update(value).digest('hex');
 }
 
-export async function createAdminSession(role: 'admin' | 'wholesale_admin' = 'admin') {
-  return createEmployeeSession({ role });
+export async function createAdminSession(
+  role: 'admin' | 'wholesale_admin' = 'admin',
+  options: CreateSessionOptions = {},
+) {
+  return createEmployeeSession({ role, adminUserId: options.adminUserId ?? undefined }, options);
 }
 
-export async function createEmployeeSession(session: AdminSession) {
-  const value = `${Date.now()}:${session.role}:${session.managerId ?? ''}`;
-  const token = `${value}.${sign(value)}`;
+export async function createEmployeeSession(session: AdminSession, options: CreateSessionOptions = {}) {
+  const storedSession = await createStoredAdminSession({
+    role: session.role,
+    adminUserId: session.adminUserId ?? options.adminUserId ?? null,
+    managerId: session.managerId ?? null,
+    ip: options.ip,
+    userAgent: options.userAgent,
+  });
   const jar = await cookies();
-  jar.set(COOKIE_NAME, token, {
+  jar.set(COOKIE_NAME, storedSession.token, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.ADMIN_COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
@@ -36,6 +51,12 @@ export async function createEmployeeSession(session: AdminSession) {
 
 export async function clearAdminSession() {
   const jar = await cookies();
+  const token = jar.get(COOKIE_NAME)?.value;
+  if (token) {
+    await revokeStoredAdminSession(token).catch((error) => {
+      console.error('Failed to revoke admin session', error);
+    });
+  }
   jar.delete(COOKIE_NAME);
 }
 
@@ -49,6 +70,21 @@ export async function getAdminSession(): Promise<AdminSession | null> {
   const token = jar.get(COOKIE_NAME)?.value;
   if (!token) return null;
 
+  try {
+    const storedSession = await getStoredAdminSession(token);
+    if (storedSession) {
+      return {
+        role: storedSession.role,
+        adminUserId: storedSession.adminUserId,
+        managerId: storedSession.managerId,
+        sessionId: storedSession.sessionId,
+      };
+    }
+  } catch (error) {
+    console.error('Failed to read stored admin session', error);
+  }
+
+  // Backward-compatible read for old signed cookies. New logins use admin_sessions.
   const [value, mac] = token.split('.');
   if (!value || !mac) return null;
 

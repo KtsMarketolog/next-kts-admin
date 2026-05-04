@@ -138,6 +138,74 @@
   color: #6f7182;
 }
 
+.requestForm {
+  display: grid;
+  gap: $apx-18;
+}
+
+.quantityInput {
+  width: $apx-82;
+  min-height: $apx-38;
+  border: $apx-1 solid #d9dbe8;
+  border-radius: $apx-8;
+  padding: 0 $apx-10;
+  font: inherit;
+  color: #242633;
+  background: #fff;
+}
+
+.requestBar {
+  position: sticky;
+  bottom: $apx-16;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $apx-16;
+  background: #fff;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-12;
+  box-shadow: 0 $apx-12 $apx-28 rgba(21, 24, 42, 0.12);
+  padding: $apx-16 $apx-18;
+
+  div {
+    display: grid;
+    gap: $apx-4;
+  }
+
+  strong {
+    font-size: $apx-15;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+  }
+}
+
+.requestButton {
+  min-height: $apx-44;
+  border: 0;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-18;
+  font-size: $apx-14;
+  font-weight: 800;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+}
+
+.requestStatus {
+  margin: 0;
+  color: #260b86;
+  font-weight: 700;
+}
+
 @media (max-width: 800px) {
   .page {
     padding: $apx-m-120 $apx-m-16 $apx-m-50;
@@ -165,6 +233,12 @@
     width: 100%;
   }
 
+  .prices {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
   .product {
     grid-template-columns: 1fr;
     gap: $apx-m-14;
@@ -174,5 +248,28 @@
 
   .imageBox img {
     height: $apx-m-160;
+  }
+
+  .quantityInput {
+    width: $apx-m-78;
+    min-height: $apx-m-38;
+    border-radius: $apx-m-8;
+  }
+
+  .requestForm {
+    gap: $apx-m-14;
+  }
+
+  .requestBar {
+    position: static;
+    display: grid;
+    gap: $apx-m-12;
+    border-radius: $apx-m-12;
+    padding: $apx-m-14;
+  }
+
+  .requestButton {
+    width: 100%;
+    min-height: $apx-m-44;
   }
 }

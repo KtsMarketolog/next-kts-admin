@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "cleanup": "node scripts/cleanup-maintenance.mjs"
   },
   "dependencies": {
     "@types/pdfkit": "^0.17.6",

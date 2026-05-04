@@ -6,6 +6,8 @@ import {
 } from '@/shared/lib/db';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
+import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
+import { getClientIp } from '@/shared/lib/rateLimit';
 import {
   isTokenUnchanged,
   isValidNewPublicPriceToken,
@@ -13,6 +15,7 @@ import {
   normalizePublicPriceToken,
   normalizeTextField,
   normalizeWholesalePrice,
+  shortToken,
 } from '@/shared/lib/wholesaleSecurity';
 
 type Context = {
@@ -99,10 +102,30 @@ export async function PUT(request: Request, context: Context) {
     session,
   );
 
+  if (!isTokenUnchanged(existing.token, nextToken)) {
+    await recordSecurityEvent({
+      eventType: 'price_token_changed',
+      actorType: session.role === 'manager' ? 'manager' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+      adminUserId: session.adminUserId,
+      managerId: session.role === 'manager' ? session.managerId : undefined,
+      sessionId: session.sessionId,
+      entityType: 'wholesale_price_list',
+      entityId: numericId,
+      ip: getClientIp(request),
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      metadata: {
+        oldToken: shortToken(existing.token),
+        newToken: shortToken(nextToken),
+        title,
+      },
+    });
+  }
+
   return Response.json({ ok: true });
 }
 
-export async function DELETE(_request: Request, context: Context) {
+export async function DELETE(request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
 
@@ -111,5 +134,17 @@ export async function DELETE(_request: Request, context: Context) {
   if (!Number.isInteger(numericId)) return Response.json({ error: 'Invalid id' }, { status: 400 });
 
   await deleteWholesalePriceList(numericId, session);
+  await recordSecurityEvent({
+    eventType: 'price_deleted',
+    actorType: session.role === 'manager' ? 'manager' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+    adminUserId: session.adminUserId,
+    managerId: session.role === 'manager' ? session.managerId : undefined,
+    sessionId: session.sessionId,
+    entityType: 'wholesale_price_list',
+    entityId: numericId,
+    ip: getClientIp(request),
+    userAgent: request.headers.get('user-agent'),
+    referer: request.headers.get('referer'),
+  });
   return Response.json({ ok: true });
 }

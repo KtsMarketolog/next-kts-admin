@@ -3,18 +3,12 @@ import { notFound } from 'next/navigation';
 import { getPublicWholesalePriceList } from '@/shared/lib/db';
 
 import { PriceAnalyticsTracker } from './PriceAnalyticsTracker';
+import { PriceRequestForm } from './PriceRequestForm';
 import styles from './PricePage.module.scss';
 
 type PricePageProps = {
   params: Promise<{ token: string }>;
 };
-
-function formatPrice(value: string | null) {
-  if (!value) return '—';
-  const number = Number(value);
-  if (!Number.isFinite(number)) return value;
-  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(number);
-}
 
 export const dynamic = 'force-dynamic';
 
@@ -45,43 +39,11 @@ export default async function PricePage({ params }: PricePageProps) {
             <p className={styles.empty}>В прайс пока не добавлены товары.</p>
           </section>
         ) : (
-          priceList.categories.map((category) => (
-            <section className={styles.category} key={category.id}>
-              <h2>{category.title}</h2>
-              <div className={styles.products}>
-                {category.products.map((product) => (
-                  <article className={styles.product} key={product.id}>
-                    <div className={styles.imageBox}>
-                      {product.imageUrl ? <img src={product.imageUrl} alt="" /> : <span>Нет фото</span>}
-                    </div>
-                    <div className={styles.productInfo}>
-                      <h3>{product.title}</h3>
-                      {product.sku ? <p>Артикул: {product.sku}</p> : null}
-                      {product.description ? <p>{product.description}</p> : null}
-                    </div>
-                    <table className={styles.prices}>
-                      <thead>
-                        <tr>
-                          <th>Размер</th>
-                          {priceList.showRetailPrices ? <th>Розница</th> : null}
-                          <th>Опт</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {product.variants.map((variant, index) => (
-                          <tr key={`${variant.id ?? 'base'}-${index}`}>
-                            <td>{variant.title}</td>
-                            {priceList.showRetailPrices ? <td>{formatPrice(variant.retailPrice)}</td> : null}
-                            <td>{formatPrice(variant.wholesalePrice)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ))
+          <PriceRequestForm
+            token={priceList.token}
+            showRetailPrices={priceList.showRetailPrices}
+            categories={priceList.categories}
+          />
         )}
       </div>
     </main>

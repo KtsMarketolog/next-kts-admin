@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 
+import { getAdminSessionSecret } from './authSecret';
 import { query } from './db/client';
 import { ensureSiteSchema } from './db/schema';
 
@@ -76,7 +77,7 @@ export function resetRateLimit(key: string) {
 }
 
 function rateLimitSecret() {
-  return process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_PASSWORD || 'kts-rate-limit';
+  return getAdminSessionSecret();
 }
 
 function hashRateLimitKey(key: string) {

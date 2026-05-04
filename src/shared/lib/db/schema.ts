@@ -17,9 +17,11 @@ export async function ensureSiteSchema() {
     create table if not exists admin_users (
       id bigserial primary key,
       login text not null unique,
+      email text not null default '',
       password_hash text not null default '',
       role text not null default 'admin',
       is_active boolean not null default true,
+      password_changed_at timestamptz,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
@@ -139,6 +141,7 @@ export async function ensureSiteSchema() {
       email text not null default '',
       password_hash text not null default '',
       is_active boolean not null default true,
+      password_changed_at timestamptz,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
@@ -223,6 +226,52 @@ export async function ensureSiteSchema() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists admin_sessions (
+      id uuid primary key,
+      session_hash text not null unique,
+      role text not null,
+      admin_user_id bigint references admin_users(id) on delete cascade,
+      manager_id bigint references wholesale_managers(id) on delete cascade,
+      ip_hash text not null default '',
+      user_agent text not null default '',
+      created_at timestamptz not null default now(),
+      last_seen_at timestamptz not null default now(),
+      expires_at timestamptz not null,
+      revoked_at timestamptz
+    );
+
+    create table if not exists admin_2fa_challenges (
+      id uuid primary key,
+      login text not null default '',
+      actor_type text not null default 'admin',
+      role text not null default 'admin',
+      admin_user_id bigint references admin_users(id) on delete cascade,
+      manager_id bigint references wholesale_managers(id) on delete cascade,
+      code_hash text not null,
+      login_session_id text not null default '',
+      attempts integer not null default 0,
+      expires_at timestamptz not null,
+      consumed_at timestamptz,
+      created_at timestamptz not null default now()
+    );
+
+    create table if not exists security_audit_events (
+      id bigserial primary key,
+      event_type text not null,
+      actor_type text not null default 'system',
+      admin_user_id bigint references admin_users(id) on delete set null,
+      manager_id bigint references wholesale_managers(id) on delete set null,
+      session_id text not null default '',
+      login text not null default '',
+      entity_type text not null default '',
+      entity_id text not null default '',
+      ip_hash text not null default '',
+      user_agent text not null default '',
+      referer text not null default '',
+      metadata jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    );
+
     create table if not exists rate_limit_buckets (
       key text primary key,
       count integer not null default 0,
@@ -232,8 +281,11 @@ export async function ensureSiteSchema() {
 
     alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_lists add column if not exists comment text not null default '';
+    alter table admin_users add column if not exists email text not null default '';
     alter table admin_users add column if not exists role text not null default 'admin';
+    alter table admin_users add column if not exists password_changed_at timestamptz;
     alter table wholesale_managers add column if not exists password_hash text not null default '';
+    alter table wholesale_managers add column if not exists password_changed_at timestamptz;
     alter table wholesale_price_list_events add column if not exists actor_role text not null default '';
     alter table wholesale_price_list_events add column if not exists actor_label text not null default '';
     alter table wholesale_price_list_events add column if not exists owner_manager_id bigint references wholesale_managers(id) on delete set null;
@@ -288,6 +340,19 @@ export async function ensureSiteSchema() {
     create index if not exists wholesale_analytics_events_actor_idx on wholesale_analytics_events(actor_type, created_at desc);
     create index if not exists wholesale_analytics_events_session_idx on wholesale_analytics_events(session_id, created_at desc);
     create index if not exists wholesale_analytics_events_token_idx on wholesale_analytics_events(token, created_at desc);
+    create index if not exists admin_sessions_admin_user_idx on admin_sessions(admin_user_id, created_at desc);
+    create index if not exists admin_sessions_manager_idx on admin_sessions(manager_id, created_at desc);
+    create index if not exists admin_sessions_expires_idx on admin_sessions(expires_at);
+    create index if not exists admin_sessions_revoked_idx on admin_sessions(revoked_at);
+    create index if not exists admin_2fa_challenges_login_idx on admin_2fa_challenges(login, created_at desc);
+    create index if not exists admin_2fa_challenges_session_idx on admin_2fa_challenges(login_session_id, created_at desc);
+    create index if not exists admin_2fa_challenges_expires_idx on admin_2fa_challenges(expires_at);
+    create index if not exists security_audit_events_type_idx on security_audit_events(event_type, created_at desc);
+    create index if not exists security_audit_events_actor_idx on security_audit_events(actor_type, created_at desc);
+    create index if not exists security_audit_events_admin_user_idx on security_audit_events(admin_user_id, created_at desc);
+    create index if not exists security_audit_events_manager_idx on security_audit_events(manager_id, created_at desc);
+    create index if not exists security_audit_events_session_idx on security_audit_events(session_id, created_at desc);
+    create index if not exists security_audit_events_entity_idx on security_audit_events(entity_type, entity_id, created_at desc);
     create index if not exists rate_limit_buckets_reset_idx on rate_limit_buckets(reset_at);
   `);
 
@@ -300,8 +365,11 @@ export async function ensureSiteSchema() {
   await query(`alter table hero_slides add column if not exists popup_text text`);
   await query(`alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_lists add column if not exists comment text not null default ''`);
+  await query(`alter table admin_users add column if not exists email text not null default ''`);
   await query(`alter table admin_users add column if not exists role text not null default 'admin'`);
+  await query(`alter table admin_users add column if not exists password_changed_at timestamptz`);
   await query(`alter table wholesale_managers add column if not exists password_hash text not null default ''`);
+  await query(`alter table wholesale_managers add column if not exists password_changed_at timestamptz`);
   await query(`alter table wholesale_price_list_events add column if not exists actor_role text not null default ''`);
   await query(`alter table wholesale_price_list_events add column if not exists actor_label text not null default ''`);
   await query(`alter table wholesale_price_list_events add column if not exists owner_manager_id bigint references wholesale_managers(id) on delete set null`);
@@ -314,6 +382,62 @@ export async function ensureSiteSchema() {
   await query(`create index if not exists wholesale_analytics_events_actor_idx on wholesale_analytics_events(actor_type, created_at desc)`);
   await query(`create index if not exists wholesale_analytics_events_session_idx on wholesale_analytics_events(session_id, created_at desc)`);
   await query(`create index if not exists wholesale_analytics_events_token_idx on wholesale_analytics_events(token, created_at desc)`);
+  await query(`create table if not exists admin_sessions (
+    id uuid primary key,
+    session_hash text not null unique,
+    role text not null,
+    admin_user_id bigint references admin_users(id) on delete cascade,
+    manager_id bigint references wholesale_managers(id) on delete cascade,
+    ip_hash text not null default '',
+    user_agent text not null default '',
+    created_at timestamptz not null default now(),
+    last_seen_at timestamptz not null default now(),
+    expires_at timestamptz not null,
+    revoked_at timestamptz
+  )`);
+  await query(`create index if not exists admin_sessions_admin_user_idx on admin_sessions(admin_user_id, created_at desc)`);
+  await query(`create index if not exists admin_sessions_manager_idx on admin_sessions(manager_id, created_at desc)`);
+  await query(`create index if not exists admin_sessions_expires_idx on admin_sessions(expires_at)`);
+  await query(`create index if not exists admin_sessions_revoked_idx on admin_sessions(revoked_at)`);
+  await query(`create table if not exists admin_2fa_challenges (
+    id uuid primary key,
+    login text not null default '',
+    actor_type text not null default 'admin',
+    role text not null default 'admin',
+    admin_user_id bigint references admin_users(id) on delete cascade,
+    manager_id bigint references wholesale_managers(id) on delete cascade,
+    code_hash text not null,
+    login_session_id text not null default '',
+    attempts integer not null default 0,
+    expires_at timestamptz not null,
+    consumed_at timestamptz,
+    created_at timestamptz not null default now()
+  )`);
+  await query(`create index if not exists admin_2fa_challenges_login_idx on admin_2fa_challenges(login, created_at desc)`);
+  await query(`create index if not exists admin_2fa_challenges_session_idx on admin_2fa_challenges(login_session_id, created_at desc)`);
+  await query(`create index if not exists admin_2fa_challenges_expires_idx on admin_2fa_challenges(expires_at)`);
+  await query(`create table if not exists security_audit_events (
+    id bigserial primary key,
+    event_type text not null,
+    actor_type text not null default 'system',
+    admin_user_id bigint references admin_users(id) on delete set null,
+    manager_id bigint references wholesale_managers(id) on delete set null,
+    session_id text not null default '',
+    login text not null default '',
+    entity_type text not null default '',
+    entity_id text not null default '',
+    ip_hash text not null default '',
+    user_agent text not null default '',
+    referer text not null default '',
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now()
+  )`);
+  await query(`create index if not exists security_audit_events_type_idx on security_audit_events(event_type, created_at desc)`);
+  await query(`create index if not exists security_audit_events_actor_idx on security_audit_events(actor_type, created_at desc)`);
+  await query(`create index if not exists security_audit_events_admin_user_idx on security_audit_events(admin_user_id, created_at desc)`);
+  await query(`create index if not exists security_audit_events_manager_idx on security_audit_events(manager_id, created_at desc)`);
+  await query(`create index if not exists security_audit_events_session_idx on security_audit_events(session_id, created_at desc)`);
+  await query(`create index if not exists security_audit_events_entity_idx on security_audit_events(entity_type, entity_id, created_at desc)`);
   await query(`create table if not exists rate_limit_buckets (
     key text primary key,
     count integer not null default 0,

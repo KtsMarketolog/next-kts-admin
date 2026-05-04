@@ -18,8 +18,10 @@ export type WholesaleManager = {
 export type WholesaleManagerAuth = {
   id: number;
   login: string;
+  email: string;
   passwordHash: string;
   isActive: boolean;
+  passwordChangedAt: string | null;
 };
 
 export type WholesaleManagerProfile = {
@@ -850,10 +852,12 @@ export async function getWholesaleManagerByLogin(login: string): Promise<Wholesa
   const result = await query<{
     id: string;
     login: string;
+    email: string;
     password_hash: string;
     is_active: boolean;
+    password_changed_at: string | null;
   }>(
-    `select id::text, login, password_hash, is_active
+    `select id::text, login, email, password_hash, is_active, password_changed_at::text
      from wholesale_managers
      where login = $1 or lower(email) = $1
      limit 1`,
@@ -864,8 +868,10 @@ export async function getWholesaleManagerByLogin(login: string): Promise<Wholesa
   return {
     id: Number(row.id),
     login: row.login,
+    email: row.email,
     passwordHash: row.password_hash,
     isActive: row.is_active,
+    passwordChangedAt: row.password_changed_at,
   };
 }
 
@@ -904,8 +910,8 @@ export async function createWholesaleManager(input: {
 }) {
   await ensureSiteSchema();
   const result = await query<{ id: string }>(
-    `insert into wholesale_managers (name, login, email, password_hash, is_active)
-     values ($1, $2, $3, $4, $5)
+    `insert into wholesale_managers (name, login, email, password_hash, is_active, password_changed_at)
+     values ($1, $2, $3, $4, $5, now())
      returning id`,
     [input.name, normalizeLogin(input.login), input.email, input.passwordHash, input.isActive],
   );
@@ -923,6 +929,7 @@ export async function updateWholesaleManager(
          login = $3,
          email = $4,
          password_hash = case when $5::text is null then password_hash else $5 end,
+         password_changed_at = case when $5::text is null then password_changed_at else now() end,
          is_active = $6,
          updated_at = now()
      where id = $1`,
