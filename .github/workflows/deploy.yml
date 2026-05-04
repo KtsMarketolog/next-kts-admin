@@ -20,7 +20,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        run: |
+          set -euo pipefail
+          test -n "${{ secrets.VPS_HOST }}" || (echo "::error title=Missing repository secret::VPS_HOST is required" && exit 1)
+          test -n "${{ secrets.VPS_USER }}" || (echo "::error title=Missing repository secret::VPS_USER is required" && exit 1)
+          test -n "${{ secrets.VPS_PROJECT_PATH }}" || (echo "::error title=Missing repository secret::VPS_PROJECT_PATH is required" && exit 1)
+          test -n "${{ secrets.VPS_SSH_KEY }}" || (echo "::error title=Missing repository secret::VPS_SSH_KEY is required" && exit 1)
 
       - name: Configure SSH
         run: |
@@ -30,6 +38,13 @@ jobs:
           printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/kts_deploy
           chmod 600 ~/.ssh/kts_deploy
           ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Check SSH connection
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/kts_deploy -o IdentitiesOnly=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "echo Connected to VPS as \$(whoami)" || \
+            (echo "::error title=SSH connection failed::Check VPS_HOST, VPS_USER, VPS_SSH_KEY and authorized_keys on the server" && exit 1)
 
       - name: Sync files to server
         run: |
@@ -49,4 +64,4 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/kts_deploy -o IdentitiesOnly=yes \
             "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "cd '${{ secrets.VPS_PROJECT_PATH }}' && npm ci --include=dev && npm run build && pm2 startOrRestart ecosystem.config.cjs --update-env"
+            "set -euo pipefail && cd '${{ secrets.VPS_PROJECT_PATH }}' && npm ci --include=dev && npm run build && (command -v pm2 >/dev/null || npm install -g pm2) && pm2 startOrRestart ecosystem.config.cjs --update-env"
