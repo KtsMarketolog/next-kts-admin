@@ -46,6 +46,13 @@
   gap: $apx-12;
 }
 
+.downloadActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $apx-10;
+  flex-wrap: wrap;
+}
+
 .managerContact {
   display: grid;
   justify-items: end;
@@ -90,6 +97,11 @@
   font-weight: 800;
   text-decoration: none;
   white-space: nowrap;
+}
+
+.excelButton {
+  composes: pdfButton;
+  background: #0f7b4d;
 }
 
 .category {
@@ -266,6 +278,11 @@
     justify-items: stretch;
   }
 
+  .downloadActions {
+    display: grid;
+    gap: $apx-m-10;
+  }
+
   .managerContact {
     justify-items: start;
     min-width: 0;
@@ -278,7 +295,8 @@
     font-size: $apx-m-30;
   }
 
-  .pdfButton {
+  .pdfButton,
+  .excelButton {
     width: 100%;
   }
 

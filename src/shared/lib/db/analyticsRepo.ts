@@ -24,6 +24,7 @@ export type AnalyticsEventType =
   | 'public_price_opened'
   | 'public_price_reopened'
   | 'public_price_pdf_downloaded'
+  | 'public_price_excel_downloaded'
   | 'public_price_phone_clicked'
   | 'public_price_email_clicked'
   | 'public_price_product_opened'

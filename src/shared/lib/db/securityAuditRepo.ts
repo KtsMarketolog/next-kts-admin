@@ -22,6 +22,7 @@ export type SecurityEventType =
   | 'price_deleted'
   | 'price_token_changed'
   | 'admin_pdf_downloaded'
+  | 'admin_excel_downloaded'
   | 'rate_limit_blocked';
 
 export type RecordSecurityEventInput = {

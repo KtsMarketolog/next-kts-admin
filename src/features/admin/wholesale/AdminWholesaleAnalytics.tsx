@@ -7,7 +7,7 @@ import styles from '@/app/admin/admin.module.scss';
 
 type Period = '7d' | '30d' | 'all';
 type ExportFormat = 'pdf' | 'xls';
-type Tab = 'overview' | 'managers' | 'prices' | 'clients' | 'public' | 'pdf' | 'events';
+type Tab = 'overview' | 'managers' | 'prices' | 'clients' | 'public' | 'pdf' | 'excel' | 'events';
 export type AdminWholesaleAnalyticsTab = Tab;
 
 type Problem = 'EMPTY' | 'NO_CLIENT' | 'NO_EXPIRATION' | 'EXPIRED' | 'EXPIRING_SOON' | 'STALE' | 'NO_VIEWS';
@@ -330,6 +330,37 @@ type Analytics = {
       lastDownloadAt: string | null;
     }>;
   };
+  excel: {
+    totalDownloads: number;
+    downloadsLast7Days: number;
+    downloadsLast30Days: number;
+    downloadsInSelectedPeriod: number;
+    uniqueDownloaders: number;
+    lastDownloadAt: string | null;
+    pricesWithDownloads: number;
+    pricesWithoutDownloads: number;
+    topManager: { managerId: number | null; managerName: string; downloads: number } | null;
+    topDownloadedPrices: Array<{
+      priceId: number;
+      title: string;
+      clientName: string;
+      managerId: number | null;
+      managerName: string;
+      downloads: number;
+      uniqueDownloaders: number;
+      views: number;
+      lastDownloadAt: string | null;
+    }>;
+    latestDownloads: AnalyticsEvent[];
+    managersByDownloads: Array<{
+      managerId: number | null;
+      managerName: string;
+      pricesWithDownloads: number;
+      downloads: number;
+      uniqueDownloaders: number;
+      lastDownloadAt: string | null;
+    }>;
+  };
   clients: {
     totalClients: number;
     clientsWithActivePrices: number;
@@ -378,6 +409,7 @@ const tabs: Array<{ value: Tab; label: string }> = [
   { value: 'clients', label: 'Клиенты' },
   { value: 'public', label: 'Публичные ссылки' },
   { value: 'pdf', label: 'PDF' },
+  { value: 'excel', label: 'EXCEL' },
   { value: 'events', label: 'Журнал событий' },
 ];
 
@@ -402,6 +434,7 @@ const eventLabels: Record<string, string> = {
   public_price_opened: 'Клиент открыл прайс',
   public_price_reopened: 'Клиент повторно открыл прайс',
   public_price_pdf_downloaded: 'Клиент скачал PDF',
+  public_price_excel_downloaded: 'Клиент скачал Excel',
   public_price_phone_clicked: 'Клиент нажал телефон',
   public_price_email_clicked: 'Клиент нажал email',
   public_price_product_opened: 'Клиент открыл товар',
@@ -945,6 +978,7 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
             {tab === 'clients' ? <ClientsTab analytics={analytics} routerPush={router.push} /> : null}
             {tab === 'public' ? <PublicLinksTab analytics={analytics} routerPush={router.push} /> : null}
             {tab === 'pdf' ? <PdfTab analytics={analytics} routerPush={router.push} /> : null}
+            {tab === 'excel' ? <ExcelTab analytics={analytics} routerPush={router.push} /> : null}
             {tab === 'events' ? (
               <EventsTab
                 analytics={analytics}
@@ -1207,6 +1241,26 @@ function PdfTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (
   );
 }
 
+function ExcelTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
+  return (
+    <>
+      <div className={styles.analyticsKpiGrid}>
+        <KpiCard title="Всего Excel" value={analytics.excel.totalDownloads} text="Все скачивания" />
+        <KpiCard title="За 7 дней" value={analytics.excel.downloadsLast7Days} text="Недавние скачивания" tone={styles.analyticsToneGreen} />
+        <KpiCard title="За 30 дней" value={analytics.excel.downloadsLast30Days} text="Скачивания Excel" tone={styles.analyticsToneBlue} />
+        <KpiCard title="За период" value={analytics.excel.downloadsInSelectedPeriod} text={`Последний: ${formatDate(analytics.excel.lastDownloadAt)}`} tone={styles.analyticsToneViolet} />
+        <KpiCard title="Уникальные" value={analytics.excel.uniqueDownloaders} text="Уникальные скачавшие" tone={styles.analyticsToneGreen} />
+        <KpiCard title="Прайсов с Excel" value={analytics.excel.pricesWithDownloads} text="По ним скачивали" />
+        <KpiCard title="Без Excel" value={analytics.excel.pricesWithoutDownloads} text="Прайсы не скачивали" tone={styles.analyticsToneRed} />
+        <KpiCard title="Лидер" value={analytics.excel.topManager?.downloads ?? 0} text={analytics.excel.topManager?.managerName ?? 'Нет данных'} tone={styles.analyticsToneBlue} />
+      </div>
+      <TopExcelTable analytics={analytics} routerPush={routerPush} />
+      <EventsTable title="Последние скачивания Excel" events={analytics.excel.latestDownloads} empty="Скачивания Excel пока не зафиксированы" />
+      <ManagersExcelTable analytics={analytics} routerPush={routerPush} />
+    </>
+  );
+}
+
 function EventsTab({
   analytics,
   events,
@@ -1383,6 +1437,40 @@ function ManagersPdfTable({ analytics, routerPush }: { analytics: Analytics; rou
         <div className={styles.tableWrap}>
           <table className={styles.adminTable}>
             <thead><tr><th>Менеджер</th><th>Прайсов с PDF</th><th>Всего скачиваний</th><th>Уникальные</th><th>Последний download</th><th>Действие</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.managerId ?? row.managerName}><td>{row.managerName}</td><td>{row.pricesWithDownloads}</td><td>{row.downloads}</td><td>{row.uniqueDownloaders}</td><td>{formatDate(row.lastDownloadAt)}</td><td>{row.managerId ? <button type="button" onClick={() => routerPush(managerAnalyticsHref(row.managerId!))}>Аналитика</button> : '—'}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function TopExcelTable({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
+  const rows = analytics.excel.topDownloadedPrices;
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Топ прайсов по Excel</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState text="Скачивания Excel пока не зафиксированы" /> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Прайс</th><th>Клиент</th><th>Менеджер</th><th>Excel</th><th>Уникальные</th><th>Просмотры</th><th>Последний download</th><th>Действие</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.priceId}><td>{row.title}</td><td>{row.clientName || '—'}</td><td>{row.managerName || '—'}</td><td>{row.downloads}</td><td>{row.uniqueDownloaders}</td><td>{row.views}</td><td>{formatDate(row.lastDownloadAt)}</td><td><button type="button" onClick={() => routerPush(priceEditHref(row))}>Редактировать</button></td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ManagersExcelTable({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
+  const rows = analytics.excel.managersByDownloads;
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Менеджеры по Excel скачиваниям</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState text="Скачивания Excel пока не зафиксированы" /> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Менеджер</th><th>Прайсов с Excel</th><th>Всего скачиваний</th><th>Уникальные</th><th>Последний download</th><th>Действие</th></tr></thead>
             <tbody>{rows.map((row) => <tr key={row.managerId ?? row.managerName}><td>{row.managerName}</td><td>{row.pricesWithDownloads}</td><td>{row.downloads}</td><td>{row.uniqueDownloaders}</td><td>{formatDate(row.lastDownloadAt)}</td><td>{row.managerId ? <button type="button" onClick={() => routerPush(managerAnalyticsHref(row.managerId!))}>Аналитика</button> : '—'}</td></tr>)}</tbody>
           </table>
         </div>

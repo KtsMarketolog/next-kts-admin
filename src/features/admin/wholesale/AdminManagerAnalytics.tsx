@@ -362,6 +362,7 @@ const eventLabels: Record<string, string> = {
   public_price_opened: 'Клиент открыл прайс',
   public_price_reopened: 'Клиент повторно открыл прайс',
   public_price_pdf_downloaded: 'Клиент скачал PDF',
+  public_price_excel_downloaded: 'Клиент скачал Excel',
   public_price_phone_clicked: 'Клиент нажал телефон',
   public_price_email_clicked: 'Клиент нажал email',
   public_price_product_opened: 'Клиент открыл товар',

@@ -613,6 +613,37 @@ export type WholesaleAdminAnalytics = {
       lastDownloadAt: string | null;
     }>;
   };
+  excel: {
+    totalDownloads: number;
+    downloadsLast7Days: number;
+    downloadsLast30Days: number;
+    downloadsInSelectedPeriod: number;
+    uniqueDownloaders: number;
+    lastDownloadAt: string | null;
+    pricesWithDownloads: number;
+    pricesWithoutDownloads: number;
+    topManager: { managerId: number | null; managerName: string; downloads: number } | null;
+    topDownloadedPrices: Array<{
+      priceId: number;
+      title: string;
+      clientName: string;
+      managerId: number | null;
+      managerName: string;
+      downloads: number;
+      uniqueDownloaders: number;
+      views: number;
+      lastDownloadAt: string | null;
+    }>;
+    latestDownloads: WholesaleAdminAnalyticsEvent[];
+    managersByDownloads: Array<{
+      managerId: number | null;
+      managerName: string;
+      pricesWithDownloads: number;
+      downloads: number;
+      uniqueDownloaders: number;
+      lastDownloadAt: string | null;
+    }>;
+  };
   clients: {
     totalClients: number;
     clientsWithActivePrices: number;
@@ -2294,6 +2325,12 @@ export async function getWholesaleManagerAnalyticsExtended(
     pdf_period: string;
     unique_downloaders: string;
     last_pdf_at: string | null;
+    excel_downloads: string;
+    excel_last_7_days: string;
+    excel_last_30_days: string;
+    excel_period: string;
+    unique_excel_downloaders: string;
+    last_excel_at: string | null;
     requests_sent: string;
     requests_period: string;
     last_request_at: string | null;
@@ -2330,6 +2367,12 @@ export async function getWholesaleManagerAnalyticsExtended(
        coalesce(pdf.pdf_period, 0)::text as pdf_period,
        coalesce(pdf.unique_downloaders, 0)::text as unique_downloaders,
        pdf.last_pdf_at::text,
+       coalesce(excel.excel_downloads, 0)::text as excel_downloads,
+       coalesce(excel.excel_last_7_days, 0)::text as excel_last_7_days,
+       coalesce(excel.excel_last_30_days, 0)::text as excel_last_30_days,
+       coalesce(excel.excel_period, 0)::text as excel_period,
+       coalesce(excel.unique_downloaders, 0)::text as unique_excel_downloaders,
+       excel.last_excel_at::text,
        coalesce(requests.requests_sent, 0)::text as requests_sent,
        coalesce(requests.requests_period, 0)::text as requests_period,
        requests.last_request_at::text,
@@ -2384,6 +2427,19 @@ export async function getWholesaleManagerAnalyticsExtended(
      ) pdf on true
      left join lateral (
        select
+         count(*)::integer as excel_downloads,
+         count(*) filter (where created_at >= now() - interval '7 days')::integer as excel_last_7_days,
+         count(*) filter (where created_at >= now() - interval '30 days')::integer as excel_last_30_days,
+         count(*) filter (where ($2::text is null or created_at >= now() - $2::interval))::integer as excel_period,
+         count(distinct nullif(session_id, ''))::integer as unique_downloaders,
+         max(created_at) as last_excel_at
+       from wholesale_analytics_events e
+       where e.price_list_id = pl.id
+         and e.actor_type = 'client'
+         and e.event_type = 'public_price_excel_downloaded'
+     ) excel on true
+     left join lateral (
+       select
          count(*)::integer as requests_sent,
          count(*) filter (where ($2::text is null or created_at >= now() - $2::interval))::integer as requests_period,
          max(created_at) as last_request_at,
@@ -2418,6 +2474,7 @@ export async function getWholesaleManagerAnalyticsExtended(
            'public_price_opened',
            'public_price_reopened',
            'public_price_pdf_downloaded',
+           'public_price_excel_downloaded',
            'public_price_request_sent',
            'public_price_phone_clicked',
            'public_price_email_clicked',
@@ -2840,6 +2897,12 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     pdf_period: string;
     unique_downloaders: string;
     last_pdf_at: string | null;
+    excel_downloads: string;
+    excel_last_7_days: string;
+    excel_last_30_days: string;
+    excel_period: string;
+    unique_excel_downloaders: string;
+    last_excel_at: string | null;
     requests_sent: string;
     requests_period: string;
     last_request_at: string | null;
@@ -2898,6 +2961,12 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
        coalesce(pdf.pdf_period, 0)::text as pdf_period,
        coalesce(pdf.unique_downloaders, 0)::text as unique_downloaders,
        pdf.last_pdf_at::text,
+       coalesce(excel.excel_downloads, 0)::text as excel_downloads,
+       coalesce(excel.excel_last_7_days, 0)::text as excel_last_7_days,
+       coalesce(excel.excel_last_30_days, 0)::text as excel_last_30_days,
+       coalesce(excel.excel_period, 0)::text as excel_period,
+       coalesce(excel.unique_downloaders, 0)::text as unique_excel_downloaders,
+       excel.last_excel_at::text,
        coalesce(requests.requests_sent, 0)::text as requests_sent,
        coalesce(requests.requests_period, 0)::text as requests_period,
        requests.last_request_at::text,
@@ -2950,6 +3019,19 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
      ) pdf on true
      left join lateral (
        select
+         count(*)::integer as excel_downloads,
+         count(*) filter (where created_at >= now() - interval '7 days')::integer as excel_last_7_days,
+         count(*) filter (where created_at >= now() - interval '30 days')::integer as excel_last_30_days,
+         count(*) filter (where ($1::text is null or created_at >= now() - $1::interval))::integer as excel_period,
+         count(distinct nullif(session_id, ''))::integer as unique_downloaders,
+         max(created_at) as last_excel_at
+       from wholesale_analytics_events e
+       where e.price_list_id = pl.id
+         and e.actor_type = 'client'
+         and e.event_type = 'public_price_excel_downloaded'
+     ) excel on true
+     left join lateral (
+       select
          count(*)::integer as requests_sent,
          count(*) filter (where ($1::text is null or created_at >= now() - $1::interval))::integer as requests_period,
          max(created_at) as last_request_at,
@@ -2984,6 +3066,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
            'public_price_opened',
            'public_price_reopened',
            'public_price_pdf_downloaded',
+           'public_price_excel_downloaded',
            'public_price_request_sent',
            'public_price_phone_clicked',
            'public_price_email_clicked',
@@ -3172,6 +3255,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
   const pricesWithoutExpiration = rows.filter((row) => !row.valid_until).length;
   const pricesWithoutViews = rows.filter((row) => Number(row.views) === 0).length;
   const pricesWithoutPdfDownloads = rows.filter((row) => Number(row.pdf_downloads) === 0).length;
+  const pricesWithoutExcelDownloads = rows.filter((row) => Number(row.excel_downloads) === 0).length;
   const pricesCreatedLast7Days = rows.filter((row) => new Date(row.created_at).getTime() >= now - 7 * day).length;
   const pricesCreatedLast30Days = rows.filter((row) => new Date(row.created_at).getTime() >= now - 30 * day).length;
   const pricesCreatedInSelectedPeriod = rows.filter((row) => isInSelectedPeriod(row.created_at)).length;
@@ -3179,8 +3263,11 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
   const publicViewsInSelectedPeriod = rows.reduce((sum, row) => sum + Number(row.views_period), 0);
   const totalPdfDownloads = rows.reduce((sum, row) => sum + Number(row.pdf_downloads), 0);
   const pdfDownloadsInSelectedPeriod = rows.reduce((sum, row) => sum + Number(row.pdf_period), 0);
+  const totalExcelDownloads = rows.reduce((sum, row) => sum + Number(row.excel_downloads), 0);
+  const excelDownloadsInSelectedPeriod = rows.reduce((sum, row) => sum + Number(row.excel_period), 0);
   const uniquePublicVisitors = rows.reduce((sum, row) => sum + Number(row.unique_visitors), 0);
   const uniqueDownloaders = rows.reduce((sum, row) => sum + Number(row.unique_downloaders), 0);
+  const uniqueExcelDownloaders = rows.reduce((sum, row) => sum + Number(row.unique_excel_downloaders), 0);
   const repeatViews = rows.reduce((sum, row) => sum + Number(row.repeat_views), 0);
 
   const managerActivityById = new Map(
@@ -3320,6 +3407,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
   const recentEvents = recentEventsResult.rows.map(mapAdminEvent);
   const latestViews = recentEvents.filter((event) => ['public_price_opened', 'public_price_reopened'].includes(event.eventType));
   const latestDownloads = recentEvents.filter((event) => event.eventType === 'public_price_pdf_downloaded');
+  const latestExcelDownloads = recentEvents.filter((event) => event.eventType === 'public_price_excel_downloaded');
 
   const clientMap = new Map<string, WholesaleAdminAnalyticsClient>();
   for (const row of rows) {
@@ -3350,7 +3438,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     current.viewsLast7Days += Number(row.views_last_7_days);
     current.uniqueVisitors += Number(row.unique_visitors);
     current.pdfDownloads += Number(row.pdf_period);
-    const lastActivity = [row.last_view_at, row.last_pdf_at, row.last_request_at].filter(Boolean).sort().at(-1) ?? null;
+    const lastActivity = [row.last_view_at, row.last_pdf_at, row.last_excel_at, row.last_request_at].filter(Boolean).sort().at(-1) ?? null;
     if (lastActivity && (!current.lastActivityAt || lastActivity > current.lastActivityAt)) {
       current.lastActivityAt = lastActivity;
       current.managerId = row.manager_id ? Number(row.manager_id) : null;
@@ -3386,6 +3474,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
 
   const topViewedRows = [...rows].filter((row) => Number(row.views_period) > 0).sort((a, b) => Number(b.views_period) - Number(a.views_period));
   const topDownloadedRows = [...rows].filter((row) => Number(row.pdf_period) > 0).sort((a, b) => Number(b.pdf_period) - Number(a.pdf_period));
+  const topExcelRows = [...rows].filter((row) => Number(row.excel_period) > 0).sort((a, b) => Number(b.excel_period) - Number(a.excel_period));
   const topViewedPrice = topViewedRows[0]
     ? { priceId: Number(topViewedRows[0].id), title: topViewedRows[0].title, managerName: topViewedRows[0].manager_name, views: Number(topViewedRows[0].views_period) }
     : null;
@@ -3410,6 +3499,17 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     .map((manager) => ({ managerId: manager.id, managerName: manager.name, downloads: manager.pdfDownloads }))
     .filter((manager) => manager.downloads > 0)
     .sort((a, b) => b.downloads - a.downloads);
+  const managerExcel = managers
+    .map((manager) => {
+      const managerRows = priceRowsByManager.get(manager.id) ?? [];
+      return {
+        managerId: manager.id,
+        managerName: manager.name,
+        downloads: managerRows.reduce((sum, row) => sum + Number(row.excel_period), 0),
+      };
+    })
+    .filter((manager) => manager.downloads > 0)
+    .sort((a, b) => b.downloads - a.downloads);
   const managersByDownloads = managers
     .map((manager) => {
       const managerRows = priceRowsByManager.get(manager.id) ?? [];
@@ -3420,6 +3520,21 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
         downloads: managerRows.reduce((sum, row) => sum + Number(row.pdf_period), 0),
         uniqueDownloaders: managerRows.reduce((sum, row) => sum + Number(row.unique_downloaders), 0),
         lastDownloadAt: managerRows.map((row) => row.last_pdf_at).filter(Boolean).sort().at(-1) ?? null,
+      };
+    })
+    .filter((manager) => manager.downloads > 0)
+    .sort((a, b) => b.downloads - a.downloads)
+    .slice(0, 10);
+  const managersByExcelDownloads = managers
+    .map((manager) => {
+      const managerRows = priceRowsByManager.get(manager.id) ?? [];
+      return {
+        managerId: manager.id,
+        managerName: manager.name,
+        pricesWithDownloads: managerRows.filter((row) => Number(row.excel_period) > 0).length,
+        downloads: managerRows.reduce((sum, row) => sum + Number(row.excel_period), 0),
+        uniqueDownloaders: managerRows.reduce((sum, row) => sum + Number(row.unique_excel_downloaders), 0),
+        lastDownloadAt: managerRows.map((row) => row.last_excel_at).filter(Boolean).sort().at(-1) ?? null,
       };
     })
     .filter((manager) => manager.downloads > 0)
@@ -3579,6 +3694,30 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
       })),
       latestDownloads,
       managersByDownloads,
+    },
+    excel: {
+      totalDownloads: totalExcelDownloads,
+      downloadsLast7Days: rows.reduce((sum, row) => sum + Number(row.excel_last_7_days), 0),
+      downloadsLast30Days: rows.reduce((sum, row) => sum + Number(row.excel_last_30_days), 0),
+      downloadsInSelectedPeriod: excelDownloadsInSelectedPeriod,
+      uniqueDownloaders: uniqueExcelDownloaders,
+      lastDownloadAt: rows.map((row) => row.last_excel_at).filter(Boolean).sort().at(-1) ?? null,
+      pricesWithDownloads: rows.filter((row) => Number(row.excel_downloads) > 0).length,
+      pricesWithoutDownloads: pricesWithoutExcelDownloads,
+      topManager: managerExcel[0] ?? null,
+      topDownloadedPrices: topExcelRows.slice(0, 10).map((row) => ({
+        priceId: Number(row.id),
+        title: row.title,
+        clientName: row.client_name,
+        managerId: row.manager_id ? Number(row.manager_id) : null,
+        managerName: row.manager_name,
+        downloads: Number(row.excel_period),
+        uniqueDownloaders: Number(row.unique_excel_downloaders),
+        views: Number(row.views_period),
+        lastDownloadAt: row.last_excel_at,
+      })),
+      latestDownloads: latestExcelDownloads,
+      managersByDownloads: managersByExcelDownloads,
     },
     clients: {
       totalClients: clients.length,

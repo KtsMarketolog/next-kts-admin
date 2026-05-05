@@ -50,9 +50,14 @@ export default async function PricePage({ params }: PricePageProps) {
                 ) : null}
               </aside>
             ) : null}
-            <a className={styles.pdfButton} href={`/price/${priceList.token}/pdf`}>
-              Скачать PDF
-            </a>
+            <div className={styles.downloadActions}>
+              <a className={styles.pdfButton} href={`/price/${priceList.token}/pdf`}>
+                Скачать PDF
+              </a>
+              <a className={styles.excelButton} href={`/price/${priceList.token}/excel`}>
+                Скачать Excel
+              </a>
+            </div>
           </div>
         </section>
 
