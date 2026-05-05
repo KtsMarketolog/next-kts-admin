@@ -192,6 +192,13 @@
   }
 }
 
+.analyticsReportTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-520, $apx-650);
+  gap: $apx-16;
+  align-items: start;
+}
+
 .analyticsExportPanel {
   display: grid;
   gap: $apx-8;
@@ -499,6 +506,10 @@
   }
 
   .analyticsSplit {
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsReportTop {
     grid-template-columns: 1fr;
   }
 

@@ -851,32 +851,34 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
   return (
     <div className={`${styles.analyticsSection} ${styles.analyticsAdminSection ?? ''}`}>
       <div className={styles.analyticsPanel}>
-        <div className={styles.analyticsPanelHeader}>
-          <div>
-            <h3>Общая аналитика</h3>
-            <span>Все менеджеры, индивидуальные прайсы, просмотры и PDF</span>
+        <div className={styles.analyticsReportTop}>
+          <div className={styles.analyticsPanelHeader}>
+            <div>
+              <h3>Общая аналитика</h3>
+              <span>Все менеджеры, индивидуальные прайсы, просмотры и PDF</span>
+            </div>
+            {loading ? <span>Обновление данных</span> : null}
           </div>
-          {loading ? <span>Обновление данных</span> : null}
-        </div>
 
-        {analytics ? (
-          <AnalyticsExportPanel
-            analytics={analytics}
-            period={period}
-            managerId={exportManagerId}
-            format={exportFormat}
-            email={exportEmail}
-            status={exportStatus}
-            busy={exportBusy}
-            onManagerChange={setExportManagerId}
-            onFormatChange={setExportFormat}
-            onEmailChange={setExportEmail}
-            onDownload={downloadAnalytics}
-            onSend={sendAnalyticsEmail}
-            downloadDone={exportDownloadDone}
-            sendDone={exportSendDone}
-          />
-        ) : null}
+          {analytics ? (
+            <AnalyticsExportPanel
+              analytics={analytics}
+              period={period}
+              managerId={exportManagerId}
+              format={exportFormat}
+              email={exportEmail}
+              status={exportStatus}
+              busy={exportBusy}
+              onManagerChange={setExportManagerId}
+              onFormatChange={setExportFormat}
+              onEmailChange={setExportEmail}
+              onDownload={downloadAnalytics}
+              onSend={sendAnalyticsEmail}
+              downloadDone={exportDownloadDone}
+              sendDone={exportSendDone}
+            />
+          ) : null}
+        </div>
 
         <div className={styles.analyticsToolbar}>
           <span>Период</span>
