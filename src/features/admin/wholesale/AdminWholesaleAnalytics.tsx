@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 
@@ -381,6 +381,10 @@ const tabs: Array<{ value: Tab; label: string }> = [
   { value: 'events', label: 'Журнал событий' },
 ];
 
+function resolveTab(value: string | null): Tab {
+  return tabs.some((item) => item.value === value) ? (value as Tab) : 'overview';
+}
+
 const eventLabels: Record<string, string> = {
   manager_login: 'Вход менеджера',
   price_created: 'Создан прайс',
@@ -754,8 +758,10 @@ function AnalyticsExportPanel({
 
 export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalyticsProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [period, setPeriod] = useState<Period>('30d');
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>(() => resolveTab(searchParams.get('tab')));
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -797,6 +803,12 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
     };
   }, [period]);
 
+  useEffect(() => {
+    const nextTab = resolveTab(searchParams.get('tab'));
+    setTab((current) => (current === nextTab ? current : nextTab));
+    onTabChange?.(nextTab);
+  }, [onTabChange, searchParams]);
+
   const filteredEvents = useMemo(() => {
     const events = analytics?.recentEvents ?? [];
     return events.filter((event) => {
@@ -810,6 +822,9 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
   const selectTab = (nextTab: Tab) => {
     setTab(nextTab);
     onTabChange?.(nextTab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', nextTab);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
   const exportParams = () => {

@@ -236,6 +236,14 @@
   margin: $apx-14 0 $apx-24;
 }
 
+.wholesaleManagersAdminBlock {
+  margin-top: $apx-28;
+
+  > h3:first-child {
+    margin-top: 0;
+  }
+}
+
 .tableWrap {
   width: 100%;
   overflow-x: auto;

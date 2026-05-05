@@ -548,7 +548,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         <AdminWholesaleAnalytics onTabChange={setAdminAnalyticsTab} />
 
         {adminAnalyticsTab === 'managers' ? (
-          <>
+          <div className={styles.wholesaleManagersAdminBlock}>
 
         <h3>Добавить менеджера</h3>
         <div className={styles.wholesaleRow}>
@@ -634,7 +634,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           ))}
           {managers.length === 0 ? <p className={styles.mutedText}>Менеджеров пока нет</p> : null}
         </div>
-          </>
+          </div>
         ) : null}
       </section>
     );
