@@ -192,6 +192,56 @@
   }
 }
 
+.analyticsExportPanel {
+  display: grid;
+  gap: $apx-8;
+  justify-self: end;
+  width: min(100%, $apx-650);
+  border: $apx-1 solid #e3e5ef;
+  border-radius: $apx-8;
+  background: #f8f9fc;
+  padding: $apx-12;
+}
+
+.analyticsExportHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $apx-10;
+
+  strong {
+    color: #242633;
+    font-size: $apx-14;
+  }
+
+  span {
+    color: #77798a;
+    font-size: $apx-12;
+    font-weight: 700;
+  }
+}
+
+.analyticsExportGrid,
+.analyticsExportMail {
+  display: grid;
+  gap: $apx-8;
+}
+
+.analyticsExportGrid {
+  grid-template-columns: minmax($apx-190, 1fr) minmax($apx-105, 0.45fr) auto;
+}
+
+.analyticsExportMail {
+  grid-template-columns: minmax($apx-220, 1fr) auto;
+}
+
+.analyticsExportStatus {
+  margin: 0;
+  color: #4b4e61;
+  font-size: $apx-12;
+  font-weight: 700;
+}
+
 .analyticsList {
   display: grid;
   gap: $apx-10;
@@ -346,6 +396,8 @@
 
 @media (max-width: 800px) {
   .analyticsToolbar,
+  .analyticsExportGrid,
+  .analyticsExportMail,
   .analyticsPanelHeader,
   .analyticsList div {
     grid-template-columns: 1fr;
@@ -359,6 +411,7 @@
   .analyticsPeriod,
   .analyticsTabs,
   .analyticsPeriod button,
+  .analyticsExportPanel,
   .analyticsKpiGrid,
   .analyticsQualityGrid,
   .analyticsPublicGrid {

@@ -12,7 +12,13 @@ function smtpPassword() {
   return value;
 }
 
-export async function sendSystemMail(input: { to: string; subject: string; text: string; html: string }) {
+export async function sendSystemMail(input: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+  attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
+}) {
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: Number(process.env.SMTP_PORT || 465),
@@ -30,5 +36,6 @@ export async function sendSystemMail(input: { to: string; subject: string; text:
     subject: input.subject,
     text: input.text,
     html: input.html,
+    attachments: input.attachments,
   });
 }

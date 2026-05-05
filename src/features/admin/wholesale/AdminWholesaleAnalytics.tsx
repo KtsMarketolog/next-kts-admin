@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import styles from '@/app/admin/admin.module.scss';
 
 type Period = '7d' | '30d' | 'all';
+type ExportFormat = 'pdf' | 'xls';
 type Tab = 'overview' | 'managers' | 'prices' | 'clients' | 'public' | 'pdf' | 'events';
 export type AdminWholesaleAnalyticsTab = Tab;
 
@@ -673,6 +674,66 @@ type AdminWholesaleAnalyticsProps = {
   onTabChange?: (tab: AdminWholesaleAnalyticsTab) => void;
 };
 
+function AnalyticsExportPanel({
+  analytics,
+  period,
+  managerId,
+  format,
+  email,
+  status,
+  busy,
+  onManagerChange,
+  onFormatChange,
+  onEmailChange,
+  onDownload,
+  onSend,
+}: {
+  analytics: Analytics;
+  period: Period;
+  managerId: string;
+  format: ExportFormat;
+  email: string;
+  status: string;
+  busy: boolean;
+  onManagerChange: (value: string) => void;
+  onFormatChange: (value: ExportFormat) => void;
+  onEmailChange: (value: string) => void;
+  onDownload: () => void;
+  onSend: () => void;
+}) {
+  return (
+    <div className={styles.analyticsExportPanel}>
+      <div className={styles.analyticsExportHeader}>
+        <strong>Отчёт</strong>
+        <span>Период: {periods.find((item) => item.value === period)?.label ?? '30 дней'}</span>
+      </div>
+      <div className={styles.analyticsExportGrid}>
+        <select aria-label="Менеджер для отчёта" value={managerId} onChange={(event) => onManagerChange(event.target.value)}>
+          <option value="all">Все менеджеры</option>
+          {analytics.managers.map((manager) => (
+            <option key={manager.id} value={manager.id}>{manager.name}</option>
+          ))}
+        </select>
+        <select aria-label="Формат отчёта" value={format} onChange={(event) => onFormatChange(event.target.value === 'xls' ? 'xls' : 'pdf')}>
+          <option value="pdf">PDF</option>
+          <option value="xls">Excel</option>
+        </select>
+        <button type="button" onClick={onDownload}>Скачать</button>
+      </div>
+      <div className={styles.analyticsExportMail}>
+        <input
+          type="email"
+          placeholder="Email для отчёта"
+          value={email}
+          onChange={(event) => onEmailChange(event.target.value)}
+        />
+        <button type="button" disabled={busy} onClick={onSend}>{busy ? 'Отправка...' : 'Отправить'}</button>
+      </div>
+      {status ? <p className={styles.analyticsExportStatus}>{status}</p> : null}
+    </div>
+  );
+}
+
 export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalyticsProps) {
   const router = useRouter();
   const [period, setPeriod] = useState<Period>('30d');
@@ -683,6 +744,11 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
   const [eventTypeFilter, setEventTypeFilter] = useState('');
   const [actorFilter, setActorFilter] = useState('');
   const [managerFilter, setManagerFilter] = useState('');
+  const [exportManagerId, setExportManagerId] = useState('all');
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('pdf');
+  const [exportEmail, setExportEmail] = useState('');
+  const [exportStatus, setExportStatus] = useState('');
+  const [exportBusy, setExportBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -726,6 +792,47 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
     onTabChange?.(nextTab);
   };
 
+  const exportParams = () => {
+    const params = new URLSearchParams({ period, format: exportFormat });
+    if (exportManagerId !== 'all') params.set('managerId', exportManagerId);
+    return params;
+  };
+
+  const downloadAnalytics = () => {
+    setExportStatus('');
+    window.location.href = `/api/admin/wholesale/analytics/export?${exportParams().toString()}`;
+  };
+
+  const sendAnalyticsEmail = async () => {
+    const email = exportEmail.trim();
+    if (!email) {
+      setExportStatus('Укажите email');
+      return;
+    }
+
+    setExportBusy(true);
+    setExportStatus('');
+    try {
+      const response = await fetch('/api/admin/wholesale/analytics/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          period,
+          format: exportFormat,
+          managerId: exportManagerId,
+          email,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Не удалось отправить отчёт');
+      setExportStatus('Отчёт отправлен');
+    } catch (reason) {
+      setExportStatus(reason instanceof Error ? reason.message : 'Не удалось отправить отчёт');
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
   return (
     <div className={`${styles.analyticsSection} ${styles.analyticsAdminSection ?? ''}`}>
       <div className={styles.analyticsPanel}>
@@ -736,6 +843,23 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
           </div>
           {loading ? <span>Обновление данных</span> : null}
         </div>
+
+        {analytics ? (
+          <AnalyticsExportPanel
+            analytics={analytics}
+            period={period}
+            managerId={exportManagerId}
+            format={exportFormat}
+            email={exportEmail}
+            status={exportStatus}
+            busy={exportBusy}
+            onManagerChange={setExportManagerId}
+            onFormatChange={setExportFormat}
+            onEmailChange={setExportEmail}
+            onDownload={downloadAnalytics}
+            onSend={sendAnalyticsEmail}
+          />
+        ) : null}
 
         <div className={styles.analyticsToolbar}>
           <span>Период</span>
