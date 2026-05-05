@@ -771,7 +771,7 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
               ))}
             </div>
 
-            {tab === 'overview' ? <OverviewTab analytics={analytics} routerPush={router.push} /> : null}
+            {tab === 'overview' ? <OverviewTab analytics={analytics} /> : null}
             {tab === 'managers' ? <ManagersTab analytics={analytics} routerPush={router.push} /> : null}
             {tab === 'prices' ? <PricesTab analytics={analytics} routerPush={router.push} /> : null}
             {tab === 'clients' ? <ClientsTab analytics={analytics} routerPush={router.push} /> : null}
@@ -796,18 +796,9 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
   );
 }
 
-function OverviewTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
+function OverviewTab({ analytics }: { analytics: Analytics }) {
   const summary = analytics.summary;
   const activity = analytics.managerActivity;
-  const funnelRows = [
-    { label: 'Создано прайсов', value: analytics.funnel.createdPrices },
-    { label: 'Активные ссылки', value: analytics.funnel.activePublicLinks },
-    { label: 'Открывали клиенты', value: analytics.funnel.openedPrices },
-    { label: 'Повторные просмотры', value: analytics.funnel.pricesWithRepeatViews },
-    { label: 'Скачали PDF', value: analytics.funnel.pdfDownloadedPrices },
-    { label: 'Отправили заявку', value: analytics.funnel.requestsSent },
-    { label: 'Клиенты с активностью', value: analytics.funnel.clientsWithActivity },
-  ];
 
   return (
     <>
@@ -838,10 +829,6 @@ function OverviewTab({ analytics, routerPush }: { analytics: Analytics; routerPu
         <PeriodComparisonPanel rows={analytics.attention.comparison} />
       </div>
 
-      <AttentionPricesTable title="Прайсы, которые застряли" rows={analytics.attention.stuckPrices.slice(0, 10)} routerPush={routerPush} empty="Застрявших прайсов нет" />
-      <ReactionNeededTable rows={analytics.attention.managerReactionNeeded.slice(0, 10)} routerPush={routerPush} />
-      <PriorityClientsTable rows={analytics.attention.priorityClients.slice(0, 10)} routerPush={routerPush} />
-
       <div className={styles.analyticsSplit}>
         <article className={styles.analyticsPanel}>
           <div className={styles.analyticsPanelHeader}>
@@ -860,29 +847,6 @@ function OverviewTab({ analytics, routerPush }: { analytics: Analytics; routerPu
           </dl>
         </article>
 
-        <article className={styles.analyticsPanel}>
-          <div className={styles.analyticsPanelHeader}>
-            <h3>Воронка</h3>
-            <span>От создания до PDF</span>
-          </div>
-          <div className={styles.analyticsTopList}>
-            {funnelRows.map((row, index) => {
-              const previous = index === 0 ? row.value : funnelRows[index - 1].value;
-              const fromPrevious = previous > 0 ? Math.round((row.value / previous) * 100) : 0;
-              const fromTotal = analytics.funnel.createdPrices > 0 ? Math.round((row.value / analytics.funnel.createdPrices) * 100) : 0;
-              return (
-                <div className={styles.analyticsTopItem} key={row.label}>
-                  <span>{row.label}</span>
-                  <span className={styles.analyticsTopViewedAt}>{index === 0 ? '100%' : `${fromPrevious}% от прошлого • ${fromTotal}% от всех`}</span>
-                  <strong>{row.value}</strong>
-                </div>
-              );
-            })}
-          </div>
-        </article>
-      </div>
-
-      <div className={styles.analyticsSplit}>
         <article className={styles.analyticsPanel}>
           <div className={styles.analyticsPanelHeader}>
             <h3>Качество прайсов</h3>
@@ -1021,6 +985,7 @@ function ClientsTab({ analytics, routerPush }: { analytics: Analytics; routerPus
       </div>
       <ClientsTable title="Горячие клиенты" rows={analytics.clients.hotClients} routerPush={routerPush} empty="Горячих клиентов пока нет" />
       <PriorityClientsTable rows={analytics.attention.priorityClients} routerPush={routerPush} />
+      <ReactionNeededTable rows={analytics.attention.managerReactionNeeded} routerPush={routerPush} />
       <ClientHistoryTable rows={analytics.attention.clientHistory} routerPush={routerPush} />
       <ClientsTable title="Клиенты без просмотров" rows={analytics.clients.clientsWithoutViewsList} routerPush={routerPush} empty="Клиентов без просмотров нет" />
       <ClientsTable title="Топ клиентов по активности" rows={analytics.clients.topClientsByActivity} routerPush={routerPush} empty="Нет данных за выбранный период" />
