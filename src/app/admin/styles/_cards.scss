@@ -505,14 +505,7 @@
 
 .userCreateCard {
   display: grid;
-  grid-template-columns:
-    minmax($apx-160, 1fr)
-    minmax($apx-130, 0.8fr)
-    minmax($apx-180, 1fr)
-    minmax($apx-140, 0.7fr)
-    minmax($apx-150, 0.8fr)
-    max-content
-    max-content;
+  grid-template-columns: minmax($apx-190, 1fr) minmax($apx-160, 0.9fr) minmax($apx-220, 1.25fr) minmax($apx-170, 0.9fr);
   gap: $apx-10;
   align-items: end;
   border: $apx-1 solid #e1e3ee;
@@ -533,6 +526,35 @@
     font-weight: 700;
     text-transform: uppercase;
   }
+
+  label:nth-child(1) {
+    grid-column: 1 / 2;
+  }
+
+  label:nth-child(2) {
+    grid-column: 2 / 3;
+  }
+
+  label:nth-child(3) {
+    grid-column: 3 / 5;
+  }
+
+  label:nth-child(4) {
+    grid-column: 1 / 2;
+  }
+
+  label:nth-child(5) {
+    grid-column: 2 / 3;
+  }
+
+  label:nth-child(6) {
+    grid-column: 3 / 4;
+  }
+
+  > button {
+    grid-column: 4 / 5;
+    width: 100%;
+  }
 }
 
 .userAccessList {
@@ -551,12 +573,7 @@
 
 .userAccessFields {
   display: grid;
-  grid-template-columns:
-    minmax($apx-160, 1fr)
-    minmax($apx-130, 0.75fr)
-    minmax($apx-190, 1.1fr)
-    minmax($apx-150, 0.8fr)
-    minmax($apx-160, 0.9fr);
+  grid-template-columns: minmax($apx-190, 1fr) minmax($apx-160, 0.8fr) minmax($apx-240, 1.3fr);
   gap: $apx-10;
 
   label {
@@ -570,6 +587,19 @@
     font-size: $apx-12;
     font-weight: 700;
     text-transform: uppercase;
+  }
+
+  label:nth-child(4),
+  label:nth-child(5) {
+    grid-row: 2;
+  }
+
+  label:nth-child(4) {
+    grid-column: 1 / 2;
+  }
+
+  label:nth-child(5) {
+    grid-column: 2 / 4;
   }
 }
 
@@ -718,6 +748,13 @@
   .userAccessFields,
   .userAccessMeta {
     grid-template-columns: repeat(2, minmax($apx-180, 1fr));
+  }
+
+  .userCreateCard label,
+  .userCreateCard > button,
+  .userAccessFields label {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .userAccessBadges,
