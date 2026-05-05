@@ -18,6 +18,7 @@ export async function ensureSiteSchema() {
       id bigserial primary key,
       login text not null unique,
       email text not null default '',
+      name text not null default '',
       password_hash text not null default '',
       role text not null default 'admin',
       is_active boolean not null default true,
@@ -283,6 +284,7 @@ export async function ensureSiteSchema() {
     alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_lists add column if not exists comment text not null default '';
     alter table admin_users add column if not exists email text not null default '';
+    alter table admin_users add column if not exists name text not null default '';
     alter table admin_users add column if not exists role text not null default 'admin';
     alter table admin_users add column if not exists password_changed_at timestamptz;
     alter table wholesale_managers add column if not exists phone text not null default '';
@@ -368,6 +370,7 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_lists add column if not exists comment text not null default ''`);
   await query(`alter table admin_users add column if not exists email text not null default ''`);
+  await query(`alter table admin_users add column if not exists name text not null default ''`);
   await query(`alter table admin_users add column if not exists role text not null default 'admin'`);
   await query(`alter table admin_users add column if not exists password_changed_at timestamptz`);
   await query(`alter table wholesale_managers add column if not exists phone text not null default ''`);

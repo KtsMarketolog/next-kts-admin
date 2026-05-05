@@ -16,12 +16,13 @@ import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
 import { AdminSliderSection } from '@/features/admin/slider/AdminSliderSection';
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
 import type { AdminSection, SettingKey } from '@/features/admin/types';
+import { AdminUsersSection } from '@/features/admin/users/AdminUsersSection';
 import { LoginPanel } from '@/features/auth/LoginPanel';
 import type { AdminSession } from '@/shared/lib/adminAuth';
 
 import styles from './admin.module.scss';
 
-const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanies', 'brands'];
+const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanies', 'brands', 'users'];
 
 type AdminArea = 'home' | 'site' | 'wholesale';
 
@@ -69,6 +70,10 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
   const switchSection = (section: AdminSection) => {
     setActiveSection(section);
+    if (section === 'users') {
+      router.replace('/admin/site/users', { scroll: false });
+      return;
+    }
     const params = new URLSearchParams(searchParams.toString());
     params.delete('area');
     params.set('section', section);
@@ -173,6 +178,9 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
         return;
       }
       setActiveArea('site');
+      if (pathname.startsWith('/admin/site/users')) {
+        setActiveSection('users');
+      }
       return;
     }
 
@@ -180,11 +188,15 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   }, [initialArea, pathname, sessionRole]);
 
   useEffect(() => {
+    if (pathname.startsWith('/admin/site/users')) {
+      setActiveSection('users');
+      return;
+    }
     const section = searchParams.get('section');
     if (ADMIN_SECTIONS.includes(section as AdminSection)) {
       setActiveSection(section as AdminSection);
     }
-  }, [searchParams]);
+  }, [pathname, searchParams]);
 
   const saveInfo = async (target: SettingKey) => {
     setBusy(true);
@@ -315,6 +327,12 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
             >
               Портфель брендов
             </button>
+            <button
+              className={activeSection === 'users' ? styles.navActive : undefined}
+              onClick={() => switchSection('users')}
+            >
+              Пользователи и доступы
+            </button>
           </aside>
 
           <div className={styles.content}>
@@ -420,6 +438,8 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
                 showStatus={showStatus}
               />
             )}
+
+            {activeSection === 'users' && <AdminUsersSection showStatus={showStatus} />}
           </div>
         </div>
       )}

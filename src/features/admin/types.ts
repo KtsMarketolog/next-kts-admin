@@ -49,6 +49,6 @@ export type Brand = {
   isActive: boolean;
 };
 
-export type AdminSection = 'info' | 'slider' | 'news' | 'groupCompanies' | 'brands';
+export type AdminSection = 'info' | 'slider' | 'news' | 'groupCompanies' | 'brands' | 'users';
 
 export type SettingKey = 'phone' | 'email' | 'address';

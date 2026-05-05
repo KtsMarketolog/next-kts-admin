@@ -503,6 +503,144 @@
   }
 }
 
+.userCreateCard {
+  display: grid;
+  grid-template-columns:
+    minmax($apx-160, 1fr)
+    minmax($apx-130, 0.8fr)
+    minmax($apx-180, 1fr)
+    minmax($apx-140, 0.7fr)
+    minmax($apx-150, 0.8fr)
+    max-content
+    max-content;
+  gap: $apx-10;
+  align-items: end;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #f8f9fc;
+  padding: $apx-14;
+  margin-bottom: $apx-18;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+}
+
+.userAccessList {
+  display: grid;
+  gap: $apx-12;
+}
+
+.userAccessCard {
+  display: grid;
+  gap: $apx-12;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+}
+
+.userAccessFields {
+  display: grid;
+  grid-template-columns:
+    minmax($apx-160, 1fr)
+    minmax($apx-130, 0.75fr)
+    minmax($apx-190, 1.1fr)
+    minmax($apx-150, 0.8fr)
+    minmax($apx-160, 0.9fr);
+  gap: $apx-10;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+}
+
+.userAccessMeta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: $apx-12;
+  align-items: center;
+  padding-top: $apx-10;
+  border-top: $apx-1 solid #edf0f6;
+}
+
+.userActiveToggle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: $apx-8 !important;
+  width: fit-content;
+  min-height: $apx-42;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: 0 $apx-12;
+  color: #242633;
+  font-weight: 700;
+
+  input[type="checkbox"] {
+    flex: 0 0 $apx-18;
+    width: $apx-18;
+    height: $apx-18;
+    min-width: $apx-18;
+    min-height: $apx-18 !important;
+    padding: 0;
+    border-radius: $apx-3;
+    accent-color: #260b86;
+  }
+}
+
+.userAccessBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    min-height: $apx-30;
+    border-radius: $apx-999;
+    background: #f2f3f8;
+    color: #4b4e61;
+    padding: 0 $apx-10;
+    font-size: $apx-12;
+    font-weight: 700;
+  }
+}
+
+.userCurrentBadge {
+  background: #e8f7ef !important;
+  color: #15803d !important;
+}
+
+.userAccessActions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: $apx-8;
+
+  button {
+    min-width: $apx-116;
+  }
+}
+
 .wholesaleEditorGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -575,18 +713,34 @@
     grid-column: 1 / -1;
     justify-content: flex-start;
   }
+
+  .userCreateCard,
+  .userAccessFields,
+  .userAccessMeta {
+    grid-template-columns: repeat(2, minmax($apx-180, 1fr));
+  }
+
+  .userAccessBadges,
+  .userAccessActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 720px) {
   .managerFields,
   .managerControls,
   .priceListMain,
-  .priceListMeta {
+  .priceListMeta,
+  .userCreateCard,
+  .userAccessFields,
+  .userAccessMeta {
     grid-template-columns: 1fr;
   }
 
   .managerMetric,
-  .managerActive {
+  .managerActive,
+  .userActiveToggle {
     width: 100%;
     justify-content: space-between;
   }
@@ -601,6 +755,15 @@
   }
 
   .priceListActions {
+    display: grid;
+    grid-template-columns: 1fr;
+
+    button {
+      width: 100%;
+    }
+  }
+
+  .userAccessActions {
     display: grid;
     grid-template-columns: 1fr;
 

@@ -5,8 +5,8 @@ export type { AnalyticsActorType, AnalyticsEventType, TrackAnalyticsEventInput }
 export { recordSecurityEvent } from './db/securityAuditRepo';
 export type { RecordSecurityEventInput, SecurityActorType, SecurityEventType } from './db/securityAuditRepo';
 export { revokeAdminUserSessions, revokeManagerSessions } from './db/adminSessionsRepo';
-export { getAdminUserByLogin } from './db/adminUsersRepo';
-export type { AdminUserAuth } from './db/adminUsersRepo';
+export { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin, updateAccessUser } from './db/adminUsersRepo';
+export type { AccessUser, AccessUserRole, AdminUserAuth } from './db/adminUsersRepo';
 export { getPhoneSetting, getSiteSettings, updatePhoneSetting, updateSiteSettings } from './db/settingsRepo';
 export { createHeroSlide, deleteHeroSlide, getHeroSlides, updateHeroSlide } from './db/slidesRepo';
 export { createNewsItem, deleteNewsItem, getNewsItems, updateNewsItem } from './db/newsRepo';
