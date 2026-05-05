@@ -208,6 +208,13 @@ export async function POST(request: Request, context: Context) {
         totalQuantity,
         totalPrice,
         itemCount: rows.length,
+        items: rows.slice(0, 40).map((item) => ({
+          priceItemId: item.id,
+          productTitle: item.productTitle,
+          variantTitle: item.variantTitle,
+          quantity: item.quantity,
+          lineTotal: item.lineTotal,
+        })),
       },
     });
 

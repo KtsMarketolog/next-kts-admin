@@ -46,6 +46,15 @@ type ManagerRow = {
   qualityScore: number;
   lastLoginAt: string | null;
   lastActionAt: string | null;
+  viewsPerActivePrice?: number;
+  pdfPerActivePrice?: number;
+  requestsPerActivePrice?: number;
+  sentToOpenedConversion?: number;
+  openedToPdfConversion?: number;
+  openedToRequestConversion?: number;
+  stuckPriceRate?: number;
+  confirmedPriceRate?: number;
+  averageReactionHours?: number | null;
 };
 
 type AnalyticsEvent = {
@@ -80,6 +89,108 @@ type ClientRow = {
   lastActivityAt: string | null;
   lastPriceCreatedAt: string | null;
   status: string;
+};
+
+type StatusFunnelStep = {
+  key: string;
+  label: string;
+  count: number;
+  dropFromPrevious: number;
+  conversionFromPrevious: number;
+  conversionFromTotal: number;
+};
+
+type StatusFunnel = {
+  steps: StatusFunnelStep[];
+  biggestDrop: StatusFunnelStep | null;
+  averageTimeToOpenHours: number | null;
+  averageTimeToPdfHours: number | null;
+  averageTimeToRequestHours: number | null;
+};
+
+type AttentionPrice = {
+  id: number;
+  title: string;
+  clientName: string;
+  managerId: number | null;
+  managerName: string;
+  workflowStatus: string;
+  workflowStatusLabel: string;
+  reason: string;
+  daysInStage: number;
+  views: number;
+  pdfDownloads: number;
+  requestsSent: number;
+  lastClientActivityAt: string | null;
+  lastManagerActivityAt: string | null;
+};
+
+type ReactionNeeded = {
+  priceId: number;
+  priceTitle: string;
+  clientName: string;
+  managerId: number | null;
+  managerName: string;
+  lastClientEventType: string;
+  lastClientActivityAt: string;
+  lastManagerActivityAt: string | null;
+  hoursWithoutReaction: number;
+  workflowStatus: string;
+  workflowStatusLabel: string;
+};
+
+type PriorityClient = {
+  clientId: string;
+  clientName: string;
+  managerId: number | null;
+  managerName: string;
+  priceId: number;
+  priceTitle: string;
+  score: number;
+  reasons: string[];
+  viewsLast24Hours: number;
+  viewsLast7Days: number;
+  repeatViews: number;
+  pdfDownloads: number;
+  requestsSent: number;
+  lastActivityAt: string | null;
+  workflowStatus: string;
+  workflowStatusLabel: string;
+};
+
+type ClientHistory = {
+  clientId: string;
+  clientName: string;
+  managerId: number | null;
+  managerName: string;
+  priceCount: number;
+  activePrices: number;
+  activeActualPrices: number;
+  expiredPrices: number;
+  statuses: string[];
+  views: number;
+  pdfDownloads: number;
+  requestsSent: number;
+  lastPriceCreatedAt: string | null;
+  lastViewAt: string | null;
+  lastActivityAt: string | null;
+  hasActiveActualPrice: boolean;
+};
+
+type ProductInterest = {
+  productId: string | null;
+  productTitle: string;
+  opens: number;
+  quantityChanges: number;
+  requests: number;
+  lastActivityAt: string | null;
+};
+
+type PeriodComparison = {
+  label: string;
+  current: number;
+  previous: number;
+  changePercent: number | null;
 };
 
 type Analytics = {
@@ -239,6 +350,15 @@ type Analytics = {
     requestsSent: number;
     clientsWithActivity: number;
   };
+  attention: {
+    statusFunnel: StatusFunnel;
+    stuckPrices: AttentionPrice[];
+    managerReactionNeeded: ReactionNeeded[];
+    priorityClients: PriorityClient[];
+    clientHistory: ClientHistory[];
+    productInterest: ProductInterest[];
+    comparison: PeriodComparison[];
+  };
   problemPrices: ProblemPrice[];
   recentEvents: AnalyticsEvent[];
 };
@@ -278,8 +398,12 @@ const eventLabels: Record<string, string> = {
   public_price_pdf_downloaded: 'Клиент скачал PDF',
   public_price_phone_clicked: 'Клиент нажал телефон',
   public_price_email_clicked: 'Клиент нажал email',
+  public_price_product_opened: 'Клиент открыл товар',
   public_price_search_used: 'Клиент использовал поиск',
   public_price_filter_used: 'Клиент использовал фильтр',
+  public_price_request_started: 'Клиент начал заявку',
+  public_price_quantity_changed: 'Клиент выбрал количество',
+  public_price_request_abandoned: 'Клиент бросил заявку',
   public_price_request_sent: 'Клиент отправил заявку',
 };
 
@@ -356,6 +480,192 @@ function EmptyState({ text }: { text: string }) {
 function Badge({ children, tone }: { children: string; tone?: 'danger' | 'warning' | 'orange' }) {
   const className = tone === 'danger' ? styles.analyticsBadgeDanger : tone === 'warning' ? styles.analyticsBadgeWarning : styles.analyticsBadgeOrange;
   return <span className={className}>{children}</span>;
+}
+
+function formatHours(value: number | null | undefined) {
+  return value === null || value === undefined ? 'Нет данных' : `${value} ч`;
+}
+
+function formatChange(value: number | null) {
+  if (value === null) return 'новый рост';
+  if (value > 0) return `+${value}%`;
+  return `${value}%`;
+}
+
+function StatusFunnelPanel({ funnel }: { funnel: StatusFunnel }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}>
+        <h3>Воронка по статусам</h3>
+        <span>{funnel.biggestDrop ? `Провал: ${funnel.biggestDrop.label}` : 'По всем прайсам'}</span>
+      </div>
+      <div className={styles.analyticsTopList}>
+        {funnel.steps.map((step) => (
+          <div className={styles.analyticsTopItem} key={step.key}>
+            <span>{step.label}</span>
+            <span className={styles.analyticsTopViewedAt}>
+              {step.conversionFromTotal}% от всех • {step.conversionFromPrevious}% от прошлого
+            </span>
+            <strong>{step.count}</strong>
+          </div>
+        ))}
+      </div>
+      <dl className={styles.analyticsList}>
+        <div><dt>Создание → открытие</dt><dd>{formatHours(funnel.averageTimeToOpenHours)}</dd></div>
+        <div><dt>Открытие → PDF</dt><dd>{formatHours(funnel.averageTimeToPdfHours)}</dd></div>
+        <div><dt>Открытие → заявка</dt><dd>{formatHours(funnel.averageTimeToRequestHours)}</dd></div>
+      </dl>
+    </article>
+  );
+}
+
+function PeriodComparisonPanel({ rows }: { rows: PeriodComparison[] }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}>
+        <h3>Сравнение периодов</h3>
+        <span>Текущий период против прошлого</span>
+      </div>
+      {rows.length === 0 ? <EmptyState text="Для всего времени сравнение не считается" /> : (
+        <div className={styles.analyticsTopList}>
+          {rows.map((row) => (
+            <div className={styles.analyticsTopItem} key={row.label}>
+              <span>{row.label}</span>
+              <span className={styles.analyticsTopViewedAt}>прошлый: {row.previous} • {formatChange(row.changePercent)}</span>
+              <strong>{row.current}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function AttentionPricesTable({ title, rows, routerPush, empty }: { title: string; rows: AttentionPrice[]; routerPush: (href: string) => void; empty: string }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>{title}</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState text={empty} /> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Прайс</th><th>Клиент</th><th>Менеджер</th><th>Причина</th><th>Статус</th><th>Дней</th><th>Активность клиента</th><th>Просмотры</th><th>PDF</th><th>Заявки</th><th>Действие</th></tr></thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={`${title}-${row.id}-${row.reason}`}>
+                  <td><strong>{row.title}</strong></td>
+                  <td>{row.clientName || '—'}</td>
+                  <td>{row.managerName || '—'}</td>
+                  <td><Badge tone="danger">{row.reason}</Badge></td>
+                  <td>{row.workflowStatusLabel}</td>
+                  <td>{row.daysInStage}</td>
+                  <td>{formatDate(row.lastClientActivityAt)}</td>
+                  <td>{row.views}</td>
+                  <td>{row.pdfDownloads}</td>
+                  <td>{row.requestsSent}</td>
+                  <td><button type="button" onClick={() => routerPush(priceEditHref({ priceId: row.id, managerId: row.managerId }))}>Редактировать</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ReactionNeededTable({ rows, routerPush }: { rows: ReactionNeeded[]; routerPush: (href: string) => void }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Клиент проявил интерес, реакции нет</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState text="Неотработанных клиентских действий нет" /> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Клиент</th><th>Прайс</th><th>Менеджер</th><th>Действие клиента</th><th>Без реакции</th><th>Статус</th><th>Последнее действие менеджера</th><th>Действие</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={`${row.priceId}-${row.lastClientActivityAt}`}><td>{row.clientName || '—'}</td><td>{row.priceTitle}</td><td>{row.managerName || '—'}</td><td>{eventLabels[row.lastClientEventType] ?? row.lastClientEventType}<br /><span>{formatDate(row.lastClientActivityAt)}</span></td><td>{formatHours(row.hoursWithoutReaction)}</td><td>{row.workflowStatusLabel}</td><td>{formatDate(row.lastManagerActivityAt)}</td><td><button type="button" onClick={() => routerPush(priceEditHref({ priceId: row.priceId, managerId: row.managerId }))}>Открыть</button></td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function PriorityClientsTable({ rows, routerPush }: { rows: PriorityClient[]; routerPush: (href: string) => void }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Клиенты, с которыми связаться сегодня</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState text="Приоритетных клиентов пока нет" /> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Клиент</th><th>Прайс</th><th>Менеджер</th><th>Приоритет</th><th>Причины</th><th>24 часа</th><th>7 дней</th><th>PDF</th><th>Заявки</th><th>Последняя активность</th><th>Действие</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={`${row.clientId}-${row.priceId}`}><td>{row.clientName}</td><td>{row.priceTitle}</td><td>{row.managerName || '—'}</td><td><strong>{row.score}</strong></td><td><div className={styles.analyticsBadgesRow}>{row.reasons.map((reason) => <Badge key={reason} tone="orange">{reason}</Badge>)}</div></td><td>{row.viewsLast24Hours}</td><td>{row.viewsLast7Days}</td><td>{row.pdfDownloads}</td><td>{row.requestsSent}</td><td>{formatDate(row.lastActivityAt)}</td><td><button type="button" onClick={() => routerPush(priceEditHref({ priceId: row.priceId, managerId: row.managerId }))}>Открыть</button></td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ClientHistoryTable({ rows, routerPush }: { rows: ClientHistory[]; routerPush: (href: string) => void }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>История клиентов</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState text="История клиентов пока пустая" /> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Клиент</th><th>Менеджер</th><th>Прайсов</th><th>Активных</th><th>Актуальных</th><th>Просроченных</th><th>Статусы</th><th>Просмотры</th><th>PDF</th><th>Заявки</th><th>Последняя активность</th><th>Действие</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.clientId}><td>{row.clientName}</td><td>{row.managerName || '—'}</td><td>{row.priceCount}</td><td>{row.activePrices}</td><td>{row.activeActualPrices}</td><td>{row.expiredPrices}</td><td><div className={styles.analyticsBadgesRow}>{row.statuses.map((status) => <Badge key={status} tone={row.hasActiveActualPrice ? 'orange' : 'warning'}>{status}</Badge>)}</div></td><td>{row.views}</td><td>{row.pdfDownloads}</td><td>{row.requestsSent}</td><td>{formatDate(row.lastActivityAt)}</td><td>{row.managerId ? <button type="button" onClick={() => routerPush(managerAnalyticsHref(row.managerId!))}>Аналитика</button> : '—'}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ProductInterestTable({ rows }: { rows: ProductInterest[] }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Товарный интерес</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState text="Интерес к товарам пока не зафиксирован" /> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Товар</th><th>Открывали</th><th>Меняли количество</th><th>В заявках</th><th>Последняя активность</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={`${row.productId ?? row.productTitle}`}><td>{row.productTitle}</td><td>{row.opens}</td><td>{row.quantityChanges}</td><td>{row.requests}</td><td>{formatDate(row.lastActivityAt)}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ManagerFunnelQualityTable({ rows, routerPush }: { rows: ManagerRow[]; routerPush: (href: string) => void }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Качество воронки менеджеров</h3><span>{rows.length}</span></div>
+      <div className={styles.tableWrap}>
+        <table className={styles.adminTable}>
+          <thead><tr><th>Менеджер</th><th>Просмотров / активный</th><th>PDF / активный</th><th>Заявок / активный</th><th>Отправлен → открыт</th><th>Открыт → PDF</th><th>Открыт → заявка</th><th>Застряли</th><th>Подтверждены</th><th>Средняя реакция</th><th>Действие</th></tr></thead>
+          <tbody>
+            {rows.map((manager) => (
+              <tr key={manager.id}>
+                <td><strong>{manager.name}</strong></td>
+                <td>{manager.viewsPerActivePrice ?? 0}</td>
+                <td>{manager.pdfPerActivePrice ?? 0}</td>
+                <td>{manager.requestsPerActivePrice ?? 0}</td>
+                <td>{manager.sentToOpenedConversion ?? 0}%</td>
+                <td>{manager.openedToPdfConversion ?? 0}%</td>
+                <td>{manager.openedToRequestConversion ?? 0}%</td>
+                <td>{manager.stuckPriceRate ?? 0}%</td>
+                <td>{manager.confirmedPriceRate ?? 0}%</td>
+                <td>{formatHours(manager.averageReactionHours)}</td>
+                <td><button type="button" onClick={() => routerPush(managerAnalyticsHref(manager.id))}>Аналитика</button></td>
+              </tr>
+            ))}
+            {rows.length === 0 ? <tr><td colSpan={11}>Нет данных</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  );
 }
 
 export function AdminWholesaleAnalytics() {
@@ -451,7 +761,7 @@ export function AdminWholesaleAnalytics() {
               ))}
             </div>
 
-            {tab === 'overview' ? <OverviewTab analytics={analytics} /> : null}
+            {tab === 'overview' ? <OverviewTab analytics={analytics} routerPush={router.push} /> : null}
             {tab === 'managers' ? <ManagersTab analytics={analytics} routerPush={router.push} /> : null}
             {tab === 'prices' ? <PricesTab analytics={analytics} routerPush={router.push} /> : null}
             {tab === 'clients' ? <ClientsTab analytics={analytics} routerPush={router.push} /> : null}
@@ -476,7 +786,7 @@ export function AdminWholesaleAnalytics() {
   );
 }
 
-function OverviewTab({ analytics }: { analytics: Analytics }) {
+function OverviewTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
   const summary = analytics.summary;
   const activity = analytics.managerActivity;
   const funnelRows = [
@@ -505,6 +815,22 @@ function OverviewTab({ analytics }: { analytics: Analytics }) {
         <KpiCard title="Качество" value={summary.averageQualityScore} text={qualityLabel(summary.averageQualityScore)} tone={styles.analyticsToneViolet} />
         <KpiCard title="За 30 дней" value={summary.pricesCreatedLast30Days} text="Созданные прайсы" tone={styles.analyticsToneBlue} />
       </div>
+
+      <div className={styles.analyticsKpiGrid}>
+        <KpiCard title="Требуют внимания" value={analytics.attention.stuckPrices.length} text="Застряли по статусу или сроку" tone={styles.analyticsToneRed} />
+        <KpiCard title="Нет реакции" value={analytics.attention.managerReactionNeeded.length} text="Клиент активен, менеджер не ответил действием" tone={styles.analyticsToneRed} />
+        <KpiCard title="Приоритетные клиенты" value={analytics.attention.priorityClients.length} text="С кем нужно связаться сегодня" tone={styles.analyticsToneGreen} />
+        <KpiCard title="Главный провал" value={analytics.attention.statusFunnel.biggestDrop?.dropFromPrevious ?? 0} text={analytics.attention.statusFunnel.biggestDrop?.label ?? 'Нет данных'} tone={styles.analyticsToneViolet} />
+      </div>
+
+      <div className={styles.analyticsSplit}>
+        <StatusFunnelPanel funnel={analytics.attention.statusFunnel} />
+        <PeriodComparisonPanel rows={analytics.attention.comparison} />
+      </div>
+
+      <AttentionPricesTable title="Прайсы, которые застряли" rows={analytics.attention.stuckPrices.slice(0, 10)} routerPush={routerPush} empty="Застрявших прайсов нет" />
+      <ReactionNeededTable rows={analytics.attention.managerReactionNeeded.slice(0, 10)} routerPush={routerPush} />
+      <PriorityClientsTable rows={analytics.attention.priorityClients.slice(0, 10)} routerPush={routerPush} />
 
       <div className={styles.analyticsSplit}>
         <article className={styles.analyticsPanel}>
@@ -585,66 +911,69 @@ function OverviewTab({ analytics }: { analytics: Analytics }) {
 
 function ManagersTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
   return (
-    <article className={styles.analyticsPanel}>
-      <div className={styles.analyticsPanelHeader}>
-        <h3>Рейтинг менеджеров</h3>
-        <span>{analytics.managers.length}</span>
-      </div>
-      <div className={styles.tableWrap}>
-        <table className={styles.adminTable}>
-          <thead>
-            <tr>
-              <th>Менеджер</th>
-              <th>Email</th>
-              <th>Телефон</th>
-              <th>Прайсов</th>
-              <th>Активных</th>
-              <th>Просроченных</th>
-              <th>Проблемных</th>
-              <th>Создано</th>
-              <th>Действий</th>
-              <th>Просмотров</th>
-              <th>PDF</th>
-              <th>Клиентов</th>
-              <th>Качество</th>
-              <th>Последний вход</th>
-              <th>Действие</th>
-            </tr>
-          </thead>
-          <tbody>
-            {analytics.managers.map((manager) => (
-              <tr key={manager.id}>
-                <td>
-                  <strong>{manager.name}</strong>
-                  <div className={styles.analyticsBadgesRow}>
-                    <Badge tone={manager.actionsInSelectedPeriod > 0 ? 'orange' : 'warning'}>{manager.actionsInSelectedPeriod > 0 ? 'Активен' : 'Нет активности'}</Badge>
-                    {manager.problemPrices > 0 ? <Badge tone="danger">Есть проблемы</Badge> : <Badge tone="orange">Хорошее качество</Badge>}
-                  </div>
-                </td>
-                <td>{manager.email || '—'}</td>
-                <td>{manager.phone || '—'}</td>
-                <td>{manager.totalPrices}</td>
-                <td>{manager.activePrices}</td>
-                <td>{manager.expiredPrices}</td>
-                <td>{manager.problemPrices}</td>
-                <td>{manager.pricesCreatedInSelectedPeriod}</td>
-                <td>{manager.actionsInSelectedPeriod}</td>
-                <td>{manager.publicViews}</td>
-                <td>{manager.pdfDownloads}</td>
-                <td>{manager.clientsWithActivity}</td>
-                <td><strong>{manager.qualityScore}</strong><br /><span>{qualityLabel(manager.qualityScore)}</span></td>
-                <td>{formatDate(manager.lastLoginAt)}</td>
-                <td className={styles.tableActions}>
-                  <button className={styles.secondary} type="button" onClick={() => routerPush(managerHref(manager.id))}>Прайсы</button>
-                  <button type="button" onClick={() => routerPush(managerAnalyticsHref(manager.id))}>Аналитика</button>
-                </td>
+    <>
+      <article className={styles.analyticsPanel}>
+        <div className={styles.analyticsPanelHeader}>
+          <h3>Рейтинг менеджеров</h3>
+          <span>{analytics.managers.length}</span>
+        </div>
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead>
+              <tr>
+                <th>Менеджер</th>
+                <th>Email</th>
+                <th>Телефон</th>
+                <th>Прайсов</th>
+                <th>Активных</th>
+                <th>Просроченных</th>
+                <th>Проблемных</th>
+                <th>Создано</th>
+                <th>Действий</th>
+                <th>Просмотров</th>
+                <th>PDF</th>
+                <th>Клиентов</th>
+                <th>Качество</th>
+                <th>Последний вход</th>
+                <th>Действие</th>
               </tr>
-            ))}
-            {analytics.managers.length === 0 ? <tr><td colSpan={15}>Нет данных за выбранный период</td></tr> : null}
-          </tbody>
-        </table>
-      </div>
-    </article>
+            </thead>
+            <tbody>
+              {analytics.managers.map((manager) => (
+                <tr key={manager.id}>
+                  <td>
+                    <strong>{manager.name}</strong>
+                    <div className={styles.analyticsBadgesRow}>
+                      <Badge tone={manager.actionsInSelectedPeriod > 0 ? 'orange' : 'warning'}>{manager.actionsInSelectedPeriod > 0 ? 'Активен' : 'Нет активности'}</Badge>
+                      {manager.problemPrices > 0 ? <Badge tone="danger">Есть проблемы</Badge> : <Badge tone="orange">Хорошее качество</Badge>}
+                    </div>
+                  </td>
+                  <td>{manager.email || '—'}</td>
+                  <td>{manager.phone || '—'}</td>
+                  <td>{manager.totalPrices}</td>
+                  <td>{manager.activePrices}</td>
+                  <td>{manager.expiredPrices}</td>
+                  <td>{manager.problemPrices}</td>
+                  <td>{manager.pricesCreatedInSelectedPeriod}</td>
+                  <td>{manager.actionsInSelectedPeriod}</td>
+                  <td>{manager.publicViews}</td>
+                  <td>{manager.pdfDownloads}</td>
+                  <td>{manager.clientsWithActivity}</td>
+                  <td><strong>{manager.qualityScore}</strong><br /><span>{qualityLabel(manager.qualityScore)}</span></td>
+                  <td>{formatDate(manager.lastLoginAt)}</td>
+                  <td className={styles.tableActions}>
+                    <button className={styles.secondary} type="button" onClick={() => routerPush(managerHref(manager.id))}>Прайсы</button>
+                    <button type="button" onClick={() => routerPush(managerAnalyticsHref(manager.id))}>Аналитика</button>
+                  </td>
+                </tr>
+              ))}
+              {analytics.managers.length === 0 ? <tr><td colSpan={15}>Нет данных за выбранный период</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </article>
+      <ManagerFunnelQualityTable rows={analytics.managers} routerPush={routerPush} />
+    </>
   );
 }
 
@@ -658,6 +987,7 @@ function PricesTab({ analytics, routerPush }: { analytics: Analytics; routerPush
         <KpiCard title="Не обновлялись" value={analytics.summary.stalePrices30Days} text="30+ дней" tone={styles.analyticsToneRed} />
       </div>
       <ProblemPricesTable title="Проблемные прайсы" rows={analytics.problemPrices} routerPush={routerPush} empty="Проблемных прайсов нет" />
+      <AttentionPricesTable title="Прайсы, которые застряли" rows={analytics.attention.stuckPrices} routerPush={routerPush} empty="Застрявших прайсов нет" />
       <SimplePricesTable title="Последние созданные прайсы" rows={analytics.priceInsights.latestPrices} routerPush={routerPush} empty="Пока нет прайсов" />
       <SimplePricesTable title="Скоро истекают" rows={analytics.priceInsights.expiringSoonPrices} routerPush={routerPush} empty="Прайсов с истекающим сроком нет" showDays />
       <SimplePricesTable title="Прайсы без просмотров" rows={analytics.priceInsights.pricesWithoutViews} routerPush={routerPush} empty="Прайсов без просмотров нет" />
@@ -680,6 +1010,8 @@ function ClientsTab({ analytics, routerPush }: { analytics: Analytics; routerPus
         <KpiCard title="Без актуального" value={analytics.clients.clientsWithoutActualActivePrice} text="Нет активного прайса" tone={styles.analyticsToneViolet} />
       </div>
       <ClientsTable title="Горячие клиенты" rows={analytics.clients.hotClients} routerPush={routerPush} empty="Горячих клиентов пока нет" />
+      <PriorityClientsTable rows={analytics.attention.priorityClients} routerPush={routerPush} />
+      <ClientHistoryTable rows={analytics.attention.clientHistory} routerPush={routerPush} />
       <ClientsTable title="Клиенты без просмотров" rows={analytics.clients.clientsWithoutViewsList} routerPush={routerPush} empty="Клиентов без просмотров нет" />
       <ClientsTable title="Топ клиентов по активности" rows={analytics.clients.topClientsByActivity} routerPush={routerPush} empty="Нет данных за выбранный период" />
     </>
@@ -700,6 +1032,7 @@ function PublicLinksTab({ analytics, routerPush }: { analytics: Analytics; route
         <KpiCard title="Среднее" value={analytics.publicLinks.averageViewsPerPrice} text="Просмотров на прайс" tone={styles.analyticsToneViolet} />
       </div>
       <TopPublicTable analytics={analytics} routerPush={routerPush} />
+      <ProductInterestTable rows={analytics.attention.productInterest} />
       <EventsTable title="Последние просмотры" events={analytics.publicLinks.latestViews} empty="Просмотров публичных ссылок пока нет" />
       <SimplePricesTable title="Прайсы без просмотров" rows={analytics.publicLinks.pricesWithoutViewsList} routerPush={routerPush} empty="Прайсов без просмотров нет" />
     </>

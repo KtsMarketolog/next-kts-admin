@@ -29,6 +29,9 @@ export type AnalyticsEventType =
   | 'public_price_product_opened'
   | 'public_price_search_used'
   | 'public_price_filter_used'
+  | 'public_price_request_started'
+  | 'public_price_quantity_changed'
+  | 'public_price_request_abandoned'
   | 'public_price_request_sent';
 
 export type TrackAnalyticsEventInput = {

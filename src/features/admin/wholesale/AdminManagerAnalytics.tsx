@@ -62,6 +62,108 @@ type AnalyticsClient = {
   status: string;
 };
 
+type StatusFunnelStep = {
+  key: string;
+  label: string;
+  count: number;
+  dropFromPrevious: number;
+  conversionFromPrevious: number;
+  conversionFromTotal: number;
+};
+
+type StatusFunnel = {
+  steps: StatusFunnelStep[];
+  biggestDrop: StatusFunnelStep | null;
+  averageTimeToOpenHours: number | null;
+  averageTimeToPdfHours: number | null;
+  averageTimeToRequestHours: number | null;
+};
+
+type AttentionPrice = {
+  id: number;
+  title: string;
+  clientName: string;
+  managerId: number | null;
+  managerName: string;
+  workflowStatus: string;
+  workflowStatusLabel: string;
+  reason: string;
+  daysInStage: number;
+  views: number;
+  pdfDownloads: number;
+  requestsSent: number;
+  lastClientActivityAt: string | null;
+  lastManagerActivityAt: string | null;
+};
+
+type ReactionNeeded = {
+  priceId: number;
+  priceTitle: string;
+  clientName: string;
+  managerId: number | null;
+  managerName: string;
+  lastClientEventType: string;
+  lastClientActivityAt: string;
+  lastManagerActivityAt: string | null;
+  hoursWithoutReaction: number;
+  workflowStatus: string;
+  workflowStatusLabel: string;
+};
+
+type PriorityClient = {
+  clientId: string;
+  clientName: string;
+  managerId: number | null;
+  managerName: string;
+  priceId: number;
+  priceTitle: string;
+  score: number;
+  reasons: string[];
+  viewsLast24Hours: number;
+  viewsLast7Days: number;
+  repeatViews: number;
+  pdfDownloads: number;
+  requestsSent: number;
+  lastActivityAt: string | null;
+  workflowStatus: string;
+  workflowStatusLabel: string;
+};
+
+type ClientHistory = {
+  clientId: string;
+  clientName: string;
+  managerId: number | null;
+  managerName: string;
+  priceCount: number;
+  activePrices: number;
+  activeActualPrices: number;
+  expiredPrices: number;
+  statuses: string[];
+  views: number;
+  pdfDownloads: number;
+  requestsSent: number;
+  lastPriceCreatedAt: string | null;
+  lastViewAt: string | null;
+  lastActivityAt: string | null;
+  hasActiveActualPrice: boolean;
+};
+
+type ProductInterest = {
+  productId: string | null;
+  productTitle: string;
+  opens: number;
+  quantityChanges: number;
+  requests: number;
+  lastActivityAt: string | null;
+};
+
+type PeriodComparison = {
+  label: string;
+  current: number;
+  previous: number;
+  changePercent: number | null;
+};
+
 type ManagerAnalytics = {
   manager: {
     id: number;
@@ -202,6 +304,15 @@ type ManagerAnalytics = {
     largestPrice: { id: number; title: string; itemCount: number } | null;
     smallestNonEmptyPrice: { id: number; title: string; itemCount: number } | null;
   };
+  attention?: {
+    statusFunnel: StatusFunnel;
+    stuckPrices: AttentionPrice[];
+    managerReactionNeeded: ReactionNeeded[];
+    priorityClients: PriorityClient[];
+    clientHistory: ClientHistory[];
+    productInterest: ProductInterest[];
+    comparison: PeriodComparison[];
+  };
   recentEvents?: AnalyticsEvent[];
 };
 
@@ -253,8 +364,12 @@ const eventLabels: Record<string, string> = {
   public_price_pdf_downloaded: 'Клиент скачал PDF',
   public_price_phone_clicked: 'Клиент нажал телефон',
   public_price_email_clicked: 'Клиент нажал email',
+  public_price_product_opened: 'Клиент открыл товар',
   public_price_search_used: 'Клиент использовал поиск',
   public_price_filter_used: 'Клиент использовал фильтр',
+  public_price_request_started: 'Клиент начал заявку',
+  public_price_quantity_changed: 'Клиент выбрал количество',
+  public_price_request_abandoned: 'Клиент бросил заявку',
   public_price_request_sent: 'Клиент отправил заявку',
 };
 
@@ -312,6 +427,140 @@ function KpiCard({ title, value, text, tone }: { title: string; value: number | 
 
 function EmptyState({ children }: { children: string }) {
   return <p className={styles.mutedText}>{children}</p>;
+}
+
+function formatHours(value: number | null | undefined) {
+  return value === null || value === undefined ? 'Нет данных' : `${value} ч`;
+}
+
+function formatChange(value: number | null) {
+  if (value === null) return 'новый рост';
+  if (value > 0) return `+${value}%`;
+  return `${value}%`;
+}
+
+function ManagerStatusFunnelPanel({ funnel }: { funnel: StatusFunnel }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}>
+        <h3>Воронка по статусам</h3>
+        <span>{funnel.biggestDrop ? `Провал: ${funnel.biggestDrop.label}` : 'По прайсам менеджера'}</span>
+      </div>
+      <div className={styles.analyticsTopList}>
+        {funnel.steps.map((step) => (
+          <div className={styles.analyticsTopItem} key={step.key}>
+            <span>{step.label}</span>
+            <span className={styles.analyticsTopViewedAt}>{step.conversionFromTotal}% от всех • {step.conversionFromPrevious}% от прошлого</span>
+            <strong>{step.count}</strong>
+          </div>
+        ))}
+      </div>
+      <dl className={styles.analyticsList}>
+        <div><dt>Создание → открытие</dt><dd>{formatHours(funnel.averageTimeToOpenHours)}</dd></div>
+        <div><dt>Открытие → PDF</dt><dd>{formatHours(funnel.averageTimeToPdfHours)}</dd></div>
+        <div><dt>Открытие → заявка</dt><dd>{formatHours(funnel.averageTimeToRequestHours)}</dd></div>
+      </dl>
+    </article>
+  );
+}
+
+function ManagerPeriodComparisonPanel({ rows }: { rows: PeriodComparison[] }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Сравнение периодов</h3><span>Текущий против прошлого</span></div>
+      {rows.length === 0 ? <EmptyState>Для всего времени сравнение не считается</EmptyState> : (
+        <div className={styles.analyticsTopList}>
+          {rows.map((row) => (
+            <div className={styles.analyticsTopItem} key={row.label}>
+              <span>{row.label}</span>
+              <span className={styles.analyticsTopViewedAt}>прошлый: {row.previous} • {formatChange(row.changePercent)}</span>
+              <strong>{row.current}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ManagerAttentionPricesTable({ rows, managerId, routerPush }: { rows: AttentionPrice[]; managerId: number; routerPush: (href: string) => void }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Прайсы, которые застряли</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState>Застрявших прайсов нет</EmptyState> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Прайс</th><th>Клиент</th><th>Причина</th><th>Статус</th><th>Дней</th><th>Активность клиента</th><th>Просмотры</th><th>PDF</th><th>Заявки</th><th>Действие</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={`${row.id}-${row.reason}`}><td>{row.title}</td><td>{row.clientName || '—'}</td><td><span className={styles.analyticsBadgeDanger}>{row.reason}</span></td><td>{row.workflowStatusLabel}</td><td>{row.daysInStage}</td><td>{formatDate(row.lastClientActivityAt)}</td><td>{row.views}</td><td>{row.pdfDownloads}</td><td>{row.requestsSent}</td><td><button type="button" onClick={() => routerPush(`/admin/wholesale/${row.id}/edit?analyticsManagerId=${managerId}`)}>Открыть</button></td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ManagerReactionNeededTable({ rows, managerId, routerPush }: { rows: ReactionNeeded[]; managerId: number; routerPush: (href: string) => void }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Клиент проявил интерес, реакции нет</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState>Неотработанных клиентских действий нет</EmptyState> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Клиент</th><th>Прайс</th><th>Действие клиента</th><th>Без реакции</th><th>Статус</th><th>Действие</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={`${row.priceId}-${row.lastClientActivityAt}`}><td>{row.clientName || '—'}</td><td>{row.priceTitle}</td><td>{eventLabel(row.lastClientEventType)}<br /><span>{formatDate(row.lastClientActivityAt)}</span></td><td>{formatHours(row.hoursWithoutReaction)}</td><td>{row.workflowStatusLabel}</td><td><button type="button" onClick={() => routerPush(`/admin/wholesale/${row.priceId}/edit?analyticsManagerId=${managerId}`)}>Открыть</button></td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ManagerPriorityClientsTable({ rows, managerId, routerPush }: { rows: PriorityClient[]; managerId: number; routerPush: (href: string) => void }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Клиенты, с которыми связаться сегодня</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState>Приоритетных клиентов пока нет</EmptyState> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Клиент</th><th>Прайс</th><th>Приоритет</th><th>Причины</th><th>24 часа</th><th>7 дней</th><th>PDF</th><th>Заявки</th><th>Последняя активность</th><th>Действие</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={`${row.clientId}-${row.priceId}`}><td>{row.clientName}</td><td>{row.priceTitle}</td><td><strong>{row.score}</strong></td><td><div className={styles.analyticsBadgesRow}>{row.reasons.map((reason) => <span className={styles.analyticsBadgeOrange} key={reason}>{reason}</span>)}</div></td><td>{row.viewsLast24Hours}</td><td>{row.viewsLast7Days}</td><td>{row.pdfDownloads}</td><td>{row.requestsSent}</td><td>{formatDate(row.lastActivityAt)}</td><td><button type="button" onClick={() => routerPush(`/admin/wholesale/${row.priceId}/edit?analyticsManagerId=${managerId}`)}>Открыть</button></td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ManagerClientHistoryTable({ rows }: { rows: ClientHistory[] }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>История клиентов</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState>История клиентов пока пустая</EmptyState> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Клиент</th><th>Прайсов</th><th>Активных</th><th>Актуальных</th><th>Просроченных</th><th>Статусы</th><th>Просмотры</th><th>PDF</th><th>Заявки</th><th>Последняя активность</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.clientId}><td>{row.clientName}</td><td>{row.priceCount}</td><td>{row.activePrices}</td><td>{row.activeActualPrices}</td><td>{row.expiredPrices}</td><td><div className={styles.analyticsBadgesRow}>{row.statuses.map((status) => <span className={styles.analyticsBadgeOrange} key={status}>{status}</span>)}</div></td><td>{row.views}</td><td>{row.pdfDownloads}</td><td>{row.requestsSent}</td><td>{formatDate(row.lastActivityAt)}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ManagerProductInterestTable({ rows }: { rows: ProductInterest[] }) {
+  return (
+    <article className={styles.analyticsPanel}>
+      <div className={styles.analyticsPanelHeader}><h3>Товарный интерес</h3><span>{rows.length}</span></div>
+      {rows.length === 0 ? <EmptyState>Интерес к товарам пока не зафиксирован</EmptyState> : (
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead><tr><th>Товар</th><th>Открывали</th><th>Меняли количество</th><th>В заявках</th><th>Последняя активность</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.productId ?? row.productTitle}><td>{row.productTitle}</td><td>{row.opens}</td><td>{row.quantityChanges}</td><td>{row.requests}</td><td>{formatDate(row.lastActivityAt)}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
 }
 
 export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps) {
@@ -390,6 +639,7 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
   const clients = analytics.clients;
   const funnel = analytics.funnel;
   const priceInsights = analytics.priceInsights;
+  const attention = analytics.attention;
   const qualityScore = analytics.summary.qualityScore ?? 0;
 
   return (
@@ -458,6 +708,24 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
             <KpiCard title="Клиенты" value={clients?.clientsWithViews ?? 0} text="Клиенты с активностью" tone={styles.analyticsToneGreen} />
           </div>
 
+          {attention ? (
+            <>
+              <div className={styles.analyticsKpiGrid}>
+                <KpiCard title="Требуют внимания" value={attention.stuckPrices.length} text="Прайсы застряли по статусу" tone={styles.analyticsToneRed} />
+                <KpiCard title="Нет реакции" value={attention.managerReactionNeeded.length} text="Клиент активен, менеджер не ответил действием" tone={styles.analyticsToneRed} />
+                <KpiCard title="Приоритетные клиенты" value={attention.priorityClients.length} text="С кем связаться сегодня" tone={styles.analyticsToneGreen} />
+                <KpiCard title="Главный провал" value={attention.statusFunnel.biggestDrop?.dropFromPrevious ?? 0} text={attention.statusFunnel.biggestDrop?.label ?? 'Нет данных'} tone={styles.analyticsToneViolet} />
+              </div>
+              <div className={styles.analyticsSplit}>
+                <ManagerStatusFunnelPanel funnel={attention.statusFunnel} />
+                <ManagerPeriodComparisonPanel rows={attention.comparison} />
+              </div>
+              <ManagerAttentionPricesTable rows={attention.stuckPrices.slice(0, 10)} managerId={managerId} routerPush={router.push} />
+              <ManagerReactionNeededTable rows={attention.managerReactionNeeded.slice(0, 10)} managerId={managerId} routerPush={router.push} />
+              <ManagerPriorityClientsTable rows={attention.priorityClients.slice(0, 10)} managerId={managerId} routerPush={router.push} />
+            </>
+          ) : null}
+
           <div className={styles.analyticsSplit}>
             <article className={styles.analyticsPanel}>
               <div className={styles.analyticsPanelHeader}>
@@ -509,6 +777,7 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
             <KpiCard title="Среднее позиций" value={analytics.summary.averageItemsPerPrice} text={`Медиана: ${analytics.summary.medianItemsPerPrice ?? 0}`} />
           </div>
           <PriceProblemsTable prices={analytics.problemPrices} managerId={managerId} routerPush={router.push} />
+          {attention ? <ManagerAttentionPricesTable rows={attention.stuckPrices} managerId={managerId} routerPush={router.push} /> : null}
           <SimplePriceTable title="Скоро истекают" rows={priceInsights?.expiringSoon ?? []} empty="Прайсов с ближайшим окончанием срока нет" managerId={managerId} routerPush={router.push} />
           <SimplePriceTable title="Прайсы без просмотров" rows={priceInsights?.pricesWithoutViews ?? []} empty="Прайсов без просмотров нет" managerId={managerId} routerPush={router.push} />
           <TopViewedTable title="Самые просматриваемые прайсы" rows={priceInsights?.topViewedPrices ?? []} empty="Просмотров публичных ссылок пока нет" />
@@ -525,6 +794,8 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
             <KpiCard title="Скачали PDF" value={clients?.clientsWithPdfDownloads ?? 0} text="Есть PDF-download" tone={styles.analyticsToneViolet} />
           </div>
           <ClientsTable title="Горячие клиенты" rows={clients?.hotClients ?? []} empty="Горячих клиентов пока нет" managerId={managerId} routerPush={router.push} />
+          {attention ? <ManagerPriorityClientsTable rows={attention.priorityClients} managerId={managerId} routerPush={router.push} /> : null}
+          {attention ? <ManagerClientHistoryTable rows={attention.clientHistory} /> : null}
           <ClientsTable title="Клиенты без просмотров" rows={clients?.clientsWithoutRecentActivity ?? []} empty="Клиентов без просмотров нет" managerId={managerId} routerPush={router.push} />
           <ClientsTable title="Топ клиентов по просмотрам" rows={clients?.topClientsByViews ?? []} empty="Просмотров клиентов пока нет" managerId={managerId} routerPush={router.push} />
         </>
@@ -539,6 +810,7 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
             <KpiCard title="За период" value={analytics.publicViews.periodViews} text={`Последний: ${formatDate(analytics.publicViews.lastViewAt)}`} />
           </div>
           <TopViewedPublicTable rows={analytics.publicViews.topPrices} />
+          {attention ? <ManagerProductInterestTable rows={attention.productInterest} /> : null}
           <EventsTable title="Последние просмотры" events={analytics.publicViews.recentViews ?? []} empty="Просмотров публичных ссылок пока нет" />
           <SimplePriceTable title="Прайсы без просмотров" rows={analytics.publicViews.pricesWithoutViewsList ?? []} empty="Прайсов без просмотров нет" managerId={managerId} routerPush={router.push} />
         </>

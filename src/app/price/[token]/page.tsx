@@ -4,6 +4,7 @@ import { getPublicWholesalePriceList } from '@/shared/lib/db';
 import { phoneHref } from '@/shared/lib/phone';
 
 import { PriceAnalyticsTracker } from './PriceAnalyticsTracker';
+import { PriceEventLink } from './PriceEventLink';
 import { PriceRequestForm } from './PriceRequestForm';
 import styles from './PricePage.module.scss';
 
@@ -37,8 +38,16 @@ export default async function PricePage({ params }: PricePageProps) {
               <aside className={styles.managerContact}>
                 <span>Ваш менеджер по прайсу</span>
                 {priceList.managerName ? <strong>{priceList.managerName}</strong> : null}
-                {priceList.managerPhone ? <a href={phoneHref(priceList.managerPhone)}>{priceList.managerPhone}</a> : null}
-                {priceList.managerEmail ? <a href={`mailto:${priceList.managerEmail}`}>{priceList.managerEmail}</a> : null}
+                {priceList.managerPhone ? (
+                  <PriceEventLink href={phoneHref(priceList.managerPhone)} token={priceList.token} eventType="public_price_phone_clicked">
+                    {priceList.managerPhone}
+                  </PriceEventLink>
+                ) : null}
+                {priceList.managerEmail ? (
+                  <PriceEventLink href={`mailto:${priceList.managerEmail}`} token={priceList.token} eventType="public_price_email_clicked">
+                    {priceList.managerEmail}
+                  </PriceEventLink>
+                ) : null}
               </aside>
             ) : null}
             <a className={styles.pdfButton} href={`/price/${priceList.token}/pdf`}>
