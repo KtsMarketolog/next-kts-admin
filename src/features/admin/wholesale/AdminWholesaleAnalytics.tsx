@@ -643,28 +643,38 @@ function ManagerFunnelQualityTable({ rows, routerPush }: { rows: ManagerRow[]; r
   return (
     <article className={styles.analyticsPanel}>
       <div className={styles.analyticsPanelHeader}><h3>Качество воронки менеджеров</h3><span>{rows.length}</span></div>
-      <div className={styles.tableWrap}>
-        <table className={styles.adminTable}>
-          <thead><tr><th>Менеджер</th><th>Просмотров / активный</th><th>PDF / активный</th><th>Заявок / активный</th><th>Отправлен → открыт</th><th>Открыт → PDF</th><th>Открыт → заявка</th><th>Застряли</th><th>Подтверждены</th><th>Средняя реакция</th><th>Действие</th></tr></thead>
-          <tbody>
-            {rows.map((manager) => (
-              <tr key={manager.id}>
-                <td><strong>{manager.name}</strong></td>
-                <td>{manager.viewsPerActivePrice ?? 0}</td>
-                <td>{manager.pdfPerActivePrice ?? 0}</td>
-                <td>{manager.requestsPerActivePrice ?? 0}</td>
-                <td>{manager.sentToOpenedConversion ?? 0}%</td>
-                <td>{manager.openedToPdfConversion ?? 0}%</td>
-                <td>{manager.openedToRequestConversion ?? 0}%</td>
-                <td>{manager.stuckPriceRate ?? 0}%</td>
-                <td>{manager.confirmedPriceRate ?? 0}%</td>
-                <td>{formatHours(manager.averageReactionHours)}</td>
-                <td><button type="button" onClick={() => routerPush(managerAnalyticsHref(manager.id))}>Аналитика</button></td>
-              </tr>
-            ))}
-            {rows.length === 0 ? <tr><td colSpan={11}>Нет данных</td></tr> : null}
-          </tbody>
-        </table>
+      {rows.length === 0 ? <EmptyState text="Нет данных" /> : null}
+      <div className={styles.analyticsManagerFunnelList}>
+        {rows.map((manager) => {
+          const metrics = [
+            { label: 'Просмотров / активный', value: manager.viewsPerActivePrice ?? 0 },
+            { label: 'PDF / активный', value: manager.pdfPerActivePrice ?? 0 },
+            { label: 'Заявок / активный', value: manager.requestsPerActivePrice ?? 0 },
+            { label: 'Отправлен → открыт', value: `${manager.sentToOpenedConversion ?? 0}%` },
+            { label: 'Открыт → PDF', value: `${manager.openedToPdfConversion ?? 0}%` },
+            { label: 'Открыт → заявка', value: `${manager.openedToRequestConversion ?? 0}%` },
+            { label: 'Застряли', value: `${manager.stuckPriceRate ?? 0}%` },
+            { label: 'Подтверждены', value: `${manager.confirmedPriceRate ?? 0}%` },
+            { label: 'Средняя реакция', value: formatHours(manager.averageReactionHours) },
+          ];
+
+          return (
+            <div className={styles.analyticsManagerFunnelCard} key={manager.id}>
+              <div className={styles.analyticsManagerFunnelTop}>
+                <strong>{manager.name}</strong>
+                <button type="button" onClick={() => routerPush(managerAnalyticsHref(manager.id))}>Аналитика</button>
+              </div>
+              <div className={styles.analyticsManagerFunnelStats}>
+                {metrics.map((metric) => (
+                  <div key={metric.label}>
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </article>
   );

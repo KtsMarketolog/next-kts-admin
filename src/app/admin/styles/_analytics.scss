@@ -498,6 +498,70 @@
   }
 }
 
+.analyticsManagerFunnelList {
+  display: grid;
+  gap: $apx-12;
+}
+
+.analyticsManagerFunnelCard {
+  display: grid;
+  gap: $apx-12;
+  border: $apx-1 solid #e3e5ef;
+  border-radius: $apx-8;
+  background: #fbfcff;
+  padding: $apx-14;
+}
+
+.analyticsManagerFunnelTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $apx-12;
+
+  > strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1.25;
+  }
+
+  button {
+    min-width: $apx-126;
+  }
+}
+
+.analyticsManagerFunnelStats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: $apx-8;
+  border-top: $apx-1 solid #edf0f6;
+  padding-top: $apx-12;
+
+  div {
+    display: grid;
+    align-content: start;
+    gap: $apx-5;
+    min-height: $apx-74;
+    border: $apx-1 solid #eceef6;
+    border-radius: $apx-8;
+    background: #fff;
+    padding: $apx-10;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-11;
+    font-weight: 800;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1.2;
+  }
+}
+
 @media (max-width: 1024px) {
   .analyticsKpiGrid,
   .analyticsQualityGrid,
@@ -522,6 +586,10 @@
   }
 
   .analyticsManagerRatingStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .analyticsManagerFunnelStats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -568,8 +636,18 @@
   }
 
   .analyticsManagerRatingTop,
-  .analyticsManagerRatingStats {
+  .analyticsManagerRatingStats,
+  .analyticsManagerFunnelStats {
     grid-template-columns: 1fr;
+  }
+
+  .analyticsManagerFunnelTop {
+    display: grid;
+    grid-template-columns: 1fr;
+
+    button {
+      width: 100%;
+    }
   }
 
   .analyticsManagerRatingActions {
