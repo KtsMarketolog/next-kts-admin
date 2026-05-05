@@ -80,13 +80,16 @@
 }
 
 .analyticsTab {
-  background: #f2f3f8;
-  color: #242633;
+  border-color: #e1e3ef !important;
+  background: #f2f3f8 !important;
+  color: #242633 !important;
 }
 
 .analyticsTabActive {
-  background: #260b86;
-  color: #fff;
+  border-color: #260b86 !important;
+  background: #260b86 !important;
+  color: #fff !important;
+  box-shadow: 0 $apx-6 $apx-16 rgba(38, 11, 134, 0.22);
 }
 
 .analyticsFilters {
