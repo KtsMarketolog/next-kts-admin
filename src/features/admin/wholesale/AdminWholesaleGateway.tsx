@@ -11,7 +11,7 @@ import {
   type WholesalePriceWorkflowStatus,
 } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
-import { AdminWholesaleAnalytics } from './AdminWholesaleAnalytics';
+import { AdminWholesaleAnalytics, type AdminWholesaleAnalyticsTab } from './AdminWholesaleAnalytics';
 
 type Manager = {
   id: number;
@@ -199,6 +199,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [savedManagerId, setSavedManagerId] = useState<number | null>(null);
   const [managerCreated, setManagerCreated] = useState(false);
+  const [adminAnalyticsTab, setAdminAnalyticsTab] = useState<AdminWholesaleAnalyticsTab>('overview');
 
   const editMatch = pathname.match(/\/admin\/wholesale\/(\d+)\/edit$/);
   const editId = editMatch ? Number(editMatch[1]) : null;
@@ -544,7 +545,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
         {status ? <p className={styles.status}>{status}</p> : null}
 
-        <AdminWholesaleAnalytics />
+        <AdminWholesaleAnalytics onTabChange={setAdminAnalyticsTab} />
+
+        {adminAnalyticsTab === 'managers' ? (
+          <>
 
         <h3>Добавить менеджера</h3>
         <div className={styles.wholesaleRow}>
@@ -630,6 +634,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           ))}
           {managers.length === 0 ? <p className={styles.mutedText}>Менеджеров пока нет</p> : null}
         </div>
+          </>
+        ) : null}
       </section>
     );
   }

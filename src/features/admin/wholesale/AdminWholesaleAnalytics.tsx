@@ -7,6 +7,7 @@ import styles from '@/app/admin/admin.module.scss';
 
 type Period = '7d' | '30d' | 'all';
 type Tab = 'overview' | 'managers' | 'prices' | 'clients' | 'public' | 'pdf' | 'events';
+export type AdminWholesaleAnalyticsTab = Tab;
 
 type Problem = 'EMPTY' | 'NO_CLIENT' | 'NO_EXPIRATION' | 'EXPIRED' | 'EXPIRING_SOON' | 'STALE' | 'NO_VIEWS';
 
@@ -668,7 +669,11 @@ function ManagerFunnelQualityTable({ rows, routerPush }: { rows: ManagerRow[]; r
   );
 }
 
-export function AdminWholesaleAnalytics() {
+type AdminWholesaleAnalyticsProps = {
+  onTabChange?: (tab: AdminWholesaleAnalyticsTab) => void;
+};
+
+export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalyticsProps) {
   const router = useRouter();
   const [period, setPeriod] = useState<Period>('30d');
   const [tab, setTab] = useState<Tab>('overview');
@@ -716,6 +721,11 @@ export function AdminWholesaleAnalytics() {
     });
   }, [actorFilter, analytics?.recentEvents, eventTypeFilter, managerFilter]);
 
+  const selectTab = (nextTab: Tab) => {
+    setTab(nextTab);
+    onTabChange?.(nextTab);
+  };
+
   return (
     <div className={`${styles.analyticsSection} ${styles.analyticsAdminSection ?? ''}`}>
       <div className={styles.analyticsPanel}>
@@ -754,7 +764,7 @@ export function AdminWholesaleAnalytics() {
                   className={tab === item.value ? styles.analyticsTabActive : styles.analyticsTab}
                   key={item.value}
                   type="button"
-                  onClick={() => setTab(item.value)}
+                  onClick={() => selectTab(item.value)}
                 >
                   {item.label}
                 </button>
