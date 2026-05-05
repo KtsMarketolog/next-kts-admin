@@ -687,6 +687,8 @@ function AnalyticsExportPanel({
   onEmailChange,
   onDownload,
   onSend,
+  downloadDone,
+  sendDone,
 }: {
   analytics: Analytics;
   period: Period;
@@ -700,6 +702,8 @@ function AnalyticsExportPanel({
   onEmailChange: (value: string) => void;
   onDownload: () => void;
   onSend: () => void;
+  downloadDone: boolean;
+  sendDone: boolean;
 }) {
   return (
     <div className={styles.analyticsExportPanel}>
@@ -718,7 +722,9 @@ function AnalyticsExportPanel({
           <option value="pdf">PDF</option>
           <option value="xls">Excel</option>
         </select>
-        <button type="button" onClick={onDownload}>Скачать</button>
+        <button className={downloadDone ? styles.analyticsExportSuccess : ''} type="button" onClick={onDownload}>
+          {downloadDone ? 'Скачано' : 'Скачать'}
+        </button>
       </div>
       <div className={styles.analyticsExportMail}>
         <input
@@ -727,7 +733,9 @@ function AnalyticsExportPanel({
           value={email}
           onChange={(event) => onEmailChange(event.target.value)}
         />
-        <button type="button" disabled={busy} onClick={onSend}>{busy ? 'Отправка...' : 'Отправить'}</button>
+        <button className={sendDone ? styles.analyticsExportSuccess : ''} type="button" disabled={busy} onClick={onSend}>
+          {busy ? 'Отправка...' : sendDone ? 'Отправлено' : 'Отправить'}
+        </button>
       </div>
       {status ? <p className={styles.analyticsExportStatus}>{status}</p> : null}
     </div>
@@ -749,6 +757,8 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
   const [exportEmail, setExportEmail] = useState('');
   const [exportStatus, setExportStatus] = useState('');
   const [exportBusy, setExportBusy] = useState(false);
+  const [exportDownloadDone, setExportDownloadDone] = useState(false);
+  const [exportSendDone, setExportSendDone] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -800,6 +810,8 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
 
   const downloadAnalytics = () => {
     setExportStatus('');
+    setExportDownloadDone(true);
+    window.setTimeout(() => setExportDownloadDone(false), 1800);
     window.location.href = `/api/admin/wholesale/analytics/export?${exportParams().toString()}`;
   };
 
@@ -812,6 +824,7 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
 
     setExportBusy(true);
     setExportStatus('');
+    setExportSendDone(false);
     try {
       const response = await fetch('/api/admin/wholesale/analytics/export', {
         method: 'POST',
@@ -826,6 +839,8 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Не удалось отправить отчёт');
       setExportStatus('Отчёт отправлен');
+      setExportSendDone(true);
+      window.setTimeout(() => setExportSendDone(false), 1800);
     } catch (reason) {
       setExportStatus(reason instanceof Error ? reason.message : 'Не удалось отправить отчёт');
     } finally {
@@ -858,6 +873,8 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
             onEmailChange={setExportEmail}
             onDownload={downloadAnalytics}
             onSend={sendAnalyticsEmail}
+            downloadDone={exportDownloadDone}
+            sendDone={exportSendDone}
           />
         ) : null}
 
@@ -1015,59 +1032,64 @@ function ManagersTab({ analytics, routerPush }: { analytics: Analytics; routerPu
           <h3>Рейтинг менеджеров</h3>
           <span>{analytics.managers.length}</span>
         </div>
-        <div className={styles.tableWrap}>
-          <table className={styles.adminTable}>
-            <thead>
-              <tr>
-                <th>Менеджер</th>
-                <th>Email</th>
-                <th>Телефон</th>
-                <th>Прайсов</th>
-                <th>Активных</th>
-                <th>Просроченных</th>
-                <th>Проблемных</th>
-                <th>Создано</th>
-                <th>Действий</th>
-                <th>Просмотров</th>
-                <th>PDF</th>
-                <th>Клиентов</th>
-                <th>Качество</th>
-                <th>Последний вход</th>
-                <th>Действие</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analytics.managers.map((manager) => (
-                <tr key={manager.id}>
-                  <td>
+        {analytics.managers.length === 0 ? <EmptyState text="Нет данных за выбранный период" /> : null}
+        <div className={styles.analyticsManagerRatingList}>
+          {analytics.managers.map((manager) => {
+            const metrics = [
+              { label: 'Прайсов', value: manager.totalPrices },
+              { label: 'Активных', value: manager.activePrices },
+              { label: 'Просроченных', value: manager.expiredPrices },
+              { label: 'Проблемных', value: manager.problemPrices },
+              { label: 'Создано', value: manager.pricesCreatedInSelectedPeriod },
+              { label: 'Действий', value: manager.actionsInSelectedPeriod },
+              { label: 'Просмотров', value: manager.publicViews },
+              { label: 'PDF', value: manager.pdfDownloads },
+              { label: 'Клиентов', value: manager.clientsWithActivity },
+            ];
+
+            return (
+              <div className={styles.analyticsManagerRatingCard} key={manager.id}>
+                <div className={styles.analyticsManagerRatingTop}>
+                  <div className={styles.analyticsManagerRatingName}>
                     <strong>{manager.name}</strong>
                     <div className={styles.analyticsBadgesRow}>
                       <Badge tone={manager.actionsInSelectedPeriod > 0 ? 'orange' : 'warning'}>{manager.actionsInSelectedPeriod > 0 ? 'Активен' : 'Нет активности'}</Badge>
                       {manager.problemPrices > 0 ? <Badge tone="danger">Есть проблемы</Badge> : <Badge tone="orange">Хорошее качество</Badge>}
                     </div>
-                  </td>
-                  <td>{manager.email || '—'}</td>
-                  <td>{manager.phone || '—'}</td>
-                  <td>{manager.totalPrices}</td>
-                  <td>{manager.activePrices}</td>
-                  <td>{manager.expiredPrices}</td>
-                  <td>{manager.problemPrices}</td>
-                  <td>{manager.pricesCreatedInSelectedPeriod}</td>
-                  <td>{manager.actionsInSelectedPeriod}</td>
-                  <td>{manager.publicViews}</td>
-                  <td>{manager.pdfDownloads}</td>
-                  <td>{manager.clientsWithActivity}</td>
-                  <td><strong>{manager.qualityScore}</strong><br /><span>{qualityLabel(manager.qualityScore)}</span></td>
-                  <td>{formatDate(manager.lastLoginAt)}</td>
-                  <td className={styles.tableActions}>
+                  </div>
+                  <div className={styles.analyticsManagerRatingContact}>
+                    <span>Email</span>
+                    <strong>{manager.email || '—'}</strong>
+                  </div>
+                  <div className={styles.analyticsManagerRatingContact}>
+                    <span>Телефон</span>
+                    <strong>{manager.phone || '—'}</strong>
+                  </div>
+                  <div className={styles.analyticsManagerRatingActions}>
                     <button className={styles.secondary} type="button" onClick={() => routerPush(managerHref(manager.id))}>Прайсы</button>
                     <button type="button" onClick={() => routerPush(managerAnalyticsHref(manager.id))}>Аналитика</button>
-                  </td>
-                </tr>
-              ))}
-              {analytics.managers.length === 0 ? <tr><td colSpan={15}>Нет данных за выбранный период</td></tr> : null}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+                <div className={styles.analyticsManagerRatingStats}>
+                  {metrics.map((metric) => (
+                    <div key={metric.label}>
+                      <span>{metric.label}</span>
+                      <strong>{metric.value}</strong>
+                    </div>
+                  ))}
+                  <div>
+                    <span>Качество</span>
+                    <strong>{manager.qualityScore}</strong>
+                    <small>{qualityLabel(manager.qualityScore)}</small>
+                  </div>
+                  <div>
+                    <span>Последний вход</span>
+                    <strong>{formatDate(manager.lastLoginAt)}</strong>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </article>
       <ManagerFunnelQualityTable rows={analytics.managers} routerPush={routerPush} />

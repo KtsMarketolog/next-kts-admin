@@ -242,6 +242,12 @@
   font-weight: 700;
 }
 
+.analyticsExportSuccess {
+  background: #15803d !important;
+  color: #fff !important;
+  box-shadow: 0 $apx-10 $apx-22 rgba(21, 128, 61, 0.18);
+}
+
 .analyticsList {
   display: grid;
   gap: $apx-10;
@@ -382,6 +388,109 @@
   white-space: nowrap;
 }
 
+.analyticsManagerRatingList {
+  display: grid;
+  gap: $apx-12;
+}
+
+.analyticsManagerRatingCard {
+  display: grid;
+  gap: $apx-12;
+  border: $apx-1 solid #e3e5ef;
+  border-radius: $apx-8;
+  background: #fbfcff;
+  padding: $apx-14;
+}
+
+.analyticsManagerRatingTop {
+  display: grid;
+  grid-template-columns: minmax($apx-230, 1.1fr) minmax($apx-230, 0.9fr) minmax($apx-170, 0.7fr) auto;
+  gap: $apx-12;
+  align-items: start;
+}
+
+.analyticsManagerRatingName {
+  display: grid;
+  gap: $apx-8;
+  min-width: 0;
+
+  > strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1.2;
+  }
+}
+
+.analyticsManagerRatingContact {
+  display: grid;
+  gap: $apx-5;
+  min-width: 0;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-11;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-15;
+    line-height: 1.35;
+  }
+}
+
+.analyticsManagerRatingActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: $apx-8;
+
+  button {
+    min-width: $apx-112;
+  }
+}
+
+.analyticsManagerRatingStats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: $apx-8;
+  border-top: $apx-1 solid #edf0f6;
+  padding-top: $apx-12;
+
+  div {
+    display: grid;
+    align-content: start;
+    gap: $apx-5;
+    min-height: $apx-76;
+    border: $apx-1 solid #eceef6;
+    border-radius: $apx-8;
+    background: #fff;
+    padding: $apx-10;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-11;
+    font-weight: 800;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  small {
+    color: #77798a;
+    font-size: $apx-11;
+    font-weight: 700;
+  }
+}
+
 @media (max-width: 1024px) {
   .analyticsKpiGrid,
   .analyticsQualityGrid,
@@ -391,6 +500,18 @@
 
   .analyticsSplit {
     grid-template-columns: 1fr;
+  }
+
+  .analyticsManagerRatingTop {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analyticsManagerRatingActions {
+    justify-content: flex-start;
+  }
+
+  .analyticsManagerRatingStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -433,6 +554,20 @@
   .analyticsQualityGrid,
   .analyticsPublicGrid {
     grid-template-columns: 1fr;
+  }
+
+  .analyticsManagerRatingTop,
+  .analyticsManagerRatingStats {
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsManagerRatingActions {
+    display: grid;
+    grid-template-columns: 1fr;
+
+    button {
+      width: 100%;
+    }
   }
 
   .analyticsKpiCard {

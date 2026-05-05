@@ -58,15 +58,6 @@ function dateText(value: string | null | undefined) {
   }).format(date);
 }
 
-function escapeHtml(value: CellValue) {
-  return text(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
 function safeFilename(value: string) {
   return value
     .toLowerCase()
@@ -283,6 +274,94 @@ function managerReport(analytics: WholesaleManagerAnalytics, period: WholesaleAd
   };
 }
 
+function compactText(value: CellValue, maxLength = 90) {
+  const source = text(value).replace(/\s+/g, ' ').trim();
+  return source.length > maxLength ? `${source.slice(0, maxLength - 1)}…` : source;
+}
+
+function ensurePdfSpace(doc: PDFKit.PDFDocument, height: number) {
+  const bottom = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + height > bottom) doc.addPage();
+}
+
+function drawMetricCard(
+  doc: PDFKit.PDFDocument,
+  metric: Report['metrics'][number],
+  fonts: { regularFont: string; boldFont: string },
+  x: number,
+  y: number,
+  width: number,
+) {
+  doc.roundedRect(x, y, width, 58, 6).fill('#f8f9fc');
+  doc.roundedRect(x, y, width, 58, 6).stroke('#dfe3ef');
+  doc.font(fonts.boldFont).fontSize(8).fillColor('#6f7182').text(metric.label, x + 10, y + 9, { width: width - 20 });
+  doc.font(fonts.boldFont).fontSize(19).fillColor('#242633').text(text(metric.value), x + 10, y + 25, { width: width - 20 });
+  if (metric.note) {
+    doc.font(fonts.regularFont).fontSize(7).fillColor('#77798a').text(metric.note, x + 10, y + 46, { width: width - 20 });
+  }
+  doc.fillColor('#000');
+}
+
+function drawPdfSection(
+  doc: PDFKit.PDFDocument,
+  section: ReportSection,
+  sectionIndex: number,
+  fonts: { regularFont: string; boldFont: string },
+) {
+  const left = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  ensurePdfSpace(doc, 46);
+  doc.font(fonts.boldFont).fontSize(13).fillColor('#242633').text(`${sectionIndex + 1}. ${section.title}`);
+  doc.moveDown(0.35);
+
+  if (section.rows.length === 0) {
+    doc.font(fonts.regularFont).fontSize(9).fillColor('#77798a').text('Нет данных');
+    doc.fillColor('#000').moveDown(0.8);
+    return;
+  }
+
+  section.rows.slice(0, 35).forEach((row, rowIndex) => {
+    const entries = Object.entries(row);
+    const [mainLabel, mainValue] = entries[0] ?? ['Запись', '—'];
+    const details = entries.slice(1);
+    const detailRows = Math.ceil(details.length / 2);
+    const rowHeight = Math.max(48, 31 + detailRows * 16);
+    ensurePdfSpace(doc, rowHeight + 8);
+
+    const y = doc.y;
+    doc.roundedRect(left, y, width, rowHeight, 6).fill('#fbfcff');
+    doc.roundedRect(left, y, width, rowHeight, 6).stroke('#e3e5ef');
+    doc.font(fonts.boldFont)
+      .fontSize(9)
+      .fillColor('#242633')
+      .text(`${rowIndex + 1}. ${mainLabel}: ${compactText(mainValue, 120)}`, left + 10, y + 8, { width: width - 20 });
+
+    const detailWidth = (width - 30) / 2;
+    details.forEach(([label, value], detailIndex) => {
+      const column = detailIndex % 2;
+      const line = Math.floor(detailIndex / 2);
+      const detailX = left + 10 + column * (detailWidth + 10);
+      const detailY = y + 28 + line * 16;
+      doc.font(fonts.regularFont)
+        .fontSize(8)
+        .fillColor('#4b4e61')
+        .text(`${label}: ${compactText(value, 62)}`, detailX, detailY, { width: detailWidth });
+    });
+
+    doc.fillColor('#000');
+    doc.y = y + rowHeight + 7;
+  });
+
+  if (section.rows.length > 35) {
+    doc.font(fonts.regularFont)
+      .fontSize(8)
+      .fillColor('#77798a')
+      .text(`Показаны первые 35 записей из ${section.rows.length}. Полный список доступен в Excel-отчёте.`);
+    doc.fillColor('#000').moveDown(0.5);
+  }
+}
+
 function createPdf(report: Report) {
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 38 });
@@ -297,88 +376,108 @@ function createPdf(report: Report) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.font(boldFont).fontSize(18).text(report.title);
-    doc.moveDown(0.25);
-    doc.font(regularFont).fontSize(10).fillColor('#555').text(report.subtitle).fillColor('#000');
-    doc.moveDown(0.7);
+    const left = doc.page.margins.left;
+    const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
-    const metricWidth = 165;
-    let metricsBottom = doc.y;
-    report.metrics.forEach((metric, index) => {
-      const x = doc.page.margins.left + (index % 3) * (metricWidth + 8);
-      const y = doc.y;
-      if (index > 0 && index % 3 === 0) doc.moveDown(1.2);
-      const rowY = index % 3 === 0 ? doc.y : y;
-      doc.roundedRect(x, rowY, metricWidth, 54, 5).stroke('#dfe3ef');
-      doc.font(boldFont).fontSize(8).fillColor('#6f7182').text(metric.label, x + 8, rowY + 8, { width: metricWidth - 16 });
-      doc.font(boldFont).fontSize(18).fillColor('#242633').text(text(metric.value), x + 8, rowY + 23, { width: metricWidth - 16 });
-      if (metric.note) doc.font(regularFont).fontSize(7).fillColor('#77798a').text(metric.note, x + 8, rowY + 43, { width: metricWidth - 16 });
-      doc.fillColor('#000');
-      metricsBottom = Math.max(metricsBottom, rowY + 62);
-      if (index % 3 === 2) doc.y = rowY + 62;
-    });
-    doc.y = metricsBottom;
+    doc.rect(0, 0, doc.page.width, 86).fill('#260b86');
+    doc.fillColor('#fff').font(boldFont).fontSize(18).text(report.title, left, 24, { width: contentWidth });
+    doc.font(regularFont).fontSize(10).text(report.subtitle, left, 51, { width: contentWidth });
+    doc.fillColor('#000');
+    doc.y = 106;
+
+    doc.font(boldFont).fontSize(14).fillColor('#242633').text('Ключевые показатели');
+    doc.moveDown(0.5);
+
+    const metricGap = 10;
+    const metricWidth = (contentWidth - metricGap) / 2;
+    for (let index = 0; index < report.metrics.length; index += 2) {
+      ensurePdfSpace(doc, 68);
+      const rowY = doc.y;
+      drawMetricCard(doc, report.metrics[index], { regularFont, boldFont }, left, rowY, metricWidth);
+      if (report.metrics[index + 1]) {
+        drawMetricCard(doc, report.metrics[index + 1], { regularFont, boldFont }, left + metricWidth + metricGap, rowY, metricWidth);
+      }
+      doc.y = rowY + 68;
+    }
     doc.moveDown(1);
 
-    for (const section of report.sections) {
-      if (doc.y > 700) doc.addPage();
-      doc.font(boldFont).fontSize(13).fillColor('#242633').text(section.title);
-      doc.moveDown(0.25);
-      if (section.rows.length === 0) {
-        doc.font(regularFont).fontSize(9).fillColor('#77798a').text('Нет данных');
-        doc.fillColor('#000').moveDown(0.7);
-        continue;
-      }
-
-      const columns = Object.keys(section.rows[0]).slice(0, 6);
-      doc.font(boldFont).fontSize(8).fillColor('#6f7182').text(columns.join(' | '));
-      doc.moveDown(0.2);
-      doc.font(regularFont).fontSize(8).fillColor('#242633');
-      for (const row of section.rows.slice(0, 30)) {
-        if (doc.y > 760) doc.addPage();
-        doc.text(columns.map((column) => text(row[column])).join(' | '), { width: 520 });
-      }
-      doc.fillColor('#000').moveDown(0.8);
-    }
+    report.sections.forEach((section, sectionIndex) => drawPdfSection(doc, section, sectionIndex, { regularFont, boldFont }));
 
     doc.end();
   });
 }
 
-function createXls(report: Report) {
-  const metricsRows = report.metrics
-    .map((metric) => `<tr><td>${escapeHtml(metric.label)}</td><td>${escapeHtml(metric.value)}</td><td>${escapeHtml(metric.note)}</td></tr>`)
-    .join('');
-  const sectionsHtml = report.sections.map((section) => {
-    const columns = section.rows[0] ? Object.keys(section.rows[0]) : [];
-    const header = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('');
-    const rows = section.rows
-      .map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join('')}</tr>`)
-      .join('');
-    return `<h2>${escapeHtml(section.title)}</h2><table><thead><tr>${header}</tr></thead><tbody>${rows || '<tr><td>Нет данных</td></tr>'}</tbody></table>`;
+function escapeXml(value: CellValue) {
+  return text(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function safeSheetName(value: string, index: number) {
+  const cleaned = value.replace(/[\\/?*:[\]]/g, ' ').replace(/\s+/g, ' ').trim() || `Лист ${index + 1}`;
+  return cleaned.slice(0, 28);
+}
+
+function excelCell(value: CellValue, style = 'Body') {
+  const isNumber = typeof value === 'number' && Number.isFinite(value);
+  return `<Cell ss:StyleID="${style}"><Data ss:Type="${isNumber ? 'Number' : 'String'}">${escapeXml(value)}</Data></Cell>`;
+}
+
+function worksheet(name: string, rows: Array<Record<string, CellValue>>, index: number) {
+  const columns = rows[0] ? Object.keys(rows[0]) : ['Данные'];
+  const header = `<Row>${columns.map((column) => excelCell(column, 'Header')).join('')}</Row>`;
+  const body = rows.length > 0
+    ? rows.map((row) => `<Row>${columns.map((column) => excelCell(row[column])).join('')}</Row>`).join('')
+    : `<Row>${excelCell('Нет данных')}</Row>`;
+  const columnWidths = columns.map((column) => {
+    const width = Math.max(85, Math.min(210, column.length * 10 + 65));
+    return `<Column ss:AutoFitWidth="0" ss:Width="${width}"/>`;
   }).join('');
 
-  return Buffer.from(`<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <style>
-    body { font-family: Arial, sans-serif; }
-    h1 { font-size: 20px; }
-    h2 { margin-top: 24px; font-size: 16px; }
-    table { border-collapse: collapse; margin-bottom: 16px; }
-    th, td { border: 1px solid #d9deea; padding: 6px 8px; vertical-align: top; }
-    th { background: #eef1f7; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <h1>${escapeHtml(report.title)}</h1>
-  <p>${escapeHtml(report.subtitle)}</p>
-  <h2>Ключевые показатели</h2>
-  <table><thead><tr><th>Показатель</th><th>Значение</th><th>Примечание</th></tr></thead><tbody>${metricsRows}</tbody></table>
-  ${sectionsHtml}
-</body>
-</html>`, 'utf8');
+  return `<Worksheet ss:Name="${escapeXml(safeSheetName(name, index))}"><Table>${columnWidths}${header}${body}</Table></Worksheet>`;
+}
+
+function createXls(report: Report) {
+  const metricsRows = [
+    { Показатель: 'Отчёт', Значение: report.title, Примечание: report.subtitle },
+    ...report.metrics.map((metric) => ({
+      Показатель: metric.label,
+      Значение: metric.value,
+      Примечание: metric.note ?? '',
+    })),
+  ];
+  const sheets = [
+    worksheet('Показатели', metricsRows, 0),
+    ...report.sections.map((section, index) => worksheet(section.title, section.rows, index + 1)),
+  ].join('');
+
+  return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="Header">
+   <Font ss:Bold="1" ss:Color="#242633"/>
+   <Interior ss:Color="#EEF1F7" ss:Pattern="Solid"/>
+   <Borders>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9DEEA"/>
+   </Borders>
+  </Style>
+  <Style ss:ID="Body">
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+   <Borders>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#EDF0F6"/>
+   </Borders>
+  </Style>
+ </Styles>
+ ${sheets}
+</Workbook>`, 'utf8');
 }
 
 export function buildWholesaleAnalyticsReport(
