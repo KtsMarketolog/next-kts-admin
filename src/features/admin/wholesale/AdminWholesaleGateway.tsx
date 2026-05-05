@@ -5,6 +5,11 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 import { shortToken } from '@/shared/lib/wholesaleSecurity';
+import {
+  getWholesalePriceWorkflowStatusLabel,
+  WHOLESALE_PRICE_WORKFLOW_STATUSES,
+  type WholesalePriceWorkflowStatus,
+} from '@/shared/lib/wholesalePriceWorkflowStatus';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
 import { AdminWholesaleAnalytics } from './AdminWholesaleAnalytics';
 
@@ -25,6 +30,8 @@ type PriceList = {
   clientName: string;
   token: string;
   validUntil: string | null;
+  workflowStatus: WholesalePriceWorkflowStatus;
+  workflowStatusLabel: string;
   showRetailPrices: boolean;
   isActive: boolean;
   managerId: number | null;
@@ -74,6 +81,7 @@ type PriceEditor = {
   token: string;
   validUntil: string;
   comment: string;
+  workflowStatus: WholesalePriceWorkflowStatus;
   showRetailPrices: boolean;
   isActive: boolean;
   managerId: number | null;
@@ -115,6 +123,7 @@ function emptyEditor(): PriceEditor {
     token: makeToken(),
     validUntil: '',
     comment: '',
+    workflowStatus: 'not_sent',
     showRetailPrices: false,
     isActive: true,
     managerId: null,
@@ -309,6 +318,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         token: priceList.token ?? makeToken(),
         validUntil: priceList.validUntil ?? '',
         comment: priceList.comment ?? '',
+        workflowStatus: priceList.workflowStatus ?? 'not_sent',
         showRetailPrices: Boolean(priceList.showRetailPrices),
         isActive: Boolean(priceList.isActive),
         managerId: priceList.managerId ?? null,
@@ -488,6 +498,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               <span>Статус</span>
               <strong className={item.isActive ? styles.priceStatusActive : styles.priceStatusHidden}>
                 {item.isActive ? 'Активен' : 'Скрыт'}
+              </strong>
+            </div>
+            <div className={styles.priceListField}>
+              <span>Этап работы</span>
+              <strong className={`${styles.priceWorkflowStatus} ${styles[`priceWorkflowStatus_${item.workflowStatus}`] ?? ''}`}>
+                {item.workflowStatusLabel || getWholesalePriceWorkflowStatusLabel(item.workflowStatus)}
               </strong>
             </div>
             <div className={styles.priceListActions}>
@@ -705,6 +721,19 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           <label>
             <span>Срок действия</span>
             <input type="date" value={editor.validUntil} onChange={(event) => setEditor({ ...editor, validUntil: event.target.value })} />
+          </label>
+          <label>
+            <span>Статус прайса</span>
+            <select
+              value={editor.workflowStatus}
+              onChange={(event) => setEditor({ ...editor, workflowStatus: event.target.value as WholesalePriceWorkflowStatus })}
+            >
+              {WHOLESALE_PRICE_WORKFLOW_STATUSES.map((statusItem) => (
+                <option key={statusItem.value} value={statusItem.value}>
+                  {statusItem.label}
+                </option>
+              ))}
+            </select>
           </label>
           {canManageWholesale && (
             <label>

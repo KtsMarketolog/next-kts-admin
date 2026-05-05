@@ -8,6 +8,7 @@ import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import {
   isTokenUnchanged,
   isValidNewPublicPriceToken,
@@ -95,6 +96,7 @@ export async function PUT(request: Request, context: Context) {
       validUntil,
       token: nextToken,
       comment: normalizeTextField(body.comment, 2000),
+      workflowStatus: normalizeWholesalePriceWorkflowStatus(body.workflowStatus),
       showRetailPrices: Boolean(body.showRetailPrices),
       isActive: Boolean(body.isActive ?? true),
       items: itemsFromBody(body.items),

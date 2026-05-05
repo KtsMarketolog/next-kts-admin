@@ -176,6 +176,7 @@ type ManagerAnalytics = {
     openedPrices: number;
     pricesWithRepeatViews: number;
     pdfDownloadedPrices: number;
+    requestsSent?: number;
     contactClicks: number;
   };
   priceInsights?: {
@@ -244,6 +245,7 @@ const eventLabels: Record<string, string> = {
   price_expiration_changed: 'Изменён срок действия',
   price_items_added: 'Добавлены позиции',
   price_items_removed: 'Удалены позиции',
+  price_status_changed: 'Изменён статус прайса',
   price_public_link_created: 'Создана публичная ссылка',
   price_public_link_copied: 'Скопирована публичная ссылка',
   public_price_opened: 'Клиент открыл прайс',
@@ -484,6 +486,7 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
                   ['Прайсов открывали', funnel?.openedPrices ?? 0],
                   ['С повторными просмотрами', funnel?.pricesWithRepeatViews ?? 0],
                   ['Скачивали PDF', funnel?.pdfDownloadedPrices ?? 0],
+                  ['Отправили заявку', funnel?.requestsSent ?? 0],
                   ['Клики по контактам', funnel?.contactClicks ?? 0],
                 ].map(([label, value]) => (
                   <div className={styles.analyticsTopItem} key={label}>

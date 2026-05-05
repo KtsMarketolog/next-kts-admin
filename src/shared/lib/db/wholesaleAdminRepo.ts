@@ -1,4 +1,9 @@
 import type { AdminSession } from '@/shared/lib/adminAuth';
+import {
+  getWholesalePriceWorkflowStatusLabel,
+  normalizeWholesalePriceWorkflowStatus,
+  type WholesalePriceWorkflowStatus,
+} from '@/shared/lib/wholesalePriceWorkflowStatus';
 
 import { trackAnalyticsEvent, type AnalyticsActorType, type AnalyticsEventType } from './analyticsRepo';
 import { query } from './client';
@@ -40,6 +45,8 @@ export type WholesalePriceListSummary = {
   clientName: string;
   token: string;
   validUntil: string | null;
+  workflowStatus: WholesalePriceWorkflowStatus;
+  workflowStatusLabel: string;
   showRetailPrices: boolean;
   isActive: boolean;
   managerId: number | null;
@@ -89,6 +96,7 @@ export type WholesalePriceListEditor = {
   token: string;
   validUntil: string | null;
   comment: string;
+  workflowStatus: WholesalePriceWorkflowStatus;
   showRetailPrices: boolean;
   isActive: boolean;
   managerId: number | null;
@@ -221,6 +229,7 @@ export type WholesaleManagerAnalytics = {
     openedPrices: number;
     pricesWithRepeatViews: number;
     pdfDownloadedPrices: number;
+    requestsSent: number;
     contactClicks: number;
   };
   priceInsights?: {
@@ -503,6 +512,7 @@ export type WholesaleAdminAnalytics = {
     openedPrices: number;
     pricesWithRepeatViews: number;
     pdfDownloadedPrices: number;
+    requestsSent: number;
     clientsWithActivity: number;
   };
   problemPrices: WholesaleAdminAnalyticsProblemPrice[];
@@ -527,6 +537,7 @@ type PriceListRow = {
   client_name: string;
   token: string;
   valid_until: string | null;
+  workflow_status: string | null;
   show_retail_prices: boolean;
   is_active: boolean;
   manager_id: string | null;
@@ -629,6 +640,7 @@ function actionEventType(action: string): AnalyticsEventType {
   if (action === 'delete') return 'price_deleted';
   if (action === 'enable') return 'price_activated';
   if (action === 'disable') return 'price_deactivated';
+  if (action === 'status') return 'price_status_changed';
   return 'price_updated';
 }
 
@@ -654,14 +666,15 @@ function priceListAction(previous: { is_active: boolean } | null, next: { isActi
 }
 
 function priceListDetails(
-  previous: { client_name: string; valid_until: string | null; is_active: boolean } | null,
-  next: Pick<WholesalePriceListEditor, 'clientName' | 'validUntil' | 'isActive'>,
+  previous: { client_name: string; valid_until: string | null; is_active: boolean; workflow_status?: string | null } | null,
+  next: Pick<WholesalePriceListEditor, 'clientName' | 'validUntil' | 'isActive' | 'workflowStatus'>,
 ) {
   if (!previous) return 'Прайс создан';
 
   const details: string[] = [];
   if ((previous.client_name || '') !== next.clientName) details.push('изменён клиент');
   if ((previous.valid_until || '') !== (next.validUntil || '')) details.push('изменён срок действия');
+  if (normalizeWholesalePriceWorkflowStatus(previous.workflow_status) !== next.workflowStatus) details.push('изменён статус работы');
   if (previous.is_active !== next.isActive) details.push(next.isActive ? 'прайс включён' : 'прайс отключён');
   return details.length ? details.join(', ') : 'Прайс обновлён';
 }
@@ -812,6 +825,8 @@ function mapPriceList(row: PriceListRow): WholesalePriceListSummary {
     clientName: row.client_name,
     token: row.token,
     validUntil: row.valid_until,
+    workflowStatus: normalizeWholesalePriceWorkflowStatus(row.workflow_status),
+    workflowStatusLabel: getWholesalePriceWorkflowStatusLabel(row.workflow_status),
     showRetailPrices: row.show_retail_prices,
     isActive: row.is_active,
     managerId: row.manager_id ? Number(row.manager_id) : null,
@@ -971,6 +986,7 @@ async function getWholesalePriceListsByManagerId(managerId: number | null) {
        pl.client_name,
        pl.token,
        pl.valid_until::text,
+       pl.workflow_status,
        pl.show_retail_prices,
        pl.is_active,
        pl.manager_id::text,
@@ -1096,7 +1112,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
   const managerId = sessionManagerId(session);
   const priceList = await query<Omit<WholesalePriceListEditor, 'items'> & { id: string; manager_id: string | null }>(
     `select id::text, title, client_name as "clientName", token, valid_until::text as "validUntil",
-            comment, show_retail_prices as "showRetailPrices", is_active as "isActive", manager_id::text
+            comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", is_active as "isActive", manager_id::text
      from wholesale_price_lists
      where id = $1 and ($2::bigint is null or manager_id = $2)
      limit 1`,
@@ -1130,6 +1146,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
     token: row.token,
     validUntil: row.validUntil,
     comment: row.comment,
+    workflowStatus: normalizeWholesalePriceWorkflowStatus(row.workflowStatus),
     showRetailPrices: row.showRetailPrices,
     isActive: row.isActive,
     managerId: row.manager_id ? Number(row.manager_id) : null,
@@ -1151,9 +1168,9 @@ export async function createWholesalePriceList(
   const managerId = session?.role === 'manager' ? session.managerId ?? null : input.managerId;
   const result = await query<{ id: string }>(
     `insert into wholesale_price_lists (
-       title, client_name, manager_id, valid_until, token, comment, show_retail_prices, is_active
+       title, client_name, manager_id, valid_until, token, comment, workflow_status, show_retail_prices, is_active
      )
-     values ($1, $2, $3, nullif($4, '')::date, $5, $6, $7, $8)
+     values ($1, $2, $3, nullif($4, '')::date, $5, $6, $7, $8, $9)
      returning id`,
     [
       input.title,
@@ -1162,6 +1179,7 @@ export async function createWholesalePriceList(
       input.validUntil ?? '',
       input.token,
       input.comment,
+      input.workflowStatus,
       input.showRetailPrices,
       input.isActive,
     ],
@@ -1205,9 +1223,10 @@ export async function updateWholesalePriceList(
     client_name: string;
     manager_id: string | null;
     valid_until: string | null;
+    workflow_status: string | null;
     is_active: boolean;
   }>(
-    `select title, client_name, manager_id::text, valid_until::text, is_active
+    `select title, client_name, manager_id::text, valid_until::text, workflow_status, is_active
      from wholesale_price_lists
      where id = $1 and ($2::bigint is null or manager_id = $2)
      limit 1`,
@@ -1232,10 +1251,11 @@ export async function updateWholesalePriceList(
          valid_until = nullif($5, '')::date,
          token = $6,
          comment = $7,
-         show_retail_prices = $8,
-         is_active = $9,
+         workflow_status = $8,
+         show_retail_prices = $9,
+         is_active = $10,
          updated_at = now()
-     where id = $1 and ($10::bigint is null or manager_id = $10)`,
+     where id = $1 and ($11::bigint is null or manager_id = $11)`,
     [
       id,
       input.title,
@@ -1244,6 +1264,7 @@ export async function updateWholesalePriceList(
       input.validUntil ?? '',
       input.token,
       input.comment,
+      input.workflowStatus,
       input.showRetailPrices,
       input.isActive,
       sessionManagerId(session),
@@ -1280,6 +1301,19 @@ export async function updateWholesalePriceList(
       ...baseEvent,
       eventType: 'price_expiration_changed',
       metadata: { from: previousRow.valid_until, to: input.validUntil || null, title: input.title },
+    });
+  }
+  if (normalizeWholesalePriceWorkflowStatus(previousRow.workflow_status) !== input.workflowStatus) {
+    await trackAnalyticsEvent({
+      ...baseEvent,
+      eventType: 'price_status_changed',
+      clientId: clientIdFromName(input.clientName),
+      metadata: {
+        from: getWholesalePriceWorkflowStatusLabel(previousRow.workflow_status),
+        to: getWholesalePriceWorkflowStatusLabel(input.workflowStatus),
+        title: input.title,
+        clientName: input.clientName,
+      },
     });
   }
   if (nextVisibleItems > previousVisibleItems) {
@@ -1686,6 +1720,9 @@ export async function getWholesaleManagerAnalyticsExtended(
     pdf_period: string;
     unique_downloaders: string;
     last_pdf_at: string | null;
+    requests_sent: string;
+    requests_period: string;
+    last_request_at: string | null;
     change_count: string;
     last_changed_at: string | null;
     last_changed_by: string | null;
@@ -1713,6 +1750,9 @@ export async function getWholesaleManagerAnalyticsExtended(
        coalesce(pdf.pdf_period, 0)::text as pdf_period,
        coalesce(pdf.unique_downloaders, 0)::text as unique_downloaders,
        pdf.last_pdf_at::text,
+       coalesce(requests.requests_sent, 0)::text as requests_sent,
+       coalesce(requests.requests_period, 0)::text as requests_period,
+       requests.last_request_at::text,
        coalesce(changes.change_count, 0)::text as change_count,
        changes.last_changed_at::text,
        changes.last_changed_by
@@ -1755,6 +1795,16 @@ export async function getWholesaleManagerAnalyticsExtended(
          and e.actor_type = 'client'
          and e.event_type = 'public_price_pdf_downloaded'
      ) pdf on true
+     left join lateral (
+       select
+         count(*)::integer as requests_sent,
+         count(*) filter (where ($2::text is null or created_at >= now() - $2::interval))::integer as requests_period,
+         max(created_at) as last_request_at
+       from wholesale_analytics_events e
+       where e.price_list_id = pl.id
+         and e.actor_type = 'client'
+         and e.event_type = 'public_price_request_sent'
+     ) requests on true
      left join lateral (
        select
          count(*)::integer as change_count,
@@ -2052,6 +2102,7 @@ export async function getWholesaleManagerAnalyticsExtended(
       openedPrices: rows.filter((row) => Number(row.views) > 0).length,
       pricesWithRepeatViews: rows.filter((row) => Number(row.repeat_views) > 0).length,
       pdfDownloadedPrices: rows.filter((row) => Number(row.pdf_downloads) > 0).length,
+      requestsSent: rows.filter((row) => Number(row.requests_sent) > 0).length,
       contactClicks: recentEvents.filter((event) => ['public_price_phone_clicked', 'public_price_email_clicked'].includes(event.eventType)).length,
     },
     priceInsights: {
@@ -2103,6 +2154,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     'price_expiration_changed',
     'price_items_added',
     'price_items_removed',
+    'price_status_changed',
     'price_public_link_created',
     'price_public_link_copied',
   ];
@@ -2142,6 +2194,9 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     pdf_period: string;
     unique_downloaders: string;
     last_pdf_at: string | null;
+    requests_sent: string;
+    requests_period: string;
+    last_request_at: string | null;
   };
 
   type AdminEventRow = AnalyticsEventRow & {
@@ -2190,7 +2245,10 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
        coalesce(pdf.pdf_last_30_days, 0)::text as pdf_last_30_days,
        coalesce(pdf.pdf_period, 0)::text as pdf_period,
        coalesce(pdf.unique_downloaders, 0)::text as unique_downloaders,
-       pdf.last_pdf_at::text
+       pdf.last_pdf_at::text,
+       coalesce(requests.requests_sent, 0)::text as requests_sent,
+       coalesce(requests.requests_period, 0)::text as requests_period,
+       requests.last_request_at::text
      from wholesale_price_lists pl
      left join wholesale_managers m on m.id = pl.manager_id
      left join lateral (
@@ -2231,6 +2289,16 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
          and e.actor_type = 'client'
          and e.event_type = 'public_price_pdf_downloaded'
      ) pdf on true
+     left join lateral (
+       select
+         count(*)::integer as requests_sent,
+         count(*) filter (where ($1::text is null or created_at >= now() - $1::interval))::integer as requests_period,
+         max(created_at) as last_request_at
+       from wholesale_analytics_events e
+       where e.price_list_id = pl.id
+         and e.actor_type = 'client'
+         and e.event_type = 'public_price_request_sent'
+     ) requests on true
      order by pl.created_at desc, pl.id desc`,
     [interval],
   );
@@ -2453,7 +2521,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
       const managerStale = managerRows.filter((row) => new Date(row.updated_at).getTime() < now - 30 * day).length;
       const clientsWithActivity = new Set(
         managerRows
-          .filter((row) => Number(row.views_period) > 0 || Number(row.pdf_period) > 0)
+          .filter((row) => Number(row.views_period) > 0 || Number(row.pdf_period) > 0 || Number(row.requests_period) > 0)
           .map((row) => clientIdFromName(row.client_name))
           .filter(Boolean) as string[],
       ).size;
@@ -2569,7 +2637,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     current.viewsLast7Days += Number(row.views_last_7_days);
     current.uniqueVisitors += Number(row.unique_visitors);
     current.pdfDownloads += Number(row.pdf_period);
-    const lastActivity = [row.last_view_at, row.last_pdf_at].filter(Boolean).sort().at(-1) ?? null;
+    const lastActivity = [row.last_view_at, row.last_pdf_at, row.last_request_at].filter(Boolean).sort().at(-1) ?? null;
     if (lastActivity && (!current.lastActivityAt || lastActivity > current.lastActivityAt)) {
       current.lastActivityAt = lastActivity;
       current.managerId = row.manager_id ? Number(row.manager_id) : null;
@@ -2634,7 +2702,10 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     .sort((a, b) => b.downloads - a.downloads)
     .slice(0, 10);
 
-  const clientsWithActivity = clients.filter((client) => client.views > 0 || client.pdfDownloads > 0).length;
+  const clientsWithActivity = clients.filter((client) => {
+    const hasRequest = rows.some((row) => client.clientId === clientIdFromName(row.client_name) && Number(row.requests_period) > 0);
+    return client.views > 0 || client.pdfDownloads > 0 || hasRequest;
+  }).length;
   const clientsWithExpiredPrices = new Set(
     rows
       .filter((row) => {
@@ -2804,6 +2875,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
       openedPrices: rows.filter((row) => Number(row.views) > 0).length,
       pricesWithRepeatViews: rows.filter((row) => Number(row.repeat_views) > 0).length,
       pdfDownloadedPrices: rows.filter((row) => Number(row.pdf_downloads) > 0).length,
+      requestsSent: rows.filter((row) => Number(row.requests_sent) > 0).length,
       clientsWithActivity,
     },
     problemPrices: problemPrices.slice(0, 50),

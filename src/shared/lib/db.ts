@@ -59,6 +59,13 @@ export type {
   WholesalePriceListItemInput,
   WholesalePriceListSummary,
 } from './db/wholesaleAdminRepo';
+export {
+  DEFAULT_WHOLESALE_PRICE_WORKFLOW_STATUS,
+  getWholesalePriceWorkflowStatusLabel,
+  normalizeWholesalePriceWorkflowStatus,
+  WHOLESALE_PRICE_WORKFLOW_STATUSES,
+} from './wholesalePriceWorkflowStatus';
+export type { WholesalePriceWorkflowStatus } from './wholesalePriceWorkflowStatus';
 export { getPublicWholesalePriceList, getPublicWholesaleRequestItems } from './db/wholesaleRepo';
 export type {
   PublicWholesaleCategory,

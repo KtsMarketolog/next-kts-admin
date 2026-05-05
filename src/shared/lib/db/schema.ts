@@ -156,6 +156,7 @@ export async function ensureSiteSchema() {
       valid_until date,
       token text not null unique,
       comment text not null default '',
+      workflow_status text not null default 'not_sent',
       show_retail_prices boolean not null default false,
       is_active boolean not null default true,
       created_at timestamptz not null default now(),
@@ -283,6 +284,7 @@ export async function ensureSiteSchema() {
 
     alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_lists add column if not exists comment text not null default '';
+    alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent';
     alter table admin_users add column if not exists email text not null default '';
     alter table admin_users add column if not exists name text not null default '';
     alter table admin_users add column if not exists role text not null default 'admin';
@@ -333,6 +335,7 @@ export async function ensureSiteSchema() {
     create index if not exists wholesale_price_list_items_price_list_idx on wholesale_price_list_items(price_list_id);
     create index if not exists wholesale_price_list_items_product_idx on wholesale_price_list_items(wholesale_product_id);
     create index if not exists wholesale_price_lists_manager_idx on wholesale_price_lists(manager_id);
+    create index if not exists wholesale_price_lists_workflow_status_idx on wholesale_price_lists(workflow_status);
     create index if not exists wholesale_price_list_events_manager_idx on wholesale_price_list_events(manager_id, created_at desc);
     create index if not exists wholesale_price_list_events_owner_manager_idx on wholesale_price_list_events(owner_manager_id, created_at desc);
     create index if not exists wholesale_manager_login_logs_manager_idx on wholesale_manager_login_logs(manager_id, created_at desc);
@@ -369,6 +372,7 @@ export async function ensureSiteSchema() {
   await query(`alter table hero_slides add column if not exists popup_text text`);
   await query(`alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_lists add column if not exists comment text not null default ''`);
+  await query(`alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent'`);
   await query(`alter table admin_users add column if not exists email text not null default ''`);
   await query(`alter table admin_users add column if not exists name text not null default ''`);
   await query(`alter table admin_users add column if not exists role text not null default 'admin'`);
@@ -382,6 +386,7 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_price_list_events add column if not exists details text not null default ''`);
   await query(`create index if not exists admin_users_login_idx on admin_users(login)`);
   await query(`create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc)`);
+  await query(`create index if not exists wholesale_price_lists_workflow_status_idx on wholesale_price_lists(workflow_status)`);
   await query(`create index if not exists wholesale_analytics_events_price_idx on wholesale_analytics_events(price_list_id, created_at desc)`);
   await query(`create index if not exists wholesale_analytics_events_client_idx on wholesale_analytics_events(client_id, created_at desc)`);
   await query(`create index if not exists wholesale_analytics_events_type_idx on wholesale_analytics_events(event_type, created_at desc)`);

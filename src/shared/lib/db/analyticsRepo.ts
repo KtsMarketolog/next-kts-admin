@@ -17,6 +17,7 @@ export type AnalyticsEventType =
   | 'price_expiration_changed'
   | 'price_items_added'
   | 'price_items_removed'
+  | 'price_status_changed'
   | 'price_public_link_created'
   | 'price_public_link_copied'
   | 'price_edit_opened'

@@ -236,6 +236,7 @@ type Analytics = {
     openedPrices: number;
     pricesWithRepeatViews: number;
     pdfDownloadedPrices: number;
+    requestsSent: number;
     clientsWithActivity: number;
   };
   problemPrices: ProblemPrice[];
@@ -269,6 +270,7 @@ const eventLabels: Record<string, string> = {
   price_expiration_changed: 'Изменён срок действия',
   price_items_added: 'Добавлены позиции',
   price_items_removed: 'Удалены позиции',
+  price_status_changed: 'Изменён статус прайса',
   price_public_link_created: 'Создана публичная ссылка',
   price_public_link_copied: 'Скопирована публичная ссылка',
   public_price_opened: 'Клиент открыл прайс',
@@ -483,6 +485,7 @@ function OverviewTab({ analytics }: { analytics: Analytics }) {
     { label: 'Открывали клиенты', value: analytics.funnel.openedPrices },
     { label: 'Повторные просмотры', value: analytics.funnel.pricesWithRepeatViews },
     { label: 'Скачали PDF', value: analytics.funnel.pdfDownloadedPrices },
+    { label: 'Отправили заявку', value: analytics.funnel.requestsSent },
     { label: 'Клиенты с активностью', value: analytics.funnel.clientsWithActivity },
   ];
 

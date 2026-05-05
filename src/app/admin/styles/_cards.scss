@@ -425,7 +425,13 @@
 }
 
 .priceListMeta {
-  grid-template-columns: minmax($apx-150, 0.8fr) minmax($apx-210, 1fr) minmax($apx-130, 0.7fr) minmax($apx-110, 0.6fr) minmax($apx-390, 1.4fr);
+  grid-template-columns:
+    minmax($apx-150, 0.75fr)
+    minmax($apx-200, 0.95fr)
+    minmax($apx-120, 0.65fr)
+    minmax($apx-110, 0.55fr)
+    minmax($apx-170, 0.8fr)
+    minmax($apx-330, 1.25fr);
   padding-top: $apx-12;
   border-top: $apx-1 solid #edf0f6;
 }
@@ -490,6 +496,45 @@
 .priceStatusHidden {
   background: #f2f3f8;
   color: #6f7182 !important;
+}
+
+.priceWorkflowStatus {
+  width: fit-content;
+  border-radius: $apx-999;
+  padding: $apx-5 $apx-10;
+  background: #eef2ff;
+  color: #260b86 !important;
+  font-size: $apx-13 !important;
+}
+
+.priceWorkflowStatus_not_sent {
+  background: #f2f3f8;
+  color: #6f7182 !important;
+}
+
+.priceWorkflowStatus_sent {
+  background: #eff6ff;
+  color: #1d4ed8 !important;
+}
+
+.priceWorkflowStatus_negotiation {
+  background: #fff7ed;
+  color: #c2410c !important;
+}
+
+.priceWorkflowStatus_confirmed {
+  background: #e8f7ef;
+  color: #15803d !important;
+}
+
+.priceWorkflowStatus_needs_correction {
+  background: #fef3c7;
+  color: #a16207 !important;
+}
+
+.priceWorkflowStatus_rejected {
+  background: #fee2e2;
+  color: #b91c1c !important;
 }
 
 .priceListActions {

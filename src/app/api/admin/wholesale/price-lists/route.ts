@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
 import { createWholesalePriceList, getWholesalePriceLists, type WholesalePriceListItemInput } from '@/shared/lib/db';
+import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import {
   isValidNewPublicPriceToken,
   normalizeOptionalDate,
@@ -72,6 +73,7 @@ export async function POST(request: Request) {
       validUntil,
       token: nextToken,
       comment: normalizeTextField(body.comment, 2000),
+      workflowStatus: normalizeWholesalePriceWorkflowStatus(body.workflowStatus),
       showRetailPrices: Boolean(body.showRetailPrices),
       isActive: Boolean(body.isActive ?? true),
       items: itemsFromBody(body.items),
