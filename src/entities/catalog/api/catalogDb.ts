@@ -72,6 +72,10 @@ export function ensureCatalogSchema() {
       slug text not null unique,
       title text not null,
       article text,
+      price_group text not null default '',
+      price_eur numeric(14, 2),
+      price_rub numeric(14, 2),
+      price_cny numeric(14, 2),
       promo boolean not null default false,
       brand_id bigint references catalog_brands(id) on delete set null,
       category_id bigint references catalog_categories(id) on delete set null,
@@ -80,6 +84,11 @@ export function ensureCatalogSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+
+    alter table catalog_products add column if not exists price_group text not null default '';
+    alter table catalog_products add column if not exists price_eur numeric(14, 2);
+    alter table catalog_products add column if not exists price_rub numeric(14, 2);
+    alter table catalog_products add column if not exists price_cny numeric(14, 2);
 
     create index if not exists catalog_categories_order_idx
       on catalog_categories (is_active, sort_order, id);
@@ -91,6 +100,8 @@ export function ensureCatalogSchema() {
       on catalog_products (subcategory_id, is_active, title);
     create index if not exists catalog_products_brand_idx
       on catalog_products (brand_id, is_active, title);
+    create index if not exists catalog_products_category_idx
+      on catalog_products (category_id, is_active, title);
     create index if not exists catalog_products_promo_idx
       on catalog_products (promo, is_active, title);
     create index if not exists catalog_products_search_idx

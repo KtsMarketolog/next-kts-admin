@@ -724,6 +724,147 @@
   }
 }
 
+.catalogStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-10;
+  margin-bottom: $apx-16;
+
+  > div {
+    display: grid;
+    gap: $apx-8;
+    border: $apx-1 solid #e1e3ee;
+    border-left: $apx-4 solid #260b86;
+    border-radius: $apx-8;
+    background: #fff;
+    padding: $apx-14;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-28;
+    line-height: 1;
+  }
+}
+
+.catalogImportCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-220, $apx-320) auto;
+  gap: $apx-12;
+  align-items: end;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #f8f9fc;
+  padding: $apx-14;
+  margin-bottom: $apx-18;
+
+  h3 {
+    margin: 0 0 $apx-6;
+    font-size: $apx-18;
+  }
+
+  p,
+  span {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-13;
+    line-height: 1.4;
+  }
+
+  button {
+    min-width: $apx-160;
+  }
+}
+
+.catalogProductForm {
+  display: grid;
+  grid-template-columns: repeat(5, minmax($apx-150, 1fr));
+  gap: $apx-10;
+  align-items: end;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  padding: $apx-14;
+  margin-bottom: $apx-18;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  label:first-child {
+    grid-column: span 2;
+  }
+}
+
+.catalogToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: $apx-10;
+  align-items: center;
+  margin-bottom: $apx-10;
+}
+
+.catalogProductList {
+  display: grid;
+  gap: $apx-12;
+}
+
+.catalogProductCard {
+  display: grid;
+  gap: $apx-12;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+}
+
+.catalogProductFields {
+  display: grid;
+  grid-template-columns: repeat(5, minmax($apx-140, 1fr));
+  gap: $apx-10;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  label:first-child {
+    grid-column: span 2;
+  }
+}
+
+.catalogProductMeta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: $apx-12;
+  align-items: center;
+  padding-top: $apx-10;
+  border-top: $apx-1 solid #edf0f6;
+}
+
 .wholesaleEditorGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -799,19 +940,28 @@
 
   .userCreateCard,
   .userAccessFields,
-  .userAccessMeta {
+  .userAccessMeta,
+  .catalogProductForm,
+  .catalogProductFields,
+  .catalogProductMeta,
+  .catalogImportCard,
+  .catalogStatsGrid {
     grid-template-columns: repeat(2, minmax($apx-180, 1fr));
   }
 
   .userCreateCard label,
   .userCreateCard > button,
-  .userAccessFields label {
+  .userAccessFields label,
+  .catalogProductForm label,
+  .catalogProductFields label {
     grid-column: auto;
     grid-row: auto;
   }
 
   .userAccessBadges,
-  .userAccessActions {
+  .userAccessActions,
+  .catalogProductMeta .userAccessBadges,
+  .catalogProductMeta .userAccessActions {
     grid-column: 1 / -1;
     justify-content: flex-start;
   }
@@ -824,7 +974,13 @@
   .priceListMeta,
   .userCreateCard,
   .userAccessFields,
-  .userAccessMeta {
+  .userAccessMeta,
+  .catalogProductForm,
+  .catalogProductFields,
+  .catalogProductMeta,
+  .catalogImportCard,
+  .catalogStatsGrid,
+  .catalogToolbar {
     grid-template-columns: 1fr;
   }
 

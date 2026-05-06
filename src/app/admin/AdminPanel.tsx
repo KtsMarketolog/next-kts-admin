@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AdminBrandPortfolioSection } from '@/features/admin/brand-portfolio/AdminBrandPortfolioSection';
+import { AdminCatalogSection } from '@/features/admin/catalog/AdminCatalogSection';
 import { AdminDashboard } from '@/features/admin/dashboard/AdminDashboard';
 import { AdminGroupCompaniesSection } from '@/features/admin/group-companies/AdminGroupCompaniesSection';
 import { AdminInfoSection } from '@/features/admin/info/AdminInfoSection';
@@ -22,7 +23,7 @@ import type { AdminSession } from '@/shared/lib/adminAuth';
 
 import styles from './admin.module.scss';
 
-const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanies', 'brands', 'users'];
+const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanies', 'brands', 'catalog', 'users'];
 
 type AdminArea = 'home' | 'site' | 'wholesale';
 
@@ -328,6 +329,12 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
               Портфель брендов
             </button>
             <button
+              className={activeSection === 'catalog' ? styles.navActive : undefined}
+              onClick={() => switchSection('catalog')}
+            >
+              Каталог
+            </button>
+            <button
               className={activeSection === 'users' ? styles.navActive : undefined}
               onClick={() => switchSection('users')}
             >
@@ -438,6 +445,8 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
                 showStatus={showStatus}
               />
             )}
+
+            {activeSection === 'catalog' && <AdminCatalogSection showStatus={showStatus} />}
 
             {activeSection === 'users' && <AdminUsersSection showStatus={showStatus} />}
           </div>

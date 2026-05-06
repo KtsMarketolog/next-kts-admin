@@ -100,10 +100,17 @@ export async function ensureSiteSchema() {
 
     create table if not exists wholesale_products (
       id bigserial primary key,
+      catalog_product_id bigint,
       category_id bigint references wholesale_categories(id) on delete set null,
       title text not null default '',
       sku text not null default '',
       series_description text not null default '',
+      brand_title text not null default '',
+      subcategory_title text not null default '',
+      price_group text not null default '',
+      price_eur numeric(14, 2),
+      price_rub numeric(14, 2),
+      price_cny numeric(14, 2),
       retail_price numeric(12, 2),
       wholesale_price numeric(12, 2),
       sort_order integer not null default 0,
@@ -285,6 +292,13 @@ export async function ensureSiteSchema() {
     alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_lists add column if not exists comment text not null default '';
     alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent';
+    alter table wholesale_products add column if not exists catalog_product_id bigint;
+    alter table wholesale_products add column if not exists brand_title text not null default '';
+    alter table wholesale_products add column if not exists subcategory_title text not null default '';
+    alter table wholesale_products add column if not exists price_group text not null default '';
+    alter table wholesale_products add column if not exists price_eur numeric(14, 2);
+    alter table wholesale_products add column if not exists price_rub numeric(14, 2);
+    alter table wholesale_products add column if not exists price_cny numeric(14, 2);
     alter table admin_users add column if not exists email text not null default '';
     alter table admin_users add column if not exists name text not null default '';
     alter table admin_users add column if not exists role text not null default 'admin';
@@ -329,6 +343,7 @@ export async function ensureSiteSchema() {
 
     create index if not exists admin_users_login_idx on admin_users(login);
     create index if not exists wholesale_products_category_idx on wholesale_products(category_id);
+    create index if not exists wholesale_products_catalog_product_idx on wholesale_products(catalog_product_id);
     create index if not exists wholesale_product_images_product_idx on wholesale_product_images(product_id);
     create index if not exists wholesale_product_variants_product_idx on wholesale_product_variants(product_id);
     create index if not exists wholesale_managers_login_idx on wholesale_managers(login);
@@ -373,6 +388,13 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_lists add column if not exists comment text not null default ''`);
   await query(`alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent'`);
+  await query(`alter table wholesale_products add column if not exists catalog_product_id bigint`);
+  await query(`alter table wholesale_products add column if not exists brand_title text not null default ''`);
+  await query(`alter table wholesale_products add column if not exists subcategory_title text not null default ''`);
+  await query(`alter table wholesale_products add column if not exists price_group text not null default ''`);
+  await query(`alter table wholesale_products add column if not exists price_eur numeric(14, 2)`);
+  await query(`alter table wholesale_products add column if not exists price_rub numeric(14, 2)`);
+  await query(`alter table wholesale_products add column if not exists price_cny numeric(14, 2)`);
   await query(`alter table admin_users add column if not exists email text not null default ''`);
   await query(`alter table admin_users add column if not exists name text not null default ''`);
   await query(`alter table admin_users add column if not exists role text not null default 'admin'`);
@@ -385,6 +407,7 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_price_list_events add column if not exists owner_manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_list_events add column if not exists details text not null default ''`);
   await query(`create index if not exists admin_users_login_idx on admin_users(login)`);
+  await query(`create index if not exists wholesale_products_catalog_product_idx on wholesale_products(catalog_product_id)`);
   await query(`create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc)`);
   await query(`create index if not exists wholesale_price_lists_workflow_status_idx on wholesale_price_lists(workflow_status)`);
   await query(`create index if not exists wholesale_analytics_events_price_idx on wholesale_analytics_events(price_list_id, created_at desc)`);
