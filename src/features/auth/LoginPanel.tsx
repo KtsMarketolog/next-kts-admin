@@ -154,7 +154,7 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
               <input
                 value={priceToken}
                 onChange={(event) => setPriceToken(event.target.value)}
-                placeholder="Например, https://t-kts.ru/price/..."
+                placeholder="Например, https://kts-impex.ru/price/..."
               />
             </label>
           ) : twoFactorChallengeId ? (
