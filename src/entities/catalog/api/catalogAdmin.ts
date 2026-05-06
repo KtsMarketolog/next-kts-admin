@@ -42,6 +42,21 @@ export type CatalogAdminStats = {
   brands: number;
 };
 
+export type CatalogAdminProductFilters = {
+  search?: string | null;
+  category?: string | null;
+  subcategory?: string | null;
+  brand?: string | null;
+  active?: 'all' | 'active' | 'inactive' | null;
+  limit?: number | null;
+};
+
+export type CatalogAdminFilterOptions = {
+  categories: string[];
+  subcategories: string[];
+  brands: string[];
+};
+
 export type CatalogImportResult = CatalogAdminStats & {
   importedProducts: number;
   syncedWholesaleProducts: number;
@@ -482,6 +497,36 @@ export async function getCatalogAdminStats(): Promise<CatalogAdminStats> {
   };
 }
 
+export async function getCatalogAdminFilterOptions(): Promise<CatalogAdminFilterOptions> {
+  await ensureCatalogSchema();
+  const [categories, subcategories, brands] = await Promise.all([
+    query<{ title: string }>(`
+      select title
+      from catalog_categories
+      where is_active = true and nullif(trim(title), '') is not null
+      order by title
+    `),
+    query<{ title: string }>(`
+      select title
+      from catalog_subcategories
+      where is_active = true and nullif(trim(title), '') is not null
+      order by title
+    `),
+    query<{ title: string }>(`
+      select title
+      from catalog_brands
+      where is_active = true and nullif(trim(title), '') is not null
+      order by title
+    `),
+  ]);
+
+  return {
+    categories: categories.rows.map((row) => row.title),
+    subcategories: subcategories.rows.map((row) => row.title),
+    brands: brands.rows.map((row) => row.title),
+  };
+}
+
 function mapAdminProduct(row: {
   id: string;
   title: string;
@@ -514,10 +559,14 @@ function mapAdminProduct(row: {
   };
 }
 
-export async function getCatalogAdminProducts(search = '', limit = 200) {
+export async function getCatalogAdminProducts(filters: CatalogAdminProductFilters = {}) {
   await ensureCatalogSchema();
-  const normalizedSearch = normalizeText(search, 120);
-  const normalizedLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+  const normalizedSearch = normalizeText(filters.search, 120);
+  const normalizedCategory = normalizeText(filters.category, 180);
+  const normalizedSubcategory = normalizeText(filters.subcategory, 180);
+  const normalizedBrand = normalizeText(filters.brand, 180);
+  const normalizedActive = filters.active === 'active' || filters.active === 'inactive' ? filters.active : 'all';
+  const normalizedLimit = Math.min(Math.max(Number(filters.limit) || 200, 1), 500);
   const result = await query<Parameters<typeof mapAdminProduct>[0]>(
     `select p.id::text,
             p.title,
@@ -536,15 +585,21 @@ export async function getCatalogAdminProducts(search = '', limit = 200) {
      left join catalog_brands b on b.id = p.brand_id
      left join catalog_categories c on c.id = p.category_id
      left join catalog_subcategories s on s.id = p.subcategory_id
-     where $1 = ''
-        or p.title ilike '%' || $1 || '%'
-        or coalesce(p.article, '') ilike '%' || $1 || '%'
-        or coalesce(b.title, '') ilike '%' || $1 || '%'
-        or coalesce(c.title, '') ilike '%' || $1 || '%'
-        or coalesce(s.title, '') ilike '%' || $1 || '%'
+     where (
+          $1 = ''
+          or p.title ilike '%' || $1 || '%'
+          or coalesce(p.article, '') ilike '%' || $1 || '%'
+          or coalesce(b.title, '') ilike '%' || $1 || '%'
+          or coalesce(c.title, '') ilike '%' || $1 || '%'
+          or coalesce(s.title, '') ilike '%' || $1 || '%'
+        )
+       and ($2 = '' or coalesce(c.title, '') = $2)
+       and ($3 = '' or coalesce(s.title, '') = $3)
+       and ($4 = '' or coalesce(b.title, '') = $4)
+       and ($5 = 'all' or ($5 = 'active' and p.is_active = true) or ($5 = 'inactive' and p.is_active = false))
      order by p.updated_at desc, p.id desc
-     limit $2`,
-    [normalizedSearch, normalizedLimit],
+     limit $6`,
+    [normalizedSearch, normalizedCategory, normalizedSubcategory, normalizedBrand, normalizedActive, normalizedLimit],
   );
   return result.rows.map(mapAdminProduct);
 }

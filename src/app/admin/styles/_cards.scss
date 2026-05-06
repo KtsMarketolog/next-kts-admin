@@ -785,7 +785,7 @@
 
 .catalogProductForm {
   display: grid;
-  grid-template-columns: repeat(5, minmax($apx-150, 1fr));
+  grid-template-columns: minmax($apx-280, 1.35fr) repeat(3, minmax($apx-190, 1fr));
   gap: $apx-10;
   align-items: end;
   border: $apx-1 solid #e1e3ee;
@@ -813,10 +813,22 @@
 
 .catalogToolbar {
   display: grid;
+  grid-template-columns: 1fr;
+  gap: $apx-10;
+  margin-bottom: $apx-10;
+}
+
+.catalogFilters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax($apx-170, 1fr));
+  gap: $apx-10;
+}
+
+.catalogSearch {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: $apx-10;
   align-items: center;
-  margin-bottom: $apx-10;
 }
 
 .catalogProductList {
@@ -835,7 +847,7 @@
 
 .catalogProductFields {
   display: grid;
-  grid-template-columns: repeat(5, minmax($apx-140, 1fr));
+  grid-template-columns: minmax($apx-320, 1.45fr) repeat(2, minmax($apx-220, 1fr));
   gap: $apx-10;
 
   label {
@@ -945,7 +957,8 @@
   .catalogProductFields,
   .catalogProductMeta,
   .catalogImportCard,
-  .catalogStatsGrid {
+  .catalogStatsGrid,
+  .catalogFilters {
     grid-template-columns: repeat(2, minmax($apx-180, 1fr));
   }
 
@@ -980,7 +993,9 @@
   .catalogProductMeta,
   .catalogImportCard,
   .catalogStatsGrid,
-  .catalogToolbar {
+  .catalogToolbar,
+  .catalogFilters,
+  .catalogSearch {
     grid-template-columns: 1fr;
   }
 

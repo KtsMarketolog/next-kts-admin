@@ -1,5 +1,6 @@
 import {
   createCatalogAdminProduct,
+  getCatalogAdminFilterOptions,
   getCatalogAdminProducts,
   getCatalogAdminStats,
   type CatalogProductInput,
@@ -34,9 +35,19 @@ export async function GET(request: Request) {
   if (denied) return denied;
 
   const url = new URL(request.url);
-  const products = await getCatalogAdminProducts(url.searchParams.get('search') ?? '', Number(url.searchParams.get('limit') ?? 200));
-  const stats = await getCatalogAdminStats();
-  return Response.json({ products, stats });
+  const [products, stats, filterOptions] = await Promise.all([
+    getCatalogAdminProducts({
+      search: url.searchParams.get('search') ?? '',
+      category: url.searchParams.get('category') ?? '',
+      subcategory: url.searchParams.get('subcategory') ?? '',
+      brand: url.searchParams.get('brand') ?? '',
+      active: (url.searchParams.get('active') as 'all' | 'active' | 'inactive' | null) ?? 'all',
+      limit: Number(url.searchParams.get('limit') ?? 200),
+    }),
+    getCatalogAdminStats(),
+    getCatalogAdminFilterOptions(),
+  ]);
+  return Response.json({ products, stats, filterOptions });
 }
 
 export async function POST(request: Request) {

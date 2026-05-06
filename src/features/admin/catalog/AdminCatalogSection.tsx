@@ -28,6 +28,19 @@ type CatalogStats = {
 
 type CatalogDraft = Omit<CatalogProduct, 'id'>;
 
+type CatalogFilterOptions = {
+  categories: string[];
+  subcategories: string[];
+  brands: string[];
+};
+
+type CatalogFilters = {
+  active: 'all' | 'active' | 'inactive';
+  category: string;
+  subcategory: string;
+  brand: string;
+};
+
 type AdminCatalogSectionProps = {
   showStatus: (message: string) => void;
 };
@@ -43,6 +56,13 @@ const EMPTY_DRAFT: CatalogDraft = {
   priceRub: '',
   priceCny: '',
   isActive: true,
+};
+
+const EMPTY_FILTERS: CatalogFilters = {
+  active: 'all',
+  category: '',
+  subcategory: '',
+  brand: '',
 };
 
 async function readError(response: Response, fallback: string) {
@@ -69,6 +89,8 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [stats, setStats] = useState<CatalogStats | null>(null);
+  const [filterOptions, setFilterOptions] = useState<CatalogFilterOptions>({ categories: [], subcategories: [], brands: [] });
+  const [filters, setFilters] = useState<CatalogFilters>(EMPTY_FILTERS);
   const [draft, setDraft] = useState<CatalogDraft>(EMPTY_DRAFT);
   const [search, setSearch] = useState('');
   const [fileName, setFileName] = useState('');
@@ -77,9 +99,17 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string>('');
 
-  const loadCatalog = useCallback(async (nextSearch = '') => {
+  const loadCatalog = useCallback(async (nextSearch = '', nextFilters: CatalogFilters = EMPTY_FILTERS) => {
     setLoading(true);
-    const response = await fetch(`/api/admin/catalog/products?limit=200&search=${encodeURIComponent(nextSearch)}`, { cache: 'no-store' });
+    const params = new URLSearchParams({
+      limit: '200',
+      search: nextSearch,
+      active: nextFilters.active,
+      category: nextFilters.category,
+      subcategory: nextFilters.subcategory,
+      brand: nextFilters.brand,
+    });
+    const response = await fetch(`/api/admin/catalog/products?${params.toString()}`, { cache: 'no-store' });
     setLoading(false);
     if (!response.ok) {
       showStatus(await readError(response, 'Не удалось загрузить каталог'));
@@ -88,6 +118,11 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     const data = await response.json();
     setProducts(Array.isArray(data.products) ? data.products : []);
     setStats(data.stats ?? null);
+    setFilterOptions({
+      categories: Array.isArray(data.filterOptions?.categories) ? data.filterOptions.categories : [],
+      subcategories: Array.isArray(data.filterOptions?.subcategories) ? data.filterOptions.subcategories : [],
+      brands: Array.isArray(data.filterOptions?.brands) ? data.filterOptions.brands : [],
+    });
   }, [showStatus]);
 
   useEffect(() => {
@@ -103,6 +138,12 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
 
   const updateProduct = (id: number, patch: Partial<CatalogProduct>) => {
     setProducts((current) => current.map((product) => (product.id === id ? { ...product, ...patch } : product)));
+  };
+
+  const applyFilters = (patch: Partial<CatalogFilters>) => {
+    const nextFilters = { ...filters, ...patch };
+    setFilters(nextFilters);
+    void loadCatalog(search, nextFilters);
   };
 
   const importExcel = async (event: FormEvent) => {
@@ -130,7 +171,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     setImportResult(summary);
     setFileName('');
     if (fileInputRef.current) fileInputRef.current.value = '';
-    await loadCatalog('');
+    await loadCatalog('', filters);
     showStatus('Каталог загружен из Excel');
   };
 
@@ -153,7 +194,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       setProducts((current) => [data.product, ...current].slice(0, 200));
       setDraft(EMPTY_DRAFT);
       markSaved('new');
-      void loadCatalog(search);
+      void loadCatalog(search, filters);
       showStatus('Товар добавлен');
     }
   };
@@ -176,7 +217,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     if (data.product) {
       setProducts((current) => current.map((item) => (item.id === product.id ? data.product : item)));
       markSaved(String(product.id));
-      void loadCatalog(search);
+      void loadCatalog(search, filters);
       showStatus('Товар сохранён');
     }
   };
@@ -193,7 +234,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     }
 
     setProducts((current) => current.filter((item) => item.id !== product.id));
-    void loadCatalog(search);
+    void loadCatalog(search, filters);
     showStatus('Товар удалён');
   };
 
@@ -295,15 +336,48 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       </div>
 
       <div className={styles.catalogToolbar}>
-        <input
-          placeholder="Поиск по названию, бренду, категории или артикулу"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') void loadCatalog(search);
-          }}
-        />
-        <button onClick={() => void loadCatalog(search)}>Найти</button>
+        <div className={styles.catalogFilters}>
+          <select value={filters.active} onChange={(event) => applyFilters({ active: event.target.value as CatalogFilters['active'] })}>
+            <option value="all">Все товары</option>
+            <option value="active">Только активные</option>
+            <option value="inactive">Только скрытые</option>
+          </select>
+          <select value={filters.category} onChange={(event) => applyFilters({ category: event.target.value, subcategory: '' })}>
+            <option value="">Все категории</option>
+            {filterOptions.categories.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
+          <select value={filters.subcategory} onChange={(event) => applyFilters({ subcategory: event.target.value })}>
+            <option value="">Все подкатегории</option>
+            {filterOptions.subcategories.map((subcategory) => (
+              <option key={subcategory} value={subcategory}>
+                {subcategory}
+              </option>
+            ))}
+          </select>
+          <select value={filters.brand} onChange={(event) => applyFilters({ brand: event.target.value })}>
+            <option value="">Все бренды</option>
+            {filterOptions.brands.map((brand) => (
+              <option key={brand} value={brand}>
+                {brand}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.catalogSearch}>
+          <input
+            placeholder="Поиск по названию, бренду, категории или артикулу"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void loadCatalog(search, filters);
+            }}
+          />
+          <button onClick={() => void loadCatalog(search, filters)}>Найти</button>
+        </div>
       </div>
 
       {loading ? (
