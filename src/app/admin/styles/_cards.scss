@@ -923,7 +923,7 @@
 
 .wholesaleCatalogTools {
   display: grid;
-  grid-template-columns: minmax($apx-260, 1.5fr) minmax($apx-180, 1fr) minmax($apx-180, 1fr) max-content;
+  grid-template-columns: minmax($apx-320, 1.4fr) minmax($apx-220, 1fr) minmax($apx-220, 1fr);
   gap: $apx-12;
   align-items: end;
   margin: $apx-18 0;
@@ -944,11 +944,12 @@
   }
 
   p {
+    grid-column: 1 / -1;
     margin: 0;
     color: #6f7182;
     font-size: $apx-13;
     font-weight: 700;
-    text-align: right;
+    text-align: left;
   }
 }
 
@@ -1127,7 +1128,6 @@
 .variantTable {
   display: grid;
   grid-template-columns:
-    minmax($apx-120, 0.8fr)
     minmax($apx-80, 0.55fr)
     minmax($apx-90, 0.65fr)
     minmax($apx-80, 0.55fr)
@@ -1136,7 +1136,7 @@
   gap: $apx-8 $apx-12;
   align-items: center;
 
-  > div:nth-child(-n + 6) {
+  > div:nth-child(-n + 5) {
     color: #6f7182;
     font-size: $apx-12;
     font-weight: 700;

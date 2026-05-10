@@ -941,7 +941,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                           </div>
                         </div>
                         <div className={styles.variantTable}>
-                          <div>Позиция</div>
                           <div>EUR</div>
                           <div>RUB</div>
                           <div>CNY</div>
@@ -952,7 +951,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                             const item = itemByKey.get(key);
                             return (
                               <div className={styles.variantRow} key={key}>
-                                <span>{hasSeveralPositions ? variant.title : 'Основная'}</span>
                                 <span>{product.priceEur || '—'}</span>
                                 <span>{product.priceRub || '—'}</span>
                                 <span>{product.priceCny || '—'}</span>
