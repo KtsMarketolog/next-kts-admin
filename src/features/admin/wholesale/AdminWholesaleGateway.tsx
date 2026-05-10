@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
@@ -57,6 +57,10 @@ type CatalogProduct = {
   sku: string;
   description: string;
   imageUrl: string | null;
+  priceGroup: string;
+  priceEur: string | null;
+  priceRub: string | null;
+  priceCny: string | null;
   variants: CatalogVariant[];
 };
 
@@ -109,6 +113,8 @@ const emptyManager = {
   password: '',
   isActive: true,
 };
+
+const CATALOG_PAGE_SIZE = 120;
 
 function makeToken() {
   const bytes = new Uint8Array(12);
@@ -167,6 +173,41 @@ function flatCatalogItems(categories: CatalogCategory[]) {
   );
 }
 
+type CatalogRow = ReturnType<typeof flatCatalogItems>[number];
+
+type CatalogGroup = {
+  id: string;
+  title: string;
+  products: CatalogProduct[];
+};
+
+function groupCatalogRowsByPriceGroup(rows: CatalogRow[]) {
+  const groups = new Map<string, CatalogGroup>();
+  const products = new Map<string, CatalogProduct>();
+
+  for (const row of rows) {
+    const groupTitle = row.product.priceGroup || 'Без ценовой группы';
+    const groupKey = groupTitle.toLowerCase();
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = { id: groupKey, title: groupTitle, products: [] };
+      groups.set(groupKey, group);
+    }
+
+    const productKey = `${groupKey}:${row.product.id}`;
+    let product = products.get(productKey);
+    if (!product) {
+      product = { ...row.product, variants: [] };
+      products.set(productKey, product);
+      group.products.push(product);
+    }
+
+    product.variants.push(row.variant);
+  }
+
+  return Array.from(groups.values());
+}
+
 function mergeEditorItems(categories: CatalogCategory[], items: PriceItem[]) {
   const current = new Map(items.map((item) => [`${item.productId}:${item.variantId ?? 'base'}`, item]));
   return flatCatalogItems(categories).map(({ product, variant }, index) => {
@@ -200,6 +241,11 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [savedManagerId, setSavedManagerId] = useState<number | null>(null);
   const [managerCreated, setManagerCreated] = useState(false);
   const [adminAnalyticsTab, setAdminAnalyticsTab] = useState<AdminWholesaleAnalyticsTab>('overview');
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogCategoryId, setCatalogCategoryId] = useState('all');
+  const [catalogPriceGroup, setCatalogPriceGroup] = useState('all');
+  const [catalogVisibleLimit, setCatalogVisibleLimit] = useState(CATALOG_PAGE_SIZE);
+  const deferredCatalogQuery = useDeferredValue(catalogQuery);
 
   const editMatch = pathname.match(/\/admin\/wholesale\/(\d+)\/edit$/);
   const editId = editMatch ? Number(editMatch[1]) : null;
@@ -228,6 +274,63 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const editorBackHref = analyticsBackHref ?? '/admin/wholesale/manager';
 
   const catalogRows = useMemo(() => flatCatalogItems(catalog), [catalog]);
+  const catalogPriceGroups = useMemo(() => {
+    const groups = new Set<string>();
+    for (const { product } of catalogRows) {
+      if (product.priceGroup) groups.add(product.priceGroup);
+    }
+    return Array.from(groups).sort((first, second) => first.localeCompare(second, 'ru'));
+  }, [catalogRows]);
+  const itemByKey = useMemo(
+    () => new Map(editor.items.map((item) => [`${item.productId}:${item.variantId ?? 'base'}`, item])),
+    [editor.items],
+  );
+  const filteredCatalogRows = useMemo(() => {
+    const query = deferredCatalogQuery.trim().toLowerCase();
+    return catalogRows.filter(({ category, product, variant }) => {
+      if (catalogCategoryId !== 'all' && String(category.id) !== catalogCategoryId) return false;
+      if (catalogPriceGroup !== 'all' && product.priceGroup !== catalogPriceGroup) return false;
+      if (!query) return true;
+      return [
+        category.title,
+        product.title,
+        product.sku,
+        product.description,
+        product.priceGroup,
+        product.priceEur,
+        product.priceRub,
+        product.priceCny,
+        variant.title,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [catalogCategoryId, catalogPriceGroup, catalogRows, deferredCatalogQuery]);
+  const sortedCatalogRows = useMemo(
+    () =>
+      [...filteredCatalogRows].sort((first, second) => {
+        const firstGroup = first.product.priceGroup;
+        const secondGroup = second.product.priceGroup;
+        if (!firstGroup && secondGroup) return 1;
+        if (firstGroup && !secondGroup) return -1;
+        return (
+          firstGroup.localeCompare(secondGroup, 'ru') ||
+          first.category.title.localeCompare(second.category.title, 'ru') ||
+          first.product.title.localeCompare(second.product.title, 'ru') ||
+          first.variant.title.localeCompare(second.variant.title, 'ru')
+        );
+      }),
+    [filteredCatalogRows],
+  );
+  const visibleCatalogRows = useMemo(
+    () => sortedCatalogRows.slice(0, catalogVisibleLimit),
+    [catalogVisibleLimit, sortedCatalogRows],
+  );
+  const visibleCatalogGroups = useMemo(() => groupCatalogRowsByPriceGroup(visibleCatalogRows), [visibleCatalogRows]);
+
+  useEffect(() => {
+    setCatalogVisibleLimit(CATALOG_PAGE_SIZE);
+  }, [catalogCategoryId, catalogPriceGroup, deferredCatalogQuery]);
 
   const showStatus = (message: string) => {
     setStatus(message);
@@ -775,48 +878,104 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         {catalog.length === 0 ? (
           <p className={styles.mutedText}>В базе прайс-товаров пока нет позиций. Сначала нужно добавить отдельные wholesale-товары.</p>
         ) : (
-          catalog.map((category) => (
-            <div className={styles.priceCategory} key={category.id}>
-              <h3>{category.title}</h3>
-              {category.products.map((product) => (
-                <article className={styles.priceProduct} key={product.id}>
-                  <div className={styles.priceProductInfo}>
-                    {product.imageUrl ? <img src={product.imageUrl} alt="" /> : <span>Нет фото</span>}
-                    <div>
-                      <strong>{product.title}</strong>
-                      {product.sku ? <p>{product.sku}</p> : null}
-                      {product.description ? <p>{product.description}</p> : null}
-                      <div className={styles.actions}>
-                        <button className={styles.secondary} onClick={() => setProductVisible(product.id, true)}>Показать все размеры</button>
-                        <button className={styles.secondary} onClick={() => setProductVisible(product.id, false)}>Убрать все размеры</button>
-                      </div>
-                    </div>
-                  </div>
-                  <div className={styles.variantTable}>
-                    <div>Размер</div>
-                    <div>Розница</div>
-                    <div>Опт</div>
-                    <div>Показывать</div>
-                    {product.variants.map((variant) => {
-                      const key = `${product.id}:${variant.id ?? 'base'}`;
-                      const item = editor.items.find((candidate) => `${candidate.productId}:${candidate.variantId ?? 'base'}` === key);
-                      return (
-                        <div className={styles.variantRow} key={key}>
-                          <span>{variant.title}</span>
-                          <span>{variant.retailPrice || '—'}</span>
-                          <input value={item?.customWholesalePrice ?? ''} onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })} />
-                          <label className={styles.checkbox}>
-                            <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
-                            Показывать
-                          </label>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </article>
-              ))}
+          <>
+            <div className={styles.wholesaleCatalogTools}>
+              <label>
+                <span>Поиск товаров</span>
+                <input
+                  value={catalogQuery}
+                  onChange={(event) => setCatalogQuery(event.target.value)}
+                  placeholder="Название, бренд, категория или артикул"
+                />
+              </label>
+              <label>
+                <span>Категория</span>
+                <select value={catalogCategoryId} onChange={(event) => setCatalogCategoryId(event.target.value)}>
+                  <option value="all">Все категории</option>
+                  {catalog.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Ценовая группа</span>
+                <select value={catalogPriceGroup} onChange={(event) => setCatalogPriceGroup(event.target.value)}>
+                  <option value="all">Все группы</option>
+                  {catalogPriceGroups.map((group) => (
+                    <option key={group} value={group}>
+                      {group}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p>
+                Показано {visibleCatalogRows.length} из {filteredCatalogRows.length}. Всего позиций: {catalogRows.length}.
+              </p>
             </div>
-          ))
+
+            {filteredCatalogRows.length === 0 ? (
+              <p className={styles.mutedText}>По выбранному фильтру товары не найдены.</p>
+            ) : (
+              visibleCatalogGroups.map((group) => (
+                <div className={styles.priceCategory} key={group.id}>
+                  <h3>{group.title}</h3>
+                  {group.products.map((product) => (
+                    <article className={styles.priceProduct} key={product.id}>
+                      <div className={styles.priceProductInfo}>
+                        {product.imageUrl ? <img src={product.imageUrl} alt="" /> : <span>Нет фото</span>}
+                        <div>
+                          <strong>{product.title}</strong>
+                          {product.sku ? <p>{product.sku}</p> : null}
+                          {product.description ? <p>{product.description}</p> : null}
+                          <p>EUR: {product.priceEur || '—'} · RUB: {product.priceRub || '—'} · CNY: {product.priceCny || '—'}</p>
+                          <div className={styles.actions}>
+                            <button className={styles.secondary} onClick={() => setProductVisible(product.id, true)}>Показать все размеры</button>
+                            <button className={styles.secondary} onClick={() => setProductVisible(product.id, false)}>Убрать все размеры</button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className={styles.variantTable}>
+                        <div>Позиция</div>
+                        <div>EUR</div>
+                        <div>RUB</div>
+                        <div>CNY</div>
+                        <div>Опт</div>
+                        <div>Показывать</div>
+                        {product.variants.map((variant) => {
+                          const key = `${product.id}:${variant.id ?? 'base'}`;
+                          const item = itemByKey.get(key);
+                          return (
+                            <div className={styles.variantRow} key={key}>
+                              <span>{variant.title}</span>
+                              <span>{product.priceEur || '—'}</span>
+                              <span>{product.priceRub || '—'}</span>
+                              <span>{product.priceCny || '—'}</span>
+                              <input value={item?.customWholesalePrice ?? ''} onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })} />
+                              <label className={styles.checkbox}>
+                                <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
+                                Показывать
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ))
+            )}
+
+            {visibleCatalogRows.length < filteredCatalogRows.length ? (
+              <button
+                className={`${styles.secondary} ${styles.wholesaleLoadMore}`}
+                onClick={() => setCatalogVisibleLimit((current) => current + CATALOG_PAGE_SIZE)}
+              >
+                Показать ещё {Math.min(CATALOG_PAGE_SIZE, filteredCatalogRows.length - visibleCatalogRows.length)}
+              </button>
+            ) : null}
+          </>
         )}
 
         <div className={styles.actions}>

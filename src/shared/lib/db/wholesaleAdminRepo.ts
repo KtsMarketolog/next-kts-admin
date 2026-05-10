@@ -72,6 +72,10 @@ export type WholesaleCatalogProduct = {
   sku: string;
   description: string;
   imageUrl: string | null;
+  priceGroup: string;
+  priceEur: string | null;
+  priceRub: string | null;
+  priceCny: string | null;
   variants: WholesaleCatalogVariant[];
 };
 
@@ -1641,6 +1645,10 @@ export async function getWholesaleCatalog() {
     sku: string;
     series_description: string;
     image_url: string | null;
+    price_group: string | null;
+    price_eur: string | null;
+    price_rub: string | null;
+    price_cny: string | null;
     variant_id: string | null;
     variant_title: string | null;
     retail_price: string | null;
@@ -1654,6 +1662,10 @@ export async function getWholesaleCatalog() {
       p.sku,
       p.series_description,
       img.image_url,
+      p.price_group,
+      p.price_eur::text,
+      p.price_rub::text,
+      p.price_cny::text,
       v.id::text as variant_id,
       v.title as variant_title,
       coalesce(v.retail_price, p.retail_price)::text as retail_price,
@@ -1694,6 +1706,10 @@ export async function getWholesaleCatalog() {
         sku: row.sku,
         description: row.series_description,
         imageUrl: row.image_url,
+        priceGroup: row.price_group ?? '',
+        priceEur: row.price_eur,
+        priceRub: row.price_rub,
+        priceCny: row.price_cny,
         variants: [],
       };
       products.set(productKey, product);
