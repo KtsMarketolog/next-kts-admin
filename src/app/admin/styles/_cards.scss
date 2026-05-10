@@ -903,6 +903,11 @@
 
 .wholesaleWide {
   grid-column: 1 / -1;
+
+  textarea {
+    min-height: auto;
+    line-height: 1.45;
+  }
 }
 
 .discountBox {
@@ -923,7 +928,7 @@
 
 .wholesaleCatalogTools {
   display: grid;
-  grid-template-columns: minmax($apx-320, 1.4fr) minmax($apx-220, 1fr) minmax($apx-220, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $apx-12;
   align-items: end;
   margin: $apx-18 0;
@@ -934,6 +939,19 @@
   label {
     display: grid;
     gap: $apx-6;
+    min-width: 0;
+  }
+
+  label:first-child,
+  p {
+    grid-column: 1 / -1;
+  }
+
+  input,
+  select {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   span {
@@ -944,7 +962,6 @@
   }
 
   p {
-    grid-column: 1 / -1;
     margin: 0;
     color: #6f7182;
     font-size: $apx-13;

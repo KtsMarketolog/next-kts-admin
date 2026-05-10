@@ -208,6 +208,11 @@ function groupCatalogRowsByPriceGroup(rows: CatalogRow[]) {
   return Array.from(groups.values());
 }
 
+function getTextareaRows(value: string) {
+  const visualRows = value.split(/\r\n|\r|\n/).reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 120)), 0);
+  return Math.max(2, visualRows + 1);
+}
+
 function mergeEditorItems(categories: CatalogCategory[], items: PriceItem[]) {
   const current = new Map(items.map((item) => [`${item.productId}:${item.variantId ?? 'base'}`, item]));
   return flatCatalogItems(categories).map(({ product, variant }, index) => {
@@ -327,6 +332,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     [catalogVisibleLimit, sortedCatalogRows],
   );
   const visibleCatalogGroups = useMemo(() => groupCatalogRowsByPriceGroup(visibleCatalogRows), [visibleCatalogRows]);
+  const commentRows = useMemo(() => getTextareaRows(editor.comment), [editor.comment]);
 
   useEffect(() => {
     setCatalogVisibleLimit(CATALOG_PAGE_SIZE);
@@ -857,7 +863,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           )}
           <label className={styles.wholesaleWide}>
             <span>Комментарий</span>
-            <textarea value={editor.comment} onChange={(event) => setEditor({ ...editor, comment: event.target.value })} />
+            <textarea rows={commentRows} value={editor.comment} onChange={(event) => setEditor({ ...editor, comment: event.target.value })} />
           </label>
           <label className={styles.checkbox}>
             <input type="checkbox" checked={editor.isActive} onChange={(event) => setEditor({ ...editor, isActive: event.target.checked })} />
