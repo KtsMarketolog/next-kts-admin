@@ -15,6 +15,9 @@ type CatalogProduct = {
   priceEur: string;
   priceRub: string;
   priceCny: string;
+  stock: number;
+  isExpected: boolean;
+  stockUpdatedAt?: string | null;
   isActive: boolean;
 };
 
@@ -32,6 +35,20 @@ type CatalogFilterOptions = {
   categories: string[];
   subcategories: string[];
   brands: string[];
+};
+
+type StockImportLog = {
+  logId: number | null;
+  createdAt: string;
+  fileName: string;
+  emailFrom: string;
+  emailSubject: string;
+  status: 'success' | 'partial_success' | 'failed';
+  totalRows: number;
+  updatedRows: number;
+  notFoundRows: number;
+  failedRows: number;
+  errors: { row: number; name: string; error: string }[];
 };
 
 type CatalogFilters = {
@@ -55,6 +72,8 @@ const EMPTY_DRAFT: CatalogDraft = {
   priceEur: '',
   priceRub: '',
   priceCny: '',
+  stock: 0,
+  isExpected: false,
   isActive: true,
 };
 
@@ -81,6 +100,8 @@ function productPayload(product: CatalogDraft | CatalogProduct) {
     priceEur: product.priceEur,
     priceRub: product.priceRub,
     priceCny: product.priceCny,
+    stock: product.stock,
+    isExpected: product.isExpected,
     isActive: product.isActive,
   };
 }
@@ -98,6 +119,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string>('');
+  const [stockLogs, setStockLogs] = useState<StockImportLog[]>([]);
 
   const loadCatalog = useCallback(async (nextSearch = '', nextFilters: CatalogFilters = EMPTY_FILTERS) => {
     setLoading(true);
@@ -128,6 +150,17 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   useEffect(() => {
     void loadCatalog('');
   }, [loadCatalog]);
+
+  const loadStockLogs = useCallback(async () => {
+    const response = await fetch('/api/admin/stock-import/logs?limit=10', { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    setStockLogs(Array.isArray(data.logs) ? data.logs : []);
+  }, []);
+
+  useEffect(() => {
+    void loadStockLogs();
+  }, [loadStockLogs]);
 
   const markSaved = (id: string) => {
     setSavedId(id);
@@ -173,6 +206,27 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     if (fileInputRef.current) fileInputRef.current.value = '';
     await loadCatalog('', filters);
     showStatus('Каталог загружен из Excel');
+  };
+
+  const checkStockEmail = async () => {
+    setBusyId('stock-email');
+    const response = await fetch('/api/admin/stock-import/check-email', { method: 'POST' });
+    setBusyId(null);
+
+    if (!response.ok) {
+      showStatus(await readError(response, 'Не удалось проверить почту с остатками'));
+      return;
+    }
+
+    const data = await response.json();
+    await loadStockLogs();
+    if (!data.processed) {
+      showStatus('Новых писем с остатками нет');
+      return;
+    }
+
+    const result = data.result;
+    showStatus(`Остатки обновлены: ${result?.updatedRows ?? 0}, ошибок: ${result?.failedRows ?? 0}`);
   };
 
   const createProduct = async () => {
@@ -285,6 +339,55 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
         <button disabled={busyId === 'import'}>{busyId === 'import' ? 'Загрузка...' : 'Загрузить Excel'}</button>
       </form>
 
+      <div className={styles.catalogImportCard}>
+        <div>
+          <h3>Импорт остатков</h3>
+          <p>Проверяет почту и обновляет только остаток, ожидание поступления и дату обновления. Товары не создаются.</p>
+          {stockLogs[0] && (
+            <span>
+              Последний импорт: {stockLogs[0].status}, обновлено {stockLogs[0].updatedRows} из {stockLogs[0].totalRows}
+            </span>
+          )}
+        </div>
+        <div>
+          <p>Файл .xlsx: Наименование, Остаток, Ожидается</p>
+        </div>
+        <button type="button" disabled={busyId === 'stock-email'} onClick={checkStockEmail}>
+          {busyId === 'stock-email' ? 'Проверка...' : 'Проверить почту сейчас'}
+        </button>
+      </div>
+
+      {stockLogs.length > 0 && (
+        <div className={styles.tableWrap}>
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Файл</th>
+                <th>Статус</th>
+                <th>Строк</th>
+                <th>Обновлено</th>
+                <th>Не найдено</th>
+                <th>Ошибок</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockLogs.map((log) => (
+                <tr key={log.logId ?? `${log.createdAt}-${log.fileName}`}>
+                  <td>{new Date(log.createdAt).toLocaleString('ru-RU')}</td>
+                  <td>{log.fileName || '-'}</td>
+                  <td>{log.status}</td>
+                  <td>{log.totalRows}</td>
+                  <td>{log.updatedRows}</td>
+                  <td>{log.notFoundRows}</td>
+                  <td>{log.failedRows}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className={styles.catalogProductForm}>
         <label>
           <span>Наименование</span>
@@ -321,6 +424,24 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
         <label>
           <span>Цена CNY</span>
           <input value={draft.priceCny} onChange={(event) => setDraft((current) => ({ ...current, priceCny: event.target.value }))} />
+        </label>
+        <label>
+          <span>Остаток</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={draft.stock}
+            onChange={(event) => setDraft((current) => ({ ...current, stock: Math.max(0, Number(event.target.value) || 0) }))}
+          />
+        </label>
+        <label className={styles.userActiveToggle}>
+          <input
+            type="checkbox"
+            checked={draft.isExpected}
+            onChange={(event) => setDraft((current) => ({ ...current, isExpected: event.target.checked }))}
+          />
+          Ожидается
         </label>
         <label className={styles.userActiveToggle}>
           <input
@@ -427,6 +548,16 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
                     <span>CNY</span>
                     <input value={product.priceCny} onChange={(event) => updateProduct(product.id, { priceCny: event.target.value })} />
                   </label>
+                  <label>
+                    <span>Остаток</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={product.stock}
+                      onChange={(event) => updateProduct(product.id, { stock: Math.max(0, Number(event.target.value) || 0) })}
+                    />
+                  </label>
                 </div>
                 <div className={styles.catalogProductMeta}>
                   <label className={styles.userActiveToggle}>
@@ -437,11 +568,20 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
                     />
                     Активен
                   </label>
+                  <label className={styles.userActiveToggle}>
+                    <input
+                      type="checkbox"
+                      checked={product.isExpected}
+                      onChange={(event) => updateProduct(product.id, { isExpected: event.target.checked })}
+                    />
+                    Ожидается
+                  </label>
                   <div className={styles.userAccessBadges}>
                     <span>{product.brand || 'Без бренда'}</span>
                     <span>{product.category || 'Без категории'}</span>
                     <span>{product.subcategory || 'Без подкатегории'}</span>
                     <span>Арт.: {product.article || '-'}</span>
+                    <span>{product.stock > 0 ? `В наличии: ${product.stock} шт.` : product.isExpected ? 'Скоро поступление' : 'Под заказ'}</span>
                   </div>
                   <div className={styles.userAccessActions}>
                     <button

@@ -76,6 +76,9 @@ export function ensureCatalogSchema() {
       price_eur numeric(14, 2),
       price_rub numeric(14, 2),
       price_cny numeric(14, 2),
+      stock integer not null default 0,
+      is_expected boolean not null default false,
+      stock_updated_at timestamptz,
       promo boolean not null default false,
       brand_id bigint references catalog_brands(id) on delete set null,
       category_id bigint references catalog_categories(id) on delete set null,
@@ -89,6 +92,9 @@ export function ensureCatalogSchema() {
     alter table catalog_products add column if not exists price_eur numeric(14, 2);
     alter table catalog_products add column if not exists price_rub numeric(14, 2);
     alter table catalog_products add column if not exists price_cny numeric(14, 2);
+    alter table catalog_products add column if not exists stock integer not null default 0;
+    alter table catalog_products add column if not exists is_expected boolean not null default false;
+    alter table catalog_products add column if not exists stock_updated_at timestamptz;
 
     create index if not exists catalog_categories_order_idx
       on catalog_categories (is_active, sort_order, id);
@@ -106,6 +112,8 @@ export function ensureCatalogSchema() {
       on catalog_products (promo, is_active, title);
     create index if not exists catalog_products_search_idx
       on catalog_products using gin (to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(article, '')));
+    create index if not exists catalog_products_stock_title_norm_idx
+      on catalog_products (lower(trim(regexp_replace(replace(title, chr(160), ' '), $$\s+$$, ' ', 'g'))));
   `).then(() => undefined);
 
   return catalogSchemaReady;

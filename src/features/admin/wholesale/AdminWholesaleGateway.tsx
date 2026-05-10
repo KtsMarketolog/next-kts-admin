@@ -61,6 +61,9 @@ type CatalogProduct = {
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
+  stock: number;
+  isExpected: boolean;
+  stockUpdatedAt: string | null;
   variants: CatalogVariant[];
 };
 
@@ -125,6 +128,11 @@ function makeToken() {
 
 function getDefaultPriceTitle() {
   return `Прайс от ${new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow' }).format(new Date())}`;
+}
+
+function stockLabel(product: CatalogProduct) {
+  if (product.stock > 0) return `${product.stock} шт.`;
+  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
 }
 
 function emptyEditor(): PriceEditor {
@@ -1036,6 +1044,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                           <div>EUR</div>
                           <div>RUB</div>
                           <div>CNY</div>
+                          <div>Остаток</div>
                           <div>Цена в прайсе</div>
                           <div>Показ</div>
                           {product.variants.map((variant) => {
@@ -1046,6 +1055,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                                 <span>{product.priceEur || '—'}</span>
                                 <span>{product.priceRub || '—'}</span>
                                 <span>{product.priceCny || '—'}</span>
+                                <span>{stockLabel(product)}</span>
                                 <input value={item?.customWholesalePrice ?? ''} onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })} />
                                 <label className={styles.checkbox}>
                                   <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />

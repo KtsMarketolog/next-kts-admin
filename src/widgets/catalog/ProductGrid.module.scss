@@ -116,6 +116,22 @@
 
 }
 
+.stock {
+
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  margin-top: $apx-8;
+  padding: $apx-5 $apx-8;
+  border-radius: $apx-8;
+  background: #ffffff;
+  color: #2b285f;
+  font-size: $apx-13;
+  font-weight: 700;
+
+}
+
 .link {
 
   position: absolute;

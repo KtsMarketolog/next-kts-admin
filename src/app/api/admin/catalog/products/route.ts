@@ -22,6 +22,8 @@ function productInputFromBody(body: Record<string, unknown>): CatalogProductInpu
     priceEur: typeof body.priceEur === 'string' || typeof body.priceEur === 'number' ? body.priceEur : null,
     priceRub: typeof body.priceRub === 'string' || typeof body.priceRub === 'number' ? body.priceRub : null,
     priceCny: typeof body.priceCny === 'string' || typeof body.priceCny === 'number' ? body.priceCny : null,
+    stock: typeof body.stock === 'string' || typeof body.stock === 'number' ? body.stock : null,
+    isExpected: typeof body.isExpected === 'boolean' ? body.isExpected : null,
     isActive: typeof body.isActive === 'boolean' ? body.isActive : true,
   };
 }

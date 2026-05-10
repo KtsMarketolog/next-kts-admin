@@ -11,6 +11,8 @@ type ProductUI = {
   article?: string | null;     // артикул
   category?: string | null;    // имя категории
   subcategory?: string | null; // имя подкатегории
+  stock?: number | null;
+  isExpected?: boolean | null;
 };
 
 const BRAND_TITLES: Record<string, string> = {
@@ -52,6 +54,12 @@ function prettyBrandName(brandTitle?: string | null, brandSlug?: string) {
   
   return BRAND_TITLES[brandSlug] ?? brandSlug;
 
+}
+
+function stockLabel(product: ProductUI) {
+  const stock = Number(product.stock ?? 0);
+  if (stock > 0) return `В наличии: ${stock} шт.`;
+  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
 }
 
 export default function ProductGrid({ items }: { items: ProductUI[] }) {
@@ -100,6 +108,8 @@ export default function ProductGrid({ items }: { items: ProductUI[] }) {
                 {sub && <span className={styles.tag}>#{sub}</span>}
 
               </div>
+
+              <span className={styles.stock}>{stockLabel(p)}</span>
 
             </div>
 

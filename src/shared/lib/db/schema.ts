@@ -111,6 +111,9 @@ export async function ensureSiteSchema() {
       price_eur numeric(14, 2),
       price_rub numeric(14, 2),
       price_cny numeric(14, 2),
+      stock integer not null default 0,
+      is_expected boolean not null default false,
+      stock_updated_at timestamptz,
       retail_price numeric(12, 2),
       wholesale_price numeric(12, 2),
       sort_order integer not null default 0,
@@ -289,6 +292,25 @@ export async function ensureSiteSchema() {
       updated_at timestamptz not null default now()
     );
 
+    create table if not exists stock_import_logs (
+      id bigserial primary key,
+      created_at timestamptz not null default now(),
+      file_name text not null default '',
+      email_from text not null default '',
+      email_subject text not null default '',
+      status text not null default 'failed',
+      total_rows integer not null default 0,
+      updated_rows integer not null default 0,
+      not_found_rows integer not null default 0,
+      failed_rows integer not null default 0,
+      errors_json jsonb not null default '[]'::jsonb
+    );
+
+    create table if not exists stock_import_locks (
+      key text primary key,
+      locked_at timestamptz not null default now()
+    );
+
     alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_lists add column if not exists comment text not null default '';
     alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent';
@@ -299,6 +321,9 @@ export async function ensureSiteSchema() {
     alter table wholesale_products add column if not exists price_eur numeric(14, 2);
     alter table wholesale_products add column if not exists price_rub numeric(14, 2);
     alter table wholesale_products add column if not exists price_cny numeric(14, 2);
+    alter table wholesale_products add column if not exists stock integer not null default 0;
+    alter table wholesale_products add column if not exists is_expected boolean not null default false;
+    alter table wholesale_products add column if not exists stock_updated_at timestamptz;
     alter table admin_users add column if not exists email text not null default '';
     alter table admin_users add column if not exists name text not null default '';
     alter table admin_users add column if not exists role text not null default 'admin';
@@ -376,6 +401,7 @@ export async function ensureSiteSchema() {
     create index if not exists security_audit_events_session_idx on security_audit_events(session_id, created_at desc);
     create index if not exists security_audit_events_entity_idx on security_audit_events(entity_type, entity_id, created_at desc);
     create index if not exists rate_limit_buckets_reset_idx on rate_limit_buckets(reset_at);
+    create index if not exists stock_import_logs_created_idx on stock_import_logs(created_at desc);
   `);
 
   await query(`alter table hero_slides add column if not exists tablet_image_url text`);
@@ -395,6 +421,9 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_products add column if not exists price_eur numeric(14, 2)`);
   await query(`alter table wholesale_products add column if not exists price_rub numeric(14, 2)`);
   await query(`alter table wholesale_products add column if not exists price_cny numeric(14, 2)`);
+  await query(`alter table wholesale_products add column if not exists stock integer not null default 0`);
+  await query(`alter table wholesale_products add column if not exists is_expected boolean not null default false`);
+  await query(`alter table wholesale_products add column if not exists stock_updated_at timestamptz`);
   await query(`alter table admin_users add column if not exists email text not null default ''`);
   await query(`alter table admin_users add column if not exists name text not null default ''`);
   await query(`alter table admin_users add column if not exists role text not null default 'admin'`);

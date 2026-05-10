@@ -15,6 +15,8 @@ export type CatalogProductInput = {
   priceEur?: string | number | null;
   priceRub?: string | number | null;
   priceCny?: string | number | null;
+  stock?: string | number | null;
+  isExpected?: boolean | null;
   isActive?: boolean;
 };
 
@@ -29,6 +31,9 @@ export type CatalogAdminProduct = {
   priceEur: string;
   priceRub: string;
   priceCny: string;
+  stock: number;
+  isExpected: boolean;
+  stockUpdatedAt: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -72,6 +77,8 @@ type NormalizedCatalogProductInput = {
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
+  stock: number | null;
+  isExpected: boolean | null;
   isActive: boolean;
 };
 
@@ -134,6 +141,15 @@ export function normalizeCatalogPrice(value: unknown) {
   const amount = Number(text);
   if (!Number.isFinite(amount) || amount < 0 || amount > 999999999) return null;
   return text;
+}
+
+function normalizeStockValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+  const text = String(value).trim().replace(/\s+/g, '');
+  if (!/^\d+$/.test(text)) return null;
+  const amount = Number(text);
+  if (!Number.isSafeInteger(amount) || amount < 0 || amount > 999999999) return null;
+  return amount;
 }
 
 function slugify(value: string, fallback: string) {
@@ -355,6 +371,8 @@ async function syncWholesaleProduct(
     normalizeCatalogPrice(input.priceEur),
     normalizeCatalogPrice(input.priceRub),
     normalizeCatalogPrice(input.priceCny),
+    input.stock,
+    input.isExpected,
     sortOrder,
     input.isActive,
   ];
@@ -372,8 +390,15 @@ async function syncWholesaleProduct(
            price_eur = $9,
            price_rub = $10,
            price_cny = $11,
-           sort_order = $12,
-           is_active = $13,
+           stock = coalesce($12, stock),
+           is_expected = coalesce($13, is_expected),
+           stock_updated_at = case
+             when $12::integer is not null and wholesale_products.stock is distinct from $12 then now()
+             when $13::boolean is not null and wholesale_products.is_expected is distinct from $13 then now()
+             else wholesale_products.stock_updated_at
+           end,
+           sort_order = $14,
+           is_active = $15,
            updated_at = now()
        where catalog_product_id = $1`,
       values,
@@ -394,10 +419,13 @@ async function syncWholesaleProduct(
        price_eur,
        price_rub,
        price_cny,
+       stock,
+       is_expected,
+       stock_updated_at,
        sort_order,
        is_active
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, coalesce($12, 0), coalesce($13, false), null, $14, $15)`,
     values,
   );
 }
@@ -413,6 +441,8 @@ function normalizeInput(input: CatalogProductInput): NormalizedCatalogProductInp
     priceEur: normalizeCatalogPrice(input.priceEur),
     priceRub: normalizeCatalogPrice(input.priceRub),
     priceCny: normalizeCatalogPrice(input.priceCny),
+    stock: normalizeStockValue(input.stock),
+    isExpected: input.isExpected === null || input.isExpected === undefined ? null : Boolean(input.isExpected),
     isActive: input.isActive ?? true,
   };
 }
@@ -443,13 +473,16 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
        price_eur,
        price_rub,
        price_cny,
+       stock,
+       is_expected,
+       stock_updated_at,
        promo,
        brand_id,
        category_id,
        subcategory_id,
        is_active
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10, $11, $12)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, case when $11 = true then now() else null end, false, $12, $13, $14, $15)
      returning id::text`,
     [
       `excel:${sortOrder + 1}`,
@@ -460,6 +493,9 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
       input.priceEur,
       input.priceRub,
       input.priceCny,
+      input.stock ?? 0,
+      input.isExpected ?? false,
+      input.stock !== null || input.isExpected !== null,
       brandId,
       categoryId,
       subcategoryId,
@@ -538,6 +574,9 @@ function mapAdminProduct(row: {
   price_eur: string | null;
   price_rub: string | null;
   price_cny: string | null;
+  stock: number | string | null;
+  is_expected: boolean | null;
+  stock_updated_at: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -553,6 +592,9 @@ function mapAdminProduct(row: {
     priceEur: row.price_eur ?? '',
     priceRub: row.price_rub ?? '',
     priceCny: row.price_cny ?? '',
+    stock: Number(row.stock ?? 0),
+    isExpected: Boolean(row.is_expected),
+    stockUpdatedAt: row.stock_updated_at,
     isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -578,6 +620,9 @@ export async function getCatalogAdminProducts(filters: CatalogAdminProductFilter
             p.price_eur::text,
             p.price_rub::text,
             p.price_cny::text,
+            p.stock,
+            p.is_expected,
+            p.stock_updated_at::text,
             p.is_active,
             p.created_at::text,
             p.updated_at::text
@@ -617,6 +662,9 @@ export async function getCatalogAdminProductById(id: number) {
             p.price_eur::text,
             p.price_rub::text,
             p.price_cny::text,
+            p.stock,
+            p.is_expected,
+            p.stock_updated_at::text,
             p.is_active,
             p.created_at::text,
             p.updated_at::text
@@ -683,7 +731,14 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
            brand_id = $9,
            category_id = $10,
            subcategory_id = $11,
-           is_active = $12,
+           stock = coalesce($12, stock),
+           is_expected = coalesce($13, is_expected),
+           stock_updated_at = case
+             when $12::integer is not null and stock is distinct from $12 then now()
+             when $13::boolean is not null and is_expected is distinct from $13 then now()
+             else stock_updated_at
+           end,
+           is_active = $14,
            updated_at = now()
        where id = $1`,
       [
@@ -698,6 +753,8 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
         brandId,
         categoryId,
         subcategoryId,
+        normalized.stock,
+        normalized.isExpected,
         normalized.isActive,
       ],
     );

@@ -19,6 +19,11 @@ function formatPrice(value: string | null) {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(number);
 }
 
+function stockLabel(product: PublicWholesaleCategory['products'][number]) {
+  if (product.stock > 0) return `В наличии: ${product.stock} шт.`;
+  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
+}
+
 type PriceClientEventType =
   | 'public_price_product_opened'
   | 'public_price_request_started'
@@ -160,6 +165,7 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
                   <h3>{product.title}</h3>
                   {product.sku ? <p>Артикул: {product.sku}</p> : null}
                   {product.description ? <p>{product.description}</p> : null}
+                  <p className={styles.stockStatus}>{stockLabel(product)}</p>
                 </div>
                 <table className={styles.prices}>
                   <thead>

@@ -15,6 +15,9 @@ export type PublicWholesaleProduct = {
   sku: string;
   description: string;
   imageUrl: string | null;
+  stock: number;
+  isExpected: boolean;
+  stockUpdatedAt: string | null;
   variants: PublicWholesaleVariant[];
 };
 
@@ -62,6 +65,9 @@ type PriceItemRow = {
   sku: string;
   series_description: string;
   image_url: string | null;
+  stock: string | null;
+  is_expected: boolean | null;
+  stock_updated_at: string | null;
   variant_id: string | null;
   variant_title: string | null;
   retail_price: string | null;
@@ -114,6 +120,9 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        coalesce(i.snapshot_product_sku, p.sku) as sku,
        coalesce(i.snapshot_product_description, p.series_description) as series_description,
        img.image_url,
+       p.stock::text,
+       p.is_expected,
+       p.stock_updated_at::text,
        v.id::text as variant_id,
        coalesce(i.snapshot_variant_title, v.title, '') as variant_title,
        coalesce(v.retail_price, p.retail_price)::text as retail_price,
@@ -165,6 +174,9 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
         sku: row.sku,
         description: row.series_description,
         imageUrl: row.image_url,
+        stock: Number(row.stock ?? 0),
+        isExpected: Boolean(row.is_expected),
+        stockUpdatedAt: row.stock_updated_at,
         variants: [],
       };
       category.products.push(product);

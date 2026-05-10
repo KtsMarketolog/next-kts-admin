@@ -23,6 +23,9 @@ export type Product = {
   article?: string | null;
   category?: string | null;
   subcategory?: string | null;
+  stock: number;
+  isExpected: boolean;
+  stockUpdatedAt: string | null;
 };
 
 export type BrandSubLite = { slug: string; title: string; category?: string };
@@ -59,6 +62,9 @@ type ProductRow = {
   brand_title: string | null;
   category_title: string | null;
   subcategory_title: string | null;
+  stock: number | string | null;
+  is_expected: boolean | null;
+  stock_updated_at: string | null;
 };
 
 function mapCategory(row: CategoryRow): Category {
@@ -100,6 +106,9 @@ function mapProduct(row: ProductRow): Product {
     article: row.article,
     category: row.category_title,
     subcategory: row.subcategory_title,
+    stock: Number(row.stock ?? 0),
+    isExpected: Boolean(row.is_expected),
+    stockUpdatedAt: row.stock_updated_at,
   };
 }
 
@@ -114,7 +123,10 @@ async function fetchProductsWhere(whereSql: string, params: unknown[]): Promise<
             b.slug as brand_slug,
             b.title as brand_title,
             c.title as category_title,
-            s.title as subcategory_title
+            s.title as subcategory_title,
+            p.stock,
+            p.is_expected,
+            p.stock_updated_at::text
      from catalog_products p
      left join catalog_brands b on b.id = p.brand_id and b.is_active = true
      left join catalog_categories c on c.id = p.category_id and c.is_active = true
