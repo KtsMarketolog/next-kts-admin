@@ -56,7 +56,7 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
       setTwoFactorChallengeId(data.challengeId);
       setTwoFactorEmail(typeof data.email === 'string' ? data.email : '');
       setPassword('');
-      setStatus(data.email ? `Код отправлен на ${data.email}` : 'Введите код подтверждения');
+      setStatus('');
       return;
     }
 
