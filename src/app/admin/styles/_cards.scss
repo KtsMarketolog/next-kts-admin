@@ -1037,6 +1037,10 @@
   .priceProduct {
     grid-template-columns: 1fr;
   }
+
+  .priceCategoryHeader {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1092,17 +1096,48 @@
       width: 100%;
     }
   }
+
+  .priceGroupDiscount {
+    grid-template-columns: 1fr;
+  }
 }
 
 .priceCategory {
   display: grid;
   gap: $apx-12;
   margin: $apx-22 0;
+}
+
+.priceCategoryHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-360, $apx-520);
+  gap: $apx-12;
+  align-items: end;
 
   h3 {
     margin: 0;
     font-size: $apx-22;
     text-transform: uppercase;
+  }
+}
+
+.priceGroupDiscount {
+  display: grid;
+  grid-template-columns: minmax($apx-120, 1fr) minmax($apx-140, auto);
+  gap: $apx-8;
+  align-items: end;
+
+  span {
+    grid-column: 1 / -1;
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  input {
+    width: 100%;
+    min-width: 0;
   }
 }
 

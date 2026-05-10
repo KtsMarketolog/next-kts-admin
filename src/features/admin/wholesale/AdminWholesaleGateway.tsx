@@ -115,6 +115,7 @@ const emptyManager = {
 };
 
 const CATALOG_PAGE_SIZE = 120;
+const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
 
 function makeToken() {
   const bytes = new Uint8Array(12);
@@ -186,7 +187,7 @@ function groupCatalogRowsByPriceGroup(rows: CatalogRow[]) {
   const products = new Map<string, CatalogProduct>();
 
   for (const row of rows) {
-    const groupTitle = row.product.priceGroup || 'Без ценовой группы';
+    const groupTitle = row.product.priceGroup || NO_PRICE_GROUP_TITLE;
     const groupKey = groupTitle.toLowerCase();
     let group = groups.get(groupKey);
     if (!group) {
@@ -206,6 +207,28 @@ function groupCatalogRowsByPriceGroup(rows: CatalogRow[]) {
   }
 
   return Array.from(groups.values());
+}
+
+function parseCatalogAmount(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = value.replace(/\s+/g, '').replace(',', '.');
+  const amount = Number(normalized);
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
+
+function formatCatalogAmount(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function getDiscountBaseAmount(row: CatalogRow) {
+  return (
+    parseCatalogAmount(row.product.priceRub) ??
+    parseCatalogAmount(row.variant.retailPrice) ??
+    parseCatalogAmount(row.variant.wholesalePrice) ??
+    parseCatalogAmount(row.product.priceEur) ??
+    parseCatalogAmount(row.product.priceCny)
+  );
 }
 
 function getTextareaRows(value: string) {
@@ -240,6 +263,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
   const [editor, setEditor] = useState<PriceEditor>(() => emptyEditor());
   const [discount, setDiscount] = useState('');
+  const [groupDiscounts, setGroupDiscounts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
@@ -279,6 +303,19 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const editorBackHref = analyticsBackHref ?? '/admin/wholesale/manager';
 
   const catalogRows = useMemo(() => flatCatalogItems(catalog), [catalog]);
+  const catalogDiscountBaseByKey = useMemo(
+    () =>
+      new Map(
+        catalogRows.map((row) => [
+          row.key,
+          {
+            amount: getDiscountBaseAmount(row),
+            groupKey: (row.product.priceGroup || NO_PRICE_GROUP_TITLE).toLowerCase(),
+          },
+        ]),
+      ),
+    [catalogRows],
+  );
   const catalogPriceGroups = useMemo(() => {
     const groups = new Set<string>();
     for (const { product } of catalogRows) {
@@ -504,24 +541,34 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     }));
   };
 
-  const calculateDiscount = () => {
-    const percent = Number(discount.replace(',', '.'));
-    if (!Number.isFinite(percent)) {
+  const calculateDiscount = (value = discount, groupKey?: string) => {
+    if (!value.trim()) {
       showStatus('Введите процент скидки');
       return;
     }
-    const retailByKey = new Map(catalogRows.map(({ key, variant }) => [key, Number(variant.retailPrice ?? 0)]));
+    const percent = Number(value.replace(',', '.'));
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      showStatus('Введите процент скидки');
+      return;
+    }
+    const changedCount = editor.items.filter((item) => {
+      const key = `${item.productId}:${item.variantId ?? 'base'}`;
+      const base = catalogDiscountBaseByKey.get(key);
+      return Boolean(base && base.amount !== null && (!groupKey || base.groupKey === groupKey));
+    }).length;
     setEditor((current) => ({
       ...current,
       items: current.items.map((item) => {
         const key = `${item.productId}:${item.variantId ?? 'base'}`;
-        const retail = retailByKey.get(key) ?? 0;
+        const base = catalogDiscountBaseByKey.get(key);
+        if (!base || base.amount === null || (groupKey && base.groupKey !== groupKey)) return item;
         return {
           ...item,
-          customWholesalePrice: retail > 0 ? String(Math.round(retail * (1 - percent / 100))) : item.customWholesalePrice,
+          customWholesalePrice: formatCatalogAmount(base.amount * (1 - percent / 100)),
         };
       }),
     }));
+    showStatus(changedCount > 0 ? 'Цены рассчитаны' : 'В выбранной группе нет цен для расчёта');
   };
 
   const savePriceList = async () => {
@@ -878,7 +925,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         <div className={styles.discountBox}>
           <span>Применить скидку ко всем позициям, %</span>
           <input value={discount} onChange={(event) => setDiscount(event.target.value)} placeholder="Например 20" />
-          <button className={styles.secondary} onClick={calculateDiscount}>Рассчитать цены</button>
+          <button className={styles.secondary} onClick={() => calculateDiscount()}>Рассчитать цены</button>
         </div>
 
         {catalog.length === 0 ? (
@@ -926,7 +973,25 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             ) : (
               visibleCatalogGroups.map((group) => (
                 <div className={styles.priceCategory} key={group.id}>
-                  <h3>{group.title}</h3>
+                  <div className={styles.priceCategoryHeader}>
+                    <h3>{group.title}</h3>
+                    <div className={styles.priceGroupDiscount}>
+                      <span>Скидка для группы, %</span>
+                      <input
+                        value={groupDiscounts[group.id] ?? ''}
+                        onChange={(event) =>
+                          setGroupDiscounts((current) => ({
+                            ...current,
+                            [group.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="Например 20"
+                      />
+                      <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
+                        Рассчитать
+                      </button>
+                    </div>
+                  </div>
                   {group.products.map((product) => {
                     const hasSeveralPositions = product.variants.length > 1;
 
