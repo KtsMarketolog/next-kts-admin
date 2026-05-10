@@ -1015,6 +1015,10 @@
     grid-column: 1 / -1;
     justify-content: flex-start;
   }
+
+  .priceProduct {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1086,8 +1090,9 @@
 
 .priceProduct {
   display: grid;
-  grid-template-columns: minmax($apx-260, $apx-360) minmax(0, 1fr);
+  grid-template-columns: minmax($apx-280, $apx-420) minmax($apx-520, 1fr);
   gap: $apx-18;
+  align-items: start;
   border: $apx-1 solid #e6e7ef;
   border-radius: $apx-10;
   padding: $apx-14;
@@ -1122,11 +1127,11 @@
 .variantTable {
   display: grid;
   grid-template-columns:
-    minmax($apx-100, 0.8fr)
+    minmax($apx-120, 0.8fr)
     minmax($apx-80, 0.55fr)
     minmax($apx-90, 0.65fr)
     minmax($apx-80, 0.55fr)
-    minmax($apx-120, 0.9fr)
+    minmax($apx-180, 1fr)
     minmax($apx-120, auto);
   gap: $apx-8 $apx-12;
   align-items: center;
@@ -1136,6 +1141,14 @@
     font-size: $apx-12;
     font-weight: 700;
     text-transform: uppercase;
+  }
+
+  input {
+    width: 100%;
+  }
+
+  .checkbox {
+    justify-content: flex-start;
   }
 }
 

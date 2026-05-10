@@ -921,48 +921,53 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               visibleCatalogGroups.map((group) => (
                 <div className={styles.priceCategory} key={group.id}>
                   <h3>{group.title}</h3>
-                  {group.products.map((product) => (
-                    <article className={styles.priceProduct} key={product.id}>
-                      <div className={styles.priceProductInfo}>
-                        {product.imageUrl ? <img src={product.imageUrl} alt="" /> : <span>Нет фото</span>}
-                        <div>
-                          <strong>{product.title}</strong>
-                          {product.sku ? <p>{product.sku}</p> : null}
-                          {product.description ? <p>{product.description}</p> : null}
-                          <p>EUR: {product.priceEur || '—'} · RUB: {product.priceRub || '—'} · CNY: {product.priceCny || '—'}</p>
-                          <div className={styles.actions}>
-                            <button className={styles.secondary} onClick={() => setProductVisible(product.id, true)}>Показать все размеры</button>
-                            <button className={styles.secondary} onClick={() => setProductVisible(product.id, false)}>Убрать все размеры</button>
+                  {group.products.map((product) => {
+                    const hasSeveralPositions = product.variants.length > 1;
+
+                    return (
+                      <article className={styles.priceProduct} key={product.id}>
+                        <div className={styles.priceProductInfo}>
+                          {product.imageUrl ? <img src={product.imageUrl} alt="" /> : <span>Нет фото</span>}
+                          <div>
+                            <strong>{product.title}</strong>
+                            {product.sku ? <p>Арт.: {product.sku}</p> : null}
+                            {product.description ? <p>{product.description}</p> : null}
+                            {hasSeveralPositions ? (
+                              <div className={styles.actions}>
+                                <button className={styles.secondary} onClick={() => setProductVisible(product.id, true)}>Показать все позиции</button>
+                                <button className={styles.secondary} onClick={() => setProductVisible(product.id, false)}>Убрать все позиции</button>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
-                      </div>
-                      <div className={styles.variantTable}>
-                        <div>Позиция</div>
-                        <div>EUR</div>
-                        <div>RUB</div>
-                        <div>CNY</div>
-                        <div>Опт</div>
-                        <div>Показывать</div>
-                        {product.variants.map((variant) => {
-                          const key = `${product.id}:${variant.id ?? 'base'}`;
-                          const item = itemByKey.get(key);
-                          return (
-                            <div className={styles.variantRow} key={key}>
-                              <span>{variant.title}</span>
-                              <span>{product.priceEur || '—'}</span>
-                              <span>{product.priceRub || '—'}</span>
-                              <span>{product.priceCny || '—'}</span>
-                              <input value={item?.customWholesalePrice ?? ''} onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })} />
-                              <label className={styles.checkbox}>
-                                <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
-                                Показывать
-                              </label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </article>
-                  ))}
+                        <div className={styles.variantTable}>
+                          <div>Позиция</div>
+                          <div>EUR</div>
+                          <div>RUB</div>
+                          <div>CNY</div>
+                          <div>Цена в прайсе</div>
+                          <div>Показ</div>
+                          {product.variants.map((variant) => {
+                            const key = `${product.id}:${variant.id ?? 'base'}`;
+                            const item = itemByKey.get(key);
+                            return (
+                              <div className={styles.variantRow} key={key}>
+                                <span>{hasSeveralPositions ? variant.title : 'Основная'}</span>
+                                <span>{product.priceEur || '—'}</span>
+                                <span>{product.priceRub || '—'}</span>
+                                <span>{product.priceCny || '—'}</span>
+                                <input value={item?.customWholesalePrice ?? ''} onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })} />
+                                <label className={styles.checkbox}>
+                                  <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
+                                  Показывать
+                                </label>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               ))
             )}
