@@ -123,9 +123,13 @@ function makeToken() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function getDefaultPriceTitle() {
+  return `Прайс от ${new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow' }).format(new Date())}`;
+}
+
 function emptyEditor(): PriceEditor {
   return {
-    title: '',
+    title: getDefaultPriceTitle(),
     clientName: '',
     token: makeToken(),
     validUntil: '',
@@ -245,7 +249,7 @@ function mergeEditorItems(categories: CatalogCategory[], items: PriceItem[]) {
         productId: product.id,
         variantId: variant.id,
         customWholesalePrice: variant.wholesalePrice,
-        visible: true,
+        visible: false,
         sortOrder: index + 1,
       }
     );
@@ -446,7 +450,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     async function loadEditorData() {
       const nextCatalog = await loadCatalog();
       if (screen === 'create') {
-        setEditor((current) => ({ ...current, items: mergeEditorItems(nextCatalog, current.items) }));
+        setEditor({ ...emptyEditor(), items: mergeEditorItems(nextCatalog, []) });
         return;
       }
 
@@ -538,6 +542,17 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     setEditor((current) => ({
       ...current,
       items: current.items.map((item) => (item.productId === productId ? { ...item, visible } : item)),
+    }));
+  };
+
+  const setPriceGroupVisible = (groupKey: string, visible: boolean) => {
+    setEditor((current) => ({
+      ...current,
+      items: current.items.map((item) => {
+        const key = `${item.productId}:${item.variantId ?? 'base'}`;
+        const base = catalogDiscountBaseByKey.get(key);
+        return base?.groupKey === groupKey ? { ...item, visible } : item;
+      }),
     }));
   };
 
@@ -975,21 +990,27 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                 <div className={styles.priceCategory} key={group.id}>
                   <div className={styles.priceCategoryHeader}>
                     <h3>{group.title}</h3>
-                    <div className={styles.priceGroupDiscount}>
-                      <span>Скидка для группы, %</span>
-                      <input
-                        value={groupDiscounts[group.id] ?? ''}
-                        onChange={(event) =>
-                          setGroupDiscounts((current) => ({
-                            ...current,
-                            [group.id]: event.target.value,
-                          }))
-                        }
-                        placeholder="Например 20"
-                      />
-                      <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
-                        Рассчитать
-                      </button>
+                    <div className={styles.priceGroupTools}>
+                      <div className={styles.priceGroupDiscount}>
+                        <span>Скидка для группы, %</span>
+                        <input
+                          value={groupDiscounts[group.id] ?? ''}
+                          onChange={(event) =>
+                            setGroupDiscounts((current) => ({
+                              ...current,
+                              [group.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="Например 20"
+                        />
+                        <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
+                          Рассчитать
+                        </button>
+                      </div>
+                      <div className={styles.priceGroupVisibility}>
+                        <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, true)}>Показать все</button>
+                        <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, false)}>Убрать все</button>
+                      </div>
                     </div>
                   </div>
                   {group.products.map((product) => {
