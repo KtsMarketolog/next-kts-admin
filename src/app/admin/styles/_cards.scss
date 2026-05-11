@@ -429,7 +429,7 @@
 }
 
 .priceListMain {
-  grid-template-columns: minmax($apx-210, 1.2fr) minmax($apx-170, 0.9fr) minmax($apx-170, 0.9fr) minmax($apx-140, 0.7fr);
+  grid-template-columns: minmax($apx-260, 1.4fr) repeat(2, minmax($apx-180, 1fr));
 }
 
 .priceListMeta {
@@ -958,7 +958,7 @@
 
 .catalogProductForm {
   display: grid;
-  grid-template-columns: minmax($apx-280, 1.35fr) repeat(3, minmax($apx-190, 1fr));
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
   gap: $apx-10;
   align-items: end;
   border: $apx-1 solid #e1e3ee;
@@ -970,6 +970,14 @@
     display: grid;
     gap: $apx-6;
     min-width: 0;
+  }
+
+  input,
+  select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   span {

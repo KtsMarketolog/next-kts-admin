@@ -4,7 +4,6 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
-import { shortToken } from '@/shared/lib/wholesaleSecurity';
 import {
   getWholesalePriceWorkflowStatusLabel,
   WHOLESALE_PRICE_WORKFLOW_STATUSES,
@@ -753,10 +752,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               <span>Менеджер</span>
               <strong>{item.managerName || '—'}</strong>
             </div>
-            <div className={styles.priceListField}>
-              <span>Ссылка</span>
-              <code>{shortToken(item.token)}</code>
-            </div>
           </div>
           <div className={styles.priceListMeta}>
             <div className={styles.priceListField}>
@@ -791,7 +786,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                 type="button"
                 onClick={() => copyLink(item)}
               >
-                {copiedToken === item.token ? 'Скопировано' : 'Скопировать'}
+                {copiedToken === item.token ? 'Скопировано' : 'Скопировать ссылку'}
               </button>
               <button className={styles.danger} onClick={() => deletePriceList(item.id)}>Удалить</button>
             </div>
