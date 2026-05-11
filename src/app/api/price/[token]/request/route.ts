@@ -68,6 +68,21 @@ function money(value: number) {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value);
 }
 
+function parseMoneyValue(value: string | null) {
+  if (!value) return null;
+  const number = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function formatAmount(value: number, currency?: string) {
+  return `${money(value)}${currency ? ` ${currency}` : ''}`;
+}
+
+function formatAmountList(values: Array<{ amount: number; currency: string }>) {
+  if (values.length === 0) return '0';
+  return values.map((value) => formatAmount(value.amount, value.currency)).join(' / ');
+}
+
 function requireEnv(name: string) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not configured`);
@@ -119,17 +134,40 @@ export async function POST(request: Request, context: Context) {
   const rows = requestedItems.map((item) => {
     const dbItem = dbItemsById.get(item.id);
     if (!dbItem) throw new Error('Validated item disappeared');
-    const price = Number(dbItem.wholesalePrice ?? 0);
-    const safePrice = Number.isFinite(price) && price > 0 ? price : 0;
+    const currencyPrices = [
+      { amount: parseMoneyValue(dbItem.priceEur), currency: 'EUR' },
+      { amount: parseMoneyValue(dbItem.priceRub), currency: 'RUB' },
+      { amount: parseMoneyValue(dbItem.priceCny), currency: 'CNY' },
+    ]
+      .filter((price): price is { amount: number; currency: string } => price.amount !== null)
+      .map((price) => ({
+        amount: price.amount,
+        currency: price.currency,
+        lineTotal: price.amount * item.quantity,
+      }));
+    const fallbackPrice = parseMoneyValue(dbItem.wholesalePrice);
+    const prices =
+      currencyPrices.length > 0
+        ? currencyPrices
+        : fallbackPrice
+          ? [{ amount: fallbackPrice, currency: '', lineTotal: fallbackPrice * item.quantity }]
+          : [];
     return {
       ...dbItem,
       quantity: item.quantity,
-      lineTotal: safePrice * item.quantity,
+      prices,
     };
   });
 
   const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
-  const totalPrice = rows.reduce((sum, item) => sum + item.lineTotal, 0);
+  const totalByCurrency = new Map<string, number>();
+  for (const row of rows) {
+    for (const price of row.prices) {
+      totalByCurrency.set(price.currency, (totalByCurrency.get(price.currency) ?? 0) + price.lineTotal);
+    }
+  }
+  const totalAmounts = Array.from(totalByCurrency.entries()).map(([currency, amount]) => ({ currency, amount }));
+  const totalPriceLabel = formatAmountList(totalAmounts);
   const priceUrl = new URL(`/price/${encodeURIComponent(priceList.token)}`, request.url).toString();
 
   try {
@@ -153,8 +191,8 @@ export async function POST(request: Request, context: Context) {
             <td>${escapeHtml(item.sku)}</td>
             <td>${escapeHtml(item.variantTitle)}</td>
             <td>${item.quantity}</td>
-            <td>${escapeHtml(item.wholesalePrice ?? '0')}</td>
-            <td>${money(item.lineTotal)}</td>
+            <td>${escapeHtml(formatAmountList(item.prices))}</td>
+            <td>${escapeHtml(formatAmountList(item.prices.map((price) => ({ amount: price.lineTotal, currency: price.currency }))))}</td>
           </tr>
         `,
       )
@@ -176,7 +214,7 @@ export async function POST(request: Request, context: Context) {
           <tbody>${itemRows}</tbody>
         </table>
         <p><b>Итого позиций:</b> ${totalQuantity}</p>
-        <p><b>Итого сумма:</b> ${money(totalPrice)}</p>
+        <p><b>Итого сумма:</b> ${escapeHtml(totalPriceLabel)}</p>
       `,
       text:
         `${subject}\n` +
@@ -187,10 +225,12 @@ export async function POST(request: Request, context: Context) {
         rows
           .map(
             (item) =>
-              `${item.productTitle}; ${item.sku}; ${item.variantTitle}; ${item.quantity} шт.; цена ${item.wholesalePrice ?? '0'}; сумма ${money(item.lineTotal)}`,
+              `${item.productTitle}; ${item.sku}; ${item.variantTitle}; ${item.quantity} шт.; цена ${formatAmountList(item.prices)}; сумма ${formatAmountList(
+                item.prices.map((price) => ({ amount: price.lineTotal, currency: price.currency })),
+              )}`,
           )
           .join('\n') +
-        `\n\nИтого позиций: ${totalQuantity}\nИтого сумма: ${money(totalPrice)}\n`,
+        `\n\nИтого позиций: ${totalQuantity}\nИтого сумма: ${totalPriceLabel}\n`,
     });
 
     await trackAnalyticsEvent({
@@ -206,14 +246,15 @@ export async function POST(request: Request, context: Context) {
       referer: request.headers.get('referer'),
       metadata: {
         totalQuantity,
-        totalPrice,
+        totalPrice: totalPriceLabel,
+        totalByCurrency: Object.fromEntries(totalAmounts.map((item) => [item.currency || 'amount', item.amount])),
         itemCount: rows.length,
         items: rows.slice(0, 40).map((item) => ({
           priceItemId: item.id,
           productTitle: item.productTitle,
           variantTitle: item.variantTitle,
           quantity: item.quantity,
-          lineTotal: item.lineTotal,
+          totals: item.prices.map((price) => ({ currency: price.currency, amount: price.lineTotal })),
         })),
       },
     });

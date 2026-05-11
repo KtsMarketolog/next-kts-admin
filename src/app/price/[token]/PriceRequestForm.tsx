@@ -27,7 +27,35 @@ function hasPriceValue(value: string | null) {
   return Number.isFinite(number) ? number > 0 : value.trim().length > 0;
 }
 
+function parsePriceNumber(value: string | null) {
+  if (!value) return null;
+  const number = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function formatAmountList(values: Array<{ amount: number; currency: string }>) {
+  if (values.length === 0) return '0';
+  return values
+    .map((value) => `${formatPrice(String(value.amount))}${value.currency ? ` ${value.currency}` : ''}`)
+    .join(' / ');
+}
+
 type PublicPriceVariant = PublicWholesaleCategory['products'][number]['variants'][number];
+
+function getVariantRequestPrices(variant: PublicPriceVariant) {
+  const currencyPrices = [
+    { amount: parsePriceNumber(variant.priceEur), currency: 'EUR' },
+    { amount: parsePriceNumber(variant.priceRub), currency: 'RUB' },
+    { amount: parsePriceNumber(variant.priceCny), currency: 'CNY' },
+  ].filter((price): price is { amount: number; currency: string } => price.amount !== null);
+
+  const fallbackPrice = parsePriceNumber(variant.wholesalePrice);
+  return currencyPrices.length > 0
+    ? currencyPrices
+    : fallbackPrice
+      ? [{ amount: fallbackPrice, currency: '' }]
+      : [];
+}
 
 function formatIndividualPrices(variant: PublicPriceVariant) {
   const currencyPrices = [
@@ -105,6 +133,28 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
   );
 
   const totalQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+  const variantsByPriceItemId = useMemo(() => {
+    const variants = new Map<number, PublicPriceVariant>();
+    for (const category of categories) {
+      for (const product of category.products) {
+        for (const variant of product.variants) {
+          variants.set(variant.priceItemId, variant);
+        }
+      }
+    }
+    return variants;
+  }, [categories]);
+  const requestTotalLabel = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const item of selectedItems) {
+      const variant = variantsByPriceItemId.get(item.id);
+      if (!variant) continue;
+      for (const price of getVariantRequestPrices(variant)) {
+        totals.set(price.currency, (totals.get(price.currency) ?? 0) + price.amount * item.quantity);
+      }
+    }
+    return formatAmountList(Array.from(totals.entries()).map(([currency, amount]) => ({ currency, amount })));
+  }, [selectedItems, variantsByPriceItemId]);
   const totalProductCount = useMemo(
     () => categories.reduce((sum, category) => sum + category.products.length, 0),
     [categories],
@@ -344,6 +394,7 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
         <div>
           <strong>Позиций в заявке: {selectedItems.length}</strong>
           <span>Общее количество: {totalQuantity}</span>
+          <span>Общая сумма: {requestTotalLabel}</span>
         </div>
         <button className={styles.requestButton} type="submit" disabled={busy}>
           {busy ? 'Отправка...' : 'Отправить заявку'}

@@ -53,6 +53,7 @@ export type WholesalePriceListSummary = {
   managerId: number | null;
   managerName: string | null;
   itemCount: number;
+  priceGroupCount: number;
   createdAt: string;
   updatedAt: string;
   lastChangedAt: string | null;
@@ -713,6 +714,7 @@ type PriceListRow = {
   manager_id: string | null;
   manager_name: string | null;
   item_count: string;
+  price_group_count: string;
   created_at: string;
   updated_at: string;
   last_changed_at: string | null;
@@ -1447,6 +1449,7 @@ function mapPriceList(row: PriceListRow): WholesalePriceListSummary {
     managerId: row.manager_id ? Number(row.manager_id) : null,
     managerName: row.manager_name,
     itemCount: Number(row.item_count),
+    priceGroupCount: Number(row.price_group_count),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastChangedAt: row.last_changed_at,
@@ -1607,7 +1610,16 @@ async function getWholesalePriceListsByManagerId(managerId: number | null) {
        pl.is_active,
        pl.manager_id::text,
        m.name as manager_name,
-       count(i.id)::text as item_count,
+       (count(distinct p.id) filter (
+         where i.visible = true
+           and p.is_active = true
+           and (i.wholesale_variant_id is null or v.is_active = true)
+       ))::text as item_count,
+       (count(distinct coalesce(nullif(p.price_group, ''), 'Без ценовой группы')) filter (
+         where i.visible = true
+           and p.is_active = true
+           and (i.wholesale_variant_id is null or v.is_active = true)
+       ))::text as price_group_count,
        pl.created_at::text,
        pl.updated_at::text,
        last_event.created_at::text as last_changed_at,
@@ -1616,6 +1628,8 @@ async function getWholesalePriceListsByManagerId(managerId: number | null) {
      from wholesale_price_lists pl
      left join wholesale_managers m on m.id = pl.manager_id
      left join wholesale_price_list_items i on i.price_list_id = pl.id
+     left join wholesale_products p on p.id = i.wholesale_product_id
+     left join wholesale_product_variants v on v.id = i.wholesale_variant_id and v.product_id = p.id
      left join lateral (
        select
          e.created_at,

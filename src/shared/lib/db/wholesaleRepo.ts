@@ -90,6 +90,9 @@ export type PublicWholesaleRequestItem = {
   sku: string;
   variantTitle: string;
   wholesalePrice: string | null;
+  priceEur: string | null;
+  priceRub: string | null;
+  priceCny: string | null;
 };
 
 export async function getPublicWholesalePriceList(token: string): Promise<PublicWholesalePriceList | null> {
@@ -240,13 +243,19 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
     sku: string;
     variant_title: string | null;
     wholesale_price: string | null;
+    price_eur: string | null;
+    price_rub: string | null;
+    price_cny: string | null;
   }>(
     `select
        i.id::text,
        coalesce(i.snapshot_product_title, p.title) as product_title,
        coalesce(i.snapshot_product_sku, p.sku) as sku,
        coalesce(i.snapshot_variant_title, v.title, '') as variant_title,
-       coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price
+       coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
+       p.price_eur::text as price_eur,
+       p.price_rub::text as price_rub,
+       p.price_cny::text as price_cny
      from wholesale_price_lists pl
      join wholesale_price_list_items i on i.price_list_id = pl.id
      join wholesale_products p on p.id = i.wholesale_product_id
@@ -267,5 +276,8 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
     sku: row.sku,
     variantTitle: row.variant_title || 'Цена',
     wholesalePrice: row.wholesale_price,
+    priceEur: row.price_eur,
+    priceRub: row.price_rub,
+    priceCny: row.price_cny,
   }));
 }

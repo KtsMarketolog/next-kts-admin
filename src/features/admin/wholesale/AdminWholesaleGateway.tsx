@@ -38,6 +38,7 @@ type PriceList = {
   managerId: number | null;
   managerName: string | null;
   itemCount: number;
+  priceGroupCount: number;
   createdAt: string;
   updatedAt: string;
   lastChangedAt: string | null;
@@ -742,7 +743,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           <div className={styles.priceListMain}>
             <div className={styles.priceListTitle}>
               <strong>{item.title}</strong>
-              <span>Позиций: {item.itemCount}</span>
+              <span>Позиций: {item.itemCount} · Ценовых групп: {item.priceGroupCount}</span>
             </div>
             <div className={styles.priceListField}>
               <span>Клиент</span>

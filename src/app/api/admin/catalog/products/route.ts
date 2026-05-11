@@ -37,17 +37,20 @@ export async function GET(request: Request) {
   if (denied) return denied;
 
   const url = new URL(request.url);
+  const category = url.searchParams.get('category') ?? '';
+  const subcategory = url.searchParams.get('subcategory') ?? '';
+  const brand = url.searchParams.get('brand') ?? '';
   const [products, stats, filterOptions] = await Promise.all([
     getCatalogAdminProducts({
       search: url.searchParams.get('search') ?? '',
-      category: url.searchParams.get('category') ?? '',
-      subcategory: url.searchParams.get('subcategory') ?? '',
-      brand: url.searchParams.get('brand') ?? '',
+      category,
+      subcategory,
+      brand,
       active: (url.searchParams.get('active') as 'all' | 'active' | 'inactive' | null) ?? 'all',
       limit: Number(url.searchParams.get('limit') ?? 200),
     }),
     getCatalogAdminStats(),
-    getCatalogAdminFilterOptions(),
+    getCatalogAdminFilterOptions({ category, subcategory, brand }),
   ]);
   return Response.json({ products, stats, filterOptions });
 }

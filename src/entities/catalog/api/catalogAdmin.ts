@@ -56,6 +56,8 @@ export type CatalogAdminProductFilters = {
   limit?: number | null;
 };
 
+export type CatalogAdminFilterOptionFilters = Pick<CatalogAdminProductFilters, 'category' | 'subcategory' | 'brand'>;
+
 export type CatalogAdminFilterOptions = {
   categories: string[];
   subcategories: string[];
@@ -623,27 +625,51 @@ export async function getCatalogAdminStats(): Promise<CatalogAdminStats> {
   };
 }
 
-export async function getCatalogAdminFilterOptions(): Promise<CatalogAdminFilterOptions> {
+export async function getCatalogAdminFilterOptions(filters: CatalogAdminFilterOptionFilters = {}): Promise<CatalogAdminFilterOptions> {
   await ensureCatalogSchema();
+  const normalizedCategory = normalizeText(filters.category, 180);
+  const normalizedSubcategory = normalizeText(filters.subcategory, 180);
+  const normalizedBrand = normalizeText(filters.brand, 180);
   const [categories, subcategories, brands] = await Promise.all([
     query<{ title: string }>(`
-      select title
-      from catalog_categories
-      where is_active = true and nullif(trim(title), '') is not null
-      order by title
-    `),
+      select distinct c.title
+      from catalog_categories c
+      join catalog_products p on p.category_id = c.id
+      left join catalog_subcategories s on s.id = p.subcategory_id
+      left join catalog_brands b on b.id = p.brand_id
+      where c.is_active = true
+        and p.is_active = true
+        and nullif(trim(c.title), '') is not null
+        and ($1 = '' or coalesce(s.title, '') = $1)
+        and ($2 = '' or coalesce(b.title, '') = $2)
+      order by c.title
+    `, [normalizedSubcategory, normalizedBrand]),
     query<{ title: string }>(`
-      select title
-      from catalog_subcategories
-      where is_active = true and nullif(trim(title), '') is not null
-      order by title
-    `),
+      select distinct s.title
+      from catalog_subcategories s
+      join catalog_products p on p.subcategory_id = s.id
+      left join catalog_categories c on c.id = p.category_id
+      left join catalog_brands b on b.id = p.brand_id
+      where s.is_active = true
+        and p.is_active = true
+        and nullif(trim(s.title), '') is not null
+        and ($1 = '' or coalesce(c.title, '') = $1)
+        and ($2 = '' or coalesce(b.title, '') = $2)
+      order by s.title
+    `, [normalizedCategory, normalizedBrand]),
     query<{ title: string }>(`
-      select title
-      from catalog_brands
-      where is_active = true and nullif(trim(title), '') is not null
-      order by title
-    `),
+      select distinct b.title
+      from catalog_brands b
+      join catalog_products p on p.brand_id = b.id
+      left join catalog_categories c on c.id = p.category_id
+      left join catalog_subcategories s on s.id = p.subcategory_id
+      where b.is_active = true
+        and p.is_active = true
+        and nullif(trim(b.title), '') is not null
+        and ($1 = '' or coalesce(c.title, '') = $1)
+        and ($2 = '' or coalesce(s.title, '') = $2)
+      order by b.title
+    `, [normalizedCategory, normalizedSubcategory]),
   ]);
 
   return {

@@ -89,6 +89,11 @@ async function readError(response: Response, fallback: string) {
   return typeof data.error === 'string' ? data.error : fallback;
 }
 
+function optionValues(items: string[], selected = '') {
+  const uniqueItems = Array.from(new Set(items.filter(Boolean)));
+  return selected && !uniqueItems.includes(selected) ? [selected, ...uniqueItems] : uniqueItems;
+}
+
 function productPayload(product: CatalogDraft | CatalogProduct) {
   return {
     title: product.title,
@@ -472,15 +477,36 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
         </label>
         <label>
           <span>Категория</span>
-          <input value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))} />
+          <select value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))}>
+            <option value="">Выберите категорию</option>
+            {optionValues(filterOptions.categories, draft.category).map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           <span>Подкатегория</span>
-          <input value={draft.subcategory} onChange={(event) => setDraft((current) => ({ ...current, subcategory: event.target.value }))} />
+          <select value={draft.subcategory} onChange={(event) => setDraft((current) => ({ ...current, subcategory: event.target.value }))}>
+            <option value="">Выберите подкатегорию</option>
+            {optionValues(filterOptions.subcategories, draft.subcategory).map((subcategory) => (
+              <option key={subcategory} value={subcategory}>
+                {subcategory}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           <span>Бренд</span>
-          <input value={draft.brand} onChange={(event) => setDraft((current) => ({ ...current, brand: event.target.value }))} />
+          <select value={draft.brand} onChange={(event) => setDraft((current) => ({ ...current, brand: event.target.value }))}>
+            <option value="">Выберите бренд</option>
+            {optionValues(filterOptions.brands, draft.brand).map((brand) => (
+              <option key={brand} value={brand}>
+                {brand}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           <span>Артикул</span>
@@ -540,17 +566,17 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
             <option value="active">Только активные</option>
             <option value="inactive">Только скрытые</option>
           </select>
-          <select value={filters.category} onChange={(event) => applyFilters({ category: event.target.value, subcategory: '' })}>
+          <select value={filters.category} onChange={(event) => applyFilters({ category: event.target.value, subcategory: '', brand: '' })}>
             <option value="">Все категории</option>
-            {filterOptions.categories.map((category) => (
+            {optionValues(filterOptions.categories, filters.category).map((category) => (
               <option key={category} value={category}>
                 {category}
               </option>
             ))}
           </select>
-          <select value={filters.subcategory} onChange={(event) => applyFilters({ subcategory: event.target.value })}>
+          <select value={filters.subcategory} onChange={(event) => applyFilters({ subcategory: event.target.value, brand: '' })}>
             <option value="">Все подкатегории</option>
-            {filterOptions.subcategories.map((subcategory) => (
+            {optionValues(filterOptions.subcategories, filters.subcategory).map((subcategory) => (
               <option key={subcategory} value={subcategory}>
                 {subcategory}
               </option>
@@ -558,7 +584,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
           </select>
           <select value={filters.brand} onChange={(event) => applyFilters({ brand: event.target.value })}>
             <option value="">Все бренды</option>
-            {filterOptions.brands.map((brand) => (
+            {optionValues(filterOptions.brands, filters.brand).map((brand) => (
               <option key={brand} value={brand}>
                 {brand}
               </option>
