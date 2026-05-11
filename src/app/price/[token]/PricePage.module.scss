@@ -269,15 +269,66 @@
   }
 }
 
-.quantityInput {
-  width: $apx-82;
-  min-height: $apx-38;
-  border: $apx-1 solid #d9dbe8;
-  border-radius: $apx-8;
-  padding: 0 $apx-10;
+.prices {
+  th:last-child,
+  td:last-child {
+    text-align: center;
+  }
+
+  th:last-child {
+    text-transform: uppercase;
+  }
+}
+
+.quantityCell {
+  width: $apx-190;
+}
+
+.quantityStepper {
+  display: inline-grid;
+  grid-template-columns: $apx-54 $apx-54 $apx-54;
+  gap: $apx-8;
+  align-items: center;
+  justify-content: center;
+}
+
+.quantityButton,
+.quantityValue {
+  min-width: $apx-54;
+  height: $apx-44;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: $apx-1 solid #dfb985;
+  border-radius: $apx-10;
+  background: #fffaf3;
+  color: #10121a;
   font: inherit;
-  color: #242633;
-  background: #fff;
+  font-size: $apx-16;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.quantityButton {
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    border-color: #bd823d;
+    background: #fff3e0;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+}
+
+.quantityValue {
+  background: #fffdf8;
 }
 
 .requestBar {
@@ -401,10 +452,21 @@
     border-radius: $apx-m-10;
   }
 
-  .quantityInput {
-    width: $apx-m-78;
-    min-height: $apx-m-38;
-    border-radius: $apx-m-8;
+  .quantityCell {
+    width: $apx-m-174;
+  }
+
+  .quantityStepper {
+    grid-template-columns: $apx-m-50 $apx-m-50 $apx-m-50;
+    gap: $apx-m-7;
+  }
+
+  .quantityButton,
+  .quantityValue {
+    min-width: $apx-m-50;
+    height: $apx-m-42;
+    border-radius: $apx-m-9;
+    font-size: $apx-m-15;
   }
 
   .requestForm {

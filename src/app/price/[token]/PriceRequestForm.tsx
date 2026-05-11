@@ -302,26 +302,36 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
                     </tr>
                   </thead>
                   <tbody>
-                    {product.variants.map((variant, index) => (
-                      <tr key={`${variant.id ?? 'base'}-${index}`}>
-                        <td>{formatIndividualPrices(variant)}</td>
-                        <td>
-                          <input
-                            className={styles.quantityInput}
-                            type="number"
-                            min="0"
-                            max="999"
-                            step="1"
-                            value={quantities[variant.priceItemId] || ''}
-                            onChange={(event) => {
-                              const value = Math.max(0, Math.min(999, Number(event.target.value) || 0));
-                              changeQuantity(variant.priceItemId, value, product.title);
-                            }}
-                            aria-label={`Количество: ${product.title} ${variant.title}`}
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                    {product.variants.map((variant, index) => {
+                      const currentQuantity = quantities[variant.priceItemId] || 0;
+
+                      return (
+                        <tr key={`${variant.id ?? 'base'}-${index}`}>
+                          <td>{formatIndividualPrices(variant)}</td>
+                          <td className={styles.quantityCell}>
+                            <div className={styles.quantityStepper}>
+                              <button
+                                type="button"
+                                className={styles.quantityButton}
+                                onClick={() => changeQuantity(variant.priceItemId, Math.max(0, currentQuantity - 1), product.title)}
+                                aria-label="Уменьшить количество"
+                              >
+                                -1
+                              </button>
+                              <span className={styles.quantityValue}>{currentQuantity}</span>
+                              <button
+                                type="button"
+                                className={styles.quantityButton}
+                                onClick={() => changeQuantity(variant.priceItemId, Math.min(999, currentQuantity + 1), product.title)}
+                                aria-label="Увеличить количество"
+                              >
+                                +1
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </article>
