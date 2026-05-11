@@ -36,10 +36,18 @@
   }
 
   h1 {
-    margin: 0;
+    margin: $apx-8 0 $apx-6;
     font-size: $apx-36;
     line-height: 1.15;
   }
+}
+
+.heroMain {
+  display: grid;
+  align-content: start;
+  gap: $apx-2;
+  max-width: $apx-760;
+  padding-top: $apx-4;
 }
 
 .heroSide {

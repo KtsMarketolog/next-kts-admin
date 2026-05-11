@@ -27,7 +27,7 @@ export default async function PricePage({ params }: PricePageProps) {
       <PriceAnalyticsTracker token={priceList.token} />
       <div className={styles.shell}>
         <section className={styles.hero}>
-          <div>
+          <div className={styles.heroMain}>
             <p>Индивидуальный прайс</p>
             <h1>{priceList.title}</h1>
             {priceList.clientName ? <p>Клиент: {priceList.clientName}</p> : null}
