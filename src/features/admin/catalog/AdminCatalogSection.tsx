@@ -136,6 +136,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string>('');
   const [stockLogs, setStockLogs] = useState<StockImportLog[]>([]);
+  const [stockHistoryExpanded, setStockHistoryExpanded] = useState(false);
 
   const loadCatalog = useCallback(async (nextSearch = '', nextFilters: CatalogFilters = EMPTY_FILTERS) => {
     setLoading(true);
@@ -329,6 +330,9 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     showStatus('Товар удалён');
   };
 
+  const visibleStockLogs = stockHistoryExpanded ? stockLogs : stockLogs.slice(0, 1);
+  const hiddenStockLogCount = Math.max(stockLogs.length - 1, 0);
+
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -401,11 +405,18 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
               <h3>История импорта остатков</h3>
               <p>Последние проверки почты и результаты обновления остатков.</p>
             </div>
-            <span className={styles.stockLogCount}>{stockLogs.length}</span>
+            <div className={styles.stockLogHeaderActions}>
+              <span className={styles.stockLogCount}>{stockLogs.length}</span>
+              {hiddenStockLogCount > 0 && (
+                <button type="button" className={styles.stockLogToggle} onClick={() => setStockHistoryExpanded((current) => !current)}>
+                  {stockHistoryExpanded ? 'Скрыть историю' : `Показать ещё ${hiddenStockLogCount}`}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className={styles.stockLogList}>
-            {stockLogs.map((log) => (
+            {visibleStockLogs.map((log) => (
               <article className={styles.stockLogItem} key={log.logId ?? `${log.createdAt}-${log.fileName}`}>
                 <div className={styles.stockLogMain}>
                   <div>

@@ -272,16 +272,80 @@ function mergeEditorItems(categories: CatalogCategory[], items: PriceItem[]) {
   });
 }
 
+function renderWholesaleEditorSkeleton() {
+  return (
+    <div className={styles.editorSkeleton} aria-busy="true">
+      <div className={styles.skeletonEditorGrid}>
+        {Array.from({ length: 6 }, (_, index) => (
+          <div className={styles.skeletonField} key={index}>
+            <span className={styles.skeletonLabelLine} />
+            <span className={styles.skeletonInputLine} />
+          </div>
+        ))}
+        <div className={`${styles.skeletonField} ${styles.wholesaleWide}`}>
+          <span className={styles.skeletonLabelLine} />
+          <span className={styles.skeletonTextareaLine} />
+        </div>
+      </div>
+
+      <div className={styles.skeletonOptions}>
+        <span />
+        <span />
+        <span />
+      </div>
+
+      <div className={styles.skeletonDiscountLine}>
+        <span />
+        <span />
+        <span />
+      </div>
+
+      <div className={styles.skeletonSearchBlock}>
+        <span />
+        <span />
+        <span />
+      </div>
+
+      {Array.from({ length: 2 }, (_, groupIndex) => (
+        <div className={styles.skeletonPriceGroup} key={groupIndex}>
+          <div className={styles.skeletonGroupHeader}>
+            <span className={styles.skeletonImage} />
+            <span className={styles.skeletonTitleLine} />
+            <span className={styles.skeletonWideLine} />
+          </div>
+          {Array.from({ length: 3 }, (_, productIndex) => (
+            <div className={styles.skeletonProductCard} key={productIndex}>
+              <div>
+                <span className={styles.skeletonTitleLine} />
+                <span className={styles.skeletonShortLine} />
+                <span className={styles.skeletonShortLine} />
+              </div>
+              <div className={styles.skeletonVariantGrid}>
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: AdminWholesaleGatewayProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const startsInEditor = pathname.endsWith('/create') || /\/admin\/wholesale\/\d+\/edit$/.test(pathname);
   const [managers, setManagers] = useState<Manager[]>([]);
   const [currentManager, setCurrentManager] = useState<CurrentManager | null>(null);
   const [managerDraft, setManagerDraft] = useState(emptyManager);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
   const [editor, setEditor] = useState<PriceEditor>(() => emptyEditor());
+  const [editorLoading, setEditorLoading] = useState(startsInEditor);
   const [discount, setDiscount] = useState('');
   const [groupDiscounts, setGroupDiscounts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState('');
@@ -461,22 +525,36 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   }, [canManageWholesale, router, screen]);
 
   useEffect(() => {
-    if (screen !== 'create' && screen !== 'edit') return;
+    if (screen !== 'create' && screen !== 'edit') {
+      setEditorLoading(false);
+      return;
+    }
+
+    let isActive = true;
 
     async function loadEditorData() {
+      setEditorLoading(true);
       const nextCatalog = await loadCatalog();
+      if (!isActive) return;
       if (screen === 'create') {
         setEditor({ ...emptyEditor(), items: mergeEditorItems(nextCatalog, []) });
+        setEditorLoading(false);
         return;
       }
 
-      if (!editId) return;
+      if (!editId) {
+        setEditorLoading(false);
+        return;
+      }
       const res = await fetch(`/api/admin/wholesale/price-lists/${editId}`, { cache: 'no-store' });
+      if (!isActive) return;
       if (!res.ok) {
+        setEditorLoading(false);
         showStatus('Прайс не найден');
         return;
       }
       const data = await res.json();
+      if (!isActive) return;
       const priceList = data.priceList;
       setEditor({
         id: priceList.id,
@@ -492,9 +570,18 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         managerId: priceList.managerId ?? null,
         items: mergeEditorItems(nextCatalog, Array.isArray(priceList.items) ? priceList.items : []),
       });
+      setEditorLoading(false);
     }
 
-    void loadEditorData();
+    void loadEditorData().catch(() => {
+      if (!isActive) return;
+      showStatus('Не удалось загрузить данные прайса');
+      setEditorLoading(false);
+    });
+
+    return () => {
+      isActive = false;
+    };
   }, [editId, screen]);
 
   const createManager = async () => {
@@ -899,6 +986,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
         {status ? <p className={styles.status}>{status}</p> : null}
 
+        {editorLoading ? (
+          renderWholesaleEditorSkeleton()
+        ) : (
+          <>
         <div className={styles.wholesaleEditorGrid}>
           <label>
             <span>Название прайса</span>
@@ -1104,6 +1195,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           <button disabled={busy} onClick={savePriceList}>Сохранить прайс</button>
           <button className={styles.secondary} onClick={() => router.push(editorBackHref)}>Отмена</button>
         </div>
+          </>
+        )}
       </section>
     );
   }

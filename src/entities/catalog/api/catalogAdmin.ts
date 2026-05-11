@@ -456,6 +456,39 @@ function createCache(): EntityCache {
   };
 }
 
+function catalogProductImportKey(input: Pick<NormalizedCatalogProductInput, 'title'>) {
+  return cacheKey(normalizeText(input.title, 500));
+}
+
+async function getExistingCatalogProducts(client: PoolClient) {
+  const result = await client.query<{
+    id: string;
+    title: string;
+    sort_order: string | null;
+  }>(`
+    select p.id::text,
+           p.title,
+           coalesce(wp.sort_order, 0)::text as sort_order
+    from catalog_products p
+    left join wholesale_products wp on wp.catalog_product_id = p.id
+    order by p.is_active desc, p.updated_at desc, p.id asc
+  `);
+
+  const products = new Map<string, Array<{ id: number; sortOrder: number }>>();
+  for (const row of result.rows) {
+    const key = catalogProductImportKey({ title: row.title });
+    if (!key) continue;
+    const bucket = products.get(key) ?? [];
+    bucket.push({
+      id: Number(row.id),
+      sortOrder: Number(row.sort_order ?? 0),
+    });
+    products.set(key, bucket);
+  }
+
+  return products;
+}
+
 async function insertCatalogProduct(client: PoolClient, cache: EntityCache, input: NormalizedCatalogProductInput, sortOrder: number) {
   const categoryId = await ensureCategory(client, cache, input.category, sortOrder);
   const subcategoryId = await ensureSubcategory(client, cache, input.subcategory, sortOrder);
@@ -505,6 +538,63 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
   const id = Number(inserted.rows[0]?.id);
   await syncWholesaleProduct(client, cache, id, input, sortOrder);
   return id;
+}
+
+async function updateCatalogProductFromImport(
+  client: PoolClient,
+  cache: EntityCache,
+  id: number,
+  input: NormalizedCatalogProductInput,
+  sortOrder: number,
+) {
+  const categoryId = await ensureCategory(client, cache, input.category, sortOrder);
+  const subcategoryId = await ensureSubcategory(client, cache, input.subcategory, sortOrder);
+  const brandId = await ensureBrand(client, cache, input.brand);
+  await linkCatalogEntities(client, categoryId, subcategoryId, brandId, sortOrder);
+
+  const slug = await uniqueSlug(client, 'catalog_products', slugify(input.title, `product-${id}`), id);
+  await client.query(
+    `update catalog_products
+     set document_id = $2,
+         slug = $3,
+         title = $4,
+         article = $5,
+         price_group = $6,
+         price_eur = $7,
+         price_rub = $8,
+         price_cny = $9,
+         brand_id = $10,
+         category_id = $11,
+         subcategory_id = $12,
+         stock = coalesce($13, stock),
+         is_expected = coalesce($14, is_expected),
+         stock_updated_at = case
+           when $13::integer is not null and stock is distinct from $13 then now()
+           when $14::boolean is not null and is_expected is distinct from $14 then now()
+           else stock_updated_at
+         end,
+         is_active = $15,
+         updated_at = now()
+     where id = $1`,
+    [
+      id,
+      `excel:${sortOrder + 1}`,
+      slug,
+      input.title,
+      input.article,
+      input.priceGroup,
+      input.priceEur,
+      input.priceRub,
+      input.priceCny,
+      brandId,
+      categoryId,
+      subcategoryId,
+      input.stock,
+      input.isExpected,
+      input.isActive,
+    ],
+  );
+  await syncWholesaleProduct(client, cache, id, input, sortOrder);
 }
 
 export async function getCatalogAdminStats(): Promise<CatalogAdminStats> {
@@ -782,24 +872,85 @@ export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promi
   if (normalizedRows.length === 0) throw new Error('В файле нет товаров для импорта');
 
   await withTransaction(async (client) => {
-    await client.query(`
-      truncate table
-        catalog_category_subcategories,
-        catalog_brand_categories,
-        catalog_brand_subcategories,
-        catalog_products,
-        catalog_brands,
-        catalog_subcategories,
-        catalog_categories
-      restart identity cascade
-    `);
-    await client.query(`update wholesale_products set is_active = false, catalog_product_id = null, updated_at = now()`);
-    await client.query(`update wholesale_categories set is_active = false, updated_at = now()`);
-
     const cache = createCache();
+    const existingProducts = await getExistingCatalogProducts(client);
+    const touchedProductIds = new Set<number>();
+
     for (const [index, row] of normalizedRows.entries()) {
-      await insertCatalogProduct(client, cache, row, index);
+      const key = catalogProductImportKey(row);
+      const existingBucket = existingProducts.get(key);
+      const existingProduct = existingBucket?.shift();
+
+      if (existingProduct) {
+        await updateCatalogProductFromImport(client, cache, existingProduct.id, row, index);
+        touchedProductIds.add(existingProduct.id);
+      } else {
+        const insertedId = await insertCatalogProduct(client, cache, row, index);
+        touchedProductIds.add(insertedId);
+      }
     }
+
+    const activeIds = Array.from(touchedProductIds);
+    await client.query(
+      `update catalog_products
+       set is_active = false,
+           updated_at = now()
+       where not (id = any($1::bigint[]))
+         and is_active = true`,
+      [activeIds],
+    );
+    await client.query(
+      `update wholesale_products
+       set is_active = false,
+           updated_at = now()
+       where catalog_product_id is not null
+         and not (catalog_product_id = any($1::bigint[]))
+         and is_active = true`,
+      [activeIds],
+    );
+    await client.query(
+      `update wholesale_price_list_items items
+       set visible = false,
+           updated_at = now()
+       from wholesale_products products
+       where products.id = items.wholesale_product_id
+         and products.catalog_product_id is not null
+         and not (products.catalog_product_id = any($1::bigint[]))
+         and items.visible = true`,
+      [activeIds],
+    );
+    await client.query(`
+      update catalog_categories categories
+      set is_active = exists (
+            select 1 from catalog_products products
+            where products.category_id = categories.id and products.is_active = true
+          ),
+          updated_at = now()
+    `);
+    await client.query(`
+      update catalog_subcategories subcategories
+      set is_active = exists (
+            select 1 from catalog_products products
+            where products.subcategory_id = subcategories.id and products.is_active = true
+          ),
+          updated_at = now()
+    `);
+    await client.query(`
+      update catalog_brands brands
+      set is_active = exists (
+            select 1 from catalog_products products
+            where products.brand_id = brands.id and products.is_active = true
+          ),
+          updated_at = now()
+    `);
+    await client.query(`
+      update wholesale_categories categories
+      set is_active = exists (
+            select 1 from wholesale_products products
+            where products.category_id = categories.id and products.is_active = true
+          ),
+          updated_at = now()
+    `);
   });
 
   const stats = await getCatalogAdminStats();
