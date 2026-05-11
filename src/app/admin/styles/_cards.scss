@@ -783,6 +783,156 @@
   }
 }
 
+.stockLogCard {
+  display: grid;
+  gap: $apx-14;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+  margin: 0 0 $apx-18;
+}
+
+.stockLogHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $apx-14;
+
+  h3 {
+    margin: 0 0 $apx-4;
+    font-size: $apx-18;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-13;
+    line-height: 1.4;
+  }
+}
+
+.stockLogCount {
+  display: inline-flex;
+  min-width: $apx-34;
+  height: $apx-28;
+  align-items: center;
+  justify-content: center;
+  border-radius: $apx-999;
+  background: #f0eefb;
+  color: #260b86;
+  font-size: $apx-13;
+  font-weight: 800;
+}
+
+.stockLogList {
+  display: grid;
+  gap: $apx-10;
+}
+
+.stockLogItem {
+  display: grid;
+  gap: $apx-12;
+  border: $apx-1 solid #e7e9f2;
+  border-radius: $apx-10;
+  background: #f9fafc;
+  padding: $apx-12;
+}
+
+.stockLogMain {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $apx-12;
+}
+
+.stockLogFile {
+  display: block;
+  color: #242633;
+  font-size: $apx-15;
+  line-height: 1.25;
+}
+
+.stockLogMeta {
+  display: block;
+  margin-top: $apx-4;
+  color: #6f7182;
+  font-size: $apx-12;
+}
+
+.stockLogStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: $apx-86;
+  border-radius: $apx-999;
+  padding: $apx-6 $apx-10;
+  font-size: $apx-12;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.stockLogStatusSuccess {
+  background: #e8f7ef;
+  color: #11733b;
+}
+
+.stockLogStatusPartial {
+  background: #fff4d8;
+  color: #946000;
+}
+
+.stockLogStatusFailed {
+  background: #ffe9e7;
+  color: #b3261e;
+}
+
+.stockLogMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax($apx-110, 1fr));
+  gap: $apx-8;
+}
+
+.stockLogMetric {
+  display: grid;
+  gap: $apx-4;
+  border: $apx-1 solid #e7e9f2;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: $apx-10;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-11;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1;
+  }
+}
+
+.stockLogErrors {
+  border-top: $apx-1 solid #e7e9f2;
+  padding-top: $apx-10;
+  color: #6f7182;
+  font-size: $apx-13;
+
+  summary {
+    cursor: pointer;
+    color: #260b86;
+    font-weight: 800;
+  }
+
+  ul {
+    margin: $apx-8 0 0;
+    padding-left: $apx-18;
+  }
+}
+
 .catalogProductForm {
   display: grid;
   grid-template-columns: minmax($apx-280, 1.35fr) repeat(3, minmax($apx-190, 1fr));
@@ -1045,6 +1195,10 @@
   .priceGroupTools {
     grid-template-columns: 1fr;
   }
+
+  .stockLogMetrics {
+    grid-template-columns: repeat(2, minmax($apx-150, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -1081,6 +1235,16 @@
     button {
       width: 100%;
     }
+  }
+
+  .stockLogHeader,
+  .stockLogMain {
+    display: grid;
+    gap: $apx-10;
+  }
+
+  .stockLogMetrics {
+    grid-template-columns: 1fr;
   }
 
   .priceListActions {
@@ -1120,12 +1284,38 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax($apx-520, $apx-760);
   gap: $apx-12;
-  align-items: end;
+  align-items: center;
+}
+
+.priceCategoryTitle {
+  display: flex;
+  align-items: center;
+  gap: $apx-14;
 
   h3 {
     margin: 0;
     font-size: $apx-22;
     text-transform: uppercase;
+  }
+}
+
+.priceGroupImageBox {
+  width: $apx-86;
+  height: $apx-64;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: $apx-10;
+  background: #eef0f5;
+  overflow: hidden;
+  color: #77798a;
+  font-size: $apx-11;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
   }
 }
 
@@ -1175,22 +1365,8 @@
 
 .priceProductInfo {
   display: grid;
-  grid-template-columns: $apx-72 minmax(0, 1fr);
   gap: $apx-12;
   align-content: start;
-
-  img,
-  > span {
-    width: $apx-72;
-    height: $apx-72;
-    border-radius: $apx-8;
-    background: #eef0f5;
-    object-fit: contain;
-    display: grid;
-    place-items: center;
-    color: #6f7182;
-    font-size: $apx-11;
-  }
 
   p {
     margin: $apx-4 0 0;

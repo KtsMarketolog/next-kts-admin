@@ -32,6 +32,38 @@ type AdminPanelProps = {
   initialSession?: AdminSession | null;
 };
 
+type AdminSessionResponse = {
+  authenticated?: boolean;
+  role?: AdminSession['role'] | null;
+};
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function fetchAdminSessionSnapshot(): Promise<AdminSessionResponse> {
+  const response = await fetch('/api/admin/session', { cache: 'no-store' });
+
+  if (!response.ok) {
+    throw new Error(`Admin session check failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function fetchAdminSessionWithRetry() {
+  const first = await fetchAdminSessionSnapshot();
+
+  if (first.authenticated) {
+    return first;
+  }
+
+  await wait(350);
+  return fetchAdminSessionSnapshot();
+}
+
 export default function AdminPanel({ initialArea = 'home', initialSession = null }: AdminPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -106,14 +138,18 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       fetch('/api/admin/brand-categories', { cache: 'no-store' }),
     ]);
 
-    if (
-      settingsRes.status === 401 ||
-      slidesRes.status === 401 ||
-      newsRes.status === 401 ||
-      groupCompaniesRes.status === 401 ||
-      brandsRes.status === 401
-    ) {
+    const responses = [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes];
+
+    if (responses.some((response) => response.status === 401 || response.status === 403)) {
       setAuthenticated(false);
+      return;
+    }
+
+    if (responses.some((response) => !response.ok)) {
+      console.error(
+        'Failed to load admin data',
+        responses.map((response) => response.status).join(', '),
+      );
       return;
     }
 
@@ -141,9 +177,12 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   }, [loadAdminData]);
 
   useEffect(() => {
-    fetch('/api/admin/session', { cache: 'no-store' })
-      .then((res) => res.json())
+    let cancelled = false;
+
+    fetchAdminSessionWithRetry()
       .then((data) => {
+        if (cancelled) return;
+
         if (data.authenticated) {
           const nextRole: AdminSession['role'] =
             data.role === 'manager' ? 'manager' : data.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
@@ -155,16 +194,21 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
             }
             return;
           }
-          void loadAdminData().catch(() => setAuthenticated(false));
+          void loadAdminData().catch((error) => {
+            console.error('Failed to load admin data after session check', error);
+          });
         } else {
           setSessionRole(null);
           setAuthenticated(false);
         }
       })
-      .catch(() => {
-        setSessionRole(null);
-        setAuthenticated(false);
+      .catch((error) => {
+        console.error('Failed to verify admin session', error);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [loadAdminData, pathname, router]);
 
   useEffect(() => {
@@ -234,7 +278,9 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
           setSessionRole(role);
           setAuthenticated(true);
           if (role === 'admin') {
-            await loadAdminData();
+            await loadAdminData().catch((error) => {
+              console.error('Failed to load admin data after login', error);
+            });
           }
           if (pathname.startsWith('/admin/wholesale')) {
             setActiveArea('home');

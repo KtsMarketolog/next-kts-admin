@@ -106,6 +106,22 @@ function productPayload(product: CatalogDraft | CatalogProduct) {
   };
 }
 
+function stockLogStatusText(status: StockImportLog['status']) {
+  if (status === 'success') return 'Успешно';
+  if (status === 'partial_success') return 'Частично';
+  return 'Ошибка';
+}
+
+function stockLogStatusClass(status: StockImportLog['status']) {
+  if (status === 'success') return styles.stockLogStatusSuccess;
+  if (status === 'partial_success') return styles.stockLogStatusPartial;
+  return styles.stockLogStatusFailed;
+}
+
+function formatStockLogDate(value: string) {
+  return new Date(value).toLocaleString('ru-RU');
+}
+
 export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
@@ -379,33 +395,62 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       </div>
 
       {stockLogs.length > 0 && (
-        <div className={styles.tableWrap}>
-          <table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Файл</th>
-                <th>Статус</th>
-                <th>Строк</th>
-                <th>Обновлено</th>
-                <th>Не найдено</th>
-                <th>Ошибок</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stockLogs.map((log) => (
-                <tr key={log.logId ?? `${log.createdAt}-${log.fileName}`}>
-                  <td>{new Date(log.createdAt).toLocaleString('ru-RU')}</td>
-                  <td>{log.fileName || '-'}</td>
-                  <td>{log.status}</td>
-                  <td>{log.totalRows}</td>
-                  <td>{log.updatedRows}</td>
-                  <td>{log.notFoundRows}</td>
-                  <td>{log.failedRows}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className={styles.stockLogCard}>
+          <div className={styles.stockLogHeader}>
+            <div>
+              <h3>История импорта остатков</h3>
+              <p>Последние проверки почты и результаты обновления остатков.</p>
+            </div>
+            <span className={styles.stockLogCount}>{stockLogs.length}</span>
+          </div>
+
+          <div className={styles.stockLogList}>
+            {stockLogs.map((log) => (
+              <article className={styles.stockLogItem} key={log.logId ?? `${log.createdAt}-${log.fileName}`}>
+                <div className={styles.stockLogMain}>
+                  <div>
+                    <strong className={styles.stockLogFile}>{log.fileName || 'Файл без названия'}</strong>
+                    <span className={styles.stockLogMeta}>{formatStockLogDate(log.createdAt)}</span>
+                  </div>
+                  <span className={`${styles.stockLogStatus} ${stockLogStatusClass(log.status)}`}>
+                    {stockLogStatusText(log.status)}
+                  </span>
+                </div>
+
+                <div className={styles.stockLogMetrics}>
+                  <div className={styles.stockLogMetric}>
+                    <span>Строк</span>
+                    <strong>{log.totalRows}</strong>
+                  </div>
+                  <div className={styles.stockLogMetric}>
+                    <span>Обновлено</span>
+                    <strong>{log.updatedRows}</strong>
+                  </div>
+                  <div className={styles.stockLogMetric}>
+                    <span>Не найдено</span>
+                    <strong>{log.notFoundRows}</strong>
+                  </div>
+                  <div className={styles.stockLogMetric}>
+                    <span>Ошибок</span>
+                    <strong>{log.failedRows}</strong>
+                  </div>
+                </div>
+
+                {log.errors.length > 0 && (
+                  <details className={styles.stockLogErrors}>
+                    <summary>Показать ошибки</summary>
+                    <ul>
+                      {log.errors.slice(0, 5).map((error, index) => (
+                        <li key={`${log.logId ?? log.createdAt}-${index}`}>
+                          Строка {error.row}: {error.name || 'без названия'} — {error.error}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </article>
+            ))}
+          </div>
         </div>
       )}
 

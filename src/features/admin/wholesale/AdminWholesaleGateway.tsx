@@ -191,6 +191,7 @@ type CatalogRow = ReturnType<typeof flatCatalogItems>[number];
 type CatalogGroup = {
   id: string;
   title: string;
+  imageUrl: string | null;
   products: CatalogProduct[];
 };
 
@@ -203,8 +204,12 @@ function groupCatalogRowsByPriceGroup(rows: CatalogRow[]) {
     const groupKey = groupTitle.toLowerCase();
     let group = groups.get(groupKey);
     if (!group) {
-      group = { id: groupKey, title: groupTitle, products: [] };
+      group = { id: groupKey, title: groupTitle, imageUrl: row.product.imageUrl, products: [] };
       groups.set(groupKey, group);
+    }
+
+    if (!group.imageUrl && row.product.imageUrl) {
+      group.imageUrl = row.product.imageUrl;
     }
 
     const productKey = `${groupKey}:${row.product.id}`;
@@ -997,7 +1002,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               visibleCatalogGroups.map((group) => (
                 <div className={styles.priceCategory} key={group.id}>
                   <div className={styles.priceCategoryHeader}>
-                    <h3>{group.title}</h3>
+                    <div className={styles.priceCategoryTitle}>
+                      <div className={styles.priceGroupImageBox}>
+                        {group.imageUrl ? <img src={group.imageUrl} alt="" /> : <span>Нет фото</span>}
+                      </div>
+                      <h3>{group.title}</h3>
+                    </div>
                     <div className={styles.priceGroupTools}>
                       <div className={styles.priceGroupDiscount}>
                         <span>Скидка для группы, %</span>
@@ -1027,7 +1037,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                     return (
                       <article className={styles.priceProduct} key={product.id}>
                         <div className={styles.priceProductInfo}>
-                          {product.imageUrl ? <img src={product.imageUrl} alt="" /> : <span>Нет фото</span>}
                           <div>
                             <strong>{product.title}</strong>
                             {product.sku ? <p>Арт.: {product.sku}</p> : null}
