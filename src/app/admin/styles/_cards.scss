@@ -1007,26 +1007,38 @@
 .catalogProductList {
   display: grid;
   gap: $apx-12;
+  min-width: 0;
 }
 
 .catalogProductCard {
   display: grid;
   gap: $apx-12;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: $apx-1 solid #e1e3ee;
   border-radius: $apx-10;
   background: #fff;
   padding: $apx-14;
+  box-sizing: border-box;
 }
 
 .catalogProductFields {
   display: grid;
-  grid-template-columns: minmax($apx-320, 1.45fr) repeat(2, minmax($apx-220, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: $apx-10;
+  min-width: 0;
 
   label {
     display: grid;
     gap: $apx-6;
     min-width: 0;
+  }
+
+  input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   span {
@@ -1036,18 +1048,44 @@
     text-transform: uppercase;
   }
 
-  label:first-child {
-    grid-column: span 2;
+  label:nth-child(1) {
+    grid-column: span 6;
+  }
+
+  label:nth-child(2),
+  label:nth-child(3) {
+    grid-column: span 3;
+  }
+
+  label:nth-child(4),
+  label:nth-child(5),
+  label:nth-child(6),
+  label:nth-child(7),
+  label:nth-child(8),
+  label:nth-child(9),
+  label:nth-child(10) {
+    grid-column: span 3;
   }
 }
 
 .catalogProductMeta {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  display: flex;
+  flex-wrap: wrap;
   gap: $apx-12;
   align-items: center;
   padding-top: $apx-10;
   border-top: $apx-1 solid #edf0f6;
+  min-width: 0;
+
+  .userAccessBadges {
+    flex: 1 1 $apx-420;
+    min-width: 0;
+  }
+
+  .userAccessActions {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
 }
 
 .wholesaleEditorGrid {
