@@ -12,11 +12,17 @@ type PriceRequestFormProps = {
   categories: PublicWholesaleCategory[];
 };
 
+const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
+
 function formatPrice(value: string | null) {
   if (!value) return '—';
   const number = Number(value);
   if (!Number.isFinite(number)) return value;
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(number);
+}
+
+function normalizeSearchText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 function stockLabel(product: PublicWholesaleCategory['products'][number]) {
@@ -51,6 +57,7 @@ function trackPriceEvent(token: string, eventType: PriceClientEventType, metadat
 
 export function PriceRequestForm({ token, showRetailPrices, categories }: PriceRequestFormProps) {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [searchQuery, setSearchQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const openedProductsRef = useRef<Set<number>>(new Set());
@@ -67,6 +74,62 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
   );
 
   const totalQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+  const totalProductCount = useMemo(
+    () => categories.reduce((sum, category) => sum + category.products.length, 0),
+    [categories],
+  );
+  const groupedProducts = useMemo(() => {
+    const query = normalizeSearchText(searchQuery);
+    const products = categories.flatMap((category) =>
+      category.products.map((product) => ({
+        categoryTitle: category.title,
+        groupTitle: product.priceGroup || NO_PRICE_GROUP_TITLE,
+        product,
+      })),
+    );
+
+    return products
+      .filter(({ categoryTitle, product }) => {
+        if (!query) return true;
+        return [
+          categoryTitle,
+          product.title,
+          product.sku,
+          product.description,
+          product.priceGroup,
+          ...product.variants.map((variant) => variant.title),
+        ]
+          .filter(Boolean)
+          .some((value) => normalizeSearchText(String(value)).includes(query));
+      })
+      .sort((first, second) => {
+        const firstGroup = first.product.priceGroup;
+        const secondGroup = second.product.priceGroup;
+        if (!firstGroup && secondGroup) return 1;
+        if (firstGroup && !secondGroup) return -1;
+        return (
+          firstGroup.localeCompare(secondGroup, 'ru') ||
+          first.categoryTitle.localeCompare(second.categoryTitle, 'ru') ||
+          first.product.title.localeCompare(second.product.title, 'ru')
+        );
+      })
+      .reduce<Array<{ title: string; products: Array<{ categoryTitle: string; product: PublicWholesaleCategory['products'][number] }> }>>(
+        (groups, item) => {
+          const lastGroup = groups[groups.length - 1];
+          if (lastGroup?.title === item.groupTitle) {
+            lastGroup.products.push({ categoryTitle: item.categoryTitle, product: item.product });
+          } else {
+            groups.push({
+              title: item.groupTitle,
+              products: [{ categoryTitle: item.categoryTitle, product: item.product }],
+            });
+          }
+          return groups;
+        },
+        [],
+      );
+  }, [categories, searchQuery]);
+  const visibleProductCount = groupedProducts.reduce((sum, group) => sum + group.products.length, 0);
 
   useEffect(() => {
     selectionRef.current = { selectedItems: selectedItems.length, totalQuantity };
@@ -147,14 +210,35 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
 
   return (
     <form className={styles.requestForm} onSubmit={submit}>
-      {categories.map((category) => (
-        <section className={styles.category} key={category.id}>
-          <h2>{category.title}</h2>
+      <section className={styles.priceSearch}>
+        <label>
+          <span>Поиск по прайсу</span>
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Название, артикул, категория или ценовая группа"
+          />
+        </label>
+        <p>
+          Показано {visibleProductCount} из {totalProductCount}
+        </p>
+      </section>
+
+      {groupedProducts.length === 0 ? (
+        <section className={styles.category}>
+          <p className={styles.empty}>По запросу ничего не найдено.</p>
+        </section>
+      ) : null}
+
+      {groupedProducts.map((group) => (
+        <section className={styles.category} key={group.title}>
+          <h2>{group.title}</h2>
           <div className={styles.products}>
-            {category.products.map((product) => (
+            {group.products.map(({ categoryTitle, product }) => (
               <article
                 className={styles.product}
-                key={product.id}
+                key={`${group.title}-${categoryTitle}-${product.id}`}
                 onFocusCapture={() => trackProductOpen(product)}
                 onMouseEnter={() => trackProductOpen(product)}
               >
@@ -173,7 +257,7 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
                       <th>Размер</th>
                       {showRetailPrices ? <th>Розница</th> : null}
                       <th>Опт</th>
-                      <th>Заявка</th>
+                      <th>Количество</th>
                     </tr>
                   </thead>
                   <tbody>

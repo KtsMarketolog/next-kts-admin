@@ -14,6 +14,7 @@ export type PublicWholesaleProduct = {
   title: string;
   sku: string;
   description: string;
+  priceGroup: string;
   imageUrl: string | null;
   stock: number;
   isExpected: boolean;
@@ -64,6 +65,7 @@ type PriceItemRow = {
   product_title: string;
   sku: string;
   series_description: string;
+  price_group: string | null;
   image_url: string | null;
   stock: string | null;
   is_expected: boolean | null;
@@ -119,6 +121,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        coalesce(i.snapshot_product_title, p.title) as product_title,
        coalesce(i.snapshot_product_sku, p.sku) as sku,
        coalesce(i.snapshot_product_description, p.series_description) as series_description,
+       p.price_group,
        img.image_url,
        p.stock::text,
        p.is_expected,
@@ -173,6 +176,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
         title: row.product_title,
         sku: row.sku,
         description: row.series_description,
+        priceGroup: row.price_group ?? '',
         imageUrl: row.image_url,
         stock: Number(row.stock ?? 0),
         isExpected: Boolean(row.is_expected),

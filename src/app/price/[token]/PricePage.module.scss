@@ -197,6 +197,48 @@
   gap: $apx-18;
 }
 
+.priceSearch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: $apx-16;
+  background: #fff;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-12;
+  padding: $apx-16 $apx-18;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  input {
+    width: 100%;
+    min-height: $apx-42;
+    border: $apx-1 solid #d9dbe8;
+    border-radius: $apx-8;
+    padding: 0 $apx-12;
+    background: #fff;
+    color: #242633;
+    font: inherit;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+}
+
 .quantityInput {
   width: $apx-82;
   min-height: $apx-38;
@@ -330,6 +372,23 @@
 
   .requestForm {
     gap: $apx-m-14;
+  }
+
+  .priceSearch {
+    grid-template-columns: 1fr;
+    gap: $apx-m-10;
+    border-radius: $apx-m-12;
+    padding: $apx-m-14;
+
+    input {
+      min-height: $apx-m-42;
+      border-radius: $apx-m-8;
+      padding: 0 $apx-m-12;
+    }
+
+    p {
+      white-space: normal;
+    }
   }
 
   .requestBar {
