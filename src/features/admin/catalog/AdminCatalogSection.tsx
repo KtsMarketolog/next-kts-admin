@@ -350,7 +350,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
           )}
         </div>
         <div>
-          <p>Файл .xlsx: Наименование, Остаток, Ожидается</p>
+          <p>Файл .xlsx: Остатки*.xlsx, колонки Наименование, Остаток, Ожидается</p>
         </div>
         <button type="button" disabled={busyId === 'stock-email'} onClick={checkStockEmail}>
           {busyId === 'stock-email' ? 'Проверка...' : 'Проверить почту сейчас'}

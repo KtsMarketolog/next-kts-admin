@@ -265,7 +265,12 @@ function envBoolean(value: string | undefined, fallback: boolean) {
 }
 
 function matchesAllowedSender(address: string, allowed: string) {
-  return address.trim().toLowerCase() === allowed.trim().toLowerCase();
+  const normalizedAddress = address.trim().toLowerCase();
+  return allowed
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(normalizedAddress);
 }
 
 function attachmentAllowed(fileName: string, prefix: string) {
@@ -283,19 +288,19 @@ async function moveMessage(client: any, uid: number | string, folder: string) {
 }
 
 export async function importStockFromEmail() {
-  const host = process.env.STOCK_MAIL_HOST;
+  const host = process.env.STOCK_MAIL_HOST || process.env.SMTP_HOST?.replace(/^smtp\./i, 'imap.') || 'imap.yandex.ru';
   const port = Number(process.env.STOCK_MAIL_PORT || 993);
   const secure = envBoolean(process.env.STOCK_MAIL_SECURE, true);
-  const user = process.env.STOCK_MAIL_USER;
-  const password = process.env.STOCK_MAIL_PASSWORD;
-  const allowedFrom = process.env.STOCK_MAIL_ALLOWED_FROM;
+  const user = process.env.STOCK_MAIL_USER || process.env.SMTP_USER;
+  const password = process.env.STOCK_MAIL_PASSWORD || process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
+  const allowedFrom = process.env.STOCK_MAIL_ALLOWED_FROM || user;
   const subjectPart = process.env.STOCK_MAIL_SUBJECT?.trim() ?? '';
-  const filePrefix = process.env.STOCK_MAIL_FILENAME_PREFIX?.trim() ?? '';
+  const filePrefix = process.env.STOCK_MAIL_FILENAME_PREFIX?.trim() || 'Остатки';
   const processedFolder = process.env.STOCK_MAIL_PROCESSED_FOLDER || 'Processed';
   const errorFolder = process.env.STOCK_MAIL_ERROR_FOLDER || 'ImportErrors';
 
   if (!host || !user || !password || !allowedFrom) {
-    throw new Error('Не настроены STOCK_MAIL_HOST, STOCK_MAIL_USER, STOCK_MAIL_PASSWORD или STOCK_MAIL_ALLOWED_FROM');
+    throw new Error('Не настроены STOCK_MAIL_USER/STOCK_MAIL_PASSWORD или SMTP_USER/SMTP_PASSWORD для чтения почты');
   }
 
   const [{ ImapFlow }, { simpleParser }] = await Promise.all([import('imapflow'), import('mailparser')]);
