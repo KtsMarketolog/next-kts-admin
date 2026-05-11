@@ -33,6 +33,7 @@ type PriceList = {
   workflowStatus: WholesalePriceWorkflowStatus;
   workflowStatusLabel: string;
   showRetailPrices: boolean;
+  showStock: boolean;
   isActive: boolean;
   managerId: number | null;
   managerName: string | null;
@@ -90,6 +91,7 @@ type PriceEditor = {
   comment: string;
   workflowStatus: WholesalePriceWorkflowStatus;
   showRetailPrices: boolean;
+  showStock: boolean;
   isActive: boolean;
   managerId: number | null;
   items: PriceItem[];
@@ -144,6 +146,7 @@ function emptyEditor(): PriceEditor {
     comment: '',
     workflowStatus: 'not_sent',
     showRetailPrices: false,
+    showStock: true,
     isActive: true,
     managerId: null,
     items: [],
@@ -484,6 +487,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         comment: priceList.comment ?? '',
         workflowStatus: priceList.workflowStatus ?? 'not_sent',
         showRetailPrices: Boolean(priceList.showRetailPrices),
+        showStock: priceList.showStock !== false,
         isActive: Boolean(priceList.isActive),
         managerId: priceList.managerId ?? null,
         items: mergeEditorItems(nextCatalog, Array.isArray(priceList.items) ? priceList.items : []),
@@ -943,6 +947,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           <label className={styles.checkbox}>
             <input type="checkbox" checked={editor.isActive} onChange={(event) => setEditor({ ...editor, isActive: event.target.checked })} />
             Активен
+          </label>
+          <label className={styles.checkbox}>
+            <input type="checkbox" checked={editor.showStock} onChange={(event) => setEditor({ ...editor, showStock: event.target.checked })} />
+            Показывать остатки в прайсе
           </label>
           <label className={styles.checkbox}>
             <input type="checkbox" checked={editor.showRetailPrices} onChange={(event) => setEditor({ ...editor, showRetailPrices: event.target.checked })} />

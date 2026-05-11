@@ -43,6 +43,7 @@ export type PublicWholesalePriceList = {
   validUntil: string | null;
   updatedAt: string;
   showRetailPrices: boolean;
+  showStock: boolean;
   categories: PublicWholesaleCategory[];
 };
 
@@ -58,6 +59,7 @@ type PriceListRow = {
   valid_until: string | null;
   updated_at: string;
   show_retail_prices: boolean;
+  show_stock: boolean;
 };
 
 type PriceItemRow = {
@@ -107,7 +109,8 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        m.phone as manager_phone,
        pl.valid_until::text,
        pl.updated_at::text,
-       pl.show_retail_prices
+       pl.show_retail_prices,
+       pl.show_stock
      from wholesale_price_lists pl
      left join wholesale_managers m on m.id = pl.manager_id
      where pl.token = $1 and pl.is_active = true
@@ -220,6 +223,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
     validUntil: priceListRow.valid_until,
     updatedAt: priceListRow.updated_at,
     showRetailPrices: priceListRow.show_retail_prices,
+    showStock: priceListRow.show_stock !== false,
     categories: Array.from(categoriesById.values()),
   };
 }

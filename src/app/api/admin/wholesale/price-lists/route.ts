@@ -75,6 +75,7 @@ export async function POST(request: Request) {
       comment: normalizeTextField(body.comment, 2000),
       workflowStatus: normalizeWholesalePriceWorkflowStatus(body.workflowStatus),
       showRetailPrices: Boolean(body.showRetailPrices),
+      showStock: body.showStock !== false,
       isActive: Boolean(body.isActive ?? true),
       items: itemsFromBody(body.items),
     },

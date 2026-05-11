@@ -9,6 +9,7 @@ import styles from './PricePage.module.scss';
 type PriceRequestFormProps = {
   token: string;
   categories: PublicWholesaleCategory[];
+  showStock: boolean;
 };
 
 const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
@@ -85,7 +86,7 @@ function trackPriceEvent(token: string, eventType: PriceClientEventType, metadat
   });
 }
 
-export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
+export function PriceRequestForm({ token, categories, showStock }: PriceRequestFormProps) {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [busy, setBusy] = useState(false);
@@ -291,7 +292,7 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
                   <h3>{product.title}</h3>
                   {product.sku ? <p>Артикул: {product.sku}</p> : null}
                   {product.description ? <p>{product.description}</p> : null}
-                  <p className={styles.stockStatus}>{stockLabel(product)}</p>
+                  {showStock ? <p className={styles.stockStatus}>{stockLabel(product)}</p> : null}
                 </div>
                 <table className={styles.prices}>
                   <thead>

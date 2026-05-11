@@ -168,6 +168,7 @@ export async function ensureSiteSchema() {
       comment text not null default '',
       workflow_status text not null default 'not_sent',
       show_retail_prices boolean not null default false,
+      show_stock boolean not null default true,
       is_active boolean not null default true,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
@@ -314,6 +315,7 @@ export async function ensureSiteSchema() {
     alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_lists add column if not exists comment text not null default '';
     alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent';
+    alter table wholesale_price_lists add column if not exists show_stock boolean not null default true;
     alter table wholesale_products add column if not exists catalog_product_id bigint;
     alter table wholesale_products add column if not exists brand_title text not null default '';
     alter table wholesale_products add column if not exists subcategory_title text not null default '';
@@ -414,6 +416,7 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_lists add column if not exists comment text not null default ''`);
   await query(`alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent'`);
+  await query(`alter table wholesale_price_lists add column if not exists show_stock boolean not null default true`);
   await query(`alter table wholesale_products add column if not exists catalog_product_id bigint`);
   await query(`alter table wholesale_products add column if not exists brand_title text not null default ''`);
   await query(`alter table wholesale_products add column if not exists subcategory_title text not null default ''`);

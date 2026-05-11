@@ -48,6 +48,7 @@ export type WholesalePriceListSummary = {
   workflowStatus: WholesalePriceWorkflowStatus;
   workflowStatusLabel: string;
   showRetailPrices: boolean;
+  showStock: boolean;
   isActive: boolean;
   managerId: number | null;
   managerName: string | null;
@@ -105,6 +106,7 @@ export type WholesalePriceListEditor = {
   comment: string;
   workflowStatus: WholesalePriceWorkflowStatus;
   showRetailPrices: boolean;
+  showStock: boolean;
   isActive: boolean;
   managerId: number | null;
   items: WholesalePriceListItemInput[];
@@ -706,6 +708,7 @@ type PriceListRow = {
   valid_until: string | null;
   workflow_status: string | null;
   show_retail_prices: boolean;
+  show_stock: boolean;
   is_active: boolean;
   manager_id: string | null;
   manager_name: string | null;
@@ -1439,6 +1442,7 @@ function mapPriceList(row: PriceListRow): WholesalePriceListSummary {
     workflowStatus: normalizeWholesalePriceWorkflowStatus(row.workflow_status),
     workflowStatusLabel: getWholesalePriceWorkflowStatusLabel(row.workflow_status),
     showRetailPrices: row.show_retail_prices,
+    showStock: row.show_stock !== false,
     isActive: row.is_active,
     managerId: row.manager_id ? Number(row.manager_id) : null,
     managerName: row.manager_name,
@@ -1599,6 +1603,7 @@ async function getWholesalePriceListsByManagerId(managerId: number | null) {
        pl.valid_until::text,
        pl.workflow_status,
        pl.show_retail_prices,
+       pl.show_stock,
        pl.is_active,
        pl.manager_id::text,
        m.name as manager_name,
@@ -1744,7 +1749,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
   const managerId = sessionManagerId(session);
   const priceList = await query<Omit<WholesalePriceListEditor, 'items'> & { id: string; manager_id: string | null }>(
     `select id::text, title, client_name as "clientName", token, valid_until::text as "validUntil",
-            comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", is_active as "isActive", manager_id::text
+            comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", show_stock as "showStock", is_active as "isActive", manager_id::text
      from wholesale_price_lists
      where id = $1 and ($2::bigint is null or manager_id = $2)
      limit 1`,
@@ -1780,6 +1785,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
     comment: row.comment,
     workflowStatus: normalizeWholesalePriceWorkflowStatus(row.workflowStatus),
     showRetailPrices: row.showRetailPrices,
+    showStock: row.showStock !== false,
     isActive: row.isActive,
     managerId: row.manager_id ? Number(row.manager_id) : null,
     items: items.rows.map((item) => ({
@@ -1800,9 +1806,9 @@ export async function createWholesalePriceList(
   const managerId = session?.role === 'manager' ? session.managerId ?? null : input.managerId;
   const result = await query<{ id: string }>(
     `insert into wholesale_price_lists (
-       title, client_name, manager_id, valid_until, token, comment, workflow_status, show_retail_prices, is_active
+       title, client_name, manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, is_active
      )
-     values ($1, $2, $3, nullif($4, '')::date, $5, $6, $7, $8, $9)
+     values ($1, $2, $3, nullif($4, '')::date, $5, $6, $7, $8, $9, $10)
      returning id`,
     [
       input.title,
@@ -1813,6 +1819,7 @@ export async function createWholesalePriceList(
       input.comment,
       input.workflowStatus,
       input.showRetailPrices,
+      input.showStock,
       input.isActive,
     ],
   );
@@ -1885,9 +1892,10 @@ export async function updateWholesalePriceList(
          comment = $7,
          workflow_status = $8,
          show_retail_prices = $9,
-         is_active = $10,
+         show_stock = $10,
+         is_active = $11,
          updated_at = now()
-     where id = $1 and ($11::bigint is null or manager_id = $11)`,
+     where id = $1 and ($12::bigint is null or manager_id = $12)`,
     [
       id,
       input.title,
@@ -1898,6 +1906,7 @@ export async function updateWholesalePriceList(
       input.comment,
       input.workflowStatus,
       input.showRetailPrices,
+      input.showStock,
       input.isActive,
       sessionManagerId(session),
     ],

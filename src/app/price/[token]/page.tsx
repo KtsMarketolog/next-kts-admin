@@ -69,6 +69,7 @@ export default async function PricePage({ params }: PricePageProps) {
           <PriceRequestForm
             token={priceList.token}
             categories={priceList.categories}
+            showStock={priceList.showStock}
           />
         )}
       </div>
