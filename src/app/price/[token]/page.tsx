@@ -36,7 +36,7 @@ export default async function PricePage({ params }: PricePageProps) {
           <div className={styles.heroSide}>
             {hasManagerContact ? (
               <aside className={styles.managerContact}>
-                <span>Ваш менеджер по прайсу</span>
+                <span>Ваш менеджер по развитию</span>
                 {priceList.managerName ? <strong>{priceList.managerName}</strong> : null}
                 {priceList.managerPhone ? (
                   <PriceEventLink href={phoneHref(priceList.managerPhone)} token={priceList.token} eventType="public_price_phone_clicked">
@@ -68,7 +68,6 @@ export default async function PricePage({ params }: PricePageProps) {
         ) : (
           <PriceRequestForm
             token={priceList.token}
-            showRetailPrices={priceList.showRetailPrices}
             categories={priceList.categories}
           />
         )}

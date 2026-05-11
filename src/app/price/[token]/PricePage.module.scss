@@ -121,7 +121,7 @@
 
 .product {
   display: grid;
-  grid-template-columns: $apx-180 minmax(0, 1fr) minmax($apx-300, 0.8fr);
+  grid-template-columns: minmax(0, 1fr) minmax($apx-300, 0.7fr);
   gap: $apx-18;
   align-items: start;
   border: $apx-1 solid #e6e7ef;
@@ -129,8 +129,19 @@
   padding: $apx-14;
 }
 
-.imageBox {
-  min-height: $apx-130;
+.categoryHeader {
+  display: flex;
+  align-items: center;
+  gap: $apx-16;
+
+  h2 {
+    margin: 0;
+  }
+}
+
+.groupImageBox {
+  width: $apx-120;
+  height: $apx-84;
   display: grid;
   place-items: center;
   border-radius: $apx-10;
@@ -138,10 +149,11 @@
   overflow: hidden;
   color: #77798a;
   font-size: $apx-13;
+  flex: 0 0 auto;
 
   img {
     width: 100%;
-    height: $apx-130;
+    height: 100%;
     object-fit: contain;
     display: block;
   }
@@ -378,8 +390,15 @@
     padding: $apx-m-12;
   }
 
-  .imageBox img {
-    height: $apx-m-160;
+  .categoryHeader {
+    align-items: flex-start;
+    gap: $apx-m-12;
+  }
+
+  .groupImageBox {
+    width: $apx-m-96;
+    height: $apx-m-70;
+    border-radius: $apx-m-10;
   }
 
   .quantityInput {

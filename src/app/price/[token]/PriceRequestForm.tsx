@@ -8,7 +8,6 @@ import styles from './PricePage.module.scss';
 
 type PriceRequestFormProps = {
   token: string;
-  showRetailPrices: boolean;
   categories: PublicWholesaleCategory[];
 };
 
@@ -86,7 +85,7 @@ function trackPriceEvent(token: string, eventType: PriceClientEventType, metadat
   });
 }
 
-export function PriceRequestForm({ token, showRetailPrices, categories }: PriceRequestFormProps) {
+export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [busy, setBusy] = useState(false);
@@ -144,14 +143,24 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
           first.product.title.localeCompare(second.product.title, 'ru')
         );
       })
-      .reduce<Array<{ title: string; products: Array<{ categoryTitle: string; product: PublicWholesaleCategory['products'][number] }> }>>(
+      .reduce<
+        Array<{
+          title: string;
+          imageUrl: string | null;
+          products: Array<{ categoryTitle: string; product: PublicWholesaleCategory['products'][number] }>;
+        }>
+      >(
         (groups, item) => {
           const lastGroup = groups[groups.length - 1];
           if (lastGroup?.title === item.groupTitle) {
+            if (!lastGroup.imageUrl && item.product.imageUrl) {
+              lastGroup.imageUrl = item.product.imageUrl;
+            }
             lastGroup.products.push({ categoryTitle: item.categoryTitle, product: item.product });
           } else {
             groups.push({
               title: item.groupTitle,
+              imageUrl: item.product.imageUrl,
               products: [{ categoryTitle: item.categoryTitle, product: item.product }],
             });
           }
@@ -264,7 +273,12 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
 
       {groupedProducts.map((group) => (
         <section className={styles.category} key={group.title}>
-          <h2>{group.title}</h2>
+          <div className={styles.categoryHeader}>
+            <div className={styles.groupImageBox}>
+              {group.imageUrl ? <img src={group.imageUrl} alt="" /> : <span>Нет фото</span>}
+            </div>
+            <h2>{group.title}</h2>
+          </div>
           <div className={styles.products}>
             {group.products.map(({ categoryTitle, product }) => (
               <article
@@ -273,9 +287,6 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
                 onFocusCapture={() => trackProductOpen(product)}
                 onMouseEnter={() => trackProductOpen(product)}
               >
-                <div className={styles.imageBox}>
-                  {product.imageUrl ? <img src={product.imageUrl} alt="" /> : <span>Нет фото</span>}
-                </div>
                 <div className={styles.productInfo}>
                   <h3>{product.title}</h3>
                   {product.sku ? <p>Артикул: {product.sku}</p> : null}
@@ -285,7 +296,6 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
                 <table className={styles.prices}>
                   <thead>
                     <tr>
-                      {showRetailPrices ? <th>Розница</th> : null}
                       <th>Индивидуальная цена</th>
                       <th>Количество</th>
                     </tr>
@@ -293,7 +303,6 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
                   <tbody>
                     {product.variants.map((variant, index) => (
                       <tr key={`${variant.id ?? 'base'}-${index}`}>
-                        {showRetailPrices ? <td>{formatPrice(variant.retailPrice)}</td> : null}
                         <td>{formatIndividualPrices(variant)}</td>
                         <td>
                           <input
