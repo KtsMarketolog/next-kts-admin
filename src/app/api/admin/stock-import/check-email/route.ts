@@ -29,6 +29,8 @@ export async function POST(request: Request) {
       referer: request.headers.get('referer'),
       metadata: {
         processed: result.processed,
+        checkedMessages: result.checkedMessages,
+        skipped: result.skipped,
         status: result.result?.status,
         updatedRows: result.result?.updatedRows,
         failedRows: result.result?.failedRows,

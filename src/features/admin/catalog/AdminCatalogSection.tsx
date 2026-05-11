@@ -221,6 +221,27 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     const data = await response.json();
     await loadStockLogs();
     if (!data.processed) {
+      const skipped = data.skipped ?? {};
+      const firstSample = Array.isArray(skipped.samples) ? skipped.samples[0] : null;
+      const checkedMessages = Number(data.checkedMessages ?? 0);
+      const settings = data.settings ?? {};
+      if (checkedMessages > 0 && Number(skipped.sender ?? 0) > 0) {
+        showStatus(
+          `Найдено писем: ${checkedMessages}, но отправитель не разрешён: ${firstSample?.from || 'не указан'}. Добавьте его в STOCK_MAIL_ALLOWED_FROM.`,
+        );
+        return;
+      }
+      if (checkedMessages > 0 && Number(skipped.subject ?? 0) > 0) {
+        showStatus(`Найдено писем: ${checkedMessages}, но тема не содержит "${settings.subjectPart}".`);
+        return;
+      }
+      if (checkedMessages > 0 && Number(skipped.attachment ?? 0) > 0) {
+        const files = Array.isArray(firstSample?.attachments) ? firstSample.attachments.filter(Boolean).join(', ') : '';
+        showStatus(
+          `Найдено писем: ${checkedMessages}, но нет подходящего .xlsx с префиксом "${settings.filePrefix || 'Остатки'}"${files ? `; вложения: ${files}` : ''}.`,
+        );
+        return;
+      }
       showStatus('Новых писем с остатками нет');
       return;
     }
@@ -350,7 +371,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
           )}
         </div>
         <div>
-          <p>Файл .xlsx: Остатки*.xlsx, колонки Наименование, Остаток, Ожидается</p>
+          <p>Файл .xlsx: Остатки*.xlsx, колонки Наименование, Остаток/Остатки. Ожидается можно не указывать, тогда будет “нет”.</p>
         </div>
         <button type="button" disabled={busyId === 'stock-email'} onClick={checkStockEmail}>
           {busyId === 'stock-email' ? 'Проверка...' : 'Проверить почту сейчас'}

@@ -31,11 +31,38 @@ export type StockImportLog = Omit<StockImportResult, 'errors'> & {
   errors: StockImportError[];
 };
 
-const HEADER_TITLE = 'Наименование';
-const HEADER_STOCK = 'Остаток';
-const HEADER_EXPECTED = 'Ожидается';
+export type StockEmailSkipReason = 'sender' | 'subject' | 'attachment';
+
+export type StockEmailSkipSample = {
+  reason: StockEmailSkipReason;
+  from: string;
+  subject: string;
+  attachments: string[];
+};
+
+export type StockEmailImportResult = {
+  processed: number;
+  result: StockImportResult | null;
+  checkedMessages: number;
+  skipped: {
+    sender: number;
+    subject: number;
+    attachment: number;
+    samples: StockEmailSkipSample[];
+  };
+  settings: {
+    allowedFrom: string;
+    subjectPart: string;
+    filePrefix: string;
+  };
+};
+
+const HEADER_TITLE_ALIASES = ['Наименование'];
+const HEADER_STOCK_ALIASES = ['Остаток', 'Остатки'];
+const HEADER_EXPECTED_ALIASES = ['Ожидается'];
 const LOCK_KEY = 'email';
 const MAX_ERRORS = 200;
+const MAX_SKIP_SAMPLES = 5;
 
 export function normalizeStockProductName(value: unknown) {
   return String(value ?? '')
@@ -44,9 +71,25 @@ export function normalizeStockProductName(value: unknown) {
     .replace(/\s+/g, ' ');
 }
 
-function readCell(row: RawRow, key: string) {
-  const value = row[key];
+function normalizeHeader(value: unknown) {
+  return String(value ?? '')
+    .replace(/\u00a0/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function readCellByAliases(row: RawRow, aliases: string[]) {
+  const wanted = new Set(aliases.map(normalizeHeader));
+  const entry = Object.entries(row).find(([key]) => wanted.has(normalizeHeader(key)));
+  const value = entry?.[1];
   return value === null || value === undefined ? '' : String(value).trim();
+}
+
+function readRawCellByAliases(row: RawRow, aliases: string[]) {
+  const wanted = new Set(aliases.map(normalizeHeader));
+  const entry = Object.entries(row).find(([key]) => wanted.has(normalizeHeader(key)));
+  return entry?.[1] ?? '';
 }
 
 function parseStock(value: unknown) {
@@ -176,10 +219,11 @@ export async function importStockFromExcelBuffer(input: {
     await withTransaction(async (client) => {
       for (const [index, row] of rows.entries()) {
         const rowNumber = index + 2;
-        const rawName = readCell(row, HEADER_TITLE);
+        const rawName = readCellByAliases(row, HEADER_TITLE_ALIASES);
         const name = normalizeStockProductName(rawName);
-        const stock = parseStock(row[HEADER_STOCK]);
-        const isExpected = parseExpected(row[HEADER_EXPECTED]);
+        const stock = parseStock(readRawCellByAliases(row, HEADER_STOCK_ALIASES));
+        const rawExpected = readCellByAliases(row, HEADER_EXPECTED_ALIASES);
+        const isExpected = rawExpected ? parseExpected(rawExpected) : false;
 
         if (!name) {
           failedRows += 1;
@@ -279,6 +323,38 @@ function attachmentAllowed(fileName: string, prefix: string) {
   return !prefix || normalized.toLowerCase().startsWith(prefix.trim().toLowerCase());
 }
 
+function createEmailResult(
+  input: {
+    processed?: number;
+    result?: StockImportResult | null;
+    checkedMessages: number;
+    skipped: StockEmailImportResult['skipped'];
+    allowedFrom: string;
+    subjectPart: string;
+    filePrefix: string;
+  },
+): StockEmailImportResult {
+  return {
+    processed: input.processed ?? 0,
+    result: input.result ?? null,
+    checkedMessages: input.checkedMessages,
+    skipped: input.skipped,
+    settings: {
+      allowedFrom: input.allowedFrom,
+      subjectPart: input.subjectPart,
+      filePrefix: input.filePrefix,
+    },
+  };
+}
+
+function addSkippedEmailSample(
+  skipped: StockEmailImportResult['skipped'],
+  sample: StockEmailSkipSample,
+) {
+  skipped[sample.reason] += 1;
+  if (skipped.samples.length < MAX_SKIP_SAMPLES) skipped.samples.push(sample);
+}
+
 async function moveMessage(client: any, uid: number | string, folder: string) {
   if (!folder) return;
   await client.mailboxCreate(folder).catch(() => undefined);
@@ -287,7 +363,7 @@ async function moveMessage(client: any, uid: number | string, folder: string) {
   });
 }
 
-export async function importStockFromEmail() {
+export async function importStockFromEmail(): Promise<StockEmailImportResult> {
   const host = process.env.STOCK_MAIL_HOST || process.env.SMTP_HOST?.replace(/^smtp\./i, 'imap.') || 'imap.yandex.ru';
   const port = Number(process.env.STOCK_MAIL_PORT || 993);
   const secure = envBoolean(process.env.STOCK_MAIL_SECURE, true);
@@ -318,18 +394,42 @@ export async function importStockFromEmail() {
     try {
       const uidsResult = await client.search({ seen: false }, { uid: true });
       const uids = Array.isArray(uidsResult) ? uidsResult : [];
-      if (uids.length === 0) return { processed: 0, result: null };
+      const skipped: StockEmailImportResult['skipped'] = {
+        sender: 0,
+        subject: 0,
+        attachment: 0,
+        samples: [],
+      };
+      if (uids.length === 0) {
+        return createEmailResult({
+          checkedMessages: 0,
+          skipped,
+          allowedFrom,
+          subjectPart,
+          filePrefix,
+        });
+      }
       for await (const message of client.fetch(uids.join(','), { uid: true, source: true }, { uid: true })) {
         if (!message.source || !message.uid) continue;
         const parsed = await simpleParser(message.source as Buffer);
         const fromAddress = parsed.from?.value?.[0]?.address ?? '';
         const subject = parsed.subject ?? '';
+        const attachments = parsed.attachments.map((item) => item.filename ?? '');
 
-        if (!matchesAllowedSender(fromAddress, allowedFrom)) continue;
-        if (subjectPart && !subject.toLowerCase().includes(subjectPart.toLowerCase())) continue;
+        if (!matchesAllowedSender(fromAddress, allowedFrom)) {
+          addSkippedEmailSample(skipped, { reason: 'sender', from: fromAddress, subject, attachments });
+          continue;
+        }
+        if (subjectPart && !subject.toLowerCase().includes(subjectPart.toLowerCase())) {
+          addSkippedEmailSample(skipped, { reason: 'subject', from: fromAddress, subject, attachments });
+          continue;
+        }
 
         const attachment = parsed.attachments.find((item) => attachmentAllowed(item.filename ?? '', filePrefix));
-        if (!attachment) continue;
+        if (!attachment) {
+          addSkippedEmailSample(skipped, { reason: 'attachment', from: fromAddress, subject, attachments });
+          continue;
+        }
 
         try {
           const result = await importStockFromExcelBuffer({
@@ -339,13 +439,27 @@ export async function importStockFromEmail() {
             emailSubject: subject,
           });
           await moveMessage(client, message.uid, result.status === 'failed' ? errorFolder : processedFolder);
-          return { processed: 1, result };
+          return createEmailResult({
+            processed: 1,
+            result,
+            checkedMessages: uids.length,
+            skipped,
+            allowedFrom,
+            subjectPart,
+            filePrefix,
+          });
         } catch (error) {
           await moveMessage(client, message.uid, errorFolder);
           throw error;
         }
       }
-      return { processed: 0, result: null };
+      return createEmailResult({
+        checkedMessages: uids.length,
+        skipped,
+        allowedFrom,
+        subjectPart,
+        filePrefix,
+      });
     } finally {
       lock.release();
     }
