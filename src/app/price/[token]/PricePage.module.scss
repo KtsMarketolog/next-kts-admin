@@ -187,6 +187,24 @@
   }
 }
 
+.currencyPrices {
+  display: grid;
+  gap: $apx-4;
+}
+
+.priceValue {
+  display: block;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.priceCurrency {
+  margin-left: $apx-6;
+  color: #6f7182;
+  font-size: $apx-12;
+  font-weight: 800;
+}
+
 .empty {
   margin: 0;
   color: #6f7182;

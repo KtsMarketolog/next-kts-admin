@@ -21,6 +21,37 @@ function formatPrice(value: string | null) {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(number);
 }
 
+function hasPriceValue(value: string | null) {
+  if (!value) return false;
+  const number = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  return Number.isFinite(number) ? number > 0 : value.trim().length > 0;
+}
+
+type PublicPriceVariant = PublicWholesaleCategory['products'][number]['variants'][number];
+
+function formatIndividualPrices(variant: PublicPriceVariant) {
+  const currencyPrices = [
+    { value: variant.priceEur, currency: 'EUR' },
+    { value: variant.priceRub, currency: 'RUB' },
+    { value: variant.priceCny, currency: 'CNY' },
+  ].filter((price) => hasPriceValue(price.value));
+
+  if (currencyPrices.length === 0) {
+    return <span className={styles.priceValue}>{formatPrice(variant.wholesalePrice)}</span>;
+  }
+
+  return (
+    <span className={styles.currencyPrices}>
+      {currencyPrices.map((price) => (
+        <span className={styles.priceValue} key={price.currency}>
+          {formatPrice(price.value)}
+          <span className={styles.priceCurrency}>{price.currency}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function normalizeSearchText(value: string) {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -254,18 +285,16 @@ export function PriceRequestForm({ token, showRetailPrices, categories }: PriceR
                 <table className={styles.prices}>
                   <thead>
                     <tr>
-                      <th>Размер</th>
                       {showRetailPrices ? <th>Розница</th> : null}
-                      <th>Опт</th>
+                      <th>Индивидуальная цена</th>
                       <th>Количество</th>
                     </tr>
                   </thead>
                   <tbody>
                     {product.variants.map((variant, index) => (
                       <tr key={`${variant.id ?? 'base'}-${index}`}>
-                        <td>{variant.title}</td>
                         {showRetailPrices ? <td>{formatPrice(variant.retailPrice)}</td> : null}
-                        <td>{formatPrice(variant.wholesalePrice)}</td>
+                        <td>{formatIndividualPrices(variant)}</td>
                         <td>
                           <input
                             className={styles.quantityInput}
