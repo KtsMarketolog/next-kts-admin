@@ -2,7 +2,7 @@
 
 .page {
   min-height: 100vh;
-  background: #f4f5f7;
+  background: #f3f4f8;
   padding: $apx-150 $apx-24 $apx-70;
   color: #242633;
 }
@@ -17,8 +17,9 @@
 .hero,
 .category {
   background: #fff;
-  border: $apx-1 solid #dedfeb;
-  border-radius: $apx-14;
+  border: $apx-1 solid #e1e3ef;
+  border-radius: $apx-18;
+  box-shadow: 0 $apx-14 $apx-34 rgba(29, 31, 54, 0.04);
   padding: $apx-24;
 }
 
@@ -27,6 +28,7 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: $apx-18;
+  min-height: $apx-210;
 
   p {
     margin: 0;
@@ -106,7 +108,7 @@
 
 .category {
   display: grid;
-  gap: $apx-16;
+  gap: $apx-18;
 
   h2 {
     margin: 0;
@@ -116,23 +118,29 @@
 
 .products {
   display: grid;
-  gap: $apx-14;
+  gap: $apx-16;
 }
 
 .product {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax($apx-300, 0.7fr);
-  gap: $apx-18;
-  align-items: start;
-  border: $apx-1 solid #e6e7ef;
-  border-radius: $apx-12;
-  padding: $apx-14;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-420, 0.52fr);
+  gap: $apx-24;
+  align-items: stretch;
+  border: $apx-1 solid #e5e7f0;
+  border-radius: $apx-16;
+  background: linear-gradient(180deg, #ffffff 0%, #fcfcff 100%);
+  padding: $apx-18;
 }
 
 .categoryHeader {
   display: flex;
   align-items: center;
   gap: $apx-16;
+  min-height: $apx-104;
+  border: $apx-1 solid #ececf7;
+  border-radius: $apx-14;
+  background: linear-gradient(90deg, #faf9ff 0%, #ffffff 72%);
+  padding: $apx-12 $apx-14;
 
   h2 {
     margin: 0;
@@ -140,8 +148,8 @@
 }
 
 .groupImageBox {
-  width: $apx-120;
-  height: $apx-84;
+  width: $apx-112;
+  height: $apx-78;
   display: grid;
   place-items: center;
   border-radius: $apx-10;
@@ -162,6 +170,7 @@
 .productInfo {
   display: grid;
   gap: $apx-8;
+  align-content: center;
 
   h3 {
     margin: 0;
@@ -177,25 +186,45 @@
 }
 
 .stockStatus {
+  width: max-content;
+  max-width: 100%;
+  border: $apx-1 solid #e3def9;
+  border-radius: $apx-999;
+  background: #f4f1ff;
+  padding: $apx-5 $apx-10;
   font-weight: 800;
   color: #260b86 !important;
 }
 
 .prices {
   width: 100%;
-  border-collapse: collapse;
+  border: $apx-1 solid #e7e8f2;
+  border-radius: $apx-14;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  background: #fff;
   font-size: $apx-14;
+  align-self: center;
 
   th,
   td {
     border-bottom: $apx-1 solid #e6e7ef;
-    padding: $apx-10 $apx-8;
+    padding: $apx-14 $apx-16;
     text-align: left;
   }
 
   th {
-    color: #6f7182;
-    font-weight: 700;
+    background: #f8f8fd;
+    color: #707386;
+    font-size: $apx-12;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  tr:last-child td {
+    border-bottom: 0;
   }
 }
 
@@ -233,8 +262,9 @@
   align-items: end;
   gap: $apx-16;
   background: #fff;
-  border: $apx-1 solid #dedfeb;
-  border-radius: $apx-12;
+  border: $apx-1 solid #e1e3ef;
+  border-radius: $apx-16;
+  box-shadow: 0 $apx-10 $apx-24 rgba(29, 31, 54, 0.035);
   padding: $apx-16 $apx-18;
 
   label {
@@ -253,7 +283,7 @@
     width: 100%;
     min-height: $apx-42;
     border: $apx-1 solid #d9dbe8;
-    border-radius: $apx-8;
+    border-radius: $apx-10;
     padding: 0 $apx-12;
     background: #fff;
     color: #242633;
@@ -281,12 +311,12 @@
 }
 
 .quantityCell {
-  width: $apx-190;
+  width: $apx-210;
 }
 
 .quantityStepper {
   display: inline-grid;
-  grid-template-columns: $apx-54 $apx-54 $apx-54;
+  grid-template-columns: $apx-56 $apx-58 $apx-56;
   gap: $apx-8;
   align-items: center;
   justify-content: center;
@@ -294,15 +324,15 @@
 
 .quantityButton,
 .quantityValue {
-  min-width: $apx-54;
+  min-width: $apx-56;
   height: $apx-44;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: $apx-1 solid #dfb985;
+  border: $apx-1 solid #d9d4ee;
   border-radius: $apx-10;
-  background: #fffaf3;
-  color: #10121a;
+  background: #fff;
+  color: #260b86;
   font: inherit;
   font-size: $apx-16;
   font-weight: 800;
@@ -317,8 +347,9 @@
     color 0.15s ease;
 
   &:hover:not(:disabled) {
-    border-color: #bd823d;
-    background: #fff3e0;
+    border-color: #260b86;
+    background: #260b86;
+    color: #fff;
   }
 
   &:disabled {
@@ -328,7 +359,9 @@
 }
 
 .quantityValue {
-  background: #fffdf8;
+  border-color: #ece9f8;
+  background: #f5f3fb;
+  color: #151827;
 }
 
 .requestBar {
