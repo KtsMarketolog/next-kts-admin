@@ -24,7 +24,7 @@ type CreateAdminSessionInput = {
   maxAgeSeconds?: number;
 };
 
-const DEFAULT_MAX_AGE_SECONDS = 60 * 60 * 8;
+const DEFAULT_MAX_AGE_SECONDS = 60 * 60 * 24 * 100;
 
 function hashSessionToken(token: string) {
   return hashSensitiveValue(`admin-session:${token}`);

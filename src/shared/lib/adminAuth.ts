@@ -6,6 +6,7 @@ import { createStoredAdminSession, getStoredAdminSession, revokeStoredAdminSessi
 
 const COOKIE_NAME = 'kts_admin_session';
 const PASSWORD_KEYLEN = 64;
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 100;
 
 export type AdminSession = {
   role: 'admin' | 'wholesale_admin' | 'manager';
@@ -45,7 +46,7 @@ export async function createEmployeeSession(session: AdminSession, options: Crea
     sameSite: 'lax',
     secure: process.env.ADMIN_COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
     path: '/',
-    maxAge: 60 * 60 * 8,
+    maxAge: SESSION_MAX_AGE_SECONDS,
   });
 }
 
@@ -95,7 +96,7 @@ export async function getAdminSession(): Promise<AdminSession | null> {
 
   const [timestamp, role, managerId] = value.split(':');
   const age = Date.now() - Number(timestamp);
-  if (!Number.isFinite(age) || age < 0 || age > 1000 * 60 * 60 * 8) return null;
+  if (!Number.isFinite(age) || age < 0 || age > SESSION_MAX_AGE_SECONDS * 1000) return null;
 
   if (!timingSafeEqual(a, b)) return null;
 
