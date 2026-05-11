@@ -454,7 +454,10 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
         const dateMs = parsed.date?.getTime() || uidNumber;
 
         if (!matchesAllowedSender(fromAddress, allowedFrom)) {
-          addSkippedEmailSample(skipped, { reason: 'sender', from: fromAddress, subject, attachments });
+          skipped.sender += 1;
+          if (parsed.attachments.some((item) => attachmentAllowed(item.filename ?? '', filePrefix))) {
+            addSkippedEmailSample(skipped, { reason: 'sender', from: fromAddress, subject, attachments });
+          }
           continue;
         }
         if (subjectPart && !subject.toLowerCase().includes(subjectPart.toLowerCase())) {

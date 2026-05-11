@@ -225,17 +225,17 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       const firstSample = Array.isArray(skipped.samples) ? skipped.samples[0] : null;
       const checkedMessages = Number(data.checkedMessages ?? 0);
       const settings = data.settings ?? {};
-      if (checkedMessages > 0 && Number(skipped.sender ?? 0) > 0) {
+      if (checkedMessages > 0 && firstSample?.reason === 'sender') {
         showStatus(
           `Найдено писем: ${checkedMessages}, но отправитель не разрешён: ${firstSample?.from || 'не указан'}. Добавьте его в STOCK_MAIL_ALLOWED_FROM.`,
         );
         return;
       }
-      if (checkedMessages > 0 && Number(skipped.subject ?? 0) > 0) {
+      if (checkedMessages > 0 && firstSample?.reason === 'subject') {
         showStatus(`Найдено писем: ${checkedMessages}, но тема не содержит "${settings.subjectPart}".`);
         return;
       }
-      if (checkedMessages > 0 && Number(skipped.attachment ?? 0) > 0) {
+      if (checkedMessages > 0 && firstSample?.reason === 'attachment') {
         const files = Array.isArray(firstSample?.attachments) ? firstSample.attachments.filter(Boolean).join(', ') : '';
         showStatus(
           `Найдено писем: ${checkedMessages}, но нет подходящего .xlsx с префиксом "${settings.filePrefix || 'Остатки'}"${files ? `; вложения: ${files}` : ''}.`,
