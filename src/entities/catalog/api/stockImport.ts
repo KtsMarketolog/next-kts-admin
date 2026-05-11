@@ -54,6 +54,7 @@ export type StockEmailImportResult = {
     allowedFrom: string;
     subjectPart: string;
     filePrefix: string;
+    scanLimit: number;
   };
 };
 
@@ -63,6 +64,18 @@ const HEADER_EXPECTED_ALIASES = ['Ожидается'];
 const LOCK_KEY = 'email';
 const MAX_ERRORS = 200;
 const MAX_SKIP_SAMPLES = 5;
+const DEFAULT_MAIL_SCAN_LIMIT = 300;
+const DEFAULT_STOCK_ALLOWED_FROM = ['saunakva@yandex.ru'];
+
+type StockEmailCandidate = {
+  uid: number | string;
+  uidNumber: number;
+  dateMs: number;
+  buffer: Buffer;
+  fileName: string;
+  emailFrom: string;
+  emailSubject: string;
+};
 
 export function normalizeStockProductName(value: unknown) {
   return String(value ?? '')
@@ -317,6 +330,17 @@ function matchesAllowedSender(address: string, allowed: string) {
     .includes(normalizedAddress);
 }
 
+function buildAllowedSenders(configured: string | undefined, user: string | undefined) {
+  return Array.from(
+    new Set(
+      [configured, user, ...DEFAULT_STOCK_ALLOWED_FROM]
+        .flatMap((item) => String(item ?? '').split(','))
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ).join(',');
+}
+
 function attachmentAllowed(fileName: string, prefix: string) {
   const normalized = fileName.trim();
   if (!normalized.toLowerCase().endsWith('.xlsx')) return false;
@@ -332,6 +356,7 @@ function createEmailResult(
     allowedFrom: string;
     subjectPart: string;
     filePrefix: string;
+    scanLimit?: number;
   },
 ): StockEmailImportResult {
   return {
@@ -343,6 +368,7 @@ function createEmailResult(
       allowedFrom: input.allowedFrom,
       subjectPart: input.subjectPart,
       filePrefix: input.filePrefix,
+      scanLimit: input.scanLimit ?? DEFAULT_MAIL_SCAN_LIMIT,
     },
   };
 }
@@ -369,9 +395,10 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
   const secure = envBoolean(process.env.STOCK_MAIL_SECURE, true);
   const user = process.env.STOCK_MAIL_USER || process.env.SMTP_USER;
   const password = process.env.STOCK_MAIL_PASSWORD || process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
-  const allowedFrom = process.env.STOCK_MAIL_ALLOWED_FROM || user;
+  const allowedFrom = buildAllowedSenders(process.env.STOCK_MAIL_ALLOWED_FROM, user);
   const subjectPart = process.env.STOCK_MAIL_SUBJECT?.trim() ?? '';
   const filePrefix = process.env.STOCK_MAIL_FILENAME_PREFIX?.trim() || 'Остатки';
+  const scanLimit = Math.min(Math.max(Number(process.env.STOCK_MAIL_SCAN_LIMIT) || DEFAULT_MAIL_SCAN_LIMIT, 1), 1000);
   const processedFolder = process.env.STOCK_MAIL_PROCESSED_FOLDER || 'Processed';
   const errorFolder = process.env.STOCK_MAIL_ERROR_FOLDER || 'ImportErrors';
 
@@ -392,8 +419,14 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
-      const uidsResult = await client.search({ seen: false }, { uid: true });
-      const uids = Array.isArray(uidsResult) ? uidsResult : [];
+      const uidsResult = await client.search({ all: true }, { uid: true });
+      const uids = Array.isArray(uidsResult)
+        ? uidsResult
+            .map((uid) => Number(uid))
+            .filter((uid) => Number.isFinite(uid) && uid > 0)
+            .sort((a, b) => b - a)
+            .slice(0, scanLimit)
+        : [];
       const skipped: StockEmailImportResult['skipped'] = {
         sender: 0,
         subject: 0,
@@ -407,14 +440,18 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
           allowedFrom,
           subjectPart,
           filePrefix,
+          scanLimit,
         });
       }
+      let candidate: StockEmailCandidate | null = null;
       for await (const message of client.fetch(uids.join(','), { uid: true, source: true }, { uid: true })) {
         if (!message.source || !message.uid) continue;
         const parsed = await simpleParser(message.source as Buffer);
         const fromAddress = parsed.from?.value?.[0]?.address ?? '';
         const subject = parsed.subject ?? '';
         const attachments = parsed.attachments.map((item) => item.filename ?? '');
+        const uidNumber = Number(message.uid) || 0;
+        const dateMs = parsed.date?.getTime() || uidNumber;
 
         if (!matchesAllowedSender(fromAddress, allowedFrom)) {
           addSkippedEmailSample(skipped, { reason: 'sender', from: fromAddress, subject, attachments });
@@ -431,14 +468,28 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
           continue;
         }
 
-        try {
-          const result = await importStockFromExcelBuffer({
+        if (!candidate || dateMs > candidate.dateMs || (dateMs === candidate.dateMs && uidNumber > candidate.uidNumber)) {
+          candidate = {
+            uid: message.uid,
+            uidNumber,
+            dateMs,
             buffer: attachment.content,
             fileName: attachment.filename ?? 'stock.xlsx',
             emailFrom: fromAddress,
             emailSubject: subject,
+          };
+        }
+      }
+
+      if (candidate) {
+        try {
+          const result = await importStockFromExcelBuffer({
+            buffer: candidate.buffer,
+            fileName: candidate.fileName,
+            emailFrom: candidate.emailFrom,
+            emailSubject: candidate.emailSubject,
           });
-          await moveMessage(client, message.uid, result.status === 'failed' ? errorFolder : processedFolder);
+          await moveMessage(client, candidate.uid, result.status === 'failed' ? errorFolder : processedFolder);
           return createEmailResult({
             processed: 1,
             result,
@@ -447,18 +498,21 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
             allowedFrom,
             subjectPart,
             filePrefix,
+            scanLimit,
           });
         } catch (error) {
-          await moveMessage(client, message.uid, errorFolder);
+          await moveMessage(client, candidate.uid, errorFolder);
           throw error;
         }
       }
+
       return createEmailResult({
         checkedMessages: uids.length,
         skipped,
         allowedFrom,
         subjectPart,
         filePrefix,
+        scanLimit,
       });
     } finally {
       lock.release();

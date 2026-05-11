@@ -363,7 +363,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       <div className={styles.catalogImportCard}>
         <div>
           <h3>Импорт остатков</h3>
-          <p>Проверяет почту и обновляет только остаток, ожидание поступления и дату обновления. Товары не создаются.</p>
+          <p>Проверяет последние письма, включая прочитанные, и обновляет только остаток, ожидание поступления и дату обновления. Товары не создаются.</p>
           {stockLogs[0] && (
             <span>
               Последний импорт: {stockLogs[0].status}, обновлено {stockLogs[0].updatedRows} из {stockLogs[0].totalRows}

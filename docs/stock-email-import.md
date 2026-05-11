@@ -16,6 +16,7 @@ STOCK_MAIL_PASSWORD=
 STOCK_MAIL_ALLOWED_FROM=
 STOCK_MAIL_SUBJECT=
 STOCK_MAIL_FILENAME_PREFIX=Остатки
+STOCK_MAIL_SCAN_LIMIT=300
 STOCK_MAIL_PROCESSED_FOLDER=Processed
 STOCK_MAIL_ERROR_FOLDER=ImportErrors
 ```
@@ -28,6 +29,8 @@ STOCK_MAIL_ERROR_FOLDER=ImportErrors
 ## Формат Excel
 
 Поддерживается только `.xlsx`. По умолчанию принимаются файлы, имя которых начинается с `Остатки`, например `Остатки_2026-05-11.xlsx`. Префикс задается через `STOCK_MAIL_FILENAME_PREFIX`.
+
+Проверяются последние письма в ящике, включая прочитанные. По умолчанию просматриваются последние `300` писем, значение можно изменить через `STOCK_MAIL_SCAN_LIMIT`. Из всех подходящих писем импортируется только самое свежее по дате письма.
 
 Первый лист должен содержать колонки:
 
