@@ -94,27 +94,30 @@
 
 .analyticsDashboardLayout {
   display: grid;
-  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-  gap: $apx-16;
+  grid-template-columns: minmax($apx-250, $apx-286) minmax(0, 1fr);
+  gap: $apx-18;
   align-items: start;
-  margin-top: $apx-4;
+  margin-top: $apx-8;
 }
 
 .analyticsSidebar {
   position: sticky;
-  top: $apx-12;
+  top: $apx-16;
   display: grid;
-  gap: $apx-10;
-  border: $apx-1 solid #e1e4ef;
-  border-radius: $apx-10;
-  background: #f8f9fd;
+  gap: $apx-12;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-16;
+  background: linear-gradient(180deg, #ffffff 0%, #f8f9ff 100%);
+  box-shadow: 0 $apx-10 $apx-30 rgba(30, 34, 58, 0.06);
   padding: $apx-12;
 }
 
 .analyticsSidebarHeader {
   display: grid;
-  gap: $apx-3;
-  padding: $apx-4 $apx-4 $apx-8;
+  gap: $apx-2;
+  margin-bottom: $apx-2;
+  border-bottom: $apx-1 solid #eceef5;
+  padding: $apx-8 $apx-10 $apx-12;
 
   span {
     color: #777b8d;
@@ -125,28 +128,41 @@
 
   strong {
     color: #242633;
-    font-size: $apx-17;
+    font-size: $apx-15;
     line-height: 1.2;
   }
 }
 
 .analyticsSideNav {
   display: grid;
-  gap: $apx-8;
+  gap: $apx-4;
 }
 
 .analyticsSideNavItem,
 .analyticsSideNavActive {
+  position: relative;
   display: grid;
-  gap: $apx-4;
+  gap: $apx-2;
   width: 100%;
-  min-height: $apx-64;
-  border: 0;
-  border-radius: $apx-8;
-  padding: $apx-10 $apx-12;
+  min-height: $apx-58;
+  border: $apx-1 solid transparent;
+  border-radius: $apx-12;
+  padding: $apx-10 $apx-12 $apx-10 $apx-18;
   text-align: left;
   cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &::before {
+    position: absolute;
+    top: $apx-12;
+    bottom: $apx-12;
+    left: $apx-8;
+    width: $apx-4;
+    border-radius: $apx-999;
+    background: transparent;
+    content: "";
+  }
 
   span {
     font-size: $apx-13;
@@ -155,32 +171,41 @@
   }
 
   small {
-    font-size: $apx-11;
+    font-size: $apx-10;
     font-weight: 700;
     line-height: 1.25;
   }
 }
 
 .analyticsSideNavItem {
-  background: #eef0f6;
+  border-color: #edf0f7;
+  background: #fff;
   color: #242633;
+  box-shadow: 0 $apx-4 $apx-14 rgba(30, 34, 58, 0.03);
 
   small {
     color: #73778a;
   }
 
   &:hover {
-    background: #e6e9f3;
+    transform: translateY(calc(#{$apx-1} * -1));
+    border-color: #dddff0;
+    background: #fbfbff;
   }
 }
 
 .analyticsSideNavActive {
-  background: #260b86;
-  color: #fff;
-  box-shadow: 0 $apx-8 $apx-18 rgba(38, 11, 134, 0.2);
+  border-color: #260b86;
+  background: #fff;
+  color: #260b86;
+  box-shadow: 0 $apx-8 $apx-22 rgba(38, 11, 134, 0.14), inset $apx-4 0 0 #260b86;
+
+  &::before {
+    background: #260b86;
+  }
 
   small {
-    color: rgba(255, 255, 255, 0.72);
+    color: #5d4ca0;
   }
 }
 
@@ -191,16 +216,19 @@
 }
 
 .analyticsContentHeader {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: $apx-16;
-  border: $apx-1 solid #e1e4ef;
-  border-radius: $apx-10;
-  background: #fff;
-  padding: $apx-14 $apx-16;
+  align-items: center;
+  gap: $apx-12;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-16;
+  background: linear-gradient(135deg, #ffffff 0%, #faf9ff 100%);
+  box-shadow: 0 $apx-10 $apx-28 rgba(30, 34, 58, 0.05);
+  padding: $apx-16 $apx-18;
 
   span {
+    display: block;
     color: #777b8d;
     font-size: $apx-11;
     font-weight: 900;
@@ -208,24 +236,25 @@
   }
 
   h4 {
-    margin: $apx-3 0 $apx-4;
+    margin: 0 0 $apx-2;
     color: #242633;
-    font-size: $apx-22;
+    font-size: $apx-24;
     line-height: 1.15;
   }
 
   p {
     margin: 0;
     color: #73778a;
-    font-size: $apx-13;
+    font-size: $apx-12;
     font-weight: 700;
   }
 
   strong {
     border-radius: $apx-999;
-    background: #f0edff;
-    color: #260b86;
-    padding: $apx-7 $apx-11;
+    background: #260b86;
+    color: #fff;
+    box-shadow: 0 $apx-8 $apx-18 rgba(38, 11, 134, 0.18);
+    padding: $apx-8 $apx-12;
     font-size: $apx-12;
     white-space: nowrap;
   }
@@ -251,11 +280,13 @@
   overflow: hidden;
   display: grid;
   gap: $apx-10;
-  min-height: $apx-150;
-  border: $apx-1 solid #e3e5ef;
-  border-radius: $apx-8;
-  background: #fff;
+  min-height: $apx-138;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
   padding: $apx-18;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 
   &::before {
     content: "";
@@ -263,6 +294,12 @@
     inset: 0 auto 0 0;
     width: $apx-5;
     background: var(--analytics-accent, #260b86);
+  }
+
+  &:hover {
+    transform: translateY(calc(#{$apx-1} * -1));
+    border-color: #cfd5e4;
+    box-shadow: 0 $apx-12 $apx-28 rgba(30, 34, 58, 0.07);
   }
 
   span {
@@ -311,9 +348,10 @@
 .analyticsPanel {
   display: grid;
   gap: $apx-14;
-  border: $apx-1 solid #e3e5ef;
-  border-radius: $apx-8;
-  background: #fff;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
   padding: $apx-18;
 }
 
@@ -348,9 +386,10 @@
   gap: $apx-8;
   justify-self: end;
   width: min(100%, $apx-650);
-  border: $apx-1 solid #e3e5ef;
-  border-radius: $apx-8;
-  background: #f8f9fc;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f8ff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.05);
   padding: $apx-12;
 }
 
@@ -441,9 +480,9 @@
   div {
     display: grid;
     gap: $apx-6;
-    border: $apx-1 solid #eceef6;
-    border-radius: $apx-8;
-    background: #f8f9fc;
+    border: $apx-1 solid #e4e7f1;
+    border-radius: $apx-12;
+    background: #fff;
     padding: $apx-14;
   }
 
@@ -524,9 +563,10 @@
   align-items: center;
   gap: $apx-12;
   width: 100%;
-  min-height: $apx-44;
-  border-radius: $apx-8;
-  background: #e9eaf2;
+  min-height: $apx-48;
+  border: $apx-1 solid #e2e5ef;
+  border-radius: $apx-10;
+  background: #f4f5fb;
   padding: 0 $apx-18;
   text-align: left;
 }
@@ -547,9 +587,10 @@
 .analyticsManagerRatingCard {
   display: grid;
   gap: $apx-12;
-  border: $apx-1 solid #e3e5ef;
-  border-radius: $apx-8;
-  background: #fbfcff;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
   padding: $apx-14;
 }
 
@@ -650,9 +691,10 @@
 .analyticsManagerFunnelCard {
   display: grid;
   gap: $apx-12;
-  border: $apx-1 solid #e3e5ef;
-  border-radius: $apx-8;
-  background: #fbfcff;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
   padding: $apx-14;
 }
 
@@ -716,7 +758,7 @@
   }
 
   .analyticsSideNav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .analyticsKpiGrid,
