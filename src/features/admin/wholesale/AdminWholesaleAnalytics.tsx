@@ -402,15 +402,15 @@ const periods: Array<{ value: Period; label: string }> = [
   { value: 'all', label: 'Всё время' },
 ];
 
-const tabs: Array<{ value: Tab; label: string }> = [
-  { value: 'overview', label: 'Обзор' },
-  { value: 'managers', label: 'Менеджеры' },
-  { value: 'prices', label: 'Прайсы' },
-  { value: 'clients', label: 'Клиенты' },
-  { value: 'public', label: 'Публичные ссылки' },
-  { value: 'pdf', label: 'PDF' },
-  { value: 'excel', label: 'EXCEL' },
-  { value: 'events', label: 'Журнал событий' },
+const tabs: Array<{ value: Tab; label: string; description: string }> = [
+  { value: 'overview', label: 'Обзор', description: 'Главные KPI, воронка и риски' },
+  { value: 'managers', label: 'Менеджеры', description: 'Рейтинг, качество и управление' },
+  { value: 'prices', label: 'Прайсы', description: 'Проблемы, сроки и карточки' },
+  { value: 'clients', label: 'Клиенты', description: 'Активность, приоритет и история' },
+  { value: 'public', label: 'Публичные ссылки', description: 'Открытия и повторные просмотры' },
+  { value: 'pdf', label: 'PDF', description: 'Скачивания PDF' },
+  { value: 'excel', label: 'EXCEL', description: 'Скачивания Excel' },
+  { value: 'events', label: 'Журнал событий', description: 'Действия и фильтры' },
 ];
 
 function resolveTab(value: string | null): Tab {
@@ -852,6 +852,33 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
     });
   }, [actorFilter, analytics?.recentEvents, eventTypeFilter, managerFilter]);
 
+  const activeTab = tabs.find((item) => item.value === tab) ?? tabs[0];
+
+  const renderTabContent = () => {
+    if (!analytics) return null;
+
+    if (tab === 'overview') return <OverviewTab analytics={analytics} />;
+    if (tab === 'managers') return <ManagersTab analytics={analytics} routerPush={router.push} />;
+    if (tab === 'prices') return <PricesTab analytics={analytics} routerPush={router.push} />;
+    if (tab === 'clients') return <ClientsTab analytics={analytics} routerPush={router.push} />;
+    if (tab === 'public') return <PublicLinksTab analytics={analytics} routerPush={router.push} />;
+    if (tab === 'pdf') return <PdfTab analytics={analytics} routerPush={router.push} />;
+    if (tab === 'excel') return <ExcelTab analytics={analytics} routerPush={router.push} />;
+
+    return (
+      <EventsTab
+        analytics={analytics}
+        events={filteredEvents}
+        eventTypeFilter={eventTypeFilter}
+        actorFilter={actorFilter}
+        managerFilter={managerFilter}
+        setEventTypeFilter={setEventTypeFilter}
+        setActorFilter={setActorFilter}
+        setManagerFilter={setManagerFilter}
+      />
+    );
+  };
+
   const selectTab = (nextTab: Tab) => {
     setTab(nextTab);
     onTabChange?.(nextTab);
@@ -958,40 +985,39 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
         {!analytics && loading ? <EmptyState text="Загружаю общую аналитику" /> : null}
 
         {analytics ? (
-          <>
-            <div className={styles.analyticsTabs}>
-              {tabs.map((item) => (
-                <button
-                  className={tab === item.value ? styles.analyticsTabActive : styles.analyticsTab}
-                  key={item.value}
-                  type="button"
-                  onClick={() => selectTab(item.value)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+          <div className={styles.analyticsDashboardLayout}>
+            <aside className={styles.analyticsSidebar} aria-label="Разделы общей аналитики">
+              <div className={styles.analyticsSidebarHeader}>
+                <span>Дашборд</span>
+                <strong>Разделы</strong>
+              </div>
+              <nav className={styles.analyticsSideNav}>
+                {tabs.map((item) => (
+                  <button
+                    className={tab === item.value ? styles.analyticsSideNavActive : styles.analyticsSideNavItem}
+                    key={item.value}
+                    type="button"
+                    onClick={() => selectTab(item.value)}
+                  >
+                    <span>{item.label}</span>
+                    <small>{item.description}</small>
+                  </button>
+                ))}
+              </nav>
+            </aside>
 
-            {tab === 'overview' ? <OverviewTab analytics={analytics} /> : null}
-            {tab === 'managers' ? <ManagersTab analytics={analytics} routerPush={router.push} /> : null}
-            {tab === 'prices' ? <PricesTab analytics={analytics} routerPush={router.push} /> : null}
-            {tab === 'clients' ? <ClientsTab analytics={analytics} routerPush={router.push} /> : null}
-            {tab === 'public' ? <PublicLinksTab analytics={analytics} routerPush={router.push} /> : null}
-            {tab === 'pdf' ? <PdfTab analytics={analytics} routerPush={router.push} /> : null}
-            {tab === 'excel' ? <ExcelTab analytics={analytics} routerPush={router.push} /> : null}
-            {tab === 'events' ? (
-              <EventsTab
-                analytics={analytics}
-                events={filteredEvents}
-                eventTypeFilter={eventTypeFilter}
-                actorFilter={actorFilter}
-                managerFilter={managerFilter}
-                setEventTypeFilter={setEventTypeFilter}
-                setActorFilter={setActorFilter}
-                setManagerFilter={setManagerFilter}
-              />
-            ) : null}
-          </>
+            <section className={styles.analyticsContent}>
+              <div className={styles.analyticsContentHeader}>
+                <div>
+                  <span>Раздел</span>
+                  <h4>{activeTab.label}</h4>
+                  <p>{activeTab.description}</p>
+                </div>
+                {tab === 'managers' ? <strong>{analytics.managers.length} менеджеров</strong> : null}
+              </div>
+              <div className={styles.analyticsContentBody}>{renderTabContent()}</div>
+            </section>
+          </div>
         ) : null}
       </div>
     </div>

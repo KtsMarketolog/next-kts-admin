@@ -92,6 +92,150 @@
   box-shadow: 0 $apx-6 $apx-16 rgba(38, 11, 134, 0.22);
 }
 
+.analyticsDashboardLayout {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: $apx-16;
+  align-items: start;
+  margin-top: $apx-4;
+}
+
+.analyticsSidebar {
+  position: sticky;
+  top: $apx-12;
+  display: grid;
+  gap: $apx-10;
+  border: $apx-1 solid #e1e4ef;
+  border-radius: $apx-10;
+  background: #f8f9fd;
+  padding: $apx-12;
+}
+
+.analyticsSidebarHeader {
+  display: grid;
+  gap: $apx-3;
+  padding: $apx-4 $apx-4 $apx-8;
+
+  span {
+    color: #777b8d;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-17;
+    line-height: 1.2;
+  }
+}
+
+.analyticsSideNav {
+  display: grid;
+  gap: $apx-8;
+}
+
+.analyticsSideNavItem,
+.analyticsSideNavActive {
+  display: grid;
+  gap: $apx-4;
+  width: 100%;
+  min-height: $apx-64;
+  border: 0;
+  border-radius: $apx-8;
+  padding: $apx-10 $apx-12;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+
+  span {
+    font-size: $apx-13;
+    font-weight: 900;
+    line-height: 1.2;
+  }
+
+  small {
+    font-size: $apx-11;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+}
+
+.analyticsSideNavItem {
+  background: #eef0f6;
+  color: #242633;
+
+  small {
+    color: #73778a;
+  }
+
+  &:hover {
+    background: #e6e9f3;
+  }
+}
+
+.analyticsSideNavActive {
+  background: #260b86;
+  color: #fff;
+  box-shadow: 0 $apx-8 $apx-18 rgba(38, 11, 134, 0.2);
+
+  small {
+    color: rgba(255, 255, 255, 0.72);
+  }
+}
+
+.analyticsContent {
+  display: grid;
+  gap: $apx-14;
+  min-width: 0;
+}
+
+.analyticsContentHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: $apx-16;
+  border: $apx-1 solid #e1e4ef;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14 $apx-16;
+
+  span {
+    color: #777b8d;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  h4 {
+    margin: $apx-3 0 $apx-4;
+    color: #242633;
+    font-size: $apx-22;
+    line-height: 1.15;
+  }
+
+  p {
+    margin: 0;
+    color: #73778a;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+
+  strong {
+    border-radius: $apx-999;
+    background: #f0edff;
+    color: #260b86;
+    padding: $apx-7 $apx-11;
+    font-size: $apx-12;
+    white-space: nowrap;
+  }
+}
+
+.analyticsContentBody {
+  display: grid;
+  gap: $apx-14;
+}
+
 .analyticsFilters {
   display: flex;
   flex-wrap: wrap;
@@ -563,6 +707,18 @@
 }
 
 @media (max-width: 1024px) {
+  .analyticsDashboardLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsSidebar {
+    position: static;
+  }
+
+  .analyticsSideNav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .analyticsKpiGrid,
   .analyticsQualityGrid,
   .analyticsPublicGrid {
@@ -595,21 +751,26 @@
 }
 
 @media (max-width: 800px) {
+  .analyticsDashboardLayout,
   .analyticsToolbar,
   .analyticsExportGrid,
   .analyticsExportMail,
+  .analyticsContentHeader,
   .analyticsPanelHeader,
   .analyticsList div {
     grid-template-columns: 1fr;
   }
 
+  .analyticsDashboardLayout,
   .analyticsToolbar,
+  .analyticsContentHeader,
   .analyticsPanelHeader {
     display: grid;
   }
 
   .analyticsPeriod,
   .analyticsTabs,
+  .analyticsSideNav,
   .analyticsPeriod button,
   .analyticsExportPanel,
   .analyticsKpiGrid,
