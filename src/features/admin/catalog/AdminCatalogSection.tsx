@@ -84,6 +84,8 @@ const EMPTY_FILTERS: CatalogFilters = {
   brand: '',
 };
 
+const CATALOG_PRODUCT_PAGE_LIMIT = 100;
+
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -127,6 +129,30 @@ function formatStockLogDate(value: string) {
   return new Date(value).toLocaleString('ru-RU');
 }
 
+function renderCatalogSkeleton() {
+  return (
+    <div className={styles.catalogSkeletonList} aria-busy="true" aria-label="Загрузка каталога">
+      {Array.from({ length: 4 }, (_, cardIndex) => (
+        <article className={styles.catalogProductCard} key={cardIndex}>
+          <div className={styles.catalogProductFields}>
+            {Array.from({ length: 10 }, (_, fieldIndex) => (
+              <div className={styles.skeletonField} key={fieldIndex}>
+                <span className={styles.skeletonLabelLine} />
+                <span className={styles.skeletonInputLine} />
+              </div>
+            ))}
+          </div>
+          <div className={styles.catalogProductMeta}>
+            <span className={styles.skeletonInputLine} />
+            <span className={styles.skeletonInputLine} />
+            <span className={styles.skeletonInputLine} />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
@@ -146,27 +172,32 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const loadCatalog = useCallback(async (nextSearch = '', nextFilters: CatalogFilters = EMPTY_FILTERS) => {
     setLoading(true);
     const params = new URLSearchParams({
-      limit: '200',
+      limit: String(CATALOG_PRODUCT_PAGE_LIMIT),
       search: nextSearch,
       active: nextFilters.active,
       category: nextFilters.category,
       subcategory: nextFilters.subcategory,
       brand: nextFilters.brand,
     });
-    const response = await fetch(`/api/admin/catalog/products?${params.toString()}`, { cache: 'no-store' });
-    setLoading(false);
-    if (!response.ok) {
-      showStatus(await readError(response, 'Не удалось загрузить каталог'));
-      return;
+    try {
+      const response = await fetch(`/api/admin/catalog/products?${params.toString()}`, { cache: 'no-store' });
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось загрузить каталог'));
+        return;
+      }
+      const data = await response.json();
+      setProducts(Array.isArray(data.products) ? data.products : []);
+      setStats(data.stats ?? null);
+      setFilterOptions({
+        categories: Array.isArray(data.filterOptions?.categories) ? data.filterOptions.categories : [],
+        subcategories: Array.isArray(data.filterOptions?.subcategories) ? data.filterOptions.subcategories : [],
+        brands: Array.isArray(data.filterOptions?.brands) ? data.filterOptions.brands : [],
+      });
+    } catch {
+      showStatus('Не удалось загрузить каталог');
+    } finally {
+      setLoading(false);
     }
-    const data = await response.json();
-    setProducts(Array.isArray(data.products) ? data.products : []);
-    setStats(data.stats ?? null);
-    setFilterOptions({
-      categories: Array.isArray(data.filterOptions?.categories) ? data.filterOptions.categories : [],
-      subcategories: Array.isArray(data.filterOptions?.subcategories) ? data.filterOptions.subcategories : [],
-      brands: Array.isArray(data.filterOptions?.brands) ? data.filterOptions.brands : [],
-    });
   }, [showStatus]);
 
   useEffect(() => {
@@ -288,7 +319,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
 
     const data = await response.json();
     if (data.product) {
-      setProducts((current) => [data.product, ...current].slice(0, 200));
+      setProducts((current) => [data.product, ...current].slice(0, CATALOG_PRODUCT_PAGE_LIMIT));
       setDraft(EMPTY_DRAFT);
       markSaved('new');
       void loadCatalog(search, filters);
@@ -605,12 +636,12 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       </div>
 
       {loading ? (
-        <p className={styles.mutedText}>Загрузка каталога...</p>
+        renderCatalogSkeleton()
       ) : products.length === 0 ? (
         <p className={styles.mutedText}>Товары не найдены</p>
       ) : (
         <>
-          <p className={styles.mutedText}>Показаны первые 200 товаров. Для точного поиска используйте строку поиска.</p>
+          <p className={styles.mutedText}>Показаны первые {CATALOG_PRODUCT_PAGE_LIMIT} товаров. Для точного поиска используйте строку поиска.</p>
           <div className={styles.catalogProductList}>
             {products.map((product) => (
               <article className={styles.catalogProductCard} key={product.id}>

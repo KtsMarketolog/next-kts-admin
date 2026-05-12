@@ -47,7 +47,7 @@ export async function GET(request: Request) {
       subcategory,
       brand,
       active: (url.searchParams.get('active') as 'all' | 'active' | 'inactive' | null) ?? 'all',
-      limit: Number(url.searchParams.get('limit') ?? 200),
+      limit: Number(url.searchParams.get('limit') ?? 100),
     }),
     getCatalogAdminStats(),
     getCatalogAdminFilterOptions({ category, subcategory, brand }),

@@ -1018,6 +1018,20 @@
   min-width: 0;
 }
 
+.catalogSkeletonList {
+  display: grid;
+  gap: $apx-12;
+  min-width: 0;
+
+  .catalogProductMeta {
+    align-items: stretch;
+  }
+
+  .skeletonInputLine {
+    width: 100%;
+  }
+}
+
 .catalogProductCard {
   display: grid;
   gap: $apx-12;
