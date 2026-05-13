@@ -507,6 +507,10 @@
   grid-column: span 3;
 }
 
+.analyticsEventFieldSpan2 {
+  grid-column: span 2;
+}
+
 .analyticsEventFieldMono strong {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-size: $apx-12;
@@ -525,10 +529,13 @@
 
 .analyticsEventDetails {
   display: grid;
-  gap: $apx-8;
+  align-content: start;
+  gap: $apx-5;
+  min-height: $apx-68;
+  border: $apx-1 solid #edf0f6;
   border-radius: $apx-10;
   background: #f6f7fb;
-  padding: $apx-12;
+  padding: $apx-10;
 
   > span {
     color: #777b8d;
@@ -549,17 +556,17 @@
 
 .analyticsEventDetailsGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $apx-8;
+  grid-template-columns: 1fr;
+  gap: $apx-6;
   margin: 0;
 
   div {
     display: grid;
-    gap: $apx-4;
+    gap: $apx-3;
     border: $apx-1 solid #e4e7f1;
     border-radius: $apx-8;
     background: #fff;
-    padding: $apx-9 $apx-10;
+    padding: $apx-7 $apx-8;
   }
 
   dt {
@@ -1020,7 +1027,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .analyticsEventFieldWide {
+  .analyticsEventFieldWide,
+  .analyticsEventFieldSpan2 {
     grid-column: span 2;
   }
 }
@@ -1079,7 +1087,8 @@
     grid-template-columns: 1fr;
   }
 
-  .analyticsEventFieldWide {
+  .analyticsEventFieldWide,
+  .analyticsEventFieldSpan2 {
     grid-column: span 1;
   }
 

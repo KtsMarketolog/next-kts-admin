@@ -1655,18 +1655,21 @@ function EventField({
   label,
   value,
   href,
+  span,
   wide,
   mono,
 }: {
   label: string;
   value: string | null | undefined;
   href?: string;
+  span?: 2 | 3;
   wide?: boolean;
   mono?: boolean;
 }) {
   const className = [
     styles.analyticsEventField,
-    wide ? styles.analyticsEventFieldWide : '',
+    span === 2 ? styles.analyticsEventFieldSpan2 : '',
+    span === 3 || wide ? styles.analyticsEventFieldWide : '',
     mono ? styles.analyticsEventFieldMono : '',
   ].filter(Boolean).join(' ');
 
@@ -1701,22 +1704,22 @@ function EventCard({ event }: { event: AnalyticsEvent }) {
         <EventField label="Менеджер" value={event.managerName} />
         <EventField label="Прайс" value={event.priceTitle} />
         <EventField label="Клиент" value={event.clientName} />
-        <EventField label="Referer" value={event.referer} href={refererHref} wide mono />
-      </div>
-      <div className={styles.analyticsEventDetails}>
-        <span>Детали</span>
-        {details.entries.length > 0 ? (
-          <dl className={styles.analyticsEventDetailsGrid}>
-            {details.entries.map((entry) => (
-              <div key={`${event.id}-${entry.label}`}>
-                <dt>{entry.label}</dt>
-                <dd>{entry.value}</dd>
-              </div>
-            ))}
-          </dl>
-        ) : (
-          <p>{details.raw || '—'}</p>
-        )}
+        <EventField label="Referer" value={event.referer} href={refererHref} span={2} mono />
+        <div className={styles.analyticsEventDetails}>
+          <span>Детали</span>
+          {details.entries.length > 0 ? (
+            <dl className={styles.analyticsEventDetailsGrid}>
+              {details.entries.map((entry) => (
+                <div key={`${event.id}-${entry.label}`}>
+                  <dt>{entry.label}</dt>
+                  <dd>{entry.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p>{details.raw || '—'}</p>
+          )}
+        </div>
       </div>
     </article>
   );
