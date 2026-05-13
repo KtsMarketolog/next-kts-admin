@@ -793,6 +793,8 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
   font-weight: 700;
   filter: blur($apx-4);
+  color: #242633 !important;
+  cursor: copy !important;
   transition: filter 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
 
   &::placeholder {
@@ -811,6 +813,10 @@
     background: #f7f4ff;
     filter: none;
   }
+}
+
+.userPasswordEditInput {
+  margin-top: $apx-8;
 }
 
 .userPasswordCopyButton {

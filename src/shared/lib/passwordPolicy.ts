@@ -5,17 +5,17 @@ export type PasswordPolicyResult = {
 
 export function validatePasswordPolicy(password: string): PasswordPolicyResult {
   if (password.length < 10) {
-    return { ok: false, error: 'Password must be at least 10 characters' };
+    return { ok: false, error: 'Пароль должен быть не короче 10 символов. Добавьте символы и повторите сохранение.' };
   }
   if (password.length > 200) {
-    return { ok: false, error: 'Password must be 10-200 characters' };
+    return { ok: false, error: 'Пароль должен быть не длиннее 200 символов' };
   }
-  if (!/[A-Za-zА-Яа-я]/.test(password) || !/\d/.test(password)) {
-    return { ok: false, error: 'Password must include letters and digits' };
+  if (!/[\p{L}]/u.test(password) || !/\d/.test(password)) {
+    return { ok: false, error: 'Пароль должен содержать буквы и цифры. Добавьте букву и цифру, затем сохраните снова.' };
   }
   const simple = password.toLowerCase();
   if (['password', 'qwerty', '123456', 'admin', 'kts'].some((part) => simple.includes(part))) {
-    return { ok: false, error: 'Password is too simple' };
+    return { ok: false, error: 'Пароль слишком простой. Используйте другой пароль и сохраните снова.' };
   }
   return { ok: true };
 }
