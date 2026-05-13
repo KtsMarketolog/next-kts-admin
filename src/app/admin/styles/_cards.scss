@@ -1484,12 +1484,14 @@
 .priceCategory {
   display: grid;
   gap: $apx-12;
-  margin: $apx-22 0;
+  margin: $apx-12 0;
+  border-bottom: $apx-1 solid #e6e7ef;
+  padding-bottom: $apx-12;
 }
 
 .priceCategoryHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax($apx-520, $apx-760);
+  grid-template-columns: minmax(0, 1fr) max-content;
   gap: $apx-12;
   align-items: center;
 }
@@ -1504,6 +1506,18 @@
     font-size: $apx-22;
     text-transform: uppercase;
   }
+}
+
+.priceCategoryMeta {
+  display: block;
+  margin-top: $apx-4;
+  color: #6f7182;
+  font-size: $apx-12;
+  font-weight: 700;
+}
+
+.priceCategoryToggle {
+  white-space: nowrap;
 }
 
 .priceGroupImageBox {
@@ -1558,6 +1572,11 @@
   grid-template-columns: repeat(2, max-content);
   gap: $apx-8;
   align-items: end;
+}
+
+.priceGroupProducts {
+  display: grid;
+  gap: $apx-12;
 }
 
 .priceProduct {

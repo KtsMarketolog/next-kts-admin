@@ -89,6 +89,13 @@ function stockLabel(product: PublicWholesaleCategory['products'][number]) {
   return product.isExpected ? 'Скоро поступление' : 'Под заказ';
 }
 
+function normalizeQuantityInput(value: string) {
+  if (!value.trim()) return 0;
+  const quantity = Number(value);
+  if (!Number.isFinite(quantity)) return 0;
+  return Math.max(0, Math.min(999, Math.floor(quantity)));
+}
+
 type PriceClientEventType =
   | 'public_price_product_opened'
   | 'public_price_request_started'
@@ -368,7 +375,18 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
                               >
                                 -1
                               </button>
-                              <span className={styles.quantityValue}>{currentQuantity}</span>
+                              <input
+                                className={styles.quantityValue}
+                                type="number"
+                                inputMode="numeric"
+                                min={0}
+                                max={999}
+                                step={1}
+                                value={currentQuantity}
+                                onChange={(event) => changeQuantity(variant.priceItemId, normalizeQuantityInput(event.target.value), product.title)}
+                                onFocus={(event) => event.currentTarget.select()}
+                                aria-label={`Количество для ${product.title}`}
+                              />
                               <button
                                 type="button"
                                 className={styles.quantityButton}

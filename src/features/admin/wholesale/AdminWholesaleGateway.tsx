@@ -119,7 +119,6 @@ const emptyManager = {
   isActive: true,
 };
 
-const CATALOG_PAGE_SIZE = 120;
 const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
 
 function makeToken() {
@@ -348,6 +347,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [editorLoading, setEditorLoading] = useState(startsInEditor);
   const [discount, setDiscount] = useState('');
   const [groupDiscounts, setGroupDiscounts] = useState<Record<string, string>>({});
+  const [expandedPriceGroups, setExpandedPriceGroups] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
@@ -357,7 +357,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogCategoryId, setCatalogCategoryId] = useState('all');
   const [catalogPriceGroup, setCatalogPriceGroup] = useState('all');
-  const [catalogVisibleLimit, setCatalogVisibleLimit] = useState(CATALOG_PAGE_SIZE);
   const deferredCatalogQuery = useDeferredValue(catalogQuery);
 
   const editMatch = pathname.match(/\/admin\/wholesale\/(\d+)\/edit$/);
@@ -448,16 +447,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       }),
     [filteredCatalogRows],
   );
-  const visibleCatalogRows = useMemo(
-    () => sortedCatalogRows.slice(0, catalogVisibleLimit),
-    [catalogVisibleLimit, sortedCatalogRows],
-  );
-  const visibleCatalogGroups = useMemo(() => groupCatalogRowsByPriceGroup(visibleCatalogRows), [visibleCatalogRows]);
+  const filteredCatalogGroups = useMemo(() => groupCatalogRowsByPriceGroup(sortedCatalogRows), [sortedCatalogRows]);
   const commentRows = useMemo(() => getTextareaRows(editor.comment), [editor.comment]);
-
-  useEffect(() => {
-    setCatalogVisibleLimit(CATALOG_PAGE_SIZE);
-  }, [catalogCategoryId, catalogPriceGroup, deferredCatalogQuery]);
 
   const showStatus = (message: string) => {
     setStatus(message);
@@ -657,6 +648,13 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         const base = catalogDiscountBaseByKey.get(key);
         return base?.groupKey === groupKey ? { ...item, visible } : item;
       }),
+    }));
+  };
+
+  const togglePriceGroupExpanded = (groupKey: string) => {
+    setExpandedPriceGroups((current) => ({
+      ...current,
+      [groupKey]: !current[groupKey],
     }));
   };
 
@@ -1087,103 +1085,119 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                 </select>
               </label>
               <p>
-                Показано {visibleCatalogRows.length} из {filteredCatalogRows.length}. Всего позиций: {catalogRows.length}.
+                Ценовых групп: {filteredCatalogGroups.length}. Позиции: {filteredCatalogRows.length} из {catalogRows.length}.
               </p>
             </div>
 
             {filteredCatalogRows.length === 0 ? (
               <p className={styles.mutedText}>По выбранному фильтру товары не найдены.</p>
             ) : (
-              visibleCatalogGroups.map((group) => (
-                <div className={styles.priceCategory} key={group.id}>
-                  <div className={styles.priceCategoryHeader}>
-                    <div className={styles.priceCategoryTitle}>
-                      <div className={styles.priceGroupImageBox}>
-                        {group.imageUrl ? <img src={group.imageUrl} alt="" /> : <span>Нет фото</span>}
-                      </div>
-                      <h3>{group.title}</h3>
-                    </div>
-                    <div className={styles.priceGroupTools}>
-                      <div className={styles.priceGroupDiscount}>
-                        <span>Скидка для группы, %</span>
-                        <input
-                          value={groupDiscounts[group.id] ?? ''}
-                          onChange={(event) =>
-                            setGroupDiscounts((current) => ({
-                              ...current,
-                              [group.id]: event.target.value,
-                            }))
-                          }
-                          placeholder="Например 20"
-                        />
-                        <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
-                          Рассчитать
-                        </button>
-                      </div>
-                      <div className={styles.priceGroupVisibility}>
-                        <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, true)}>Показать все</button>
-                        <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, false)}>Убрать все</button>
-                      </div>
-                    </div>
-                  </div>
-                  {group.products.map((product) => {
-                    const hasSeveralPositions = product.variants.length > 1;
+              filteredCatalogGroups.map((group) => {
+                const isExpanded = expandedPriceGroups[group.id] === true;
+                const groupPositionCount = group.products.reduce((sum, product) => sum + product.variants.length, 0);
 
-                    return (
-                      <article className={styles.priceProduct} key={product.id}>
-                        <div className={styles.priceProductInfo}>
-                          <div>
-                            <strong>{product.title}</strong>
-                            {product.sku ? <p>Арт.: {product.sku}</p> : null}
-                            {product.description ? <p>{product.description}</p> : null}
-                            {hasSeveralPositions ? (
-                              <div className={styles.actions}>
-                                <button className={styles.secondary} onClick={() => setProductVisible(product.id, true)}>Показать все позиции</button>
-                                <button className={styles.secondary} onClick={() => setProductVisible(product.id, false)}>Убрать все позиции</button>
-                              </div>
-                            ) : null}
+                return (
+                  <div className={styles.priceCategory} key={group.id}>
+                    <div className={styles.priceCategoryHeader}>
+                      <div className={styles.priceCategoryTitle}>
+                        <div className={styles.priceGroupImageBox}>
+                          {group.imageUrl ? <img src={group.imageUrl} alt="" /> : <span>Нет фото</span>}
+                        </div>
+                        <div>
+                          <h3>{group.title}</h3>
+                          <span className={styles.priceCategoryMeta}>
+                            {group.products.length} товаров · {groupPositionCount} позиций
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        className={`${styles.secondary} ${styles.priceCategoryToggle}`}
+                        type="button"
+                        onClick={() => togglePriceGroupExpanded(group.id)}
+                        aria-expanded={isExpanded}
+                      >
+                        {isExpanded ? 'Скрыть' : 'Раскрыть'}
+                      </button>
+                    </div>
+
+                    {isExpanded ? (
+                      <>
+                        <div className={styles.priceGroupTools}>
+                          <div className={styles.priceGroupDiscount}>
+                            <span>Скидка для группы, %</span>
+                            <input
+                              value={groupDiscounts[group.id] ?? ''}
+                              onChange={(event) =>
+                                setGroupDiscounts((current) => ({
+                                  ...current,
+                                  [group.id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Например 20"
+                            />
+                            <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
+                              Рассчитать
+                            </button>
+                          </div>
+                          <div className={styles.priceGroupVisibility}>
+                            <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, true)}>Показать все</button>
+                            <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, false)}>Убрать все</button>
                           </div>
                         </div>
-                        <div className={styles.variantTable}>
-                          <div>EUR</div>
-                          <div>RUB</div>
-                          <div>CNY</div>
-                          <div>Остаток</div>
-                          <div>Цена в прайсе</div>
-                          <div>Показ</div>
-                          {product.variants.map((variant) => {
-                            const key = `${product.id}:${variant.id ?? 'base'}`;
-                            const item = itemByKey.get(key);
+                        <div className={styles.priceGroupProducts}>
+                          {group.products.map((product) => {
+                            const hasSeveralPositions = product.variants.length > 1;
+
                             return (
-                              <div className={styles.variantRow} key={key}>
-                                <span>{product.priceEur || '—'}</span>
-                                <span>{product.priceRub || '—'}</span>
-                                <span>{product.priceCny || '—'}</span>
-                                <span>{stockLabel(product)}</span>
-                                <input value={item?.customWholesalePrice ?? ''} onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })} />
-                                <label className={styles.checkbox}>
-                                  <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
-                                  Показывать
-                                </label>
-                              </div>
+                              <article className={styles.priceProduct} key={product.id}>
+                                <div className={styles.priceProductInfo}>
+                                  <div>
+                                    <strong>{product.title}</strong>
+                                    {product.sku ? <p>Арт.: {product.sku}</p> : null}
+                                    {product.description ? <p>{product.description}</p> : null}
+                                    {hasSeveralPositions ? (
+                                      <div className={styles.actions}>
+                                        <button className={styles.secondary} onClick={() => setProductVisible(product.id, true)}>Показать все позиции</button>
+                                        <button className={styles.secondary} onClick={() => setProductVisible(product.id, false)}>Убрать все позиции</button>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <div className={styles.variantTable}>
+                                  <div>EUR</div>
+                                  <div>RUB</div>
+                                  <div>CNY</div>
+                                  <div>Остаток</div>
+                                  <div>Цена в прайсе</div>
+                                  <div>Показ</div>
+                                  {product.variants.map((variant) => {
+                                    const key = `${product.id}:${variant.id ?? 'base'}`;
+                                    const item = itemByKey.get(key);
+                                    return (
+                                      <div className={styles.variantRow} key={key}>
+                                        <span>{product.priceEur || '—'}</span>
+                                        <span>{product.priceRub || '—'}</span>
+                                        <span>{product.priceCny || '—'}</span>
+                                        <span>{stockLabel(product)}</span>
+                                        <input value={item?.customWholesalePrice ?? ''} onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })} />
+                                        <label className={styles.checkbox}>
+                                          <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
+                                          Показывать
+                                        </label>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </article>
                             );
                           })}
                         </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ))
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })
             )}
-
-            {visibleCatalogRows.length < filteredCatalogRows.length ? (
-              <button
-                className={`${styles.secondary} ${styles.wholesaleLoadMore}`}
-                onClick={() => setCatalogVisibleLimit((current) => current + CATALOG_PAGE_SIZE)}
-              >
-                Показать ещё {Math.min(CATALOG_PAGE_SIZE, filteredCatalogRows.length - visibleCatalogRows.length)}
-              </button>
-            ) : null}
           </>
         )}
 

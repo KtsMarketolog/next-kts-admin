@@ -367,9 +367,20 @@
 }
 
 .quantityValue {
+  box-sizing: border-box;
+  width: $apx-58;
+  padding: 0 $apx-6;
   border-color: #ece9f8;
   background: #f5f3fb;
   color: #151827;
+  text-align: center;
+  appearance: textfield;
+
+  &::-webkit-inner-spin-button,
+  &::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+  }
 }
 
 .requestBar {
@@ -505,6 +516,7 @@
   .quantityButton,
   .quantityValue {
     min-width: $apx-m-50;
+    width: $apx-m-50;
     height: $apx-m-42;
     border-radius: $apx-m-9;
     font-size: $apx-m-15;
