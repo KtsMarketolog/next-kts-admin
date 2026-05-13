@@ -74,6 +74,7 @@ type AnalyticsEvent = {
   details: string;
   sessionId: string;
   referer: string;
+  eventLabelOverride?: string;
 };
 
 type ClientRow = {
@@ -485,6 +486,46 @@ const eventDetailLabels: Record<string, string> = {
   priceGroup: 'Ценовая группа',
   details: 'Детали',
 };
+
+function formatTimes(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const word = mod10 === 1 && mod100 !== 11 ? 'раз' : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 'раза' : 'раз';
+  return `${count} ${word}`;
+}
+
+function eventRepeatKey(event: AnalyticsEvent, group: string) {
+  return [
+    group,
+    event.priceId ?? event.priceTitle ?? '',
+    event.clientId || event.clientName || '',
+    event.sessionId || '',
+    event.referer || '',
+  ].join('|');
+}
+
+function aggregateRepeatedEvents(events: AnalyticsEvent[], options: { group: string; label: (count: number) => string }) {
+  const groups = new Map<string, { event: AnalyticsEvent; count: number }>();
+
+  for (const event of events) {
+    const key = eventRepeatKey(event, options.group);
+    const current = groups.get(key);
+
+    if (!current) {
+      groups.set(key, { event: { ...event }, count: 1 });
+      continue;
+    }
+
+    current.count += 1;
+  }
+
+  return Array.from(groups.values())
+    .map(({ event, count }) => ({
+      ...event,
+      eventLabelOverride: options.label(count),
+    }))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
 
 const problemLabels: Record<Problem, string> = {
   EMPTY: 'Пустой',
@@ -1314,6 +1355,11 @@ function PublicActivitySection({
 }
 
 function PublicLinksTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
+  const latestViews = aggregateRepeatedEvents(analytics.publicLinks.latestViews, {
+    group: 'public_price_view',
+    label: (count) => `Клиент открыл прайс ${formatTimes(count)}`,
+  });
+
   return (
     <>
       <div className={styles.analyticsKpiGrid}>
@@ -1327,13 +1373,18 @@ function PublicLinksTab({ analytics, routerPush }: { analytics: Analytics; route
         <KpiCard title="Среднее" value={analytics.publicLinks.averageViewsPerPrice} text="Просмотров на прайс" tone={styles.analyticsToneViolet} />
       </div>
       <TopPublicTable analytics={analytics} routerPush={routerPush} />
-      <EventsTable title="Последние просмотры" events={analytics.publicLinks.latestViews} empty="Просмотров публичных ссылок пока нет" />
+      <EventsTable title="Последние просмотры" events={latestViews} empty="Просмотров публичных ссылок пока нет" />
       <SimplePricesTable title="Прайсы без просмотров" rows={analytics.publicLinks.pricesWithoutViewsList} routerPush={routerPush} empty="Прайсов без просмотров нет" />
     </>
   );
 }
 
 function PdfTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
+  const latestDownloads = aggregateRepeatedEvents(analytics.pdf.latestDownloads, {
+    group: 'public_price_pdf_downloaded',
+    label: (count) => `Клиент скачал PDF ${formatTimes(count)}`,
+  });
+
   return (
     <>
       <div className={styles.analyticsKpiGrid}>
@@ -1347,13 +1398,18 @@ function PdfTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (
         <KpiCard title="Лидер" value={analytics.pdf.topManager?.downloads ?? 0} text={analytics.pdf.topManager?.managerName ?? 'Нет данных'} tone={styles.analyticsToneBlue} />
       </div>
       <TopPdfTable analytics={analytics} routerPush={routerPush} />
-      <EventsTable title="Последние скачивания PDF" events={analytics.pdf.latestDownloads} empty="Скачивания PDF пока не зафиксированы" />
+      <EventsTable title="Последние скачивания PDF" events={latestDownloads} empty="Скачивания PDF пока не зафиксированы" />
       <ManagersPdfTable analytics={analytics} routerPush={routerPush} />
     </>
   );
 }
 
 function ExcelTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
+  const latestDownloads = aggregateRepeatedEvents(analytics.excel.latestDownloads, {
+    group: 'public_price_excel_downloaded',
+    label: (count) => `Клиент скачал Excel ${formatTimes(count)}`,
+  });
+
   return (
     <>
       <div className={styles.analyticsKpiGrid}>
@@ -1367,7 +1423,7 @@ function ExcelTab({ analytics, routerPush }: { analytics: Analytics; routerPush:
         <KpiCard title="Лидер" value={analytics.excel.topManager?.downloads ?? 0} text={analytics.excel.topManager?.managerName ?? 'Нет данных'} tone={styles.analyticsToneBlue} />
       </div>
       <TopExcelTable analytics={analytics} routerPush={routerPush} />
-      <EventsTable title="Последние скачивания Excel" events={analytics.excel.latestDownloads} empty="Скачивания Excel пока не зафиксированы" />
+      <EventsTable title="Последние скачивания Excel" events={latestDownloads} empty="Скачивания Excel пока не зафиксированы" />
       <ManagersExcelTable analytics={analytics} routerPush={routerPush} />
     </>
   );
@@ -1696,7 +1752,7 @@ function EventCard({ event }: { event: AnalyticsEvent }) {
       <div className={styles.analyticsEventCardHeader}>
         <div>
           <span>{formatDate(event.createdAt)}</span>
-          <strong>{eventLabels[event.eventType] ?? event.eventType}</strong>
+          <strong>{event.eventLabelOverride ?? eventLabels[event.eventType] ?? event.eventType}</strong>
         </div>
         <em>{actorLabels[event.actorType] ?? event.actorType}</em>
       </div>

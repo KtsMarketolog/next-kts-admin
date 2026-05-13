@@ -84,7 +84,8 @@
   display: grid;
   grid-template-columns: minmax($apx-250, $apx-286) minmax(0, 1fr);
   gap: $apx-22;
-  max-width: $apx-1500;
+  align-items: start;
+  max-width: $apx-1680;
   margin: 0 auto;
 }
 

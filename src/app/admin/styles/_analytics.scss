@@ -123,6 +123,7 @@
 .analyticsSidebar {
   position: sticky;
   top: $apx-16;
+  align-self: start;
   display: grid;
   gap: $apx-14;
   border: $apx-1 solid #dde2ee;
@@ -156,6 +157,7 @@
 
 .analyticsSideNav {
   display: grid;
+  align-content: start;
   gap: $apx-6;
 }
 
