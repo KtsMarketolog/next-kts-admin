@@ -10,7 +10,7 @@ import {
   type WholesalePriceWorkflowStatus,
 } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
-import { AdminWholesaleAnalytics, type AdminWholesaleAnalyticsTab } from './AdminWholesaleAnalytics';
+import { AdminWholesaleAnalytics } from './AdminWholesaleAnalytics';
 
 type Manager = {
   id: number;
@@ -354,7 +354,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [savedManagerId, setSavedManagerId] = useState<number | null>(null);
   const [managerCreated, setManagerCreated] = useState(false);
-  const [adminAnalyticsTab, setAdminAnalyticsTab] = useState<AdminWholesaleAnalyticsTab>('overview');
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogCategoryId, setCatalogCategoryId] = useState('all');
   const [catalogPriceGroup, setCatalogPriceGroup] = useState('all');
@@ -827,9 +826,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
         {status ? <p className={styles.status}>{status}</p> : null}
 
-        <AdminWholesaleAnalytics onTabChange={setAdminAnalyticsTab} />
-
-        {adminAnalyticsTab === 'managers' ? (
+        <AdminWholesaleAnalytics
+          managerManagementContent={(
           <div className={styles.wholesaleManagersAdminBlock}>
 
         <h3>Добавить менеджера</h3>
@@ -917,7 +915,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           {managers.length === 0 ? <p className={styles.mutedText}>Менеджеров пока нет</p> : null}
         </div>
           </div>
-        ) : null}
+          )}
+        />
       </section>
     );
   }

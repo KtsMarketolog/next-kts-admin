@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 
 type Period = '7d' | '30d' | 'all';
 type ExportFormat = 'pdf' | 'xls';
-type Tab = 'overview' | 'managers' | 'prices' | 'clients' | 'public' | 'pdf' | 'excel' | 'events';
+type Tab = 'overview' | 'managers' | 'managerRatings' | 'prices' | 'clients' | 'public' | 'pdf' | 'excel' | 'events';
 export type AdminWholesaleAnalyticsTab = Tab;
 
 type Problem = 'EMPTY' | 'NO_CLIENT' | 'NO_EXPIRATION' | 'EXPIRED' | 'EXPIRING_SOON' | 'STALE' | 'NO_VIEWS';
@@ -404,7 +404,8 @@ const periods: Array<{ value: Period; label: string }> = [
 
 const tabs: Array<{ value: Tab; label: string; description: string }> = [
   { value: 'overview', label: 'Обзор', description: 'Главные KPI, воронка и риски' },
-  { value: 'managers', label: 'Менеджеры', description: 'Рейтинг, качество и управление' },
+  { value: 'managers', label: 'Менеджеры', description: 'Добавление, управление и статистика' },
+  { value: 'managerRatings', label: 'Рейтинг менеджеров', description: 'Рейтинг и качество воронки' },
   { value: 'prices', label: 'Прайсы', description: 'Проблемы, сроки и карточки' },
   { value: 'clients', label: 'Клиенты', description: 'Активность, приоритет и история' },
   { value: 'public', label: 'Публичные ссылки', description: 'Открытия и повторные просмотры' },
@@ -719,6 +720,7 @@ function ManagerFunnelQualityTable({ rows, routerPush }: { rows: ManagerRow[]; r
 
 type AdminWholesaleAnalyticsProps = {
   onTabChange?: (tab: AdminWholesaleAnalyticsTab) => void;
+  managerManagementContent?: ReactNode;
 };
 
 function AnalyticsExportPanel({
@@ -789,7 +791,7 @@ function AnalyticsExportPanel({
   );
 }
 
-export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalyticsProps) {
+export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent }: AdminWholesaleAnalyticsProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -858,7 +860,8 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
     if (!analytics) return null;
 
     if (tab === 'overview') return <OverviewTab analytics={analytics} />;
-    if (tab === 'managers') return <ManagersTab analytics={analytics} routerPush={router.push} />;
+    if (tab === 'managers') return managerManagementContent ?? null;
+    if (tab === 'managerRatings') return <ManagerRatingsTab analytics={analytics} routerPush={router.push} />;
     if (tab === 'prices') return <PricesTab analytics={analytics} routerPush={router.push} />;
     if (tab === 'clients') return <ClientsTab analytics={analytics} routerPush={router.push} />;
     if (tab === 'public') return <PublicLinksTab analytics={analytics} routerPush={router.push} />;
@@ -1013,7 +1016,7 @@ export function AdminWholesaleAnalytics({ onTabChange }: AdminWholesaleAnalytics
                   <h4>{activeTab.label}</h4>
                   <p>{activeTab.description}</p>
                 </div>
-                {tab === 'managers' ? <strong>{analytics.managers.length} менеджеров</strong> : null}
+                {tab === 'managers' || tab === 'managerRatings' ? <strong>{analytics.managers.length} менеджеров</strong> : null}
               </div>
               <div className={styles.analyticsContentBody}>{renderTabContent()}</div>
             </section>
@@ -1111,7 +1114,7 @@ function OverviewTab({ analytics }: { analytics: Analytics }) {
   );
 }
 
-function ManagersTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
+function ManagerRatingsTab({ analytics, routerPush }: { analytics: Analytics; routerPush: (href: string) => void }) {
   return (
     <>
       <article className={styles.analyticsPanel}>
