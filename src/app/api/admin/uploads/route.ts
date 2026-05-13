@@ -9,6 +9,7 @@ const MAX_FILE_SIZE = 8 * 1024 * 1024;
 const MAX_SVG_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_PRICE_GROUP_SVG_WIDTH = 900;
 const MAX_PRICE_GROUP_SVG_HEIGHT = 600;
+const SVG_DATA_IMAGE_PATTERN = /^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/=\s]+$/i;
 
 const RASTER_TYPES = new Map([
   ['image/jpeg', 'jpg'],
@@ -31,6 +32,7 @@ const SVG_ALLOWED_TAGS = [
   'mask',
   'pattern',
   'use',
+  'image',
   'symbol',
   'clipPath',
   'linearGradient',
@@ -82,6 +84,9 @@ const SVG_ALLOWED_ATTRIBUTES: sanitizeHtml.AllowedAttribute[] = [
   'stop-opacity',
   'gradientUnits',
   'gradientTransform',
+  'patternContentUnits',
+  'patternUnits',
+  'preserveAspectRatio',
   'href',
   'xlink:href',
 ];
@@ -158,12 +163,18 @@ function getUploadRoot() {
 
 function sanitizeSvg(bytes: Buffer) {
   const source = bytes.toString('utf8');
+  validateSvgReferences(source);
+
   const clean = sanitizeHtml(source, {
     allowedTags: SVG_ALLOWED_TAGS,
     allowedAttributes: {
       '*': SVG_ALLOWED_ATTRIBUTES,
     },
     allowedSchemes: [],
+    allowedSchemesByTag: {
+      image: ['data'],
+    },
+    allowedSchemesAppliedToAttributes: ['href', 'xlink:href'],
     parser: {
       lowerCaseAttributeNames: false,
       lowerCaseTags: false,
@@ -175,6 +186,21 @@ function sanitizeSvg(bytes: Buffer) {
   }
 
   return Buffer.from(clean, 'utf8');
+}
+
+function validateSvgReferences(source: string) {
+  const hrefPattern = /\s(?:href|xlink:href)\s*=\s*(["'])(.*?)\1/gi;
+
+  for (const match of source.matchAll(hrefPattern)) {
+    const value = (match[2] ?? '').trim();
+    if (!value || value.startsWith('#')) continue;
+
+    if (value.startsWith('data:') && SVG_DATA_IMAGE_PATTERN.test(value)) {
+      continue;
+    }
+
+    throw new Error('Unsupported SVG reference');
+  }
 }
 
 function normalizePriceGroupSvgSize(bytes: Buffer) {
