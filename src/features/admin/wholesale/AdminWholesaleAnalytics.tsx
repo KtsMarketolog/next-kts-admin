@@ -1641,7 +1641,29 @@ function parseEventDetails(details: string | null | undefined) {
   }
 }
 
-function EventField({ label, value, wide, mono }: { label: string; value: string | null | undefined; wide?: boolean; mono?: boolean }) {
+function isHttpUrl(value: string | null | undefined) {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function EventField({
+  label,
+  value,
+  href,
+  wide,
+  mono,
+}: {
+  label: string;
+  value: string | null | undefined;
+  href?: string;
+  wide?: boolean;
+  mono?: boolean;
+}) {
   const className = [
     styles.analyticsEventField,
     wide ? styles.analyticsEventFieldWide : '',
@@ -1651,13 +1673,20 @@ function EventField({ label, value, wide, mono }: { label: string; value: string
   return (
     <div className={className}>
       <span>{label}</span>
-      <strong>{value || '—'}</strong>
+      <strong>
+        {href && value ? (
+          <a className={styles.analyticsEventLink} href={href} target="_blank" rel="noreferrer">
+            {value}
+          </a>
+        ) : value || '—'}
+      </strong>
     </div>
   );
 }
 
 function EventCard({ event }: { event: AnalyticsEvent }) {
   const details = parseEventDetails(event.details);
+  const refererHref = isHttpUrl(event.referer) ? event.referer : undefined;
 
   return (
     <article className={styles.analyticsEventCard}>
@@ -1672,8 +1701,7 @@ function EventCard({ event }: { event: AnalyticsEvent }) {
         <EventField label="Менеджер" value={event.managerName} />
         <EventField label="Прайс" value={event.priceTitle} />
         <EventField label="Клиент" value={event.clientName} />
-        <EventField label="Session" value={event.sessionId} wide mono />
-        <EventField label="Referer" value={event.referer} wide mono />
+        <EventField label="Referer" value={event.referer} href={refererHref} wide mono />
       </div>
       <div className={styles.analyticsEventDetails}>
         <span>Детали</span>

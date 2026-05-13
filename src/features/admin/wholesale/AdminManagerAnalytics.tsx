@@ -394,13 +394,18 @@ function formatDateOnly(value: string | null | undefined) {
   return year && month && day ? `${day}.${month}.${year}` : value;
 }
 
-function shortValue(value: string | null | undefined) {
-  if (!value) return '—';
-  return value.length > 12 ? `${value.slice(0, 8)}…` : value;
-}
-
 function eventLabel(value: string) {
   return eventLabels[value] ?? value;
+}
+
+function isHttpUrl(value: string | null | undefined) {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 function problemClass(problem: Problem) {
@@ -978,8 +983,29 @@ function EventsTable({ title, events, empty }: { title: string; events: Analytic
   const content = events.length === 0 ? <EmptyState>{empty}</EmptyState> : (
     <div className={styles.tableWrap}>
       <table className={styles.adminTable}>
-        <thead><tr><th>Дата</th><th>Источник</th><th>Событие</th><th>Прайс</th><th>Клиент</th><th>Менеджер</th><th>Session</th><th>Referer</th></tr></thead>
-        <tbody>{events.map((event) => <tr key={event.id}><td>{formatDate(event.createdAt)}</td><td>{event.actorType}</td><td>{eventLabel(event.eventType)}</td><td>{event.priceTitle}</td><td>{event.clientName || '—'}</td><td>{event.managerName || '—'}</td><td>{shortValue(event.sessionId)}</td><td>{shortValue(event.referer)}</td></tr>)}</tbody>
+        <thead><tr><th>Дата</th><th>Источник</th><th>Событие</th><th>Прайс</th><th>Клиент</th><th>Менеджер</th><th>Referer</th></tr></thead>
+        <tbody>
+          {events.map((event) => {
+            const refererHref = isHttpUrl(event.referer) ? event.referer : undefined;
+            return (
+              <tr key={event.id}>
+                <td>{formatDate(event.createdAt)}</td>
+                <td>{event.actorType}</td>
+                <td>{eventLabel(event.eventType)}</td>
+                <td>{event.priceTitle}</td>
+                <td>{event.clientName || '—'}</td>
+                <td>{event.managerName || '—'}</td>
+                <td>
+                  {refererHref ? (
+                    <a className={styles.analyticsEventLink} href={refererHref} target="_blank" rel="noreferrer">
+                      {event.referer}
+                    </a>
+                  ) : event.referer || '—'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
       </table>
     </div>
   );

@@ -512,6 +512,17 @@
   font-size: $apx-12;
 }
 
+.analyticsEventLink {
+  color: #260b86;
+  text-decoration: underline;
+  text-decoration-thickness: $apx-1;
+  text-underline-offset: $apx-3;
+
+  &:hover {
+    color: #15803d;
+  }
+}
+
 .analyticsEventDetails {
   display: grid;
   gap: $apx-8;
