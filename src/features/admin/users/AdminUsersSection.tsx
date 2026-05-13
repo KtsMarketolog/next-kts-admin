@@ -54,11 +54,17 @@ const ROLE_LABELS: Record<AccessUserRole, string> = {
   support_manager: 'Менеджер по сопровождению',
 };
 
-const ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
-  { value: 'manager', label: 'Менеджер по развитию' },
-  { value: 'support_manager', label: 'Менеджер по сопровождению' },
-  { value: 'wholesale_admin', label: 'Админ прайсов' },
+const ADMIN_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
   { value: 'admin', label: 'Администратор' },
+  { value: 'wholesale_admin', label: 'Админ прайсов' },
+];
+
+const MANAGER_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
+  { value: 'manager', label: 'Менеджер по развитию' },
+];
+
+const SUPPORT_MANAGER_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
+  { value: 'support_manager', label: 'Менеджер по сопровождению' },
 ];
 
 const USER_TABS: Array<{ value: UserTab; label: string }> = [
@@ -71,6 +77,26 @@ function tabForRole(role: AccessUserRole): UserTab {
   if (role === 'support_manager') return 'support_manager';
   if (role === 'manager') return 'manager';
   return 'admin';
+}
+
+function roleOptionsForTab(tab: UserTab) {
+  if (tab === 'manager') return MANAGER_ROLE_OPTIONS;
+  if (tab === 'support_manager') return SUPPORT_MANAGER_ROLE_OPTIONS;
+  return ADMIN_ROLE_OPTIONS;
+}
+
+function defaultRoleForTab(tab: UserTab): AccessUserRole {
+  if (tab === 'manager') return 'manager';
+  if (tab === 'support_manager') return 'support_manager';
+  return 'admin';
+}
+
+function emptyDraftForTab(tab: UserTab): Draft {
+  return {
+    ...EMPTY_DRAFT,
+    role: defaultRoleForTab(tab),
+    supportManagerId: tab === 'manager' ? EMPTY_DRAFT.supportManagerId : null,
+  };
 }
 
 async function readError(response: Response, fallback: string) {
@@ -94,6 +120,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
         .sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name, 'ru')),
     [users],
   );
+  const activeRoleOptions = roleOptionsForTab(activeTab);
   const filteredUsers = useMemo(() => users.filter((user) => tabForRole(user.role) === activeTab), [activeTab, users]);
 
   const loadUsers = useCallback(async () => {
@@ -112,6 +139,18 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     void loadUsers();
   }, [loadUsers]);
 
+  useEffect(() => {
+    setDraft((current) => {
+      const roleIsAllowed = roleOptionsForTab(activeTab).some((option) => option.value === current.role);
+      const role = roleIsAllowed ? current.role : defaultRoleForTab(activeTab);
+      return {
+        ...current,
+        role,
+        supportManagerId: role === 'manager' ? current.supportManagerId : null,
+      };
+    });
+  }, [activeTab]);
+
   const updateUser = (id: string, patch: Partial<AccessUser>) => {
     setUsers((current) => current.map((user) => (user.id === id ? { ...user, ...patch } : user)));
   };
@@ -128,11 +167,18 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   };
 
   const createUser = async () => {
+    const role = activeRoleOptions.some((option) => option.value === draft.role) ? draft.role : defaultRoleForTab(activeTab);
+    const payload = {
+      ...draft,
+      role,
+      supportManagerId: role === 'manager' ? draft.supportManagerId : null,
+    };
+
     setBusyId('new');
     const response = await fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(draft),
+      body: JSON.stringify(payload),
     });
     setBusyId(null);
 
@@ -144,8 +190,9 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     const data = await response.json();
     if (data.user) {
       setUsers((current) => [...current, data.user]);
-      setActiveTab(tabForRole(data.user.role));
-      setDraft(EMPTY_DRAFT);
+      const nextTab = tabForRole(data.user.role);
+      setActiveTab(nextTab);
+      setDraft(emptyDraftForTab(nextTab));
       markSaved('new');
       showStatus('Пользователь добавлен');
     }
@@ -244,23 +291,26 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
           <span>Роль</span>
           <select
             value={draft.role}
+            disabled={activeRoleOptions.length === 1}
             onChange={(event) => {
               const role = event.target.value as AccessUserRole;
               setDraft((current) => ({ ...current, role, supportManagerId: role === 'manager' ? current.supportManagerId : null }));
             }}
           >
-            {ROLE_OPTIONS.map((option) => (
+            {activeRoleOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
         </label>
-        <label>
-          <span>Менеджер по сопровождению</span>
-          {supportManagerSelect(draft.supportManagerId, (supportManagerId) => setDraft((current) => ({ ...current, supportManagerId })), draft.role !== 'manager')}
-        </label>
-        <label>
+        {activeTab === 'manager' && (
+          <label>
+            <span>Менеджер по сопровождению</span>
+            {supportManagerSelect(draft.supportManagerId, (supportManagerId) => setDraft((current) => ({ ...current, supportManagerId })), false)}
+          </label>
+        )}
+        <label className={activeTab === 'manager' ? undefined : styles.userPasswordWide}>
           <span>Пароль</span>
           <input
             type="password"
@@ -304,19 +354,25 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
                 </label>
                 <label>
                   <span>Роль</span>
-                  <select value={user.role} disabled={user.isCurrent} onChange={(event) => updateUserRole(user.id, event.target.value as AccessUserRole)}>
-                    {ROLE_OPTIONS.map((option) => (
+                  <select
+                    value={user.role}
+                    disabled={user.isCurrent || roleOptionsForTab(activeTab).length === 1}
+                    onChange={(event) => updateUserRole(user.id, event.target.value as AccessUserRole)}
+                  >
+                    {roleOptionsForTab(activeTab).map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
                   </select>
                 </label>
-                <label>
-                  <span>Менеджер по сопровождению</span>
-                  {supportManagerSelect(user.supportManagerId, (supportManagerId) => updateUser(user.id, { supportManagerId }), user.role !== 'manager')}
-                </label>
-                <label>
+                {user.role === 'manager' && (
+                  <label>
+                    <span>Менеджер по сопровождению</span>
+                    {supportManagerSelect(user.supportManagerId, (supportManagerId) => updateUser(user.id, { supportManagerId }), false)}
+                  </label>
+                )}
+                <label className={user.role === 'manager' ? undefined : styles.userPasswordWide}>
                   <span>Новый пароль</span>
                   <input
                     type="password"

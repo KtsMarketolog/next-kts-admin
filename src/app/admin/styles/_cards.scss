@@ -663,6 +663,14 @@
     grid-column: 4 / 5;
   }
 
+  label.userPasswordWide {
+    grid-column: 2 / 4;
+  }
+
+  label.userActiveToggle {
+    grid-column: 4 / 5;
+  }
+
   > button {
     grid-column: 4 / 5;
     width: 100%;
@@ -721,6 +729,10 @@
 
   label:nth-child(6) {
     grid-column: 3 / 5;
+  }
+
+  label.userPasswordWide {
+    grid-column: 2 / 5;
   }
 }
 
