@@ -380,11 +380,15 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               ? 'edit'
               : 'home';
   const analyticsManagerIdParam = Number(searchParams.get('analyticsManagerId'));
+  const createManagerIdParam = Number(searchParams.get('managerId'));
+  const createManagerId = Number.isInteger(createManagerIdParam) && createManagerIdParam > 0 ? createManagerIdParam : null;
   const analyticsBackHref =
     canManageWholesale && screen === 'edit' && Number.isInteger(analyticsManagerIdParam) && analyticsManagerIdParam > 0
       ? `/admin/wholesale/admin/managers/${analyticsManagerIdParam}/analytics`
       : null;
-  const editorBackHref = analyticsBackHref ?? '/admin/wholesale/manager';
+  const editorBackHref =
+    analyticsBackHref ??
+    (canManageWholesale && screen === 'create' && createManagerId ? `/admin/wholesale/admin/managers/${createManagerId}` : '/admin/wholesale/manager');
 
   const catalogRows = useMemo(() => flatCatalogItems(catalog), [catalog]);
   const catalogDiscountBaseByKey = useMemo(
@@ -529,7 +533,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       const nextCatalog = await loadCatalog();
       if (!isActive) return;
       if (screen === 'create') {
-        setEditor({ ...emptyEditor(), items: mergeEditorItems(nextCatalog, []) });
+        setEditor({ ...emptyEditor(), managerId: canManageWholesale ? createManagerId : null, items: mergeEditorItems(nextCatalog, []) });
         setEditorLoading(false);
         return;
       }
@@ -574,7 +578,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     return () => {
       isActive = false;
     };
-  }, [editId, screen]);
+  }, [canManageWholesale, createManagerId, editId, screen]);
 
   const createManager = async () => {
     if (!managerDraft.name.trim() || !managerDraft.login.trim() || !managerDraft.password.trim()) {
@@ -955,9 +959,14 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               {currentManager?.name ? <span className={styles.headingMeta}>{currentManager.name}</span> : null}
             </h2>
           </div>
-          <button className={styles.secondary} onClick={() => router.push('/admin/wholesale/admin')}>
-            Вернуться к менеджерам
-          </button>
+          <div className={styles.topbarActions}>
+            <button className={styles.secondary} onClick={() => router.push('/admin/wholesale/admin')}>
+              Вернуться к менеджерам
+            </button>
+            <button onClick={() => router.push(`/admin/wholesale/create?managerId=${managerDetailId}`)}>
+              Создать прайс
+            </button>
+          </div>
         </div>
 
         {status ? <p className={styles.status}>{status}</p> : null}
