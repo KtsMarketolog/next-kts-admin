@@ -1094,7 +1094,15 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             ) : (
               filteredCatalogGroups.map((group) => {
                 const isExpanded = expandedPriceGroups[group.id] === true;
-                const groupPositionCount = group.products.reduce((sum, product) => sum + product.variants.length, 0);
+                const groupAddedCount = group.products.reduce(
+                  (sum, product) =>
+                    sum +
+                    product.variants.filter((variant) => {
+                      const key = `${product.id}:${variant.id ?? 'base'}`;
+                      return Boolean(itemByKey.get(key)?.visible);
+                    }).length,
+                  0,
+                );
 
                 return (
                   <div className={styles.priceCategory} key={group.id}>
@@ -1106,7 +1114,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                         <div>
                           <h3>{group.title}</h3>
                           <span className={styles.priceCategoryMeta}>
-                            {group.products.length} товаров · {groupPositionCount} позиций
+                            Товаров: всего - {group.products.length}{' '}
+                            <span className={`${styles.priceCategoryAdded} ${groupAddedCount > 0 ? styles.priceCategoryAddedActive : ''}`}>
+                              добавлено - {groupAddedCount}
+                            </span>
                           </span>
                         </div>
                       </div>
