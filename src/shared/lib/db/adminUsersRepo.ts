@@ -4,7 +4,8 @@ import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 
 export type AdminUserRole = 'admin' | 'wholesale_admin';
-export type AccessUserRole = AdminUserRole | 'manager';
+export type ManagerAccessRole = 'manager' | 'support_manager';
+export type AccessUserRole = AdminUserRole | ManagerAccessRole;
 export type AccessUserSource = 'admin' | 'manager';
 
 export type AdminUserAuth = {
@@ -29,6 +30,8 @@ export type AccessUser = {
   isActive: boolean;
   accesses: string[];
   priceListCount: number;
+  supportManagerId: number | null;
+  supportManagerName: string;
   isCurrent: boolean;
   createdAt: string;
   updatedAt: string;
@@ -41,6 +44,7 @@ type AccessUserInput = {
   role: AccessUserRole;
   isActive: boolean;
   passwordHash?: string;
+  supportManagerId?: number | null;
 };
 
 type AccessUserRow = {
@@ -52,6 +56,8 @@ type AccessUserRow = {
   role: string;
   is_active: boolean;
   price_list_count: string;
+  support_manager_id: string | null;
+  support_manager_name: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -70,13 +76,18 @@ function normalizeAdminRole(role: string): AdminUserRole {
 }
 
 function normalizeAccessRole(role: string): AccessUserRole | null {
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager') return role;
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager' || role === 'support_manager') return role;
   return null;
+}
+
+function isManagerAccessRole(role: AccessUserRole): role is ManagerAccessRole {
+  return role === 'manager' || role === 'support_manager';
 }
 
 function accessLabels(role: AccessUserRole) {
   if (role === 'admin') return ['Сайт', 'Прайсы', 'Пользователи'];
   if (role === 'wholesale_admin') return ['Индивидуальные прайсы'];
+  if (role === 'support_manager') return ['Прайсы менеджера'];
   return ['Свои прайсы'];
 }
 
@@ -94,6 +105,8 @@ function mapAccessUser(row: AccessUserRow, currentAdminUserId?: number | null): 
     isActive: row.is_active,
     accesses: accessLabels(role),
     priceListCount: Number(row.price_list_count),
+    supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
+    supportManagerName: row.support_manager_name ?? '',
     isCurrent: row.source === 'admin' && Boolean(currentAdminUserId) && numericId === currentAdminUserId,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -150,6 +163,37 @@ async function countActiveSiteAdmins(client?: Pick<PoolClient, 'query'>) {
   return Number(result.rows[0]?.count ?? 0);
 }
 
+async function normalizeSupportManagerId(
+  role: AccessUserRole,
+  supportManagerId: number | null | undefined,
+  self?: { source: AccessUserSource; numericId: number },
+  client?: Pick<PoolClient, 'query'>,
+) {
+  if (role !== 'manager') return null;
+  if (supportManagerId === null || supportManagerId === undefined || supportManagerId === 0) return null;
+
+  const numericId = Number(supportManagerId);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    throw new Error('Некорректный менеджер по сопровождению');
+  }
+  if (self?.source === 'manager' && self.numericId === numericId) {
+    throw new Error('Нельзя назначить менеджера сопровождения самим собой');
+  }
+
+  const db = client ?? { query };
+  const result = await db.query<{ id: string }>(
+    `select id::text
+     from wholesale_managers
+     where id = $1 and role = 'support_manager'
+     limit 1`,
+    [numericId],
+  );
+  if (!result.rows[0]) {
+    throw new Error('Менеджер по сопровождению не найден');
+  }
+  return numericId;
+}
+
 export async function getAdminUserByLogin(login: string): Promise<AdminUserAuth | null> {
   await ensureSiteSchema();
   const result = await query<{
@@ -198,6 +242,8 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
         au.role,
         au.is_active,
         '0'::text as price_list_count,
+        null::text as support_manager_id,
+        ''::text as support_manager_name,
         au.created_at::text,
         au.updated_at::text
       from admin_users au
@@ -208,17 +254,20 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
         wm.name,
         wm.login,
         wm.email,
-        'manager'::text as role,
+        coalesce(nullif(wm.role, ''), 'manager') as role,
         wm.is_active,
         count(pl.id)::text as price_list_count,
+        wm.support_manager_id::text as support_manager_id,
+        coalesce(support.name, '') as support_manager_name,
         wm.created_at::text,
         wm.updated_at::text
       from wholesale_managers wm
       left join wholesale_price_lists pl on pl.manager_id = wm.id
-      group by wm.id
+      left join wholesale_managers support on support.id = wm.support_manager_id
+      group by wm.id, support.name
     ) users
     order by
-      case role when 'admin' then 1 when 'wholesale_admin' then 2 else 3 end,
+      case role when 'admin' then 1 when 'wholesale_admin' then 2 when 'manager' then 3 when 'support_manager' then 4 else 5 end,
       is_active desc,
       name asc,
       login asc
@@ -227,27 +276,30 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
   return result.rows.map((row) => mapAccessUser(row, currentAdminUserId));
 }
 
-export async function createAccessUser(input: Required<AccessUserInput>): Promise<AccessUser> {
+export async function createAccessUser(input: AccessUserInput & { passwordHash: string }): Promise<AccessUser> {
   await ensureSiteSchema();
   return withTransaction(async (client) => {
     await assertLoginAvailable(input.login, undefined, client);
 
-    if (input.role === 'manager') {
+    if (isManagerAccessRole(input.role)) {
+      const supportManagerId = await normalizeSupportManagerId(input.role, input.supportManagerId, undefined, client);
       const result = await client.query<AccessUserRow>(
-        `insert into wholesale_managers (name, login, email, phone, password_hash, is_active, password_changed_at)
-         values ($1, $2, $3, '', $4, $5, now())
+        `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, is_active, password_changed_at)
+         values ($1, $2, $3, '', $4, $5, $6, $7, now())
          returning
            'manager'::text as source,
            id::text,
            name,
            login,
            email,
-           'manager'::text as role,
+           role,
            is_active,
            '0'::text as price_list_count,
+           support_manager_id::text as support_manager_id,
+           coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
            created_at::text,
            updated_at::text`,
-        [input.name, normalizeLogin(input.login), input.email, input.passwordHash, input.isActive],
+        [input.name, normalizeLogin(input.login), input.email, input.role, supportManagerId, input.passwordHash, input.isActive],
       );
       return mapAccessUser(result.rows[0]);
     }
@@ -264,6 +316,8 @@ export async function createAccessUser(input: Required<AccessUserInput>): Promis
          role,
          is_active,
          '0'::text as price_list_count,
+         null::text as support_manager_id,
+         ''::text as support_manager_name,
          created_at::text,
          updated_at::text`,
       [input.name, normalizeLogin(input.login), input.email, input.role, input.passwordHash, input.isActive],
@@ -295,6 +349,8 @@ export async function updateAccessUser(
            role,
            is_active,
            '0'::text as price_list_count,
+           null::text as support_manager_id,
+           ''::text as support_manager_name,
            created_at::text,
            updated_at::text
          from admin_users
@@ -316,24 +372,36 @@ export async function updateAccessUser(
         throw new Error('Нельзя удалить или отключить последнего администратора');
       }
 
-      if (nextRole === 'manager') {
+      if (isManagerAccessRole(nextRole)) {
+        const supportManagerId = await normalizeSupportManagerId(nextRole, input.supportManagerId, undefined, client);
         const insertResult = await client.query<AccessUserRow>(
-          `insert into wholesale_managers (name, login, email, phone, password_hash, is_active, password_changed_at)
-           select $1, $2, $3, '', coalesce($4::text, password_hash), $5, case when $4::text is null then password_changed_at else now() end
+          `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, is_active, password_changed_at)
+           select $1, $2, $3, '', $4, $5, coalesce($6::text, password_hash), $7, case when $6::text is null then password_changed_at else now() end
            from admin_users
-           where id = $6
+           where id = $8
            returning
              'manager'::text as source,
              id::text,
              name,
              login,
              email,
-             'manager'::text as role,
+             role,
              is_active,
              '0'::text as price_list_count,
+             support_manager_id::text as support_manager_id,
+             coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
              created_at::text,
              updated_at::text`,
-          [input.name, normalizeLogin(input.login), input.email, input.passwordHash ?? null, input.isActive, parsed.numericId],
+          [
+            input.name,
+            normalizeLogin(input.login),
+            input.email,
+            nextRole,
+            supportManagerId,
+            input.passwordHash ?? null,
+            input.isActive,
+            parsed.numericId,
+          ],
         );
         await client.query(`delete from admin_users where id = $1`, [parsed.numericId]);
         return {
@@ -364,6 +432,8 @@ export async function updateAccessUser(
            role,
            is_active,
            '0'::text as price_list_count,
+           null::text as support_manager_id,
+           ''::text as support_manager_name,
            created_at::text,
            updated_at::text`,
         [
@@ -391,15 +461,18 @@ export async function updateAccessUser(
          wm.name,
          wm.login,
          wm.email,
-         'manager'::text as role,
+         coalesce(nullif(wm.role, ''), 'manager') as role,
          wm.is_active,
          count(pl.id)::text as price_list_count,
+         wm.support_manager_id::text as support_manager_id,
+         coalesce(support.name, '') as support_manager_name,
          wm.created_at::text,
          wm.updated_at::text
        from wholesale_managers wm
        left join wholesale_price_lists pl on pl.manager_id = wm.id
+       left join wholesale_managers support on support.id = wm.support_manager_id
        where wm.id = $1
-       group by wm.id
+       group by wm.id, support.name
        limit 1`,
       [parsed.numericId],
     );
@@ -407,7 +480,7 @@ export async function updateAccessUser(
     if (!existingRow) throw new Error('Пользователь не найден');
     const previous = mapAccessUser(existingRow, currentAdminUserId);
 
-    if (input.role !== 'manager') {
+    if (!isManagerAccessRole(input.role)) {
       if (previous.priceListCount > 0) {
         throw new Error('Сначала передайте прайсы другому менеджеру, затем меняйте роль');
       }
@@ -425,6 +498,8 @@ export async function updateAccessUser(
            role,
            is_active,
            '0'::text as price_list_count,
+           null::text as support_manager_id,
+           ''::text as support_manager_name,
            created_at::text,
            updated_at::text`,
         [
@@ -446,6 +521,10 @@ export async function updateAccessUser(
       };
     }
 
+    const supportManagerId = await normalizeSupportManagerId(input.role, input.supportManagerId, parsed, client);
+    if (previous.role === 'support_manager' && input.role !== 'support_manager') {
+      await client.query(`update wholesale_managers set support_manager_id = null where support_manager_id = $1`, [parsed.numericId]);
+    }
     const updateResult = await client.query<AccessUserRow>(
       `update wholesale_managers
        set name = $2,
@@ -454,6 +533,8 @@ export async function updateAccessUser(
            password_hash = case when $5::text is null then password_hash else $5 end,
            password_changed_at = case when $5::text is null then password_changed_at else now() end,
            is_active = $6,
+           role = $7,
+           support_manager_id = $8,
            updated_at = now()
        where id = $1
        returning
@@ -462,18 +543,30 @@ export async function updateAccessUser(
          name,
          login,
          email,
-         'manager'::text as role,
+         role,
          is_active,
          (select count(*)::text from wholesale_price_lists where manager_id = wholesale_managers.id) as price_list_count,
+         support_manager_id::text as support_manager_id,
+         coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
          created_at::text,
          updated_at::text`,
-      [parsed.numericId, input.name, normalizeLogin(input.login), input.email, input.passwordHash ?? null, input.isActive],
+      [
+        parsed.numericId,
+        input.name,
+        normalizeLogin(input.login),
+        input.email,
+        input.passwordHash ?? null,
+        input.isActive,
+        input.role,
+        supportManagerId,
+      ],
     );
 
     return {
       previous,
       user: mapAccessUser(updateResult.rows[0], currentAdminUserId),
-      roleChanged: previous.isActive !== input.isActive,
+      roleChanged:
+        previous.role !== input.role || previous.isActive !== input.isActive || previous.supportManagerId !== supportManagerId,
       passwordChanged: Boolean(input.passwordHash),
     };
   });
@@ -496,6 +589,8 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
            role,
            is_active,
            '0'::text as price_list_count,
+           null::text as support_manager_id,
+           ''::text as support_manager_name,
            created_at::text,
            updated_at::text
          from admin_users
@@ -521,15 +616,18 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
          wm.name,
          wm.login,
          wm.email,
-         'manager'::text as role,
+         coalesce(nullif(wm.role, ''), 'manager') as role,
          wm.is_active,
          count(pl.id)::text as price_list_count,
+         wm.support_manager_id::text as support_manager_id,
+         coalesce(support.name, '') as support_manager_name,
          wm.created_at::text,
          wm.updated_at::text
        from wholesale_managers wm
        left join wholesale_price_lists pl on pl.manager_id = wm.id
+       left join wholesale_managers support on support.id = wm.support_manager_id
        where wm.id = $1
-       group by wm.id
+       group by wm.id, support.name
        limit 1`,
       [parsed.numericId],
     );

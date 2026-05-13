@@ -71,7 +71,7 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
       return;
     }
 
-    if (data.role === 'manager') {
+    if (data.role === 'manager' || data.role === 'support_manager') {
       router.push('/admin/wholesale/manager');
       return;
     }

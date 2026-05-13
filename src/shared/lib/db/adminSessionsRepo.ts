@@ -4,7 +4,7 @@ import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager';
+export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
 
 export type StoredAdminSession = {
   sessionId: string;
@@ -31,8 +31,12 @@ function hashSessionToken(token: string) {
 }
 
 function normalizeRole(role: string): StoredAdminSessionRole | null {
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager') return role;
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager' || role === 'support_manager') return role;
   return null;
+}
+
+function isStoredManagerRole(role: StoredAdminSessionRole) {
+  return role === 'manager' || role === 'support_manager';
 }
 
 export async function createStoredAdminSession(input: CreateAdminSessionInput) {
@@ -104,8 +108,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
   if (!row || !role) return null;
 
   const createdAtMs = new Date(row.created_at).getTime();
-  const passwordChangedAt =
-    role === 'manager' ? row.manager_password_changed_at : row.admin_password_changed_at;
+  const passwordChangedAt = isStoredManagerRole(role) ? row.manager_password_changed_at : row.admin_password_changed_at;
   if (passwordChangedAt && createdAtMs < new Date(passwordChangedAt).getTime()) {
     await revokeStoredAdminSession(token);
     return null;
@@ -116,7 +119,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     return null;
   }
 
-  if (role === 'manager') {
+  if (isStoredManagerRole(role)) {
     if (!row.manager_id || row.manager_is_active === false) {
       await revokeStoredAdminSession(token);
       return null;

@@ -8,8 +8,11 @@ const COOKIE_NAME = 'kts_admin_session';
 const PASSWORD_KEYLEN = 64;
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 100;
 
+export type AdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
+export type AdminManagerSessionRole = 'manager' | 'support_manager';
+
 export type AdminSession = {
-  role: 'admin' | 'wholesale_admin' | 'manager';
+  role: AdminSessionRole;
   adminUserId?: number;
   managerId?: number;
   sessionId?: string;
@@ -20,6 +23,10 @@ type CreateSessionOptions = {
   ip?: string | null;
   userAgent?: string | null;
 };
+
+export function isManagerSessionRole(role: AdminSessionRole | null | undefined): role is AdminManagerSessionRole {
+  return role === 'manager' || role === 'support_manager';
+}
 
 function sign(value: string) {
   return createHmac('sha256', getAdminSessionSecret()).update(value).digest('hex');
@@ -100,10 +107,10 @@ export async function getAdminSession(): Promise<AdminSession | null> {
 
   if (!timingSafeEqual(a, b)) return null;
 
-  if (role === 'manager') {
+  if (isManagerSessionRole(role as AdminSessionRole)) {
     const parsedManagerId = Number(managerId);
     if (!Number.isInteger(parsedManagerId)) return null;
-    return { role: 'manager', managerId: parsedManagerId };
+    return { role: role as AdminManagerSessionRole, managerId: parsedManagerId };
   }
 
   if (role === 'admin' || role === 'wholesale_admin') {

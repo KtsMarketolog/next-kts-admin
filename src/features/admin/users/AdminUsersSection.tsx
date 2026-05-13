@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
 
-type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager';
+type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
+type UserTab = 'admin' | 'manager' | 'support_manager';
 
 type AccessUser = {
   id: string;
@@ -17,6 +18,8 @@ type AccessUser = {
   isActive: boolean;
   accesses: string[];
   priceListCount: number;
+  supportManagerId: number | null;
+  supportManagerName: string;
   isCurrent: boolean;
 };
 
@@ -29,6 +32,7 @@ type Draft = {
   login: string;
   email: string;
   role: AccessUserRole;
+  supportManagerId: number | null;
   password: string;
   isActive: boolean;
 };
@@ -38,6 +42,7 @@ const EMPTY_DRAFT: Draft = {
   login: '',
   email: '',
   role: 'manager',
+  supportManagerId: null,
   password: '',
   isActive: true,
 };
@@ -45,8 +50,28 @@ const EMPTY_DRAFT: Draft = {
 const ROLE_LABELS: Record<AccessUserRole, string> = {
   admin: 'Администратор',
   wholesale_admin: 'Админ прайсов',
-  manager: 'Менеджер',
+  manager: 'Менеджер по развитию',
+  support_manager: 'Менеджер по сопровождению',
 };
+
+const ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
+  { value: 'manager', label: 'Менеджер по развитию' },
+  { value: 'support_manager', label: 'Менеджер по сопровождению' },
+  { value: 'wholesale_admin', label: 'Админ прайсов' },
+  { value: 'admin', label: 'Администратор' },
+];
+
+const USER_TABS: Array<{ value: UserTab; label: string }> = [
+  { value: 'admin', label: 'Админ' },
+  { value: 'manager', label: 'Менеджер по развитию' },
+  { value: 'support_manager', label: 'Менеджер по сопровождению' },
+];
+
+function tabForRole(role: AccessUserRole): UserTab {
+  if (role === 'support_manager') return 'support_manager';
+  if (role === 'manager') return 'manager';
+  return 'admin';
+}
 
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
@@ -56,10 +81,20 @@ async function readError(response: Response, fallback: string) {
 export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   const [users, setUsers] = useState<AccessUser[]>([]);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [activeTab, setActiveTab] = useState<UserTab>('admin');
   const [passwords, setPasswords] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const supportManagers = useMemo(
+    () =>
+      users
+        .filter((user) => user.role === 'support_manager')
+        .sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name, 'ru')),
+    [users],
+  );
+  const filteredUsers = useMemo(() => users.filter((user) => tabForRole(user.role) === activeTab), [activeTab, users]);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -79,6 +114,10 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
 
   const updateUser = (id: string, patch: Partial<AccessUser>) => {
     setUsers((current) => current.map((user) => (user.id === id ? { ...user, ...patch } : user)));
+  };
+
+  const updateUserRole = (id: string, role: AccessUserRole) => {
+    updateUser(id, { role, supportManagerId: null, supportManagerName: '' });
   };
 
   const markSaved = (id: string) => {
@@ -105,6 +144,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     const data = await response.json();
     if (data.user) {
       setUsers((current) => [...current, data.user]);
+      setActiveTab(tabForRole(data.user.role));
       setDraft(EMPTY_DRAFT);
       markSaved('new');
       showStatus('Пользователь добавлен');
@@ -128,6 +168,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     const data = await response.json();
     if (data.user) {
       setUsers((current) => current.map((item) => (item.id === user.id ? data.user : item)));
+      setActiveTab(tabForRole(data.user.role));
       setPasswords((current) => {
         const next = { ...current };
         delete next[user.id];
@@ -153,6 +194,21 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     showStatus('Пользователь удалён');
   };
 
+  const supportManagerSelect = (
+    value: number | null,
+    onChange: (value: number | null) => void,
+    disabled: boolean,
+  ) => (
+    <select value={value ?? ''} disabled={disabled || supportManagers.length === 0} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)}>
+      <option value="">Не выбран</option>
+      {supportManagers.map((manager) => (
+        <option key={manager.id} value={manager.numericId}>
+          {manager.name || manager.login}
+        </option>
+      ))}
+    </select>
+  );
+
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -160,7 +216,15 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
           <p>Доступы</p>
           <h2>Пользователи и доступы</h2>
         </div>
-        <span className={styles.headingMeta}>{users.length} пользователей</span>
+        <span className={styles.headingMeta}>{filteredUsers.length} из {users.length}</span>
+      </div>
+
+      <div className={styles.userRoleTabs}>
+        {USER_TABS.map((tab) => (
+          <button key={tab.value} type="button" aria-pressed={activeTab === tab.value} onClick={() => setActiveTab(tab.value)}>
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       <div className={styles.userCreateCard}>
@@ -178,11 +242,23 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
         </label>
         <label>
           <span>Роль</span>
-          <select value={draft.role} onChange={(event) => setDraft((current) => ({ ...current, role: event.target.value as AccessUserRole }))}>
-            <option value="manager">Менеджер</option>
-            <option value="wholesale_admin">Админ прайсов</option>
-            <option value="admin">Администратор</option>
+          <select
+            value={draft.role}
+            onChange={(event) => {
+              const role = event.target.value as AccessUserRole;
+              setDraft((current) => ({ ...current, role, supportManagerId: role === 'manager' ? current.supportManagerId : null }));
+            }}
+          >
+            {ROLE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
+        </label>
+        <label>
+          <span>Менеджер по сопровождению</span>
+          {supportManagerSelect(draft.supportManagerId, (supportManagerId) => setDraft((current) => ({ ...current, supportManagerId })), draft.role !== 'manager')}
         </label>
         <label>
           <span>Пароль</span>
@@ -201,17 +277,17 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
           Активен
         </label>
         <button className={savedId === 'new' ? styles.savedButton : undefined} disabled={busyId === 'new'} onClick={createUser}>
-          {savedId === 'new' ? 'Пользователь добавлен' : 'Добавить пользователя'}
+          {savedId === 'new' ? 'Сохранено' : 'Добавить пользователя'}
         </button>
       </div>
 
       {loading ? (
         <p className={styles.mutedText}>Загрузка пользователей...</p>
-      ) : users.length === 0 ? (
-        <p className={styles.mutedText}>Пользователей пока нет</p>
+      ) : filteredUsers.length === 0 ? (
+        <p className={styles.mutedText}>В этой вкладке пока нет пользователей</p>
       ) : (
         <div className={styles.userAccessList}>
-          {users.map((user) => (
+          {filteredUsers.map((user) => (
             <article className={styles.userAccessCard} key={user.id}>
               <div className={styles.userAccessFields}>
                 <label>
@@ -228,15 +304,17 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
                 </label>
                 <label>
                   <span>Роль</span>
-                  <select
-                    value={user.role}
-                    disabled={user.isCurrent}
-                    onChange={(event) => updateUser(user.id, { role: event.target.value as AccessUserRole })}
-                  >
-                    <option value="manager">Менеджер</option>
-                    <option value="wholesale_admin">Админ прайсов</option>
-                    <option value="admin">Администратор</option>
+                  <select value={user.role} disabled={user.isCurrent} onChange={(event) => updateUserRole(user.id, event.target.value as AccessUserRole)}>
+                    {ROLE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
+                </label>
+                <label>
+                  <span>Менеджер по сопровождению</span>
+                  {supportManagerSelect(user.supportManagerId, (supportManagerId) => updateUser(user.id, { supportManagerId }), user.role !== 'manager')}
                 </label>
                 <label>
                   <span>Новый пароль</span>
@@ -265,7 +343,8 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
                   {user.accesses.map((access) => (
                     <span key={access}>{access}</span>
                   ))}
-                  {user.role === 'manager' && <span>Прайсов: {user.priceListCount}</span>}
+                  {user.role === 'manager' && user.supportManagerName && <span>Сопровождение: {user.supportManagerName}</span>}
+                  {(user.role === 'manager' || user.role === 'support_manager') && <span>Прайсов: {user.priceListCount}</span>}
                 </div>
                 <div className={styles.userAccessActions}>
                   <button

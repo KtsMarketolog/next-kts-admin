@@ -1,10 +1,10 @@
-import type { AdminSession } from './adminAuth';
+import { isManagerSessionRole, type AdminSession } from './adminAuth';
 import { checkDbRateLimit } from './rateLimit';
 
 const ADMIN_ACTION_WINDOW_MS = 10 * 60 * 1000;
 
 function actorKey(session: AdminSession) {
-  if (session.role === 'manager') return `manager:${session.managerId ?? 'unknown'}`;
+  if (isManagerSessionRole(session.role)) return `manager:${session.managerId ?? 'unknown'}`;
   return `role:${session.role}`;
 }
 

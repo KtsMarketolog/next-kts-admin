@@ -1,13 +1,13 @@
-import { getAdminSession } from '@/shared/lib/adminAuth';
+import { getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
 import { getWholesaleManagerById } from '@/shared/lib/db';
 
 export async function GET() {
   const session = await getAdminSession();
-  if (session?.role === 'manager' && session.managerId) {
+  if (isManagerSessionRole(session?.role) && session?.managerId) {
     const manager = await getWholesaleManagerById(session.managerId);
     return Response.json({
       authenticated: true,
-      role: 'manager',
+      role: session.role,
       manager: manager
         ? {
             id: manager.id,

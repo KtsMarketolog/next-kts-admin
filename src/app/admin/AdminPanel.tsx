@@ -29,6 +29,10 @@ const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanie
 
 type AdminArea = 'home' | 'site' | 'wholesale';
 
+function isManagerRole(role: AdminSession['role'] | string | null | undefined) {
+  return role === 'manager' || role === 'support_manager';
+}
+
 type AdminPanelProps = {
   initialArea?: AdminArea;
   initialSession?: AdminSession | null;
@@ -119,7 +123,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
   const switchArea = (area: AdminArea) => {
     if (area === 'wholesale') {
-      router.replace(sessionRole === 'manager' ? '/admin/wholesale/manager' : '/admin/wholesale/admin', { scroll: false });
+      router.replace(isManagerRole(sessionRole) ? '/admin/wholesale/manager' : '/admin/wholesale/admin', { scroll: false });
       return;
     }
 
@@ -192,7 +196,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
         if (data.authenticated) {
           const nextRole: AdminSession['role'] =
-            data.role === 'manager' ? 'manager' : data.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
+            isManagerRole(data.role) ? (data.role as AdminSession['role']) : data.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
           setSessionRole(nextRole);
           if (nextRole !== 'admin') {
             setAuthenticated(true);

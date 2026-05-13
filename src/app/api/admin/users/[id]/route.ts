@@ -13,7 +13,7 @@ import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
-const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager']);
+const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager']);
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -25,6 +25,12 @@ function normalizeRole(value: unknown): AccessUserRole | null {
 
 function badRequest(error: string, status = 400) {
   return Response.json({ error }, { status });
+}
+
+function normalizeSupportManagerId(role: AccessUserRole, value: unknown) {
+  if (role !== 'manager') return null;
+  const numericId = Number(value);
+  return Number.isInteger(numericId) && numericId > 0 ? numericId : null;
 }
 
 async function revokePreviousSessions(source: 'admin' | 'manager', numericId: number) {
@@ -53,6 +59,7 @@ export async function PUT(request: Request, context: Context) {
   const password = typeof body.password === 'string' ? body.password : '';
   const role = normalizeRole(body.role);
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
+  const supportManagerId = role ? normalizeSupportManagerId(role, body.supportManagerId) : null;
 
   if (!name || !login || !role) {
     return badRequest('Имя, логин и роль обязательны');
@@ -73,6 +80,7 @@ export async function PUT(request: Request, context: Context) {
         email,
         role,
         isActive,
+        supportManagerId,
         passwordHash: password ? hashPassword(password) : undefined,
       },
       session.adminUserId,

@@ -5,7 +5,7 @@ import {
   type WholesalePriceListItemInput,
 } from '@/shared/lib/db';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { requireEmployee } from '@/shared/lib/adminAuth';
+import { isManagerSessionRole, requireEmployee } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
@@ -108,9 +108,9 @@ export async function PUT(request: Request, context: Context) {
   if (!isTokenUnchanged(existing.token, nextToken)) {
     await recordSecurityEvent({
       eventType: 'price_token_changed',
-      actorType: session.role === 'manager' ? 'manager' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+      actorType: isManagerSessionRole(session.role) ? 'manager' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
       adminUserId: session.adminUserId,
-      managerId: session.role === 'manager' ? session.managerId : undefined,
+      managerId: isManagerSessionRole(session.role) ? session.managerId : undefined,
       sessionId: session.sessionId,
       entityType: 'wholesale_price_list',
       entityId: numericId,
@@ -139,9 +139,9 @@ export async function DELETE(request: Request, context: Context) {
   await deleteWholesalePriceList(numericId, session);
   await recordSecurityEvent({
     eventType: 'price_deleted',
-    actorType: session.role === 'manager' ? 'manager' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+    actorType: isManagerSessionRole(session.role) ? 'manager' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
     adminUserId: session.adminUserId,
-    managerId: session.role === 'manager' ? session.managerId : undefined,
+    managerId: isManagerSessionRole(session.role) ? session.managerId : undefined,
     sessionId: session.sessionId,
     entityType: 'wholesale_price_list',
     entityId: numericId,

@@ -7,7 +7,7 @@ import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
-const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager']);
+const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager']);
 
 function normalizeRole(value: unknown): AccessUserRole | null {
   return typeof value === 'string' && ACCESS_ROLES.has(value as AccessUserRole) ? (value as AccessUserRole) : null;
@@ -15,6 +15,12 @@ function normalizeRole(value: unknown): AccessUserRole | null {
 
 function badRequest(error: string, status = 400) {
   return Response.json({ error }, { status });
+}
+
+function normalizeSupportManagerId(role: AccessUserRole, value: unknown) {
+  if (role !== 'manager') return null;
+  const numericId = Number(value);
+  return Number.isInteger(numericId) && numericId > 0 ? numericId : null;
 }
 
 export async function GET() {
@@ -43,6 +49,7 @@ export async function POST(request: Request) {
   const password = typeof body.password === 'string' ? body.password : '';
   const role = normalizeRole(body.role) ?? 'manager';
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
+  const supportManagerId = normalizeSupportManagerId(role, body.supportManagerId);
 
   if (!name || !login || !password) {
     return badRequest('Имя, логин и пароль обязательны');
@@ -60,6 +67,7 @@ export async function POST(request: Request) {
       email,
       role,
       isActive,
+      supportManagerId,
       passwordHash: hashPassword(password),
     });
 

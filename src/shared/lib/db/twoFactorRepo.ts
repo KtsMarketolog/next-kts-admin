@@ -9,7 +9,7 @@ export type TwoFactorActorType = 'admin' | 'manager';
 export type TwoFactorChallengeActor = {
   challengeId: string;
   actorType: TwoFactorActorType;
-  role: 'admin' | 'wholesale_admin' | 'manager';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
   login: string;
   adminUserId?: number;
   managerId?: number;
@@ -33,7 +33,7 @@ function hashTwoFactorCode(challengeId: string, loginSessionId: string, code: st
 export async function createTwoFactorChallenge(input: {
   login: string;
   actorType: TwoFactorActorType;
-  role: 'admin' | 'wholesale_admin' | 'manager';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
   adminUserId?: number | null;
   managerId?: number | null;
   loginSessionId: string;
@@ -122,7 +122,7 @@ export async function consumeTwoFactorChallenge(input: {
 
   const actorType = row.actor_type === 'manager' ? 'manager' : 'admin';
   const role =
-    row.role === 'manager' || row.role === 'wholesale_admin' || row.role === 'admin'
+    row.role === 'manager' || row.role === 'support_manager' || row.role === 'wholesale_admin' || row.role === 'admin'
       ? row.role
       : actorType === 'manager'
         ? 'manager'

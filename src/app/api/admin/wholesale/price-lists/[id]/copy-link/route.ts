@@ -1,4 +1,4 @@
-import { requireEmployee } from '@/shared/lib/adminAuth';
+import { isManagerSessionRole, requireEmployee, type AdminSessionRole } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { getWholesalePriceListEditor, trackAnalyticsEvent } from '@/shared/lib/db';
 
@@ -6,8 +6,8 @@ type Context = {
   params: Promise<{ id: string }>;
 };
 
-function actorType(role: 'admin' | 'wholesale_admin' | 'manager') {
-  return role === 'manager' ? 'manager' : 'admin';
+function actorType(role: AdminSessionRole) {
+  return isManagerSessionRole(role) ? 'manager' : 'admin';
 }
 
 export async function POST(request: Request, context: Context) {
@@ -26,7 +26,7 @@ export async function POST(request: Request, context: Context) {
   await trackAnalyticsEvent({
     eventType: 'price_public_link_copied',
     actorType: actorType(session.role),
-    actorUserId: session.role === 'manager' ? session.managerId : null,
+    actorUserId: isManagerSessionRole(session.role) ? session.managerId : null,
     managerId: priceList.managerId,
     clientId: priceList.clientName ? priceList.clientName.trim().toLowerCase() : null,
     priceListId: priceList.id,

@@ -1,4 +1,4 @@
-import { clearAdminSession, getAdminSession } from '@/shared/lib/adminAuth';
+import { clearAdminSession, getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getClientIp } from '@/shared/lib/rateLimit';
 
@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   await clearAdminSession();
   await recordSecurityEvent({
     eventType: 'logout',
-    actorType: session?.role === 'manager' ? 'manager' : session?.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+    actorType: isManagerSessionRole(session?.role) ? 'manager' : session?.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
     adminUserId: session?.adminUserId,
     managerId: session?.managerId,
     sessionId: session?.sessionId,

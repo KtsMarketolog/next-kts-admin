@@ -1,4 +1,4 @@
-import { getAdminSession } from '@/shared/lib/adminAuth';
+import { getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
 import { getPublicWholesalePriceList, trackAnalyticsEvent } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
@@ -189,8 +189,8 @@ export async function GET(request: Request, context: Context) {
   const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
   const sessionId = publicSession.sessionId;
   const adminSession = await getAdminSession();
-  const actorType = adminSession?.role === 'manager' ? 'manager' : adminSession ? 'admin' : 'client';
-  const actorUserId = adminSession?.role === 'manager' ? adminSession.managerId : null;
+  const actorType = isManagerSessionRole(adminSession?.role) ? 'manager' : adminSession ? 'admin' : 'client';
+  const actorUserId = isManagerSessionRole(adminSession?.role) ? adminSession?.managerId : null;
 
   const limitKey =
     actorUserId && actorType !== 'client'

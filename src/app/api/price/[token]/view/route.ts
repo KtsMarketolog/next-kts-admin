@@ -1,4 +1,4 @@
-import { getAdminSession } from '@/shared/lib/adminAuth';
+import { getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
 import { getPublicWholesalePriceList, query, recordWholesalePriceView } from '@/shared/lib/db';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
@@ -35,8 +35,8 @@ export async function POST(request: Request, context: Context) {
   }
 
   const adminSession = await getAdminSession();
-  const actorType = adminSession?.role === 'manager' ? 'manager' : adminSession ? 'admin' : 'client';
-  const actorUserId = adminSession?.role === 'manager' ? adminSession.managerId : null;
+  const actorType = isManagerSessionRole(adminSession?.role) ? 'manager' : adminSession ? 'admin' : 'client';
+  const actorUserId = isManagerSessionRole(adminSession?.role) ? adminSession?.managerId : null;
 
   const previous = await query<{ count: string }>(
     `select count(*)::text as count

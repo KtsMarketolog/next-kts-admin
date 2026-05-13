@@ -1,5 +1,5 @@
 import AdminPanel from '../AdminPanel';
-import { getAdminSession } from '@/shared/lib/adminAuth';
+import { getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
 import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,7 @@ export default async function AdminWholesalePage() {
   if (session?.role === 'admin' || session?.role === 'wholesale_admin') {
     redirect('/admin/wholesale/admin');
   }
-  if (session?.role === 'manager') {
+  if (isManagerSessionRole(session?.role)) {
     redirect('/admin/wholesale/manager');
   }
 

@@ -1,4 +1,4 @@
-import type { AdminSession } from '@/shared/lib/adminAuth';
+import { isManagerSessionRole, type AdminSession } from '@/shared/lib/adminAuth';
 import {
   getWholesalePriceWorkflowStatusLabel,
   normalizeWholesalePriceWorkflowStatus,
@@ -15,16 +15,22 @@ export type WholesaleManager = {
   login: string;
   email: string;
   phone: string;
+  role: WholesaleManagerRole;
+  supportManagerId: number | null;
+  supportManagerName: string;
   isActive: boolean;
   priceListCount: number;
   lastChangedAt: string | null;
   lastChangedPriceTitle: string | null;
 };
 
+export type WholesaleManagerRole = 'manager' | 'support_manager';
+
 export type WholesaleManagerAuth = {
   id: number;
   login: string;
   email: string;
+  role: WholesaleManagerRole;
   passwordHash: string;
   isActive: boolean;
   passwordChangedAt: string | null;
@@ -36,6 +42,7 @@ export type WholesaleManagerProfile = {
   login: string;
   email: string;
   phone: string;
+  role: WholesaleManagerRole;
   isActive: boolean;
 };
 
@@ -696,6 +703,9 @@ type ManagerRow = {
   login: string;
   email: string;
   phone: string;
+  role: string | null;
+  support_manager_id: string | null;
+  support_manager_name: string | null;
   is_active: boolean;
   price_list_count: string;
   last_changed_at: string | null;
@@ -795,7 +805,7 @@ function normalizeLogin(login: string) {
 }
 
 function sessionManagerId(session?: AdminSession | null) {
-  return session?.role === 'manager' ? session.managerId ?? -1 : null;
+  return isManagerSessionRole(session?.role) ? session?.managerId ?? -1 : null;
 }
 
 function periodSqlInterval(period: WholesaleManagerAnalyticsPeriod) {
@@ -805,7 +815,7 @@ function periodSqlInterval(period: WholesaleManagerAnalyticsPeriod) {
 }
 
 function actorTypeFromRole(role: AdminSession['role'] | 'admin'): AnalyticsActorType {
-  return role === 'manager' ? 'manager' : 'admin';
+  return isManagerSessionRole(role) ? 'manager' : 'admin';
 }
 
 function actionEventType(action: string): AnalyticsEventType {
@@ -823,11 +833,15 @@ function clientIdFromName(clientName?: string | null) {
 }
 
 function actorMeta(session?: AdminSession | null) {
-  const actorManagerId = session?.role === 'manager' ? session.managerId ?? null : null;
+  const actorManagerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : null;
   const actorRole: AdminSession['role'] =
-    session?.role === 'manager' ? 'manager' : session?.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
+    isManagerSessionRole(session?.role) ? session.role : session?.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
   const actorFallback =
-    actorRole === 'admin' ? 'Администратор' : actorRole === 'wholesale_admin' ? 'Администратор прайсов' : 'Менеджер';
+    actorRole === 'admin'
+      ? 'Администратор'
+      : actorRole === 'wholesale_admin'
+        ? 'Администратор прайсов'
+        : managerRoleLabel(actorRole);
 
   return { actorManagerId, actorRole, actorFallback };
 }
@@ -1391,7 +1405,7 @@ async function insertPriceListEvent(input: PriceListEventInput) {
        $5,
        $6,
        case
-         when $6 = 'manager' then coalesce((select name from wholesale_managers where id = $2), $7)
+         when $6 in ('manager', 'support_manager') then coalesce((select name from wholesale_managers where id = $2), $7)
          else $7
        end,
        $8
@@ -1421,6 +1435,14 @@ async function insertPriceListEvent(input: PriceListEventInput) {
   });
 }
 
+function normalizeManagerRole(role: string | null | undefined): WholesaleManagerRole {
+  return role === 'support_manager' ? 'support_manager' : 'manager';
+}
+
+function managerRoleLabel(role: string | null | undefined) {
+  return normalizeManagerRole(role) === 'support_manager' ? 'Менеджер по сопровождению' : 'Менеджер по развитию';
+}
+
 function mapManager(row: ManagerRow): WholesaleManager {
   return {
     id: Number(row.id),
@@ -1428,6 +1450,9 @@ function mapManager(row: ManagerRow): WholesaleManager {
     login: row.login,
     email: row.email,
     phone: row.phone,
+    role: normalizeManagerRole(row.role),
+    supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
+    supportManagerName: row.support_manager_name ?? '',
     isActive: row.is_active,
     priceListCount: Number(row.price_list_count),
     lastChangedAt: row.last_changed_at,
@@ -1468,12 +1493,16 @@ export async function getWholesaleManagers() {
       m.login,
       m.email,
       m.phone,
+      coalesce(nullif(m.role, ''), 'manager') as role,
+      m.support_manager_id::text as support_manager_id,
+      coalesce(support.name, '') as support_manager_name,
       m.is_active,
       count(pl.id)::text as price_list_count,
       last_event.created_at::text as last_changed_at,
       last_event.title_snapshot as last_changed_price_title
     from wholesale_managers m
     left join wholesale_price_lists pl on pl.manager_id = m.id
+    left join wholesale_managers support on support.id = m.support_manager_id
     left join lateral (
       select e.created_at, e.title_snapshot
       from wholesale_price_list_events e
@@ -1482,7 +1511,7 @@ export async function getWholesaleManagers() {
       order by e.created_at desc, e.id desc
       limit 1
     ) last_event on true
-    group by m.id, last_event.created_at, last_event.title_snapshot
+    group by m.id, support.name, last_event.created_at, last_event.title_snapshot
     order by m.is_active desc, m.name asc, m.id asc
   `);
   return result.rows.map(mapManager);
@@ -1494,11 +1523,12 @@ export async function getWholesaleManagerByLogin(login: string): Promise<Wholesa
     id: string;
     login: string;
     email: string;
+    role: string | null;
     password_hash: string;
     is_active: boolean;
     password_changed_at: string | null;
   }>(
-    `select id::text, login, email, password_hash, is_active, password_changed_at::text
+    `select id::text, login, email, coalesce(nullif(role, ''), 'manager') as role, password_hash, is_active, password_changed_at::text
      from wholesale_managers
      where login = $1 or lower(email) = $1
      limit 1`,
@@ -1510,6 +1540,7 @@ export async function getWholesaleManagerByLogin(login: string): Promise<Wholesa
     id: Number(row.id),
     login: row.login,
     email: row.email,
+    role: normalizeManagerRole(row.role),
     passwordHash: row.password_hash,
     isActive: row.is_active,
     passwordChangedAt: row.password_changed_at,
@@ -1524,9 +1555,10 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
     login: string;
     email: string;
     phone: string;
+    role: string | null;
     is_active: boolean;
   }>(
-    `select id::text, name, login, email, phone, is_active
+    `select id::text, name, login, email, phone, coalesce(nullif(role, ''), 'manager') as role, is_active
      from wholesale_managers
      where id = $1
      limit 1`,
@@ -1540,6 +1572,7 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
     login: row.login,
     email: row.email,
     phone: row.phone,
+    role: normalizeManagerRole(row.role),
     isActive: row.is_active,
   };
 }
@@ -1822,7 +1855,7 @@ export async function createWholesalePriceList(
   session?: AdminSession | null,
 ) {
   await ensureSiteSchema();
-  const managerId = session?.role === 'manager' ? session.managerId ?? null : input.managerId;
+  const managerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : input.managerId;
   const result = await query<{ id: string }>(
     `insert into wholesale_price_lists (
        title, client_name, manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, is_active
@@ -1875,7 +1908,7 @@ export async function updateWholesalePriceList(
   session?: AdminSession | null,
 ) {
   await ensureSiteSchema();
-  const managerId = session?.role === 'manager' ? session.managerId ?? null : input.managerId;
+  const managerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : input.managerId;
   const previous = await query<{
     title: string;
     client_name: string;
@@ -2107,6 +2140,7 @@ export async function getWholesaleManagerAnalytics(
     login: string;
     email: string;
     phone: string;
+    role: string | null;
     last_login_at: string | null;
   }>(
     `select
@@ -2115,6 +2149,7 @@ export async function getWholesaleManagerAnalytics(
        m.login,
        m.email,
        m.phone,
+       coalesce(nullif(m.role, ''), 'manager') as role,
        last_login.created_at::text as last_login_at
      from wholesale_managers m
      left join lateral (
@@ -2186,7 +2221,8 @@ export async function getWholesaleManagerAnalytics(
          case
            when e.actor_role = 'admin' then 'Администратор'
            when e.actor_role = 'wholesale_admin' then 'Администратор прайсов'
-           when e.actor_role = 'manager' then 'Менеджер'
+           when e.actor_role = 'manager' then 'Менеджер по развитию'
+           when e.actor_role = 'support_manager' then 'Менеджер по сопровождению'
            else 'Не указано'
          end
        ) as changed_by,
@@ -2214,7 +2250,8 @@ export async function getWholesaleManagerAnalytics(
          case
            when e.actor_role = 'admin' then 'Администратор'
            when e.actor_role = 'wholesale_admin' then 'Администратор прайсов'
-           when e.actor_role = 'manager' then 'Менеджер'
+           when e.actor_role = 'manager' then 'Менеджер по развитию'
+           when e.actor_role = 'support_manager' then 'Менеджер по сопровождению'
            else 'Не указано'
          end
        ) as changed_by,
@@ -2307,7 +2344,7 @@ export async function getWholesaleManagerAnalytics(
       name: managerRow.name,
       login: managerRow.login,
       email: managerRow.email,
-      role: 'Менеджер',
+      role: managerRoleLabel(managerRow.role),
       phone: managerRow.phone,
       lastLoginAt: managerRow.last_login_at,
     },

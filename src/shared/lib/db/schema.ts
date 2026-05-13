@@ -159,6 +159,8 @@ export async function ensureSiteSchema() {
       login text not null unique,
       email text not null default '',
       phone text not null default '',
+      role text not null default 'manager',
+      support_manager_id bigint references wholesale_managers(id) on delete set null,
       password_hash text not null default '',
       is_active boolean not null default true,
       password_changed_at timestamptz,
@@ -339,6 +341,8 @@ export async function ensureSiteSchema() {
     alter table admin_users add column if not exists role text not null default 'admin';
     alter table admin_users add column if not exists password_changed_at timestamptz;
     alter table wholesale_managers add column if not exists phone text not null default '';
+    alter table wholesale_managers add column if not exists role text not null default 'manager';
+    alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_managers add column if not exists password_hash text not null default '';
     alter table wholesale_managers add column if not exists password_changed_at timestamptz;
     alter table wholesale_price_list_events add column if not exists actor_role text not null default '';
@@ -382,6 +386,8 @@ export async function ensureSiteSchema() {
     create index if not exists wholesale_product_images_product_idx on wholesale_product_images(product_id);
     create index if not exists wholesale_product_variants_product_idx on wholesale_product_variants(product_id);
     create index if not exists wholesale_managers_login_idx on wholesale_managers(login);
+    create index if not exists wholesale_managers_role_idx on wholesale_managers(role);
+    create index if not exists wholesale_managers_support_idx on wholesale_managers(support_manager_id);
     create index if not exists wholesale_price_list_items_price_list_idx on wholesale_price_list_items(price_list_id);
     create index if not exists wholesale_price_list_items_product_idx on wholesale_price_list_items(wholesale_product_id);
     create index if not exists wholesale_price_lists_manager_idx on wholesale_price_lists(manager_id);
@@ -441,6 +447,8 @@ export async function ensureSiteSchema() {
   await query(`alter table admin_users add column if not exists role text not null default 'admin'`);
   await query(`alter table admin_users add column if not exists password_changed_at timestamptz`);
   await query(`alter table wholesale_managers add column if not exists phone text not null default ''`);
+  await query(`alter table wholesale_managers add column if not exists role text not null default 'manager'`);
+  await query(`alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_managers add column if not exists password_hash text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists password_changed_at timestamptz`);
   await query(`alter table wholesale_price_list_events add column if not exists actor_role text not null default ''`);
@@ -448,6 +456,8 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_price_list_events add column if not exists owner_manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_list_events add column if not exists details text not null default ''`);
   await query(`create index if not exists admin_users_login_idx on admin_users(login)`);
+  await query(`create index if not exists wholesale_managers_role_idx on wholesale_managers(role)`);
+  await query(`create index if not exists wholesale_managers_support_idx on wholesale_managers(support_manager_id)`);
   await query(`create index if not exists wholesale_products_catalog_product_idx on wholesale_products(catalog_product_id)`);
   await query(`create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc)`);
   await query(`create index if not exists wholesale_price_lists_workflow_status_idx on wholesale_price_lists(workflow_status)`);

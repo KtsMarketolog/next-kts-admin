@@ -1,4 +1,4 @@
-import { createAdminSession, createEmployeeSession, validateAdminPassword, verifyPassword } from '@/shared/lib/adminAuth';
+import { createAdminSession, createEmployeeSession, isManagerSessionRole, validateAdminPassword, verifyPassword } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import {
   createTwoFactorChallenge,
@@ -59,10 +59,10 @@ async function finishLogin(input: {
   const userAgent = request.headers.get('user-agent');
   const referer = request.headers.get('referer');
 
-  if (actor.role === 'manager') {
+  if (isManagerSessionRole(actor.role)) {
     if (!actor.managerId) return Response.json({ error: 'Invalid session' }, { status: 401 });
     await createEmployeeSession(
-      { role: 'manager', managerId: actor.managerId },
+      { role: actor.role, managerId: actor.managerId },
       { ip, userAgent },
     );
     await recordWholesaleManagerLogin(actor.managerId, {
@@ -81,9 +81,9 @@ async function finishLogin(input: {
       ip,
       userAgent,
       referer,
-      metadata: { twoFactor: true },
+      metadata: { role: actor.role, twoFactor: true },
     });
-    return Response.json({ ok: true, role: 'manager' });
+    return Response.json({ ok: true, role: actor.role });
   }
 
   await createAdminSession(actor.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin', {
@@ -116,7 +116,7 @@ async function finishLogin(input: {
 async function startTwoFactor(input: {
   login: string;
   actorType: 'admin' | 'manager';
-  role: 'admin' | 'wholesale_admin' | 'manager';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
   email: string;
   loginSessionId: string;
   adminUserId?: number | null;
@@ -324,7 +324,7 @@ export async function POST(request: Request) {
     const response = await startTwoFactor({
       login: manager.login,
       actorType: 'manager',
-      role: 'manager',
+      role: manager.role,
       email: manager.email,
       managerId: manager.id,
       loginSessionId: loginSession.sessionId,
@@ -335,7 +335,7 @@ export async function POST(request: Request) {
   }
 
   await createEmployeeSession(
-    { role: 'manager', managerId: manager.id },
+    { role: manager.role, managerId: manager.id },
     { ip, userAgent: request.headers.get('user-agent') },
   );
   await recordWholesaleManagerLogin(manager.id, {
@@ -354,7 +354,7 @@ export async function POST(request: Request) {
     ip,
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { twoFactor: false },
+    metadata: { role: manager.role, twoFactor: false },
   });
-  return withSessionCookie(Response.json({ ok: true, role: 'manager' }), loginSession);
+  return withSessionCookie(Response.json({ ok: true, role: manager.role }), loginSession);
 }
