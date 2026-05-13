@@ -26,6 +26,7 @@ export const emptyNews: Omit<News, 'id'> = {
 
 export const emptyGroupCompany: Omit<GroupCompany, 'id'> = {
   imageUrl: '',
+  linkUrl: '',
   sortOrder: 1,
   isActive: true,
 };

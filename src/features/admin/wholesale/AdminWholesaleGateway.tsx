@@ -59,6 +59,7 @@ type CatalogProduct = {
   description: string;
   imageUrl: string | null;
   priceGroup: string;
+  priceGroupImageUrl: string | null;
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
@@ -206,12 +207,12 @@ function groupCatalogRowsByPriceGroup(rows: CatalogRow[]) {
     const groupKey = groupTitle.toLowerCase();
     let group = groups.get(groupKey);
     if (!group) {
-      group = { id: groupKey, title: groupTitle, imageUrl: row.product.imageUrl, products: [] };
+      group = { id: groupKey, title: groupTitle, imageUrl: row.product.priceGroupImageUrl || row.product.imageUrl, products: [] };
       groups.set(groupKey, group);
     }
 
-    if (!group.imageUrl && row.product.imageUrl) {
-      group.imageUrl = row.product.imageUrl;
+    if (!group.imageUrl && (row.product.priceGroupImageUrl || row.product.imageUrl)) {
+      group.imageUrl = row.product.priceGroupImageUrl || row.product.imageUrl;
     }
 
     const productKey = `${groupKey}:${row.product.id}`;

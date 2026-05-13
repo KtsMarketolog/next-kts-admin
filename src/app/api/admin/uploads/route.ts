@@ -79,7 +79,8 @@ export async function POST(request: Request) {
 
   const formData = await request.formData();
   const file = formData.get('file');
-  const kind = formData.get('kind') === 'brandLogo' ? 'brandLogo' : 'image';
+  const rawKind = formData.get('kind');
+  const kind = rawKind === 'brandLogo' || rawKind === 'priceGroup' ? rawKind : 'image';
 
   if (!(file instanceof File)) {
     return Response.json({ error: 'File is required' }, { status: 400 });
@@ -93,8 +94,8 @@ export async function POST(request: Request) {
   const detectedType = detectImageType(bytes);
 
   if (file.type === 'image/svg+xml' || detectedType === 'svg') {
-    if (kind !== 'brandLogo') {
-      return Response.json({ error: 'SVG is allowed only for brand logos' }, { status: 400 });
+    if (kind !== 'brandLogo' && kind !== 'priceGroup') {
+      return Response.json({ error: 'SVG is allowed only for brand logos and price groups' }, { status: 400 });
     }
 
     if (file.size > MAX_SVG_FILE_SIZE || detectedType !== 'svg') {

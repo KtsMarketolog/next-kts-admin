@@ -27,6 +27,8 @@ export {
   getGroupCompanies,
   updateGroupCompany,
 } from './db/groupCompaniesRepo';
+export { getPriceGroupsWithImages, updatePriceGroupImage } from './db/priceGroupImagesRepo';
+export type { PriceGroupImage } from './db/priceGroupImagesRepo';
 export {
   createWholesaleManager,
   createWholesalePriceList,

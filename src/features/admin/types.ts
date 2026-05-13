@@ -27,8 +27,15 @@ export type News = {
 export type GroupCompany = {
   id: number;
   imageUrl: string;
+  linkUrl: string;
   sortOrder: number;
   isActive: boolean;
+};
+
+export type PriceGroupImage = {
+  title: string;
+  imageUrl: string;
+  productCount: number;
 };
 
 export type BrandCategory = {
@@ -49,6 +56,6 @@ export type Brand = {
   isActive: boolean;
 };
 
-export type AdminSection = 'info' | 'slider' | 'news' | 'groupCompanies' | 'brands' | 'catalog' | 'users';
+export type AdminSection = 'info' | 'slider' | 'news' | 'groupCompanies' | 'brands' | 'catalog' | 'priceGroups' | 'users';
 
 export type SettingKey = 'phone' | 'email' | 'address';

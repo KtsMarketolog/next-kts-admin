@@ -24,20 +24,38 @@ export const GroupCompanies = async () => {
         </h2>
 
         <div className={styles.list}>
-          {companies.map((company, index) => (
-            <div key={`${company.imageUrl}-${index}`} className={styles.company}>
-              <div className={styles.disabled} aria-label={`Компания ${index + 1}`}>
-                <Image
-                  className={styles.logo}
-                  src={company.imageUrl}
-                  alt=""
-                  width={220}
-                  height={110}
-                  sizes="(max-width: 450px) 140px, (max-width: 1024px) 170px, 220px"
-                />
+          {companies.map((company, index) => {
+            const logo = (
+              <Image
+                className={styles.logo}
+                src={company.imageUrl}
+                alt=""
+                width={220}
+                height={110}
+                sizes="(max-width: 450px) 140px, (max-width: 1024px) 170px, 220px"
+              />
+            );
+
+            return (
+              <div key={`${company.imageUrl}-${index}`} className={styles.company}>
+                {company.linkUrl ? (
+                  <a
+                    className={styles.companyLink}
+                    href={company.linkUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Компания ${index + 1}`}
+                  >
+                    {logo}
+                  </a>
+                ) : (
+                  <div className={styles.disabled} aria-label={`Компания ${index + 1}`}>
+                    {logo}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Container>
     </section>

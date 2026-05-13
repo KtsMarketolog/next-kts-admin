@@ -18,6 +18,7 @@ export type PublicWholesaleProduct = {
   sku: string;
   description: string;
   priceGroup: string;
+  priceGroupImageUrl: string | null;
   imageUrl: string | null;
   stock: number;
   isExpected: boolean;
@@ -71,6 +72,7 @@ type PriceItemRow = {
   sku: string;
   series_description: string;
   price_group: string | null;
+  price_group_image_url: string | null;
   image_url: string | null;
   stock: string | null;
   is_expected: boolean | null;
@@ -134,6 +136,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        coalesce(i.snapshot_product_sku, p.sku) as sku,
        coalesce(i.snapshot_product_description, p.series_description) as series_description,
        p.price_group,
+       pgi.image_url as price_group_image_url,
        img.image_url,
        p.stock::text,
        p.is_expected,
@@ -150,6 +153,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
      join wholesale_products p on p.id = i.wholesale_product_id
      left join wholesale_categories c on c.id = p.category_id
      left join wholesale_product_variants v on v.id = i.wholesale_variant_id and v.product_id = p.id
+     left join price_group_images pgi on pgi.price_group = coalesce(nullif(trim(p.price_group), ''), 'Без ценовой группы')
      left join lateral (
        select image_url
        from wholesale_product_images
@@ -192,6 +196,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
         sku: row.sku,
         description: row.series_description,
         priceGroup: row.price_group ?? '',
+        priceGroupImageUrl: row.price_group_image_url,
         imageUrl: row.image_url,
         stock: Number(row.stock ?? 0),
         isExpected: Boolean(row.is_expected),

@@ -15,10 +15,12 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl.trim() : '';
+  const linkUrl = typeof body.linkUrl === 'string' ? body.linkUrl.trim() : '';
   if (!imageUrl) return Response.json({ error: 'Image is required' }, { status: 400 });
 
   const id = await createGroupCompany({
     imageUrl,
+    linkUrl,
     sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
     isActive: Boolean(body.isActive ?? true),
   });

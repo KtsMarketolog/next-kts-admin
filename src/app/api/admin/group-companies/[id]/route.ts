@@ -15,10 +15,12 @@ export async function PUT(request: Request, context: Context) {
 
   const body = await request.json().catch(() => ({}));
   const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl.trim() : '';
+  const linkUrl = typeof body.linkUrl === 'string' ? body.linkUrl.trim() : '';
   if (!imageUrl) return Response.json({ error: 'Image is required' }, { status: 400 });
 
   await updateGroupCompany(numericId, {
     imageUrl,
+    linkUrl,
     sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : undefined,
     isActive: typeof body.isActive === 'boolean' ? body.isActive : undefined,
   });

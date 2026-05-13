@@ -75,6 +75,7 @@ export type WholesaleCatalogProduct = {
   description: string;
   imageUrl: string | null;
   priceGroup: string;
+  priceGroupImageUrl: string | null;
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
@@ -1668,6 +1669,7 @@ export async function getWholesaleCatalog() {
     series_description: string;
     image_url: string | null;
     price_group: string | null;
+    price_group_image_url: string | null;
     price_eur: string | null;
     price_rub: string | null;
     price_cny: string | null;
@@ -1688,6 +1690,7 @@ export async function getWholesaleCatalog() {
       p.series_description,
       img.image_url,
       p.price_group,
+      pgi.image_url as price_group_image_url,
       p.price_eur::text,
       p.price_rub::text,
       p.price_cny::text,
@@ -1701,6 +1704,7 @@ export async function getWholesaleCatalog() {
     from wholesale_products p
     left join wholesale_categories c on c.id = p.category_id
     left join wholesale_product_variants v on v.product_id = p.id and v.is_active = true
+    left join price_group_images pgi on pgi.price_group = coalesce(nullif(trim(p.price_group), ''), 'Без ценовой группы')
     left join lateral (
       select image_url
       from wholesale_product_images
@@ -1735,6 +1739,7 @@ export async function getWholesaleCatalog() {
         description: row.series_description,
         imageUrl: row.image_url,
         priceGroup: row.price_group ?? '',
+        priceGroupImageUrl: row.price_group_image_url,
         priceEur: row.price_eur,
         priceRub: row.price_rub,
         priceCny: row.price_cny,

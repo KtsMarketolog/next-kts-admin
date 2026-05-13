@@ -210,16 +210,17 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
         }>
       >(
         (groups, item) => {
+          const groupImageUrl = item.product.priceGroupImageUrl || item.product.imageUrl;
           const lastGroup = groups[groups.length - 1];
           if (lastGroup?.title === item.groupTitle) {
-            if (!lastGroup.imageUrl && item.product.imageUrl) {
-              lastGroup.imageUrl = item.product.imageUrl;
+            if (!lastGroup.imageUrl && groupImageUrl) {
+              lastGroup.imageUrl = groupImageUrl;
             }
             lastGroup.products.push({ categoryTitle: item.categoryTitle, product: item.product });
           } else {
             groups.push({
               title: item.groupTitle,
-              imageUrl: item.product.imageUrl,
+              imageUrl: groupImageUrl,
               products: [{ categoryTitle: item.categoryTitle, product: item.product }],
             });
           }

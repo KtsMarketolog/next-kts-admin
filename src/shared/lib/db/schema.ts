@@ -82,8 +82,16 @@ export async function ensureSiteSchema() {
     create table if not exists group_companies (
       id bigserial primary key,
       image_url text not null default '',
+      link_url text not null default '',
       sort_order integer not null default 0,
       is_active boolean not null default true,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists price_group_images (
+      price_group text primary key,
+      image_url text not null default '',
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
@@ -413,6 +421,7 @@ export async function ensureSiteSchema() {
   await query(`alter table hero_slides add column if not exists popup_mobile_image_url text`);
   await query(`alter table hero_slides add column if not exists popup_title text`);
   await query(`alter table hero_slides add column if not exists popup_text text`);
+  await query(`alter table group_companies add column if not exists link_url text not null default ''`);
   await query(`alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_lists add column if not exists comment text not null default ''`);
   await query(`alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent'`);
@@ -607,13 +616,28 @@ async function seedBrandPortfolio() {
 
 async function seedGroupCompanies() {
   const groupCompanyCount = await query<{ count: string }>('select count(*)::text as count from group_companies');
-  if (Number(groupCompanyCount.rows[0]?.count ?? 0) !== 0) return;
+  if (Number(groupCompanyCount.rows[0]?.count ?? 0) === 0) {
+    for (const company of DEFAULT_GROUP_COMPANIES) {
+      await query(
+        `insert into group_companies (image_url, link_url, sort_order, is_active)
+         values ($1, $2, $3, $4)`,
+        [company.imageUrl, company.linkUrl, company.sortOrder, company.isActive],
+      );
+    }
+  }
 
+  await updateDefaultGroupCompanyLinks();
+}
+
+async function updateDefaultGroupCompanyLinks() {
   for (const company of DEFAULT_GROUP_COMPANIES) {
+    if (!company.linkUrl) continue;
     await query(
-      `insert into group_companies (image_url, sort_order, is_active)
-       values ($1, $2, $3)`,
-      [company.imageUrl, company.sortOrder, company.isActive],
+      `update group_companies
+       set link_url = $2,
+           updated_at = now()
+       where image_url = $1 and coalesce(link_url, '') = ''`,
+      [company.imageUrl, company.linkUrl],
     );
   }
 }

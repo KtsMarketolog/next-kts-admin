@@ -85,6 +85,12 @@ export function AdminGroupCompaniesSection({
         />
         <div className={styles.newsFields}>
           <input type="number" value={nextGroupCompanyOrder} readOnly placeholder="Позиция" />
+          <input
+            type="url"
+            value={groupCompanyDraft.linkUrl}
+            placeholder="Ссылка на сайт"
+            onChange={(event) => setGroupCompanyDraft({ ...groupCompanyDraft, linkUrl: event.target.value })}
+          />
           <label className={styles.checkbox}>
             <input
               type="checkbox"
@@ -112,6 +118,12 @@ export function AdminGroupCompaniesSection({
             />
             <div className={styles.newsFields}>
               <input type="number" value={company.sortOrder} readOnly placeholder="Позиция" />
+              <input
+                type="url"
+                value={company.linkUrl}
+                placeholder="Ссылка на сайт"
+                onChange={(event) => updateGroupCompany(company.id, { linkUrl: event.target.value })}
+              />
               <label className={styles.checkbox}>
                 <input
                   type="checkbox"

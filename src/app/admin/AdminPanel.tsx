@@ -11,8 +11,10 @@ import { AdminInfoSection } from '@/features/admin/info/AdminInfoSection';
 import { useAdminBrandPortfolio } from '@/features/admin/model/useAdminBrandPortfolio';
 import { useAdminGroupCompanies } from '@/features/admin/model/useAdminGroupCompanies';
 import { useAdminNews } from '@/features/admin/model/useAdminNews';
+import { useAdminPriceGroups } from '@/features/admin/model/useAdminPriceGroups';
 import { useAdminSlides } from '@/features/admin/model/useAdminSlides';
 import { AdminNewsSection } from '@/features/admin/news/AdminNewsSection';
+import { AdminPriceGroupsSection } from '@/features/admin/price-groups/AdminPriceGroupsSection';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
 import { AdminSliderSection } from '@/features/admin/slider/AdminSliderSection';
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
@@ -23,7 +25,7 @@ import type { AdminSession } from '@/shared/lib/adminAuth';
 
 import styles from './admin.module.scss';
 
-const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanies', 'brands', 'catalog', 'users'];
+const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanies', 'brands', 'catalog', 'priceGroups', 'users'];
 
 type AdminArea = 'home' | 'site' | 'wholesale';
 
@@ -96,10 +98,12 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   const newsAdmin = useAdminNews({ setBusy, showStatus, reloadAdminData });
   const groupCompanyAdmin = useAdminGroupCompanies({ setBusy, showStatus, reloadAdminData });
   const brandAdmin = useAdminBrandPortfolio({ setBusy, showStatus, reloadAdminData });
+  const priceGroupAdmin = useAdminPriceGroups({ setBusy, showStatus, reloadAdminData });
   const { setSlides } = slideAdmin;
   const { setNews } = newsAdmin;
   const { setGroupCompanies } = groupCompanyAdmin;
   const { setBrandCategories, setBrands, setBrandDraft } = brandAdmin;
+  const { setPriceGroups } = priceGroupAdmin;
 
   const switchSection = (section: AdminSection) => {
     setActiveSection(section);
@@ -130,15 +134,16 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   };
 
   const loadAdminData = useCallback(async () => {
-    const [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes] = await Promise.all([
+    const [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes] = await Promise.all([
       fetch('/api/admin/settings', { cache: 'no-store' }),
       fetch('/api/admin/slides', { cache: 'no-store' }),
       fetch('/api/admin/news', { cache: 'no-store' }),
       fetch('/api/admin/group-companies', { cache: 'no-store' }),
       fetch('/api/admin/brand-categories', { cache: 'no-store' }),
+      fetch('/api/admin/price-groups', { cache: 'no-store' }),
     ]);
 
-    const responses = [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes];
+    const responses = [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes];
 
     if (responses.some((response) => response.status === 401 || response.status === 403)) {
       setAuthenticated(false);
@@ -158,6 +163,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
     const newsData = await newsRes.json();
     const groupCompanyData = await groupCompaniesRes.json();
     const brandData = await brandsRes.json();
+    const priceGroupData = await priceGroupsRes.json();
     const nextBrandCategories = Array.isArray(brandData.categories) ? brandData.categories : [];
 
     setPhone(settings.phone ?? '');
@@ -168,9 +174,10 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
     setGroupCompanies(Array.isArray(groupCompanyData.companies) ? groupCompanyData.companies : []);
     setBrandCategories(nextBrandCategories);
     setBrands(Array.isArray(brandData.brands) ? brandData.brands : []);
+    setPriceGroups(Array.isArray(priceGroupData.groups) ? priceGroupData.groups : []);
     setBrandDraft((current) => ({ ...current, categoryId: current.categoryId || nextBrandCategories[0]?.id || 0 }));
     setAuthenticated(true);
-  }, [setBrandCategories, setBrandDraft, setBrands, setGroupCompanies, setNews, setSlides]);
+  }, [setBrandCategories, setBrandDraft, setBrands, setGroupCompanies, setNews, setPriceGroups, setSlides]);
 
   useEffect(() => {
     loadAdminDataRef.current = loadAdminData;
@@ -260,7 +267,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
     }
   };
 
-  const uploadImage = async (file: File, kind: 'image' | 'brandLogo' = 'image') => {
+  const uploadImage = async (file: File, kind: 'image' | 'brandLogo' | 'priceGroup' = 'image') => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('kind', kind);
@@ -381,6 +388,12 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
               Каталог
             </button>
             <button
+              className={activeSection === 'priceGroups' ? styles.navActive : undefined}
+              onClick={() => switchSection('priceGroups')}
+            >
+              Ценовая группа
+            </button>
+            <button
               className={activeSection === 'users' ? styles.navActive : undefined}
               onClick={() => switchSection('users')}
             >
@@ -493,6 +506,18 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
             )}
 
             {activeSection === 'catalog' && <AdminCatalogSection showStatus={showStatus} />}
+
+            {activeSection === 'priceGroups' && (
+              <AdminPriceGroupsSection
+                priceGroups={priceGroupAdmin.priceGroups}
+                savedPriceGroupTitle={priceGroupAdmin.savedPriceGroupTitle}
+                busy={busy}
+                updatePriceGroup={priceGroupAdmin.updatePriceGroup}
+                savePriceGroup={priceGroupAdmin.savePriceGroup}
+                uploadImage={(file) => uploadImage(file, 'priceGroup')}
+                showStatus={showStatus}
+              />
+            )}
 
             {activeSection === 'users' && <AdminUsersSection showStatus={showStatus} />}
           </div>
