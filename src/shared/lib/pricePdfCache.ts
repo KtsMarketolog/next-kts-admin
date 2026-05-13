@@ -5,7 +5,7 @@ import path from 'path';
 import type { PublicWholesalePriceList } from './db';
 
 const CACHE_DIR = path.join('.cache', 'price-pdf');
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 function cacheDigest(priceList: PublicWholesalePriceList) {
   return createHash('sha256')
@@ -15,6 +15,12 @@ function cacheDigest(priceList: PublicWholesalePriceList) {
         id: priceList.id,
         title: priceList.title,
         clientName: priceList.clientName,
+        managerName: priceList.managerName,
+        managerPhone: priceList.managerPhone,
+        managerEmail: priceList.managerEmail,
+        supportManagerName: priceList.supportManagerName,
+        supportManagerPhone: priceList.supportManagerPhone,
+        supportManagerEmail: priceList.supportManagerEmail,
         validUntil: priceList.validUntil,
         updatedAt: priceList.updatedAt,
         showRetailPrices: priceList.showRetailPrices,

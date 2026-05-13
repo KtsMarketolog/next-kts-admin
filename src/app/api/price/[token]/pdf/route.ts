@@ -15,8 +15,23 @@ type Context = {
 type PublicPriceList = NonNullable<Awaited<ReturnType<typeof getPublicWholesalePriceList>>>;
 type PublicPriceProduct = PublicPriceList['categories'][number]['products'][number];
 type PublicPriceVariant = PublicPriceProduct['variants'][number];
+type PdfDocument = InstanceType<typeof PDFDocument>;
+
+type PdfColumn = {
+  key: 'group' | 'product' | 'sku' | 'description' | 'price' | 'stock';
+  title: string;
+  width: number;
+  align?: 'left' | 'right';
+};
+
+type PdfRow = Record<PdfColumn['key'], string>;
 
 const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
+const TABLE_HEADER_COLOR = '#260b86';
+const TABLE_BORDER_COLOR = '#dfe2ee';
+const TABLE_TEXT_COLOR = '#242633';
+const TABLE_MUTED_COLOR = '#6f7182';
+const TABLE_ALT_ROW_COLOR = '#f8f9fd';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -124,9 +139,159 @@ function groupProductsByPriceGroup(priceList: PublicPriceList) {
   return Array.from(groups.values());
 }
 
+function getPdfColumns(showStock: boolean): PdfColumn[] {
+  const columns: PdfColumn[] = [
+    { key: 'group', title: 'Ценовая группа', width: showStock ? 92 : 110 },
+    { key: 'product', title: 'Товар', width: showStock ? 216 : 250 },
+    { key: 'sku', title: 'Артикул', width: showStock ? 76 : 90 },
+    { key: 'description', title: 'Описание', width: showStock ? 168 : 190 },
+    { key: 'price', title: 'Индивидуальная цена', width: showStock ? 132 : 138 },
+  ];
+  if (showStock) columns.push({ key: 'stock', title: 'Остаток', width: 94 });
+  return columns;
+}
+
+function createPdfRows(priceList: PublicPriceList): PdfRow[] {
+  const rows: PdfRow[] = [];
+  for (const group of groupProductsByPriceGroup(priceList)) {
+    for (const product of group.products) {
+      for (const variant of product.variants) {
+        rows.push({
+          group: group.title,
+          product: product.title,
+          sku: product.sku || '—',
+          description: product.description || '—',
+          price: formatIndividualPrice(variant),
+          stock: priceList.showStock ? stockLabel(product) : '',
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+function ensureSpace(doc: PdfDocument, requiredHeight: number) {
+  const bottom = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + requiredHeight <= bottom) return false;
+  doc.addPage();
+  return true;
+}
+
+function measureCellHeight(doc: PdfDocument, text: string, width: number, fontName: string, fontSize: number) {
+  doc.font(fontName).fontSize(fontSize);
+  return doc.heightOfString(text || '—', { width: width - 12, lineGap: 1 }) + 12;
+}
+
+function drawCell(
+  doc: PdfDocument,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  options: {
+    fontName: string;
+    fontSize: number;
+    color?: string;
+    background?: string;
+    borderColor?: string;
+    align?: 'left' | 'right' | 'center';
+  },
+) {
+  const background = options.background ?? '#ffffff';
+  const borderColor = options.borderColor ?? TABLE_BORDER_COLOR;
+
+  doc.save();
+  doc.rect(x, y, width, height).fill(background);
+  doc.restore();
+
+  doc.save();
+  doc.lineWidth(0.5).strokeColor(borderColor).rect(x, y, width, height).stroke();
+  doc.restore();
+
+  doc
+    .font(options.fontName)
+    .fontSize(options.fontSize)
+    .fillColor(options.color ?? TABLE_TEXT_COLOR)
+    .text(text || '—', x + 6, y + 6, {
+      width: width - 12,
+      height: height - 10,
+      align: options.align ?? 'left',
+      lineGap: 1,
+      ellipsis: true,
+    });
+}
+
+function drawTableHeader(doc: PdfDocument, columns: PdfColumn[], boldFont: string) {
+  const height = 24;
+  let x = doc.page.margins.left;
+  const y = doc.y;
+
+  for (const column of columns) {
+    drawCell(doc, column.title, x, y, column.width, height, {
+      fontName: boldFont,
+      fontSize: 8,
+      color: '#ffffff',
+      background: TABLE_HEADER_COLOR,
+      borderColor: TABLE_HEADER_COLOR,
+      align: column.align,
+    });
+    x += column.width;
+  }
+  doc.y = y + height;
+}
+
+function drawTableRow(doc: PdfDocument, columns: PdfColumn[], row: PdfRow, y: number, height: number, regularFont: string, background: string) {
+  let x = doc.page.margins.left;
+  for (const column of columns) {
+    drawCell(doc, row[column.key], x, y, column.width, height, {
+      fontName: regularFont,
+      fontSize: 8,
+      background,
+      align: column.align,
+    });
+    x += column.width;
+  }
+  doc.y = y + height;
+}
+
+function drawInfoLine(doc: PdfDocument, label: string, value: string, x: number, y: number, width: number, boldFont: string, regularFont: string) {
+  doc.font(boldFont).fontSize(8).fillColor(TABLE_MUTED_COLOR).text(label, x, y, { width });
+  doc.font(regularFont).fontSize(9).fillColor(TABLE_TEXT_COLOR).text(value || '—', x, y + 12, { width });
+}
+
+function drawPdfHeader(doc: PdfDocument, priceList: PublicPriceList, boldFont: string, regularFont: string) {
+  const left = doc.page.margins.left;
+  const top = doc.page.margins.top;
+  const right = doc.page.width - doc.page.margins.right;
+  const headerBottom = 118;
+
+  doc.font(boldFont).fontSize(19).fillColor(TABLE_TEXT_COLOR).text(priceList.title || 'Индивидуальный прайс', left, top, {
+    width: 410,
+  });
+  doc.font(regularFont).fontSize(10).fillColor(TABLE_MUTED_COLOR).text(`Клиент: ${priceList.clientName || 'Не указан'}`, left, top + 30, {
+    width: 360,
+  });
+  doc.font(regularFont).fontSize(10).fillColor(TABLE_MUTED_COLOR).text(`Действует до: ${priceList.validUntil || 'Без срока'}`, left, top + 46, {
+    width: 360,
+  });
+
+  const managerText = [priceList.managerName, priceList.managerPhone, priceList.managerEmail].filter(Boolean).join(' · ');
+  const supportText = [priceList.supportManagerName, priceList.supportManagerPhone, priceList.supportManagerEmail].filter(Boolean).join(' · ');
+  drawInfoLine(doc, 'Ваш менеджер по развитию', managerText, right - 310, top, 310, boldFont, regularFont);
+  if (supportText) {
+    drawInfoLine(doc, 'Ваш менеджер по сопровождению', supportText, right - 310, top + 40, 310, boldFont, regularFont);
+  }
+
+  doc.save();
+  doc.moveTo(left, headerBottom).lineTo(right, headerBottom).lineWidth(1).strokeColor(TABLE_BORDER_COLOR).stroke();
+  doc.restore();
+  doc.y = headerBottom + 14;
+}
+
 function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWholesalePriceList>>>) {
   return new Promise<Buffer>((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 32, info: { Title: priceList.title || 'Индивидуальный прайс' } });
     const chunks: Buffer[] = [];
     const fonts = fontPaths();
     const regularFont = fonts.regular ? 'Regular' : 'Helvetica';
@@ -138,48 +303,30 @@ function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWho
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.font(boldFont).fontSize(20).text(priceList.title || 'Индивидуальный прайс', { align: 'left' });
-    doc.moveDown(0.4);
-    if (priceList.clientName) doc.font(regularFont).fontSize(11).text(`Клиент: ${priceList.clientName}`);
-    if (priceList.validUntil) doc.font(regularFont).fontSize(11).text(`Действует до: ${priceList.validUntil}`);
-    if (priceList.managerName || priceList.managerPhone || priceList.managerEmail) {
-      doc.moveDown(0.4);
-      doc.font(boldFont).fontSize(11).text('Ваш менеджер по прайсу');
-      if (priceList.managerName) doc.font(regularFont).fontSize(10).text(priceList.managerName);
-      if (priceList.managerPhone) doc.font(regularFont).fontSize(10).text(priceList.managerPhone);
-      if (priceList.managerEmail) doc.font(regularFont).fontSize(10).text(priceList.managerEmail);
-    }
-    doc.moveDown(1);
+    drawPdfHeader(doc, priceList, boldFont, regularFont);
 
-    if (priceList.categories.length === 0) {
-      doc.font(regularFont).fontSize(12).text('В прайс пока не добавлены товары.');
+    const columns = getPdfColumns(priceList.showStock);
+    const rows = createPdfRows(priceList);
+    if (rows.length === 0) {
+      doc.font(regularFont).fontSize(12).fillColor(TABLE_MUTED_COLOR).text('В прайс пока не добавлены товары.');
       doc.end();
       return;
     }
 
-    for (const group of groupProductsByPriceGroup(priceList)) {
-      if (doc.y > 730) doc.addPage();
-      doc.font(boldFont).fontSize(15).text(group.title, { underline: true });
-      doc.moveDown(0.4);
-      for (const product of group.products) {
-        if (doc.y > 735) doc.addPage();
-        doc.font(boldFont).fontSize(12).text(product.title, { continued: false });
-        const productMeta = [
-          product.sku ? `Артикул: ${product.sku}` : '',
-          product.description,
-          priceList.showStock ? stockLabel(product) : '',
-        ].filter(Boolean);
-        if (productMeta.length > 0) {
-          doc.font(regularFont).fontSize(9).fillColor('#666').text(productMeta.join(' · ')).fillColor('#000');
-        }
-        for (const variant of product.variants) {
-          doc.font(regularFont).fontSize(10).text(`• Индивидуальная цена: ${formatIndividualPrice(variant)}`);
-        }
-        doc.moveDown(0.5);
-        if (doc.y > 760) doc.addPage();
+    drawTableHeader(doc, columns, boldFont);
+    rows.forEach((row, index) => {
+      const rowHeight = Math.min(
+        96,
+        Math.max(
+          24,
+          ...columns.map((column) => measureCellHeight(doc, row[column.key], column.width, regularFont, 8)),
+        ),
+      );
+      if (ensureSpace(doc, rowHeight + 24)) {
+        drawTableHeader(doc, columns, boldFont);
       }
-      doc.moveDown(0.4);
-    }
+      drawTableRow(doc, columns, row, doc.y, rowHeight, regularFont, index % 2 === 0 ? '#ffffff' : TABLE_ALT_ROW_COLOR);
+    });
 
     doc.end();
   });
