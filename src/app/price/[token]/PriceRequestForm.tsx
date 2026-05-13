@@ -124,6 +124,7 @@ function trackPriceEvent(token: string, eventType: PriceClientEventType, metadat
 export function PriceRequestForm({ token, categories, showStock }: PriceRequestFormProps) {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedPriceGroups, setExpandedPriceGroups] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const openedProductsRef = useRef<Set<number>>(new Set());
@@ -259,6 +260,13 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
     });
   };
 
+  const togglePriceGroupExpanded = (groupTitle: string) => {
+    setExpandedPriceGroups((current) => ({
+      ...current,
+      [groupTitle]: !current[groupTitle],
+    }));
+  };
+
   const changeQuantity = (priceItemId: number, quantity: number, productTitle: string) => {
     submittedRef.current = false;
     if (quantity > 0 && !requestStartedRef.current) {
@@ -329,84 +337,106 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
         </section>
       ) : null}
 
-      {groupedProducts.map((group) => (
-        <section className={styles.category} key={group.title}>
-          <div className={styles.categoryHeader}>
-            <div className={styles.groupImageBox}>
-              {group.imageUrl ? <img src={group.imageUrl} alt="" /> : <span>Нет фото</span>}
-            </div>
-            <h2>{group.title}</h2>
-          </div>
-          <div className={styles.products}>
-            {group.products.map(({ categoryTitle, product }) => (
-              <article
-                className={styles.product}
-                key={`${group.title}-${categoryTitle}-${product.id}`}
-                onFocusCapture={() => trackProductOpen(product)}
-                onMouseEnter={() => trackProductOpen(product)}
-              >
-                <div className={styles.productInfo}>
-                  <h3>{product.title}</h3>
-                  {product.sku ? <p>Артикул: {product.sku}</p> : null}
-                  {product.description ? <p>{product.description}</p> : null}
-                  {showStock ? <p className={styles.stockStatus}>{stockLabel(product)}</p> : null}
-                </div>
-                <table className={styles.prices}>
-                  <thead>
-                    <tr>
-                      <th>Индивидуальная цена</th>
-                      <th>Количество</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {product.variants.map((variant, index) => {
-                      const currentQuantity = quantities[variant.priceItemId] || 0;
+      {groupedProducts.map((group) => {
+        const isExpanded = expandedPriceGroups[group.title] === true;
+        const groupPositionCount = group.products.reduce((sum, item) => sum + item.product.variants.length, 0);
 
-                      return (
-                        <tr key={`${variant.id ?? 'base'}-${index}`}>
-                          <td>{formatIndividualPrices(variant)}</td>
-                          <td className={styles.quantityCell}>
-                            <div className={styles.quantityStepper}>
-                              <button
-                                type="button"
-                                className={styles.quantityButton}
-                                onClick={() => changeQuantity(variant.priceItemId, Math.max(0, currentQuantity - 1), product.title)}
-                                aria-label="Уменьшить количество"
-                              >
-                                -1
-                              </button>
-                              <input
-                                className={styles.quantityValue}
-                                type="number"
-                                inputMode="numeric"
-                                min={0}
-                                max={999}
-                                step={1}
-                                value={currentQuantity}
-                                onChange={(event) => changeQuantity(variant.priceItemId, normalizeQuantityInput(event.target.value), product.title)}
-                                onFocus={(event) => event.currentTarget.select()}
-                                aria-label={`Количество для ${product.title}`}
-                              />
-                              <button
-                                type="button"
-                                className={styles.quantityButton}
-                                onClick={() => changeQuantity(variant.priceItemId, Math.min(999, currentQuantity + 1), product.title)}
-                                aria-label="Увеличить количество"
-                              >
-                                +1
-                              </button>
-                            </div>
-                          </td>
+        return (
+          <section className={styles.category} key={group.title}>
+            <div className={styles.categoryHeader}>
+              <div className={styles.categoryTitle}>
+                <div className={styles.groupImageBox}>
+                  {group.imageUrl ? <img src={group.imageUrl} alt="" /> : <span>Нет фото</span>}
+                </div>
+                <div>
+                  <h2>{group.title}</h2>
+                  <span className={styles.categoryMeta}>
+                    {group.products.length} товаров · {groupPositionCount} позиций
+                  </span>
+                </div>
+              </div>
+              <button
+                className={styles.categoryToggle}
+                type="button"
+                onClick={() => togglePriceGroupExpanded(group.title)}
+                aria-expanded={isExpanded}
+              >
+                {isExpanded ? 'Скрыть' : 'Раскрыть'}
+              </button>
+            </div>
+            {isExpanded ? (
+              <div className={styles.products}>
+                {group.products.map(({ categoryTitle, product }) => (
+                  <article
+                    className={styles.product}
+                    key={`${group.title}-${categoryTitle}-${product.id}`}
+                    onFocusCapture={() => trackProductOpen(product)}
+                    onMouseEnter={() => trackProductOpen(product)}
+                  >
+                    <div className={styles.productInfo}>
+                      <h3>{product.title}</h3>
+                      {product.sku ? <p>Артикул: {product.sku}</p> : null}
+                      {product.description ? <p>{product.description}</p> : null}
+                      {showStock ? <p className={styles.stockStatus}>{stockLabel(product)}</p> : null}
+                    </div>
+                    <table className={styles.prices}>
+                      <thead>
+                        <tr>
+                          <th>Индивидуальная цена</th>
+                          <th>Количество</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </article>
-            ))}
-          </div>
-        </section>
-      ))}
+                      </thead>
+                      <tbody>
+                        {product.variants.map((variant, index) => {
+                          const currentQuantity = quantities[variant.priceItemId] || 0;
+
+                          return (
+                            <tr key={`${variant.id ?? 'base'}-${index}`}>
+                              <td>{formatIndividualPrices(variant)}</td>
+                              <td className={styles.quantityCell}>
+                                <div className={styles.quantityStepper}>
+                                  <button
+                                    type="button"
+                                    className={styles.quantityButton}
+                                    onClick={() => changeQuantity(variant.priceItemId, Math.max(0, currentQuantity - 1), product.title)}
+                                    aria-label="Уменьшить количество"
+                                  >
+                                    -1
+                                  </button>
+                                  <input
+                                    className={styles.quantityValue}
+                                    type="number"
+                                    inputMode="numeric"
+                                    min={0}
+                                    max={999}
+                                    step={1}
+                                    value={currentQuantity}
+                                    onChange={(event) => changeQuantity(variant.priceItemId, normalizeQuantityInput(event.target.value), product.title)}
+                                    onFocus={(event) => event.currentTarget.select()}
+                                    aria-label={`Количество для ${product.title}`}
+                                  />
+                                  <button
+                                    type="button"
+                                    className={styles.quantityButton}
+                                    onClick={() => changeQuantity(variant.priceItemId, Math.min(999, currentQuantity + 1), product.title)}
+                                    aria-label="Увеличить количество"
+                                  >
+                                    +1
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
 
       <section className={styles.requestBar}>
         <div>

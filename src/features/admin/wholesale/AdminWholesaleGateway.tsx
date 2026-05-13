@@ -737,11 +737,18 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     <div className={styles.priceListCards}>
       {priceLists.map((item) => (
         <article className={styles.priceListCard} key={item.id}>
-          <div className={styles.priceListMain}>
+          <div className={styles.priceListHeader}>
             <div className={styles.priceListTitle}>
               <strong>{item.title}</strong>
               <span>Позиций: {item.itemCount} · Ценовых групп: {item.priceGroupCount}</span>
             </div>
+            <div className={styles.priceListPrimaryActions}>
+              <button onClick={() => router.push(`/admin/wholesale/${item.id}/edit`)}>Изменить</button>
+              <button className={styles.secondary} onClick={() => window.open(`/price/${item.token}`, '_blank')}>Открыть</button>
+            </div>
+          </div>
+
+          <div className={styles.priceListDetails}>
             <div className={styles.priceListField}>
               <span>Клиент</span>
               <strong>{item.clientName || '—'}</strong>
@@ -750,8 +757,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               <span>Менеджер</span>
               <strong>{item.managerName || '—'}</strong>
             </div>
-          </div>
-          <div className={styles.priceListMeta}>
+            <div className={styles.priceListField}>
+              <span>Действует до</span>
+              <strong>{item.validUntil || '—'}</strong>
+            </div>
             <div className={styles.priceListField}>
               <span>Дата создания</span>
               <strong>{formatDate(item.createdAt)}</strong>
@@ -760,25 +769,24 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               <span>Последнее изменение</span>
               <strong>{renderLastPriceChange(item)}</strong>
             </div>
-            <div className={styles.priceListField}>
-              <span>Действует до</span>
-              <strong>{item.validUntil || '—'}</strong>
-            </div>
-            <div className={styles.priceListField}>
-              <span>Статус</span>
-              <strong className={item.isActive ? styles.priceStatusActive : styles.priceStatusHidden}>
-                {item.isActive ? 'Активен' : 'Скрыт'}
-              </strong>
-            </div>
-            <div className={styles.priceListField}>
-              <span>Этап работы</span>
-              <strong className={`${styles.priceWorkflowStatus} ${styles[`priceWorkflowStatus_${item.workflowStatus}`] ?? ''}`}>
-                {item.workflowStatusLabel || getWholesalePriceWorkflowStatusLabel(item.workflowStatus)}
-              </strong>
+          </div>
+
+          <div className={styles.priceListFooter}>
+            <div className={styles.priceListStatuses}>
+              <div className={styles.priceListField}>
+                <span>Статус</span>
+                <strong className={item.isActive ? styles.priceStatusActive : styles.priceStatusHidden}>
+                  {item.isActive ? 'Активен' : 'Скрыт'}
+                </strong>
+              </div>
+              <div className={styles.priceListField}>
+                <span>Этап работы</span>
+                <strong className={`${styles.priceWorkflowStatus} ${styles[`priceWorkflowStatus_${item.workflowStatus}`] ?? ''}`}>
+                  {item.workflowStatusLabel || getWholesalePriceWorkflowStatusLabel(item.workflowStatus)}
+                </strong>
+              </div>
             </div>
             <div className={styles.priceListActions}>
-              <button onClick={() => router.push(`/admin/wholesale/${item.id}/edit`)}>Изменить</button>
-              <button className={styles.secondary} onClick={() => window.open(`/price/${item.token}`, '_blank')}>Открыть</button>
               <button
                 className={`${styles.secondary} ${copiedToken === item.token ? styles.savedButton : ''}`}
                 type="button"
