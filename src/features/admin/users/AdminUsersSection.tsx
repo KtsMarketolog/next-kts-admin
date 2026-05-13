@@ -481,6 +481,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
             value={draft.password}
             onChange={(event) => setDraft((current) => ({ ...current, password: event.target.value }))}
           />
+          <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
         </label>
         <label className={styles.userActiveToggle}>
           <input
@@ -564,14 +565,17 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
                     </button>
                   </div>
                   {passwordIsEdited && (
-                    <input
-                      className={styles.userPasswordEditInput}
-                      type="password"
-                      autoComplete="new-password"
-                      placeholder="Введите новый пароль"
-                      value={passwordDrafts[user.id] || ''}
-                      onChange={(event) => setPasswordDrafts((current) => ({ ...current, [user.id]: event.target.value }))}
-                    />
+                    <>
+                      <input
+                        className={styles.userPasswordEditInput}
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="Введите новый пароль"
+                        value={passwordDrafts[user.id] || ''}
+                        onChange={(event) => setPasswordDrafts((current) => ({ ...current, [user.id]: event.target.value }))}
+                      />
+                      <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
+                    </>
                   )}
                 </label>
               </div>
