@@ -21,6 +21,9 @@ export default async function PricePage({ params }: PricePageProps) {
   if (!priceList) notFound();
 
   const hasManagerContact = Boolean(priceList.managerName || priceList.managerPhone || priceList.managerEmail);
+  const hasSupportManagerContact = Boolean(
+    priceList.supportManagerName || priceList.supportManagerPhone || priceList.supportManagerEmail,
+  );
 
   return (
     <main className={styles.page}>
@@ -34,21 +37,41 @@ export default async function PricePage({ params }: PricePageProps) {
             {priceList.validUntil ? <p>Действует до: {priceList.validUntil}</p> : null}
           </div>
           <div className={styles.heroSide}>
-            {hasManagerContact ? (
-              <aside className={styles.managerContact}>
-                <span>Ваш менеджер по развитию</span>
-                {priceList.managerName ? <strong>{priceList.managerName}</strong> : null}
-                {priceList.managerPhone ? (
-                  <PriceEventLink href={phoneHref(priceList.managerPhone)} token={priceList.token} eventType="public_price_phone_clicked">
-                    {priceList.managerPhone}
-                  </PriceEventLink>
+            {hasManagerContact || hasSupportManagerContact ? (
+              <div className={styles.managerContacts}>
+                {hasManagerContact ? (
+                  <aside className={styles.managerContact}>
+                    <span>Ваш менеджер по развитию</span>
+                    {priceList.managerName ? <strong>{priceList.managerName}</strong> : null}
+                    {priceList.managerPhone ? (
+                      <PriceEventLink href={phoneHref(priceList.managerPhone)} token={priceList.token} eventType="public_price_phone_clicked">
+                        {priceList.managerPhone}
+                      </PriceEventLink>
+                    ) : null}
+                    {priceList.managerEmail ? (
+                      <PriceEventLink href={`mailto:${priceList.managerEmail}`} token={priceList.token} eventType="public_price_email_clicked">
+                        {priceList.managerEmail}
+                      </PriceEventLink>
+                    ) : null}
+                  </aside>
                 ) : null}
-                {priceList.managerEmail ? (
-                  <PriceEventLink href={`mailto:${priceList.managerEmail}`} token={priceList.token} eventType="public_price_email_clicked">
-                    {priceList.managerEmail}
-                  </PriceEventLink>
+                {hasSupportManagerContact ? (
+                  <aside className={styles.managerContact}>
+                    <span>Ваш менеджер по сопровождению</span>
+                    {priceList.supportManagerName ? <strong>{priceList.supportManagerName}</strong> : null}
+                    {priceList.supportManagerPhone ? (
+                      <PriceEventLink href={phoneHref(priceList.supportManagerPhone)} token={priceList.token} eventType="public_price_phone_clicked">
+                        {priceList.supportManagerPhone}
+                      </PriceEventLink>
+                    ) : null}
+                    {priceList.supportManagerEmail ? (
+                      <PriceEventLink href={`mailto:${priceList.supportManagerEmail}`} token={priceList.token} eventType="public_price_email_clicked">
+                        {priceList.supportManagerEmail}
+                      </PriceEventLink>
+                    ) : null}
+                  </aside>
                 ) : null}
-              </aside>
+              </div>
             ) : null}
             <div className={styles.downloadActions}>
               <a className={styles.pdfButton} href={`/price/${priceList.token}/pdf`}>

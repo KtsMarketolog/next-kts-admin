@@ -41,6 +41,10 @@ export type PublicWholesalePriceList = {
   managerName: string;
   managerEmail: string;
   managerPhone: string;
+  supportManagerId: number | null;
+  supportManagerName: string;
+  supportManagerEmail: string;
+  supportManagerPhone: string;
   validUntil: string | null;
   updatedAt: string;
   showRetailPrices: boolean;
@@ -57,6 +61,10 @@ type PriceListRow = {
   manager_name: string | null;
   manager_email: string | null;
   manager_phone: string | null;
+  support_manager_id: string | null;
+  support_manager_name: string | null;
+  support_manager_email: string | null;
+  support_manager_phone: string | null;
   valid_until: string | null;
   updated_at: string;
   show_retail_prices: boolean;
@@ -112,12 +120,17 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        m.name as manager_name,
        m.email as manager_email,
        m.phone as manager_phone,
+       support.id::text as support_manager_id,
+       support.name as support_manager_name,
+       support.email as support_manager_email,
+       support.phone as support_manager_phone,
        pl.valid_until::text,
        pl.updated_at::text,
        pl.show_retail_prices,
        pl.show_stock
      from wholesale_price_lists pl
      left join wholesale_managers m on m.id = pl.manager_id
+     left join wholesale_managers support on support.id = m.support_manager_id and support.role = 'support_manager' and support.is_active = true
      where pl.token = $1 and pl.is_active = true
      limit 1`,
     [normalizedToken],
@@ -228,6 +241,10 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
     managerName: priceListRow.manager_name ?? '',
     managerEmail: priceListRow.manager_email ?? '',
     managerPhone: priceListRow.manager_phone ?? '',
+    supportManagerId: priceListRow.support_manager_id ? Number(priceListRow.support_manager_id) : null,
+    supportManagerName: priceListRow.support_manager_name ?? '',
+    supportManagerEmail: priceListRow.support_manager_email ?? '',
+    supportManagerPhone: priceListRow.support_manager_phone ?? '',
     validUntil: priceListRow.valid_until,
     updatedAt: priceListRow.updated_at,
     showRetailPrices: priceListRow.show_retail_prices,

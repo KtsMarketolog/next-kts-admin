@@ -63,6 +63,14 @@
   flex-wrap: wrap;
 }
 
+.managerContacts {
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: $apx-10;
+  flex-wrap: wrap;
+}
+
 .managerContact {
   display: grid;
   justify-items: end;
@@ -534,6 +542,11 @@
   }
 
   .downloadActions {
+    display: grid;
+    gap: $apx-m-10;
+  }
+
+  .managerContacts {
     display: grid;
     gap: $apx-m-10;
   }
