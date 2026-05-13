@@ -99,6 +99,12 @@ function emptyDraftForTab(tab: UserTab): Draft {
   };
 }
 
+function addButtonLabel(tab: UserTab) {
+  if (tab === 'manager') return 'Добавить менеджера по развитию';
+  if (tab === 'support_manager') return 'Добавить менеджера по сопровождению';
+  return 'Добавить пользователя';
+}
+
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -275,17 +281,36 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       </div>
 
       <div className={styles.userCreateCard}>
+        <div className={styles.autofillGuard} aria-hidden="true">
+          <input tabIndex={-1} autoComplete="username" />
+          <input tabIndex={-1} type="password" autoComplete="current-password" />
+        </div>
         <label>
           <span>Имя</span>
-          <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+          <input
+            name={`new-${activeTab}-name`}
+            autoComplete="off"
+            value={draft.name}
+            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+          />
         </label>
         <label>
           <span>Логин</span>
-          <input value={draft.login} onChange={(event) => setDraft((current) => ({ ...current, login: event.target.value }))} />
+          <input
+            name={`new-${activeTab}-login`}
+            autoComplete="off"
+            value={draft.login}
+            onChange={(event) => setDraft((current) => ({ ...current, login: event.target.value }))}
+          />
         </label>
         <label>
           <span>Email</span>
-          <input value={draft.email} onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))} />
+          <input
+            name={`new-${activeTab}-email`}
+            autoComplete="new-password"
+            value={draft.email}
+            onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))}
+          />
         </label>
         <label>
           <span>Роль</span>
@@ -313,7 +338,9 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
         <label className={activeTab === 'manager' ? undefined : styles.userPasswordWide}>
           <span>Пароль</span>
           <input
+            name={`new-${activeTab}-password`}
             type="password"
+            autoComplete="new-password"
             value={draft.password}
             onChange={(event) => setDraft((current) => ({ ...current, password: event.target.value }))}
           />
@@ -327,7 +354,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
           Активен
         </label>
         <button className={savedId === 'new' ? styles.savedButton : undefined} disabled={busyId === 'new'} onClick={createUser}>
-          {savedId === 'new' ? 'Сохранено' : 'Добавить пользователя'}
+          {savedId === 'new' ? 'Сохранено' : addButtonLabel(activeTab)}
         </button>
       </div>
 
@@ -376,6 +403,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
                   <span>Новый пароль</span>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     placeholder="Не менять"
                     value={passwords[user.id] || ''}
                     onChange={(event) => setPasswords((current) => ({ ...current, [user.id]: event.target.value }))}
