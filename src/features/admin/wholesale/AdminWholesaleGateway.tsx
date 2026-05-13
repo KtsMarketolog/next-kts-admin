@@ -523,6 +523,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         .sort((first, second) => Number(second.isActive) - Number(first.isActive) || first.name.localeCompare(second.name, 'ru')),
     [managers],
   );
+  const developmentManagers = useMemo(() => managers.filter((manager) => manager.role === 'manager'), [managers]);
 
   const showStatus = (message: string) => {
     setStatus(message);
@@ -1011,7 +1012,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
         <h3>Менеджеры и статистика</h3>
         <div className={styles.managerCards}>
-          {managers.map((manager) => {
+          {developmentManagers.map((manager) => {
             const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
             const displayPassword = manager.displayPassword || '';
             const availableSupportManagers = supportManagers.filter((supportManager) => supportManager.id !== manager.id);
@@ -1144,7 +1145,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             </article>
             );
           })}
-          {managers.length === 0 ? <p className={styles.mutedText}>Менеджеров пока нет</p> : null}
+          {developmentManagers.length === 0 ? <p className={styles.mutedText}>Менеджеров по развитию пока нет</p> : null}
         </div>
           </div>
           )}
@@ -1268,7 +1269,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               <span>Менеджер</span>
               <select value={editor.managerId ?? ''} onChange={(event) => setEditor({ ...editor, managerId: event.target.value ? Number(event.target.value) : null })}>
                 <option value="">Не назначен</option>
-                {managers.map((manager) => (
+                {developmentManagers.map((manager) => (
                   <option key={manager.id} value={manager.id}>{manager.name}</option>
                 ))}
               </select>
