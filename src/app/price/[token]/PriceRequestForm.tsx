@@ -339,7 +339,6 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
 
       {groupedProducts.map((group) => {
         const isExpanded = expandedPriceGroups[group.title] === true;
-        const groupPositionCount = group.products.reduce((sum, item) => sum + item.product.variants.length, 0);
 
         return (
           <section className={styles.category} key={group.title}>
@@ -351,7 +350,7 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
                 <div>
                   <h2>{group.title}</h2>
                   <span className={styles.categoryMeta}>
-                    {group.products.length} товаров · {groupPositionCount} позиций
+                    Товаров - {group.products.length}
                   </span>
                 </div>
               </div>
