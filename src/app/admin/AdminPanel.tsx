@@ -27,6 +27,17 @@ import styles from './admin.module.scss';
 
 const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanies', 'brands', 'catalog', 'priceGroups', 'users'];
 
+const SITE_NAV_ITEMS: Array<{ value: AdminSection; label: string; description: string }> = [
+  { value: 'info', label: 'Информация', description: 'Телефон, email и адрес' },
+  { value: 'slider', label: 'Слайдер', description: 'Главные слайды сайта' },
+  { value: 'news', label: 'Новости', description: 'Публикации и даты' },
+  { value: 'groupCompanies', label: 'Группа компаний', description: 'Логотипы и ссылки' },
+  { value: 'brands', label: 'Портфель брендов', description: 'Бренды и категории' },
+  { value: 'catalog', label: 'Каталог', description: 'Товары и импорт' },
+  { value: 'priceGroups', label: 'Ценовая группа', description: 'Картинки ценовых групп' },
+  { value: 'users', label: 'Пользователи и доступы', description: 'Роли и права' },
+];
+
 type AdminArea = 'home' | 'site' | 'wholesale';
 
 function isManagerRole(role: AdminSession['role'] | string | null | undefined) {
@@ -353,56 +364,24 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
       {activeArea === 'site' && (
         <div className={styles.adminShell}>
-          <aside className={styles.sidebar}>
-            <p>Дашборд</p>
-            <button
-              className={activeSection === 'info' ? styles.navActive : undefined}
-              onClick={() => switchSection('info')}
-            >
-              Информация
-            </button>
-            <button
-              className={activeSection === 'slider' ? styles.navActive : undefined}
-              onClick={() => switchSection('slider')}
-            >
-              Слайдер
-            </button>
-            <button
-              className={activeSection === 'news' ? styles.navActive : undefined}
-              onClick={() => switchSection('news')}
-            >
-              Новости
-            </button>
-            <button
-              className={activeSection === 'groupCompanies' ? styles.navActive : undefined}
-              onClick={() => switchSection('groupCompanies')}
-            >
-              Группа компаний
-            </button>
-            <button
-              className={activeSection === 'brands' ? styles.navActive : undefined}
-              onClick={() => switchSection('brands')}
-            >
-              Портфель брендов
-            </button>
-            <button
-              className={activeSection === 'catalog' ? styles.navActive : undefined}
-              onClick={() => switchSection('catalog')}
-            >
-              Каталог
-            </button>
-            <button
-              className={activeSection === 'priceGroups' ? styles.navActive : undefined}
-              onClick={() => switchSection('priceGroups')}
-            >
-              Ценовая группа
-            </button>
-            <button
-              className={activeSection === 'users' ? styles.navActive : undefined}
-              onClick={() => switchSection('users')}
-            >
-              Пользователи и доступы
-            </button>
+          <aside className={styles.analyticsSidebar}>
+            <div className={styles.analyticsSidebarHeader}>
+              <span>Дашборд</span>
+              <strong>Разделы</strong>
+            </div>
+            <nav className={styles.analyticsSideNav} aria-label="Разделы управления сайтом">
+              {SITE_NAV_ITEMS.map((item) => (
+                <button
+                  key={item.value}
+                  className={activeSection === item.value ? styles.analyticsSideNavActive : styles.analyticsSideNavItem}
+                  type="button"
+                  onClick={() => switchSection(item.value)}
+                >
+                  <span>{item.label}</span>
+                  <small>{item.description}</small>
+                </button>
+              ))}
+            </nav>
           </aside>
 
           <div className={styles.content}>
