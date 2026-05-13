@@ -105,6 +105,28 @@ function addButtonLabel(tab: UserTab) {
   return 'Добавить пользователя';
 }
 
+type SavedPasswordRevealProps = {
+  password?: string;
+  className?: string;
+  onCopy: () => void;
+};
+
+function SavedPasswordReveal({ password, className, onCopy }: SavedPasswordRevealProps) {
+  if (!password) return null;
+
+  return (
+    <button
+      type="button"
+      className={[styles.savedPasswordReveal, className].filter(Boolean).join(' ')}
+      title="Навести, чтобы показать. Нажать, чтобы скопировать"
+      onClick={onCopy}
+    >
+      <span className={styles.savedPasswordText}>{password}</span>
+      <span className={styles.savedPasswordCopy}>Скопировать</span>
+    </button>
+  );
+}
+
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -115,6 +137,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [activeTab, setActiveTab] = useState<UserTab>('admin');
   const [passwords, setPasswords] = useState<Record<string, string>>({});
+  const [savedPasswords, setSavedPasswords] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -172,6 +195,29 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     }, 2000);
   };
 
+  const copySavedPassword = async (password?: string) => {
+    if (!password) return;
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(password);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = password;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+      showStatus('Пароль скопирован');
+    } catch {
+      showStatus('Не удалось скопировать пароль');
+    }
+  };
+
   const createUser = async () => {
     const role = activeRoleOptions.some((option) => option.value === draft.role) ? draft.role : defaultRoleForTab(activeTab);
     const payload = {
@@ -196,6 +242,9 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     const data = await response.json();
     if (data.user) {
       setUsers((current) => [...current, data.user]);
+      if (payload.password) {
+        setSavedPasswords((current) => ({ ...current, [data.user.id]: payload.password }));
+      }
       const nextTab = tabForRole(data.user.role);
       setActiveTab(nextTab);
       setDraft(emptyDraftForTab(nextTab));
@@ -205,11 +254,12 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   };
 
   const saveUser = async (user: AccessUser) => {
+    const nextPassword = passwords[user.id] || '';
     setBusyId(user.id);
     const response = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...user, password: passwords[user.id] || '' }),
+      body: JSON.stringify({ ...user, password: nextPassword }),
     });
     setBusyId(null);
 
@@ -222,9 +272,19 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     if (data.user) {
       setUsers((current) => current.map((item) => (item.id === user.id ? data.user : item)));
       setActiveTab(tabForRole(data.user.role));
+      if (nextPassword || data.user.id !== user.id) {
+        setSavedPasswords((current) => {
+          const next = { ...current };
+          const visiblePassword = nextPassword || current[user.id];
+          if (data.user.id !== user.id) delete next[user.id];
+          if (visiblePassword) next[data.user.id] = visiblePassword;
+          return next;
+        });
+      }
       setPasswords((current) => {
         const next = { ...current };
         delete next[user.id];
+        if (data.user.id !== user.id) delete next[data.user.id];
         return next;
       });
       markSaved(data.user.id);
@@ -244,6 +304,11 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     }
 
     setUsers((current) => current.filter((item) => item.id !== user.id));
+    setSavedPasswords((current) => {
+      const next = { ...current };
+      delete next[user.id];
+      return next;
+    });
     showStatus('Пользователь удалён');
   };
 
@@ -409,6 +474,11 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
                     onChange={(event) => setPasswords((current) => ({ ...current, [user.id]: event.target.value }))}
                   />
                 </label>
+                <SavedPasswordReveal
+                  password={savedPasswords[user.id]}
+                  className={user.role === 'manager' ? undefined : styles.savedPasswordRevealWide}
+                  onCopy={() => copySavedPassword(savedPasswords[user.id])}
+                />
               </div>
 
               <div className={styles.userAccessMeta}>

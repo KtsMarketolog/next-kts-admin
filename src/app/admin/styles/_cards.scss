@@ -777,6 +777,64 @@
   }
 }
 
+.savedPasswordReveal {
+  display: inline-flex;
+  grid-column: 7 / 13;
+  grid-row: 3;
+  align-items: center;
+  justify-content: space-between;
+  gap: $apx-10;
+  width: 100%;
+  min-width: 0;
+  min-height: $apx-38;
+  border: $apx-1 solid #e1e3ee !important;
+  border-radius: $apx-8;
+  background: #fff !important;
+  color: #242633 !important;
+  padding: 0 $apx-10 !important;
+  cursor: copy;
+  text-align: left;
+
+  &:hover,
+  &:focus-visible {
+    border-color: #260b86 !important;
+    background: #f7f4ff !important;
+    outline: none;
+  }
+
+  &:hover .savedPasswordText,
+  &:focus-visible .savedPasswordText {
+    filter: none;
+  }
+}
+
+.savedPasswordRevealWide {
+  grid-column: 4 / 13;
+}
+
+.savedPasswordText {
+  min-width: 0;
+  overflow: hidden;
+  color: #242633 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: $apx-13 !important;
+  font-weight: 700 !important;
+  text-overflow: ellipsis;
+  text-transform: none !important;
+  white-space: nowrap;
+  filter: blur($apx-4);
+  transition: filter 0.16s ease;
+}
+
+.savedPasswordCopy {
+  flex: 0 0 auto;
+  color: #260b86 !important;
+  font-size: $apx-11 !important;
+  font-weight: 800 !important;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .userAccessMeta {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr) max-content;
@@ -1503,6 +1561,7 @@
   .userCreateCard label,
   .userCreateCard > button,
   .userAccessFields label,
+  .savedPasswordReveal,
   .catalogProductForm label,
   .catalogProductFields label {
     grid-column: auto;
