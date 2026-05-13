@@ -105,28 +105,6 @@ function addButtonLabel(tab: UserTab) {
   return 'Добавить пользователя';
 }
 
-type SavedPasswordRevealProps = {
-  password?: string;
-  className?: string;
-  onCopy: () => void;
-};
-
-function SavedPasswordReveal({ password, className, onCopy }: SavedPasswordRevealProps) {
-  if (!password) return null;
-
-  return (
-    <button
-      type="button"
-      className={[styles.savedPasswordReveal, className].filter(Boolean).join(' ')}
-      title="Навести, чтобы показать. Нажать, чтобы скопировать"
-      onClick={onCopy}
-    >
-      <span className={styles.savedPasswordText}>{password}</span>
-      <span className={styles.savedPasswordCopy}>Скопировать</span>
-    </button>
-  );
-}
-
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -217,6 +195,8 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       showStatus('Не удалось скопировать пароль');
     }
   };
+
+  const visiblePassword = (userId: string) => passwords[userId] ?? savedPasswords[userId] ?? '';
 
   const createUser = async () => {
     const role = activeRoleOptions.some((option) => option.value === draft.role) ? draft.role : defaultRoleForTab(activeTab);
@@ -465,20 +445,29 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
                   </label>
                 )}
                 <label className={user.role === 'manager' ? undefined : styles.userPasswordWide}>
-                  <span>Новый пароль</span>
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    placeholder="Не менять"
-                    value={passwords[user.id] || ''}
-                    onChange={(event) => setPasswords((current) => ({ ...current, [user.id]: event.target.value }))}
-                  />
+                  <span>Пароль</span>
+                  <div className={styles.userPasswordCopyField}>
+                    <input
+                      className={styles.userPasswordCopyInput}
+                      type="text"
+                      autoComplete="new-password"
+                      spellCheck={false}
+                      placeholder="Введите пароль"
+                      value={visiblePassword(user.id)}
+                      onClick={() => copySavedPassword(visiblePassword(user.id))}
+                      onChange={(event) => setPasswords((current) => ({ ...current, [user.id]: event.target.value }))}
+                    />
+                    <button
+                      className={styles.userPasswordCopyButton}
+                      type="button"
+                      disabled={!visiblePassword(user.id)}
+                      title="Скопировать пароль"
+                      onClick={() => copySavedPassword(visiblePassword(user.id))}
+                    >
+                      Скопировать
+                    </button>
+                  </div>
                 </label>
-                <SavedPasswordReveal
-                  password={savedPasswords[user.id]}
-                  className={user.role === 'manager' ? undefined : styles.savedPasswordRevealWide}
-                  onCopy={() => copySavedPassword(savedPasswords[user.id])}
-                />
               </div>
 
               <div className={styles.userAccessMeta}>

@@ -1,6 +1,6 @@
 export { query } from './db/client';
 export { ensureSiteSchema } from './db/schema';
-export { trackAnalyticsEvent } from './db/analyticsRepo';
+export { clearWholesaleAnalyticsEvents, trackAnalyticsEvent } from './db/analyticsRepo';
 export type { AnalyticsActorType, AnalyticsEventType, TrackAnalyticsEventInput } from './db/analyticsRepo';
 export { recordSecurityEvent } from './db/securityAuditRepo';
 export type { RecordSecurityEventInput, SecurityActorType, SecurityEventType } from './db/securityAuditRepo';

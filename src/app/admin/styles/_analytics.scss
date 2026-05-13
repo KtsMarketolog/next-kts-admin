@@ -418,6 +418,23 @@
   }
 }
 
+.analyticsPanelActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: $apx-10;
+
+  span {
+    min-width: $apx-18;
+    text-align: right;
+  }
+
+  button {
+    min-width: $apx-160;
+  }
+}
+
 .analyticsEventsList {
   display: grid;
   gap: $apx-12;

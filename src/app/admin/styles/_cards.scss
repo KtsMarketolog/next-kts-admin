@@ -777,62 +777,50 @@
   }
 }
 
-.savedPasswordReveal {
-  display: inline-flex;
-  grid-column: 7 / 13;
-  grid-row: 3;
-  align-items: center;
-  justify-content: space-between;
-  gap: $apx-10;
-  width: 100%;
+.userPasswordCopyField {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: $apx-8;
   min-width: 0;
-  min-height: $apx-38;
-  border: $apx-1 solid #e1e3ee !important;
-  border-radius: $apx-8;
-  background: #fff !important;
-  color: #242633 !important;
-  padding: 0 $apx-10 !important;
-  cursor: copy;
-  text-align: left;
 
-  &:hover,
-  &:focus-visible {
-    border-color: #260b86 !important;
-    background: #f7f4ff !important;
-    outline: none;
-  }
-
-  &:hover .savedPasswordText,
-  &:focus-visible .savedPasswordText {
+  &:hover .userPasswordCopyInput,
+  &:focus-within .userPasswordCopyInput {
     filter: none;
   }
 }
 
-.savedPasswordRevealWide {
-  grid-column: 4 / 13;
-}
-
-.savedPasswordText {
-  min-width: 0;
-  overflow: hidden;
-  color: #242633 !important;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: $apx-13 !important;
-  font-weight: 700 !important;
-  text-overflow: ellipsis;
-  text-transform: none !important;
-  white-space: nowrap;
+.userPasswordCopyInput {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+  font-weight: 700;
   filter: blur($apx-4);
-  transition: filter 0.16s ease;
+  transition: filter 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+
+  &::placeholder {
+    font-family: inherit;
+    font-weight: 400;
+    filter: none;
+  }
+
+  &:placeholder-shown {
+    filter: none;
+  }
+
+  &:hover,
+  &:focus {
+    border-color: #260b86 !important;
+    background: #f7f4ff;
+    filter: none;
+  }
 }
 
-.savedPasswordCopy {
-  flex: 0 0 auto;
-  color: #260b86 !important;
-  font-size: $apx-11 !important;
-  font-weight: 800 !important;
-  line-height: 1;
-  text-transform: uppercase;
+.userPasswordCopyButton {
+  min-width: $apx-126 !important;
+  background: #e9eaf2 !important;
+  color: #242633 !important;
+
+  &:disabled {
+    cursor: default !important;
+  }
 }
 
 .userAccessMeta {
@@ -1561,7 +1549,6 @@
   .userCreateCard label,
   .userCreateCard > button,
   .userAccessFields label,
-  .savedPasswordReveal,
   .catalogProductForm label,
   .catalogProductFields label {
     grid-column: auto;

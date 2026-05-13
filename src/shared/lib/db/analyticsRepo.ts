@@ -108,3 +108,15 @@ export async function trackAnalyticsEvent(input: TrackAnalyticsEventInput) {
     console.error('Failed to track analytics event', error);
   }
 }
+
+export async function clearWholesaleAnalyticsEvents() {
+  await ensureSiteSchema();
+  const result = await query<{ deleted: string }>(
+    `with deleted as (
+       delete from wholesale_analytics_events
+       returning 1
+     )
+     select count(*)::text as deleted from deleted`,
+  );
+  return Number(result.rows[0]?.deleted ?? 0);
+}

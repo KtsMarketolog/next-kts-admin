@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
@@ -872,33 +872,34 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
   const [exportBusy, setExportBusy] = useState(false);
   const [exportDownloadDone, setExportDownloadDone] = useState(false);
   const [exportSendDone, setExportSendDone] = useState(false);
+  const [clearEventsBusy, setClearEventsBusy] = useState(false);
+  const [clearEventsStatus, setClearEventsStatus] = useState('');
 
-  useEffect(() => {
-    let active = true;
+  const loadAnalytics = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError('');
 
-    fetch(`/api/admin/wholesale/analytics?period=${period}`, { cache: 'no-store' })
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Не удалось загрузить общую аналитику');
-        return (await res.json()) as Analytics;
-      })
-      .then((data) => {
-        if (!active) return;
-        setAnalytics(data);
-      })
-      .catch((reason) => {
-        if (!active) return;
-        setError(reason instanceof Error ? reason.message : 'Не удалось загрузить общую аналитику');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    try {
+      const response = await fetch(`/api/admin/wholesale/analytics?period=${period}`, { cache: 'no-store', signal });
+      if (!response.ok) throw new Error('Не удалось загрузить общую аналитику');
+      const data = (await response.json()) as Analytics;
+      if (!signal?.aborted) setAnalytics(data);
+    } catch (reason) {
+      if (signal?.aborted) return;
+      setError(reason instanceof Error ? reason.message : 'Не удалось загрузить общую аналитику');
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [period]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadAnalytics(controller.signal);
 
     return () => {
-      active = false;
+      controller.abort();
     };
-  }, [period]);
+  }, [loadAnalytics]);
 
   useEffect(() => {
     const nextTab = resolveTab(searchParams.get('tab'));
@@ -919,6 +920,32 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
   }, [actorFilter, analytics?.recentEvents, eventTypeFilter, managerFilter]);
 
   const activeTab = tabs.find((item) => item.value === tab) ?? tabs[0];
+
+  const clearEventLog = async () => {
+    if (!analytics?.recentEvents.length || clearEventsBusy) return;
+    if (!window.confirm('Очистить журнал событий? Все события будут удалены.')) return;
+
+    setClearEventsBusy(true);
+    setClearEventsStatus('');
+
+    try {
+      const response = await fetch('/api/admin/wholesale/analytics', { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : 'Не удалось очистить журнал');
+      }
+
+      setEventTypeFilter('');
+      setActorFilter('');
+      setManagerFilter('');
+      setClearEventsStatus('Журнал очищен');
+      await loadAnalytics();
+    } catch (reason) {
+      setClearEventsStatus(reason instanceof Error ? reason.message : 'Не удалось очистить журнал');
+    } finally {
+      setClearEventsBusy(false);
+    }
+  };
 
   const renderTabContent = () => {
     if (!analytics) return null;
@@ -949,6 +976,9 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
         setEventTypeFilter={setEventTypeFilter}
         setActorFilter={setActorFilter}
         setManagerFilter={setManagerFilter}
+        clearBusy={clearEventsBusy}
+        clearStatus={clearEventsStatus}
+        onClear={clearEventLog}
       />
     );
   };
@@ -1438,6 +1468,9 @@ function EventsTab({
   setEventTypeFilter,
   setActorFilter,
   setManagerFilter,
+  clearBusy,
+  clearStatus,
+  onClear,
 }: {
   analytics: Analytics;
   events: AnalyticsEvent[];
@@ -1447,6 +1480,9 @@ function EventsTab({
   setEventTypeFilter: (value: string) => void;
   setActorFilter: (value: string) => void;
   setManagerFilter: (value: string) => void;
+  clearBusy: boolean;
+  clearStatus: string;
+  onClear: () => void;
 }) {
   const eventTypes = Array.from(new Set((analytics.recentEvents ?? []).map((event) => event.eventType))).sort();
   const [visibleCount, setVisibleCount] = useState(EVENT_PAGE_SIZE);
@@ -1462,7 +1498,12 @@ function EventsTab({
     <article className={styles.analyticsPanel}>
       <div className={styles.analyticsPanelHeader}>
         <h3>Журнал событий</h3>
-        <span>{events.length}</span>
+        <div className={styles.analyticsPanelActions}>
+          {clearStatus ? <span>{clearStatus}</span> : <span>{events.length}</span>}
+          <button className={styles.danger} type="button" disabled={clearBusy || analytics.recentEvents.length === 0} onClick={onClear}>
+            {clearBusy ? 'Очистка...' : 'Очистить журнал'}
+          </button>
+        </div>
       </div>
       <div className={styles.analyticsFilters}>
         <select value={managerFilter} onChange={(event) => setManagerFilter(event.target.value)}>
