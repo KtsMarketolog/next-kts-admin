@@ -1443,6 +1443,28 @@ function managerRoleLabel(role: string | null | undefined) {
   return normalizeManagerRole(role) === 'support_manager' ? 'Менеджер по сопровождению' : 'Менеджер по развитию';
 }
 
+async function normalizeWholesaleSupportManagerId(supportManagerId: number | null | undefined, selfId?: number) {
+  if (supportManagerId === null || supportManagerId === undefined || supportManagerId === 0) return null;
+  const numericId = Number(supportManagerId);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    throw new Error('Некорректный менеджер по сопровождению');
+  }
+  if (selfId && numericId === selfId) {
+    throw new Error('Нельзя назначить менеджера сопровождения самим собой');
+  }
+  const result = await query<{ id: string }>(
+    `select id::text
+     from wholesale_managers
+     where id = $1 and role = 'support_manager' and is_active = true
+     limit 1`,
+    [numericId],
+  );
+  if (!result.rows[0]) {
+    throw new Error('Менеджер по сопровождению не найден');
+  }
+  return numericId;
+}
+
 function mapManager(row: ManagerRow): WholesaleManager {
   return {
     id: Number(row.id),
@@ -1582,24 +1604,27 @@ export async function createWholesaleManager(input: {
   login: string;
   email: string;
   phone: string;
+  supportManagerId?: number | null;
   passwordHash: string;
   isActive: boolean;
 }) {
   await ensureSiteSchema();
+  const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId);
   const result = await query<{ id: string }>(
-    `insert into wholesale_managers (name, login, email, phone, password_hash, is_active, password_changed_at)
-     values ($1, $2, $3, $4, $5, $6, now())
+    `insert into wholesale_managers (name, login, email, phone, support_manager_id, password_hash, is_active, password_changed_at)
+     values ($1, $2, $3, $4, $5, $6, $7, now())
      returning id`,
-    [input.name, normalizeLogin(input.login), input.email, input.phone, input.passwordHash, input.isActive],
+    [input.name, normalizeLogin(input.login), input.email, input.phone, supportManagerId, input.passwordHash, input.isActive],
   );
   return Number(result.rows[0].id);
 }
 
 export async function updateWholesaleManager(
   id: number,
-  input: { name: string; login: string; email: string; phone: string; passwordHash?: string; isActive: boolean },
+  input: { name: string; login: string; email: string; phone: string; supportManagerId?: number | null; passwordHash?: string; isActive: boolean },
 ) {
   await ensureSiteSchema();
+  const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId, id);
   await query(
     `update wholesale_managers
      set name = $2,
@@ -1609,9 +1634,10 @@ export async function updateWholesaleManager(
          password_hash = case when $6::text is null then password_hash else $6 end,
          password_changed_at = case when $6::text is null then password_changed_at else now() end,
          is_active = $7,
+         support_manager_id = $8,
          updated_at = now()
      where id = $1`,
-    [id, input.name, normalizeLogin(input.login), input.email, input.phone, input.passwordHash ?? null, input.isActive],
+    [id, input.name, normalizeLogin(input.login), input.email, input.phone, input.passwordHash ?? null, input.isActive, supportManagerId],
   );
 }
 

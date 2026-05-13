@@ -26,23 +26,31 @@ export async function POST(request: Request) {
   const email = normalizeTextField(body.email, 160);
   const phone = normalizeTextField(body.phone, 60);
   const password = typeof body.password === 'string' ? body.password : '';
+  const supportManagerId = Number(body.supportManagerId);
+  const normalizedSupportManagerId = Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
 
   if (!name || !login || !password) {
-    return Response.json({ error: 'Name, login and password are required' }, { status: 400 });
+    return Response.json({ error: 'Имя, логин и пароль обязательны' }, { status: 400 });
   }
   const passwordPolicy = validatePasswordPolicy(password);
   if (!passwordPolicy.ok) {
     return Response.json({ error: passwordPolicy.error }, { status: 400 });
   }
 
-  const id = await createWholesaleManager({
-    name,
-    login,
-    email,
-    phone,
-    passwordHash: hashPassword(password),
-    isActive: Boolean(body.isActive ?? true),
-  });
+  let id: number;
+  try {
+    id = await createWholesaleManager({
+      name,
+      login,
+      email,
+      phone,
+      supportManagerId: normalizedSupportManagerId,
+      passwordHash: hashPassword(password),
+      isActive: Boolean(body.isActive ?? true),
+    });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : 'Не удалось добавить менеджера' }, { status: 400 });
+  }
 
   await recordSecurityEvent({
     eventType: 'manager_created',
@@ -54,7 +62,7 @@ export async function POST(request: Request) {
     ip: getClientIp(request),
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { login, email, phone },
+    metadata: { login, email, phone, supportManagerId: normalizedSupportManagerId },
   });
 
   return Response.json({ id });

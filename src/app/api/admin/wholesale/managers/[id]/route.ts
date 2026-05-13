@@ -26,9 +26,11 @@ export async function PUT(request: Request, context: Context) {
   const email = normalizeTextField(body.email, 160);
   const phone = normalizeTextField(body.phone, 60);
   const password = typeof body.password === 'string' ? body.password : '';
+  const supportManagerId = Number(body.supportManagerId);
+  const normalizedSupportManagerId = Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
 
   if (!name || !login) {
-    return Response.json({ error: 'Name and login are required' }, { status: 400 });
+    return Response.json({ error: 'Имя и логин обязательны' }, { status: 400 });
   }
   if (password) {
     const passwordPolicy = validatePasswordPolicy(password);
@@ -37,16 +39,21 @@ export async function PUT(request: Request, context: Context) {
     }
   }
 
-  await updateWholesaleManager(numericId, {
-    name,
-    login,
-    email,
-    phone,
-    passwordHash: password ? hashPassword(password) : undefined,
-    isActive: Boolean(body.isActive ?? true),
-  });
-  if (password) {
-    await revokeManagerSessions(numericId);
+  try {
+    await updateWholesaleManager(numericId, {
+      name,
+      login,
+      email,
+      phone,
+      supportManagerId: normalizedSupportManagerId,
+      passwordHash: password ? hashPassword(password) : undefined,
+      isActive: Boolean(body.isActive ?? true),
+    });
+    if (password) {
+      await revokeManagerSessions(numericId);
+    }
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить менеджера' }, { status: 400 });
   }
 
   await recordSecurityEvent({
@@ -59,7 +66,7 @@ export async function PUT(request: Request, context: Context) {
     ip: getClientIp(request),
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { login, email, phone, isActive: Boolean(body.isActive ?? true) },
+    metadata: { login, email, phone, supportManagerId: normalizedSupportManagerId, isActive: Boolean(body.isActive ?? true) },
   });
 
   return Response.json({ ok: true });

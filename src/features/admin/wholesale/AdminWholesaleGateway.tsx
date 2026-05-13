@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import {
   getWholesalePriceWorkflowStatusLabel,
   WHOLESALE_PRICE_WORKFLOW_STATUSES,
@@ -18,9 +19,23 @@ type Manager = {
   login: string;
   email: string;
   phone: string;
+  role: 'manager' | 'support_manager';
+  supportManagerId: number | null;
+  supportManagerName: string;
   isActive: boolean;
   priceListCount: number;
   password?: string;
+  displayPassword: string;
+};
+
+type ManagerDraft = {
+  name: string;
+  login: string;
+  email: string;
+  phone: string;
+  supportManagerId: number | null;
+  password: string;
+  isActive: boolean;
 };
 
 type PriceList = {
@@ -111,14 +126,55 @@ type CurrentManager = {
   phone: string;
 };
 
-const emptyManager = {
+const emptyManager: ManagerDraft = {
   name: '',
   login: '',
   email: '',
   phone: '',
+  supportManagerId: null,
   password: '',
   isActive: true,
 };
+
+const MANAGER_PASSWORDS_STORAGE_KEY = 'kts-admin-wholesale-manager-passwords-v1';
+
+function readManagerPasswords() {
+  if (typeof window === 'undefined') return {} as Record<string, string>;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(MANAGER_PASSWORDS_STORAGE_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object') return {} as Record<string, string>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'),
+    );
+  } catch {
+    return {} as Record<string, string>;
+  }
+}
+
+function writeManagerPasswords(passwords: Record<string, string>) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MANAGER_PASSWORDS_STORAGE_KEY, JSON.stringify(passwords));
+}
+
+function saveManagerPassword(managerId: number, password: string) {
+  const passwords = readManagerPasswords();
+  passwords[String(managerId)] = password;
+  writeManagerPasswords(passwords);
+}
+
+function removeManagerPassword(managerId: number) {
+  const passwords = readManagerPasswords();
+  delete passwords[String(managerId)];
+  writeManagerPasswords(passwords);
+}
+
+function attachManagerPasswords(managers: Manager[]) {
+  const passwords = readManagerPasswords();
+  return managers.map((manager) => ({
+    ...manager,
+    displayPassword: manager.displayPassword || passwords[String(manager.id)] || '',
+  }));
+}
 
 const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
 
@@ -158,6 +214,11 @@ function formatDate(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString('ru-RU');
+}
+
+async function readApiError(response: Response, fallback: string) {
+  const data = await response.json().catch(() => ({}));
+  return typeof data.error === 'string' ? data.error : fallback;
 }
 
 function renderLastPriceChange(item: PriceList) {
@@ -354,6 +415,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [savedManagerId, setSavedManagerId] = useState<number | null>(null);
   const [managerCreated, setManagerCreated] = useState(false);
+  const [managerPasswordDrafts, setManagerPasswordDrafts] = useState<Record<number, string>>({});
+  const [managerPasswordEditIds, setManagerPasswordEditIds] = useState<Record<number, boolean>>({});
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogCategoryId, setCatalogCategoryId] = useState('all');
   const [catalogPriceGroup, setCatalogPriceGroup] = useState('all');
@@ -453,6 +516,13 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   );
   const filteredCatalogGroups = useMemo(() => groupCatalogRowsByPriceGroup(sortedCatalogRows), [sortedCatalogRows]);
   const commentRows = useMemo(() => getTextareaRows(editor.comment), [editor.comment]);
+  const supportManagers = useMemo(
+    () =>
+      managers
+        .filter((manager) => manager.role === 'support_manager' && manager.isActive)
+        .sort((first, second) => Number(second.isActive) - Number(first.isActive) || first.name.localeCompare(second.name, 'ru')),
+    [managers],
+  );
 
   const showStatus = (message: string) => {
     setStatus(message);
@@ -465,7 +535,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     const res = await fetch('/api/admin/wholesale/managers', { cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
-    setManagers(Array.isArray(data.managers) ? data.managers : []);
+    setManagers(attachManagerPasswords(Array.isArray(data.managers) ? data.managers : []));
   };
 
   const loadPriceLists = async () => {
@@ -579,44 +649,119 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     };
   }, [canManageWholesale, createManagerId, editId, screen]);
 
+  const validateManagerPassword = (password: string) => {
+    const passwordPolicy = validatePasswordPolicy(password);
+    if (!passwordPolicy.ok) {
+      showStatus(passwordPolicy.error || 'Пароль не подходит. Измените пароль и сохраните снова.');
+      return false;
+    }
+    return true;
+  };
+
+  const copyManagerPassword = async (password?: string) => {
+    if (!password) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(password);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = password;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+      showStatus('Пароль скопирован');
+    } catch {
+      showStatus('Не удалось скопировать пароль');
+    }
+  };
+
   const createManager = async () => {
     if (!managerDraft.name.trim() || !managerDraft.login.trim() || !managerDraft.password.trim()) {
       showStatus('Заполните имя, логин и пароль менеджера');
       return;
     }
+    if (!validateManagerPassword(managerDraft.password.trim())) return;
 
     setBusy(true);
     const res = await fetch('/api/admin/wholesale/managers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(managerDraft),
+      body: JSON.stringify({
+        ...managerDraft,
+        name: managerDraft.name.trim(),
+        login: managerDraft.login.trim(),
+        email: managerDraft.email.trim(),
+        phone: managerDraft.phone.trim(),
+        password: managerDraft.password.trim(),
+      }),
     });
     setBusy(false);
-    showStatus(res.ok ? 'Менеджер добавлен' : 'Не удалось добавить менеджера');
-    if (res.ok) {
-      setManagerCreated(true);
-      setManagerDraft(emptyManager);
-      await loadManagers();
-      window.setTimeout(() => setManagerCreated(false), 2200);
+    if (!res.ok) {
+      showStatus(await readApiError(res, 'Не удалось добавить менеджера'));
+      return;
     }
+
+    const data = await res.json().catch(() => ({}));
+    const createdId = Number(data.id);
+    if (Number.isInteger(createdId) && createdId > 0) saveManagerPassword(createdId, managerDraft.password.trim());
+    showStatus('Менеджер добавлен');
+    setManagerCreated(true);
+    setManagerDraft(emptyManager);
+    await loadManagers();
+    window.setTimeout(() => setManagerCreated(false), 2200);
   };
 
   const saveManager = async (manager: Manager) => {
+    const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
+    const nextPassword = passwordIsEdited ? (managerPasswordDrafts[manager.id] || '').trim() : '';
+    if (passwordIsEdited && !nextPassword) {
+      showStatus('Введите новый пароль или нажмите «Отменить пароль»');
+      return;
+    }
+    if (nextPassword && !validateManagerPassword(nextPassword)) return;
+
     setBusy(true);
     const res = await fetch(`/api/admin/wholesale/managers/${manager.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(manager),
+      body: JSON.stringify({
+        ...manager,
+        name: manager.name.trim(),
+        login: manager.login.trim(),
+        email: manager.email.trim(),
+        phone: manager.phone.trim(),
+        password: nextPassword,
+        supportManagerId: manager.role === 'manager' ? manager.supportManagerId : null,
+      }),
     });
     setBusy(false);
-    showStatus(res.ok ? 'Менеджер сохранён' : 'Не удалось сохранить менеджера');
-    if (res.ok) {
-      setSavedManagerId(manager.id);
-      await loadManagers();
-      window.setTimeout(() => {
-        setSavedManagerId((current) => (current === manager.id ? null : current));
-      }, 2200);
+    if (!res.ok) {
+      showStatus(await readApiError(res, 'Не удалось сохранить менеджера'));
+      return;
     }
+
+    if (nextPassword) saveManagerPassword(manager.id, nextPassword);
+    setManagerPasswordDrafts((current) => {
+      const next = { ...current };
+      delete next[manager.id];
+      return next;
+    });
+    setManagerPasswordEditIds((current) => {
+      const next = { ...current };
+      delete next[manager.id];
+      return next;
+    });
+    showStatus('Менеджер сохранён');
+    setSavedManagerId(manager.id);
+    await loadManagers();
+    window.setTimeout(() => {
+      setSavedManagerId((current) => (current === manager.id ? null : current));
+    }, 2200);
   };
 
   const deleteManager = async (id: number) => {
@@ -625,7 +770,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     const res = await fetch(`/api/admin/wholesale/managers/${id}`, { method: 'DELETE' });
     setBusy(false);
     showStatus(res.ok ? 'Менеджер удалён' : 'Не удалось удалить менеджера');
-    if (res.ok) await loadManagers();
+    if (res.ok) {
+      removeManagerPassword(id);
+      await loadManagers();
+    }
   };
 
   const updateItem = (key: string, patch: Partial<PriceItem>) => {
@@ -836,7 +984,22 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           <input value={managerDraft.login} onChange={(event) => setManagerDraft({ ...managerDraft, login: event.target.value })} placeholder="Логин" autoComplete="new-password" />
           <input value={managerDraft.email} onChange={(event) => setManagerDraft({ ...managerDraft, email: event.target.value })} placeholder="Email" autoComplete="new-password" />
           <input value={managerDraft.phone} onChange={(event) => setManagerDraft({ ...managerDraft, phone: event.target.value })} placeholder="Телефон" autoComplete="tel" />
-          <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} placeholder="Пароль" autoComplete="new-password" />
+          <select
+            value={managerDraft.supportManagerId ?? ''}
+            disabled={supportManagers.length === 0}
+            onChange={(event) => setManagerDraft({ ...managerDraft, supportManagerId: event.target.value ? Number(event.target.value) : null })}
+          >
+            <option value="">Менеджер по сопровождению</option>
+            {supportManagers.map((manager) => (
+              <option key={manager.id} value={manager.id}>
+                {manager.name || manager.login}
+              </option>
+            ))}
+          </select>
+          <label className={styles.wholesaleInlineField}>
+            <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} placeholder="Пароль" autoComplete="new-password" />
+            <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
+          </label>
           <label className={styles.checkbox}>
             <input type="checkbox" checked={managerDraft.isActive} onChange={(event) => setManagerDraft({ ...managerDraft, isActive: event.target.checked })} />
             Активен
@@ -848,7 +1011,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
         <h3>Менеджеры и статистика</h3>
         <div className={styles.managerCards}>
-          {managers.map((manager) => (
+          {managers.map((manager) => {
+            const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
+            const displayPassword = manager.displayPassword || '';
+            const availableSupportManagers = supportManagers.filter((supportManager) => supportManager.id !== manager.id);
+
+            return (
             <article className={styles.managerCard} key={manager.id}>
               <div className={styles.managerFields}>
                 <label>
@@ -868,8 +1036,56 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                   <input value={manager.phone} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, phone: event.target.value } : item))} />
                 </label>
                 <label>
-                  <span>Новый пароль</span>
-                  <input type="password" value={manager.password ?? ''} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, password: event.target.value } : item))} placeholder="Не менять" />
+                  <span>Менеджер по сопровождению</span>
+                  <select
+                    value={manager.supportManagerId ?? ''}
+                    disabled={manager.role !== 'manager' || availableSupportManagers.length === 0}
+                    onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, supportManagerId: event.target.value ? Number(event.target.value) : null } : item))}
+                  >
+                    <option value="">{manager.role === 'manager' ? 'Не выбран' : 'Не назначается'}</option>
+                    {availableSupportManagers.map((supportManager) => (
+                      <option key={supportManager.id} value={supportManager.id}>
+                        {supportManager.name || supportManager.login}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.managerPasswordField}>
+                  <span>Пароль</span>
+                  <div className={styles.userPasswordCopyField}>
+                    <input
+                      className={styles.userPasswordCopyInput}
+                      type="text"
+                      autoComplete="new-password"
+                      spellCheck={false}
+                      readOnly
+                      placeholder="Пароль не сохранён"
+                      value={displayPassword}
+                      onClick={() => copyManagerPassword(displayPassword)}
+                    />
+                    <button
+                      className={styles.userPasswordCopyButton}
+                      type="button"
+                      disabled={!displayPassword}
+                      title="Скопировать пароль"
+                      onClick={() => copyManagerPassword(displayPassword)}
+                    >
+                      Скопировать
+                    </button>
+                  </div>
+                  {passwordIsEdited && (
+                    <>
+                      <input
+                        className={styles.userPasswordEditInput}
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="Введите новый пароль"
+                        value={managerPasswordDrafts[manager.id] || ''}
+                        onChange={(event) => setManagerPasswordDrafts((current) => ({ ...current, [manager.id]: event.target.value }))}
+                      />
+                      <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
+                    </>
+                  )}
                 </label>
               </div>
               <div className={styles.managerControls}>
@@ -886,6 +1102,21 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                   <span>Активен</span>
                 </label>
                 <div className={styles.managerActions}>
+                  <button
+                    className={styles.secondary}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setManagerPasswordEditIds((current) => ({ ...current, [manager.id]: !current[manager.id] }));
+                      setManagerPasswordDrafts((current) => {
+                        const next = { ...current };
+                        delete next[manager.id];
+                        return next;
+                      });
+                    }}
+                  >
+                    {passwordIsEdited ? 'Отменить пароль' : 'Изменить пароль'}
+                  </button>
                   <button
                     className={styles.secondary}
                     type="button"
@@ -911,7 +1142,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                 </div>
               </div>
             </article>
-          ))}
+            );
+          })}
           {managers.length === 0 ? <p className={styles.mutedText}>Менеджеров пока нет</p> : null}
         </div>
           </div>
