@@ -12,6 +12,14 @@ async function loadCompanies() {
   }
 }
 
+function normalizeCompanyHref(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('/')) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
 export const GroupCompanies = async () => {
   const companies = await loadCompanies();
 
@@ -25,6 +33,7 @@ export const GroupCompanies = async () => {
 
         <div className={styles.list}>
           {companies.map((company, index) => {
+            const href = normalizeCompanyHref(company.linkUrl);
             const logo = (
               <Image
                 className={styles.logo}
@@ -38,10 +47,10 @@ export const GroupCompanies = async () => {
 
             return (
               <div key={`${company.imageUrl}-${index}`} className={styles.company}>
-                {company.linkUrl ? (
+                {href ? (
                   <a
                     className={styles.companyLink}
-                    href={company.linkUrl}
+                    href={href}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={`Компания ${index + 1}`}

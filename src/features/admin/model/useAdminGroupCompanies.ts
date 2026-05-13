@@ -11,6 +11,7 @@ export function useAdminGroupCompanies({ setBusy, showStatus, reloadAdminData }:
   const [groupCompanies, setGroupCompanies] = useState<GroupCompany[]>([]);
   const [groupCompanyDraft, setGroupCompanyDraft] = useState(emptyGroupCompany);
   const [groupCompanyCreated, setGroupCompanyCreated] = useState(false);
+  const [savedGroupCompanyId, setSavedGroupCompanyId] = useState<number | null>(null);
   const [draggedGroupCompanyId, setDraggedGroupCompanyId] = useState<number | null>(null);
 
   const nextGroupCompanyOrder = groupCompanies.length + 1;
@@ -77,7 +78,11 @@ export function useAdminGroupCompanies({ setBusy, showStatus, reloadAdminData }:
     });
     setBusy(false);
     showStatus(res.ok ? 'Компания сохранена' : 'Не удалось сохранить компанию');
-    if (res.ok) await reloadAdminData();
+    if (res.ok) {
+      setSavedGroupCompanyId(company.id);
+      window.setTimeout(() => setSavedGroupCompanyId((current) => (current === company.id ? null : current)), 2000);
+      await reloadAdminData();
+    }
   };
 
   const deleteGroupCompany = async (id: number) => {
@@ -98,6 +103,7 @@ export function useAdminGroupCompanies({ setBusy, showStatus, reloadAdminData }:
     draggedGroupCompanyId,
     setDraggedGroupCompanyId,
     groupCompanyCreated,
+    savedGroupCompanyId,
     updateGroupCompany,
     moveGroupCompany,
     createGroupCompany,

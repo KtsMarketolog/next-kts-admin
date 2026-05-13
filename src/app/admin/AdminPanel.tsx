@@ -465,6 +465,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
                 draggedGroupCompanyId={groupCompanyAdmin.draggedGroupCompanyId}
                 busy={busy}
                 groupCompanyCreated={groupCompanyAdmin.groupCompanyCreated}
+                savedGroupCompanyId={groupCompanyAdmin.savedGroupCompanyId}
                 setGroupCompanyDraft={groupCompanyAdmin.setGroupCompanyDraft}
                 setDraggedGroupCompanyId={groupCompanyAdmin.setDraggedGroupCompanyId}
                 updateGroupCompany={groupCompanyAdmin.updateGroupCompany}

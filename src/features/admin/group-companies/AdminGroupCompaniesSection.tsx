@@ -14,6 +14,7 @@ type AdminGroupCompaniesSectionProps = {
   draggedGroupCompanyId: number | null;
   busy: boolean;
   groupCompanyCreated: boolean;
+  savedGroupCompanyId: number | null;
   setGroupCompanyDraft: Dispatch<SetStateAction<Omit<GroupCompany, 'id'>>>;
   setDraggedGroupCompanyId: (id: number | null) => void;
   updateGroupCompany: (id: number, patch: Partial<GroupCompany>) => void;
@@ -32,6 +33,7 @@ export function AdminGroupCompaniesSection({
   draggedGroupCompanyId,
   busy,
   groupCompanyCreated,
+  savedGroupCompanyId,
   setGroupCompanyDraft,
   setDraggedGroupCompanyId,
   updateGroupCompany,
@@ -133,8 +135,12 @@ export function AdminGroupCompaniesSection({
                 Показывать
               </label>
               <div className={styles.actions}>
-                <button disabled={busy} onClick={() => saveGroupCompany(company)}>
-                  Сохранить
+                <button
+                  className={savedGroupCompanyId === company.id ? styles.savedButton : undefined}
+                  disabled={busy}
+                  onClick={() => saveGroupCompany(company)}
+                >
+                  {savedGroupCompanyId === company.id ? 'Сохранено' : 'Сохранить'}
                 </button>
                 <button className={styles.danger} disabled={busy} onClick={() => deleteGroupCompany(company.id)}>
                   Удалить

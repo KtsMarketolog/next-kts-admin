@@ -107,11 +107,48 @@
   font-weight: 800;
   text-decoration: none;
   white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+
+  &:hover,
+  &:focus,
+  &:active,
+  &:visited {
+    color: #fff;
+    text-decoration: none;
+  }
+
+  &:hover,
+  &:focus {
+    background: #1f086f;
+  }
+
+  &:active {
+    background: #170552;
+  }
 }
 
 .excelButton {
   composes: pdfButton;
   background: #0f7b4d;
+
+  &:hover,
+  &:focus,
+  &:active,
+  &:visited {
+    color: #fff;
+    text-decoration: none;
+  }
+
+  &:hover,
+  &:focus {
+    background: #0c633e;
+  }
+
+  &:active {
+    background: #094c30;
+  }
 }
 
 .category {
