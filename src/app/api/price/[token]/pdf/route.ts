@@ -12,6 +12,12 @@ type Context = {
   params: Promise<{ token: string }>;
 };
 
+type PublicPriceList = NonNullable<Awaited<ReturnType<typeof getPublicWholesalePriceList>>>;
+type PublicPriceProduct = PublicPriceList['categories'][number]['products'][number];
+type PublicPriceVariant = PublicPriceProduct['variants'][number];
+
+const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -69,6 +75,55 @@ function fontPaths() {
   return { regular, bold };
 }
 
+function formatPrice(value: string | null) {
+  if (!value) return '—';
+  const number = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  if (!Number.isFinite(number)) return value;
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(number);
+}
+
+function hasPriceValue(value: string | null) {
+  if (!value) return false;
+  const number = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  return Number.isFinite(number) ? number > 0 : value.trim().length > 0;
+}
+
+function formatIndividualPrice(variant: PublicPriceVariant) {
+  const currencyPrices = [
+    { value: variant.priceEur, currency: 'EUR' },
+    { value: variant.priceRub, currency: 'RUB' },
+    { value: variant.priceCny, currency: 'CNY' },
+  ].filter((price) => hasPriceValue(price.value));
+
+  if (currencyPrices.length === 0) return formatPrice(variant.wholesalePrice);
+
+  return currencyPrices.map((price) => `${formatPrice(price.value)} ${price.currency}`).join(' / ');
+}
+
+function stockLabel(product: PublicPriceProduct) {
+  if (product.stock > 0) return `В наличии: ${product.stock} шт.`;
+  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
+}
+
+function groupProductsByPriceGroup(priceList: PublicPriceList) {
+  const groups = new Map<string, { title: string; products: PublicPriceProduct[] }>();
+
+  for (const category of priceList.categories) {
+    for (const product of category.products) {
+      const groupTitle = product.priceGroup || NO_PRICE_GROUP_TITLE;
+      const groupKey = groupTitle.toLowerCase();
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = { title: groupTitle, products: [] };
+        groups.set(groupKey, group);
+      }
+      group.products.push(product);
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
 function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWholesalePriceList>>>) {
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 42 });
@@ -102,19 +157,23 @@ function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWho
       return;
     }
 
-    for (const category of priceList.categories) {
-      doc.font(boldFont).fontSize(15).text(category.title, { underline: true });
+    for (const group of groupProductsByPriceGroup(priceList)) {
+      if (doc.y > 730) doc.addPage();
+      doc.font(boldFont).fontSize(15).text(group.title, { underline: true });
       doc.moveDown(0.4);
-      for (const product of category.products) {
+      for (const product of group.products) {
+        if (doc.y > 735) doc.addPage();
         doc.font(boldFont).fontSize(12).text(product.title, { continued: false });
-        if (product.sku) doc.font(regularFont).fontSize(9).fillColor('#666').text(`Артикул: ${product.sku}`).fillColor('#000');
+        const productMeta = [
+          product.sku ? `Артикул: ${product.sku}` : '',
+          product.description,
+          priceList.showStock ? stockLabel(product) : '',
+        ].filter(Boolean);
+        if (productMeta.length > 0) {
+          doc.font(regularFont).fontSize(9).fillColor('#666').text(productMeta.join(' · ')).fillColor('#000');
+        }
         for (const variant of product.variants) {
-          const parts = [
-            variant.title,
-            priceList.showRetailPrices ? `розница: ${variant.retailPrice ?? '—'}` : '',
-            `опт: ${variant.wholesalePrice ?? '—'}`,
-          ].filter(Boolean);
-          doc.font(regularFont).fontSize(10).text(`• ${parts.join(' | ')}`);
+          doc.font(regularFont).fontSize(10).text(`• Индивидуальная цена: ${formatIndividualPrice(variant)}`);
         }
         doc.moveDown(0.5);
         if (doc.y > 760) doc.addPage();

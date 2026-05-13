@@ -9,6 +9,10 @@ type Context = {
 };
 
 type PublicPriceList = NonNullable<Awaited<ReturnType<typeof getPublicWholesalePriceList>>>;
+type PublicPriceProduct = PublicPriceList['categories'][number]['products'][number];
+type PublicPriceVariant = PublicPriceProduct['variants'][number];
+
+const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,8 +53,57 @@ function row(cells: string[], styleId?: string) {
   return `<Row${attrs}>${cells.join('')}</Row>`;
 }
 
+function formatPrice(value: string | null) {
+  if (!value) return '—';
+  const number = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  if (!Number.isFinite(number)) return value;
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(number);
+}
+
+function hasPriceValue(value: string | null) {
+  if (!value) return false;
+  const number = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  return Number.isFinite(number) ? number > 0 : value.trim().length > 0;
+}
+
+function formatIndividualPrice(variant: PublicPriceVariant) {
+  const currencyPrices = [
+    { value: variant.priceEur, currency: 'EUR' },
+    { value: variant.priceRub, currency: 'RUB' },
+    { value: variant.priceCny, currency: 'CNY' },
+  ].filter((price) => hasPriceValue(price.value));
+
+  if (currencyPrices.length === 0) return formatPrice(variant.wholesalePrice);
+
+  return currencyPrices.map((price) => `${formatPrice(price.value)} ${price.currency}`).join(' / ');
+}
+
+function stockLabel(product: PublicPriceProduct) {
+  if (product.stock > 0) return `В наличии: ${product.stock} шт.`;
+  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
+}
+
+function groupProductsByPriceGroup(priceList: PublicPriceList) {
+  const groups = new Map<string, { title: string; products: PublicPriceProduct[] }>();
+
+  for (const category of priceList.categories) {
+    for (const product of category.products) {
+      const groupTitle = product.priceGroup || NO_PRICE_GROUP_TITLE;
+      const groupKey = groupTitle.toLowerCase();
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = { title: groupTitle, products: [] };
+        groups.set(groupKey, group);
+      }
+      group.products.push(product);
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
 function createExcelXml(priceList: PublicPriceList) {
-  const columnCount = priceList.showRetailPrices ? 6 : 5;
+  const columnCount = priceList.showStock ? 6 : 5;
   const rows: string[] = [
     row([`<Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="Title"><Data ss:Type="String">${xmlEscape(priceList.title || 'Индивидуальный прайс')}</Data></Cell>`]),
     row([`<Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="Subtitle"><Data ss:Type="String">Клиент: ${xmlEscape(priceList.clientName || 'Не указан')}</Data></Cell>`]),
@@ -65,19 +118,23 @@ function createExcelXml(priceList: PublicPriceList) {
 
   rows.push(row(Array.from({ length: columnCount }, () => cell('', 'Body'))));
 
-  const headers = ['Категория', 'Товар', 'Артикул', 'Размер'];
-  if (priceList.showRetailPrices) headers.push('Розница');
-  headers.push('Опт');
+  const headers = ['Ценовая группа', 'Товар', 'Артикул', 'Описание', 'Индивидуальная цена'];
+  if (priceList.showStock) headers.push('Остаток');
   rows.push(row(headers.map((title) => cell(title, 'Header'))));
 
   let hasItems = false;
-  for (const category of priceList.categories) {
-    for (const product of category.products) {
+  for (const group of groupProductsByPriceGroup(priceList)) {
+    for (const product of group.products) {
       for (const variant of product.variants) {
         hasItems = true;
-        const values = [category.title, product.title, product.sku || '—', variant.title || 'Цена'];
-        if (priceList.showRetailPrices) values.push(variant.retailPrice || '—');
-        values.push(variant.wholesalePrice || '—');
+        const values = [
+          group.title,
+          product.title,
+          product.sku || '—',
+          product.description || '—',
+          formatIndividualPrice(variant),
+        ];
+        if (priceList.showStock) values.push(stockLabel(product));
         rows.push(row(values.map((value) => cell(value))));
       }
     }
@@ -108,9 +165,9 @@ function createExcelXml(priceList: PublicPriceList) {
    <Column ss:Width="150"/>
    <Column ss:Width="260"/>
    <Column ss:Width="110"/>
-   <Column ss:Width="130"/>
-   ${priceList.showRetailPrices ? '<Column ss:Width="100"/>' : ''}
-   <Column ss:Width="100"/>
+   <Column ss:Width="220"/>
+   <Column ss:Width="170"/>
+   ${priceList.showStock ? '<Column ss:Width="130"/>' : ''}
    ${rows.join('\n   ')}
   </Table>
   <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
