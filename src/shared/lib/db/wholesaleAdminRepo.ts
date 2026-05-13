@@ -2688,7 +2688,7 @@ export async function getWholesaleManagerAnalyticsExtended(
      where e.manager_id = $1
        and ($2::text is null or e.created_at >= now() - $2::interval)
      order by e.created_at desc, e.id desc
-     limit 50`,
+     limit 200`,
     [managerId, interval],
   );
   const recentEvents = recentEventsResult.rows.map(mapAnalyticsEvent);
@@ -3270,7 +3270,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
      left join wholesale_managers m on m.id = e.manager_id
      where ($1::text is null or e.created_at >= now() - $1::interval)
      order by e.created_at desc, e.id desc
-     limit 50`,
+     limit 200`,
     [interval],
   );
 

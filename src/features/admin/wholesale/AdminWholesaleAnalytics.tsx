@@ -457,6 +457,35 @@ const eventLabels: Record<string, string> = {
   public_price_request_sent: 'Клиент отправил заявку',
 };
 
+const EVENT_PAGE_SIZE = 20;
+
+const actorLabels: Record<string, string> = {
+  admin: 'Админ',
+  manager: 'Менеджер',
+  client: 'Клиент',
+  system: 'Система',
+  wholesale_admin: 'Админ прайсов',
+};
+
+const eventDetailLabels: Record<string, string> = {
+  title: 'Прайс',
+  clientName: 'Клиент',
+  clientId: 'ID клиента',
+  managerName: 'Менеджер',
+  productTitle: 'Товар',
+  productId: 'ID товара',
+  quantity: 'Количество',
+  from: 'Было',
+  to: 'Стало',
+  added: 'Добавлено',
+  removed: 'Удалено',
+  search: 'Поиск',
+  query: 'Запрос',
+  category: 'Категория',
+  priceGroup: 'Ценовая группа',
+  details: 'Детали',
+};
+
 const problemLabels: Record<Problem, string> = {
   EMPTY: 'Пустой',
   NO_CLIENT: 'Без клиента',
@@ -479,11 +508,6 @@ function formatDateOnly(value: string | null | undefined) {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString('ru-RU');
-}
-
-function shortValue(value: string | null | undefined) {
-  if (!value) return '—';
-  return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
 }
 
 function qualityLabel(score: number) {
@@ -1386,6 +1410,14 @@ function EventsTab({
   setManagerFilter: (value: string) => void;
 }) {
   const eventTypes = Array.from(new Set((analytics.recentEvents ?? []).map((event) => event.eventType))).sort();
+  const [visibleCount, setVisibleCount] = useState(EVENT_PAGE_SIZE);
+  const visibleEvents = events.slice(0, visibleCount);
+  const shownCount = Math.min(visibleCount, events.length);
+  const canLoadMore = shownCount < events.length;
+
+  useEffect(() => {
+    setVisibleCount(EVENT_PAGE_SIZE);
+  }, [actorFilter, eventTypeFilter, managerFilter, events.length]);
 
   return (
     <article className={styles.analyticsPanel}>
@@ -1414,7 +1446,17 @@ function EventsTab({
           <option value="system">Система</option>
         </select>
       </div>
-      <EventsTable title="" events={events} empty="Событий за выбранный период нет" inline />
+      <EventsTable title="" events={visibleEvents} empty="Событий за выбранный период нет" inline />
+      {events.length > 0 ? (
+        <div className={styles.analyticsEventsFooter}>
+          <span>Показано {shownCount} из {events.length}</span>
+          {canLoadMore ? (
+            <button type="button" onClick={() => setVisibleCount((current) => current + EVENT_PAGE_SIZE)}>
+              Показать еще 20
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1584,13 +1626,95 @@ function ManagersExcelTable({ analytics, routerPush }: { analytics: Analytics; r
   );
 }
 
+function eventDetailKeyLabel(key: string) {
+  return eventDetailLabels[key] ?? key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
+}
+
+function eventDetailValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Да' : 'Нет';
+  if (Array.isArray(value)) return value.map(eventDetailValue).join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function parseEventDetails(details: string | null | undefined) {
+  const raw = details?.trim() ?? '';
+  if (!raw) return { entries: [] as Array<{ label: string; value: string }>, raw: '' };
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const entries = Object.entries(parsed as Record<string, unknown>)
+        .filter(([, value]) => value !== null && value !== undefined && value !== '')
+        .map(([key, value]) => ({ label: eventDetailKeyLabel(key), value: eventDetailValue(value) }));
+
+      return { entries, raw: entries.length ? '' : raw };
+    }
+
+    return { entries: [] as Array<{ label: string; value: string }>, raw: eventDetailValue(parsed) };
+  } catch {
+    return { entries: [] as Array<{ label: string; value: string }>, raw };
+  }
+}
+
+function EventField({ label, value, wide, mono }: { label: string; value: string | null | undefined; wide?: boolean; mono?: boolean }) {
+  const className = [
+    styles.analyticsEventField,
+    wide ? styles.analyticsEventFieldWide : '',
+    mono ? styles.analyticsEventFieldMono : '',
+  ].filter(Boolean).join(' ');
+
+  return (
+    <div className={className}>
+      <span>{label}</span>
+      <strong>{value || '—'}</strong>
+    </div>
+  );
+}
+
+function EventCard({ event }: { event: AnalyticsEvent }) {
+  const details = parseEventDetails(event.details);
+
+  return (
+    <article className={styles.analyticsEventCard}>
+      <div className={styles.analyticsEventCardHeader}>
+        <div>
+          <span>{formatDate(event.createdAt)}</span>
+          <strong>{eventLabels[event.eventType] ?? event.eventType}</strong>
+        </div>
+        <em>{actorLabels[event.actorType] ?? event.actorType}</em>
+      </div>
+      <div className={styles.analyticsEventGrid}>
+        <EventField label="Менеджер" value={event.managerName} />
+        <EventField label="Прайс" value={event.priceTitle} />
+        <EventField label="Клиент" value={event.clientName} />
+        <EventField label="Session" value={event.sessionId} wide mono />
+        <EventField label="Referer" value={event.referer} wide mono />
+      </div>
+      <div className={styles.analyticsEventDetails}>
+        <span>Детали</span>
+        {details.entries.length > 0 ? (
+          <dl className={styles.analyticsEventDetailsGrid}>
+            {details.entries.map((entry) => (
+              <div key={`${event.id}-${entry.label}`}>
+                <dt>{entry.label}</dt>
+                <dd>{entry.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p>{details.raw || '—'}</p>
+        )}
+      </div>
+    </article>
+  );
+}
+
 function EventsTable({ title, events, empty, inline }: { title: string; events: AnalyticsEvent[]; empty: string; inline?: boolean }) {
   const content = events.length === 0 ? <EmptyState text={empty} /> : (
-    <div className={styles.tableWrap}>
-      <table className={styles.adminTable}>
-        <thead><tr><th>Дата</th><th>Источник</th><th>Событие</th><th>Менеджер</th><th>Прайс</th><th>Клиент</th><th>Session</th><th>Referer</th><th>Детали</th></tr></thead>
-        <tbody>{events.map((event) => <tr key={event.id}><td>{formatDate(event.createdAt)}</td><td>{event.actorType}</td><td>{eventLabels[event.eventType] ?? event.eventType}</td><td>{event.managerName || '—'}</td><td>{event.priceTitle || '—'}</td><td>{event.clientName || '—'}</td><td>{shortValue(event.sessionId)}</td><td>{shortValue(event.referer)}</td><td>{event.details || '—'}</td></tr>)}</tbody>
-      </table>
+    <div className={styles.analyticsEventsList}>
+      {events.map((event) => <EventCard key={event.id} event={event} />)}
     </div>
   );
 
