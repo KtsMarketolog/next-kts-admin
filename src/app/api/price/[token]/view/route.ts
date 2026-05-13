@@ -43,8 +43,9 @@ export async function POST(request: Request, context: Context) {
      from wholesale_analytics_events
      where price_list_id = $1
        and session_id = $2
+       and actor_type = $3
        and event_type in ('public_price_opened', 'public_price_reopened')`,
-    [priceList.id, sessionId],
+    [priceList.id, sessionId, actorType],
   ).catch(() => ({ rows: [{ count: '0' }] }));
 
   await recordWholesalePriceView(priceList.id, priceList.token, {

@@ -2303,13 +2303,15 @@ export async function getWholesaleManagerAnalytics(
     last_view_at: string | null;
   }>(
     `select
-       count(v.id)::text as total,
-       count(v.id) filter (where v.created_at >= now() - interval '7 days')::text as last_7_days,
-       count(v.id) filter (where v.created_at >= now() - interval '30 days')::text as last_30_days,
-       count(v.id) filter (where ($2::text is null or v.created_at >= now() - $2::interval))::text as period_views,
-       max(v.created_at)::text as last_view_at
+       count(e.id)::text as total,
+       count(e.id) filter (where e.created_at >= now() - interval '7 days')::text as last_7_days,
+       count(e.id) filter (where e.created_at >= now() - interval '30 days')::text as last_30_days,
+       count(e.id) filter (where ($2::text is null or e.created_at >= now() - $2::interval))::text as period_views,
+       max(e.created_at)::text as last_view_at
      from wholesale_price_lists pl
-     left join wholesale_price_view_logs v on v.price_list_id = pl.id
+     left join wholesale_analytics_events e on e.price_list_id = pl.id
+       and e.actor_type = 'client'
+       and e.event_type in ('public_price_opened', 'public_price_reopened')
      where pl.manager_id = $1`,
     [managerId, interval],
   );
@@ -2323,14 +2325,16 @@ export async function getWholesaleManagerAnalytics(
     `select
        pl.id::text as price_id,
        coalesce(nullif(pl.title, ''), 'Без названия') as title,
-       count(v.id)::text as views,
-       max(v.created_at)::text as last_view_at
+       count(e.id)::text as views,
+       max(e.created_at)::text as last_view_at
      from wholesale_price_lists pl
-     join wholesale_price_view_logs v on v.price_list_id = pl.id
+     join wholesale_analytics_events e on e.price_list_id = pl.id
+       and e.actor_type = 'client'
+       and e.event_type in ('public_price_opened', 'public_price_reopened')
      where pl.manager_id = $1
-       and ($2::text is null or v.created_at >= now() - $2::interval)
+       and ($2::text is null or e.created_at >= now() - $2::interval)
      group by pl.id
-     order by count(v.id) desc, max(v.created_at) desc
+     order by count(e.id) desc, max(e.created_at) desc
      limit 5`,
     [managerId, interval],
   );
@@ -2486,13 +2490,15 @@ export async function getWholesaleManagerAnalyticsExtended(
      left join lateral (
        select
          count(*)::integer as views,
-         count(*) filter (where created_at >= now() - interval '7 days')::integer as views_last_7_days,
-         count(*) filter (where created_at >= now() - interval '30 days')::integer as views_last_30_days,
-         count(*) filter (where ($2::text is null or created_at >= now() - $2::interval))::integer as views_period,
-         max(created_at) as last_view_at,
-         min(created_at) as first_view_at
-       from wholesale_price_view_logs v
-       where v.price_list_id = pl.id
+         count(*) filter (where e.created_at >= now() - interval '7 days')::integer as views_last_7_days,
+         count(*) filter (where e.created_at >= now() - interval '30 days')::integer as views_last_30_days,
+         count(*) filter (where ($2::text is null or e.created_at >= now() - $2::interval))::integer as views_period,
+         max(e.created_at) as last_view_at,
+         min(e.created_at) as first_view_at
+       from wholesale_analytics_events e
+       where e.price_list_id = pl.id
+         and e.actor_type = 'client'
+         and e.event_type in ('public_price_opened', 'public_price_reopened')
      ) views on true
      left join lateral (
        select
@@ -2692,8 +2698,8 @@ export async function getWholesaleManagerAnalyticsExtended(
     [managerId, interval],
   );
   const recentEvents = recentEventsResult.rows.map(mapAnalyticsEvent);
-  const recentViews = recentEvents.filter((event) => ['public_price_opened', 'public_price_reopened'].includes(event.eventType));
-  const recentDownloads = recentEvents.filter((event) => event.eventType === 'public_price_pdf_downloaded');
+  const recentViews = recentEvents.filter((event) => event.actorType === 'client' && ['public_price_opened', 'public_price_reopened'].includes(event.eventType));
+  const recentDownloads = recentEvents.filter((event) => event.actorType === 'client' && event.eventType === 'public_price_pdf_downloaded');
   const lastAction = recentEvents.find((event) => event.actorType === 'admin' || event.actorType === 'manager') ?? null;
 
   const topViewed = [...rows].filter((row) => Number(row.views) > 0).sort((a, b) => Number(b.views) - Number(a.views));
@@ -3078,13 +3084,15 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
      left join lateral (
        select
          count(*)::integer as views,
-         count(*) filter (where created_at >= now() - interval '7 days')::integer as views_last_7_days,
-         count(*) filter (where created_at >= now() - interval '30 days')::integer as views_last_30_days,
-         count(*) filter (where ($1::text is null or created_at >= now() - $1::interval))::integer as views_period,
-         max(created_at) as last_view_at,
-         min(created_at) as first_view_at
-       from wholesale_price_view_logs v
-       where v.price_list_id = pl.id
+         count(*) filter (where e.created_at >= now() - interval '7 days')::integer as views_last_7_days,
+         count(*) filter (where e.created_at >= now() - interval '30 days')::integer as views_last_30_days,
+         count(*) filter (where ($1::text is null or e.created_at >= now() - $1::interval))::integer as views_period,
+         max(e.created_at) as last_view_at,
+         min(e.created_at) as first_view_at
+       from wholesale_analytics_events e
+       where e.price_list_id = pl.id
+         and e.actor_type = 'client'
+         and e.event_type in ('public_price_opened', 'public_price_reopened')
      ) views on true
      left join lateral (
        select
@@ -3498,9 +3506,9 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
     managerId: row.manager_id ? Number(row.manager_id) : null,
   });
   const recentEvents = recentEventsResult.rows.map(mapAdminEvent);
-  const latestViews = recentEvents.filter((event) => ['public_price_opened', 'public_price_reopened'].includes(event.eventType));
-  const latestDownloads = recentEvents.filter((event) => event.eventType === 'public_price_pdf_downloaded');
-  const latestExcelDownloads = recentEvents.filter((event) => event.eventType === 'public_price_excel_downloaded');
+  const latestViews = recentEvents.filter((event) => event.actorType === 'client' && ['public_price_opened', 'public_price_reopened'].includes(event.eventType));
+  const latestDownloads = recentEvents.filter((event) => event.actorType === 'client' && event.eventType === 'public_price_pdf_downloaded');
+  const latestExcelDownloads = recentEvents.filter((event) => event.actorType === 'client' && event.eventType === 'public_price_excel_downloaded');
 
   const clientMap = new Map<string, WholesaleAdminAnalyticsClient>();
   for (const row of rows) {
