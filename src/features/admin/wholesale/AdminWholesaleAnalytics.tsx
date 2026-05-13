@@ -695,22 +695,6 @@ function ClientHistoryTable({ rows, routerPush }: { rows: ClientHistory[]; route
   );
 }
 
-function ProductInterestTable({ rows }: { rows: ProductInterest[] }) {
-  return (
-    <article className={styles.analyticsPanel}>
-      <div className={styles.analyticsPanelHeader}><h3>Товарный интерес</h3><span>{rows.length}</span></div>
-      {rows.length === 0 ? <EmptyState text="Интерес к товарам пока не зафиксирован" /> : (
-        <div className={styles.tableWrap}>
-          <table className={styles.adminTable}>
-            <thead><tr><th>Товар</th><th>Открывали</th><th>Меняли количество</th><th>В заявках</th><th>Последняя активность</th></tr></thead>
-            <tbody>{rows.map((row) => <tr key={`${row.productId ?? row.productTitle}`}><td>{row.productTitle}</td><td>{row.opens}</td><td>{row.quantityChanges}</td><td>{row.requests}</td><td>{formatDate(row.lastActivityAt)}</td></tr>)}</tbody>
-          </table>
-        </div>
-      )}
-    </article>
-  );
-}
-
 function ManagerFunnelQualityTable({ rows, routerPush }: { rows: ManagerRow[]; routerPush: (href: string) => void }) {
   return (
     <article className={styles.analyticsPanel}>
@@ -1343,7 +1327,6 @@ function PublicLinksTab({ analytics, routerPush }: { analytics: Analytics; route
         <KpiCard title="Среднее" value={analytics.publicLinks.averageViewsPerPrice} text="Просмотров на прайс" tone={styles.analyticsToneViolet} />
       </div>
       <TopPublicTable analytics={analytics} routerPush={routerPush} />
-      <ProductInterestTable rows={analytics.attention.productInterest} />
       <EventsTable title="Последние просмотры" events={analytics.publicLinks.latestViews} empty="Просмотров публичных ссылок пока нет" />
       <SimplePricesTable title="Прайсы без просмотров" rows={analytics.publicLinks.pricesWithoutViewsList} routerPush={routerPush} empty="Прайсов без просмотров нет" />
     </>
