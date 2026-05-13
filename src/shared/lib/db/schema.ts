@@ -625,19 +625,4 @@ async function seedGroupCompanies() {
       );
     }
   }
-
-  await updateDefaultGroupCompanyLinks();
-}
-
-async function updateDefaultGroupCompanyLinks() {
-  for (const company of DEFAULT_GROUP_COMPANIES) {
-    if (!company.linkUrl) continue;
-    await query(
-      `update group_companies
-       set link_url = $2,
-           updated_at = now()
-       where image_url = $1 and coalesce(link_url, '') = ''`,
-      [company.imageUrl, company.linkUrl],
-    );
-  }
 }

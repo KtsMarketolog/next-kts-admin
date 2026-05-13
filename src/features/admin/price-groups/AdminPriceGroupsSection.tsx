@@ -47,7 +47,7 @@ export function AdminPriceGroupsSection({
               <AdminImagePicker
                 imageUrl={group.imageUrl}
                 emptyText="Картинка не загружена"
-                uploadLabel="Добавить/заменить SVG"
+                uploadLabel="Добавить/заменить SVG до 900x600"
                 accept={priceGroupImageAccept}
                 onUpload={(file) => uploadPriceGroupImage(file, group)}
               />

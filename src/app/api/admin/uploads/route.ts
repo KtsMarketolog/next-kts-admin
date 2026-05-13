@@ -6,7 +6,9 @@ import sanitizeHtml from 'sanitize-html';
 import { requireAdmin } from '@/shared/lib/adminAuth';
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
-const MAX_SVG_FILE_SIZE = 512 * 1024;
+const MAX_SVG_FILE_SIZE = 2 * 1024 * 1024;
+const MAX_PRICE_GROUP_SVG_WIDTH = 900;
+const MAX_PRICE_GROUP_SVG_HEIGHT = 600;
 
 const RASTER_TYPES = new Map([
   ['image/jpeg', 'jpg'],
@@ -26,6 +28,10 @@ const SVG_ALLOWED_TAGS = [
   'polyline',
   'polygon',
   'defs',
+  'mask',
+  'pattern',
+  'use',
+  'symbol',
   'clipPath',
   'linearGradient',
   'radialGradient',
@@ -36,6 +42,8 @@ const SVG_ALLOWED_TAGS = [
 
 const SVG_ALLOWED_ATTRIBUTES: sanitizeHtml.AllowedAttribute[] = [
   'xmlns',
+  'xmlns:xlink',
+  'version',
   'viewBox',
   'width',
   'height',
@@ -56,6 +64,9 @@ const SVG_ALLOWED_ATTRIBUTES: sanitizeHtml.AllowedAttribute[] = [
   'fill',
   'fill-rule',
   'clip-rule',
+  'clip-path',
+  'mask',
+  'filter',
   'stroke',
   'stroke-width',
   'stroke-linecap',
@@ -71,6 +82,8 @@ const SVG_ALLOWED_ATTRIBUTES: sanitizeHtml.AllowedAttribute[] = [
   'stop-opacity',
   'gradientUnits',
   'gradientTransform',
+  'href',
+  'xlink:href',
 ];
 
 export async function POST(request: Request) {
@@ -98,14 +111,19 @@ export async function POST(request: Request) {
       return Response.json({ error: 'SVG is allowed only for brand logos and price groups' }, { status: 400 });
     }
 
-    if (file.size > MAX_SVG_FILE_SIZE || detectedType !== 'svg') {
-      return Response.json({ error: 'Invalid SVG file' }, { status: 400 });
+    if (detectedType !== 'svg') {
+      return Response.json({ error: 'Некорректный SVG файл' }, { status: 400 });
+    }
+
+    if (file.size > MAX_SVG_FILE_SIZE) {
+      return Response.json({ error: 'SVG слишком большой. Максимальный размер файла: 2 МБ' }, { status: 400 });
     }
 
     try {
-      return saveUpload(sanitizeSvg(bytes), 'svg');
+      const clean = sanitizeSvg(bytes);
+      return saveUpload(kind === 'priceGroup' ? normalizePriceGroupSvgSize(clean) : clean, 'svg');
     } catch {
-      return Response.json({ error: 'Invalid SVG file' }, { status: 400 });
+      return Response.json({ error: 'Некорректный SVG файл' }, { status: 400 });
     }
   }
 
@@ -159,6 +177,72 @@ function sanitizeSvg(bytes: Buffer) {
   return Buffer.from(clean, 'utf8');
 }
 
+function normalizePriceGroupSvgSize(bytes: Buffer) {
+  const source = bytes.toString('utf8');
+  const svgTag = source.match(/<svg\b[^>]*>/i)?.[0];
+  if (!svgTag) {
+    throw new Error('Invalid SVG file');
+  }
+
+  const size = parseSvgSize(svgTag);
+  const sourceWidth = size.width ?? MAX_PRICE_GROUP_SVG_WIDTH;
+  const sourceHeight = size.height ?? MAX_PRICE_GROUP_SVG_HEIGHT;
+  const scale = Math.min(1, MAX_PRICE_GROUP_SVG_WIDTH / sourceWidth, MAX_PRICE_GROUP_SVG_HEIGHT / sourceHeight);
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+
+  let nextSvgTag = setSvgAttribute(svgTag, 'width', `${width}px`);
+  nextSvgTag = setSvgAttribute(nextSvgTag, 'height', `${height}px`);
+
+  if (!getSvgAttribute(nextSvgTag, 'viewBox')) {
+    nextSvgTag = setSvgAttribute(nextSvgTag, 'viewBox', `0 0 ${formatSvgNumber(sourceWidth)} ${formatSvgNumber(sourceHeight)}`);
+  }
+
+  return Buffer.from(source.replace(svgTag, nextSvgTag), 'utf8');
+}
+
+function parseSvgSize(svgTag: string) {
+  const viewBox = parseViewBox(getSvgAttribute(svgTag, 'viewBox'));
+  return {
+    width: parseSvgLength(getSvgAttribute(svgTag, 'width')) ?? viewBox?.width,
+    height: parseSvgLength(getSvgAttribute(svgTag, 'height')) ?? viewBox?.height,
+  };
+}
+
+function getSvgAttribute(svgTag: string, name: string) {
+  const match = svgTag.match(new RegExp(`\\s${name}\\s*=\\s*["']([^"']+)["']`, 'i'));
+  return match?.[1] ?? null;
+}
+
+function setSvgAttribute(svgTag: string, name: string, value: string) {
+  const attributePattern = new RegExp(`\\s${name}\\s*=\\s*(["'])[^"']*\\1`, 'i');
+  if (attributePattern.test(svgTag)) {
+    return svgTag.replace(attributePattern, ` ${name}="${value}"`);
+  }
+
+  return svgTag.replace(/<svg\b/i, `<svg ${name}="${value}"`);
+}
+
+function parseSvgLength(value: string | null) {
+  if (!value) return null;
+  const match = value.trim().match(/^([0-9]+(?:\.[0-9]+)?)(?:px)?$/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseViewBox(value: string | null) {
+  if (!value) return null;
+  const parts = value.trim().split(/[\s,]+/).map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return null;
+  const [, , width, height] = parts;
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+function formatSvgNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 function detectImageType(bytes: Buffer) {
   if (bytes.length >= 12 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
     return 'jpg';
@@ -177,8 +261,8 @@ function detectImageType(bytes: Buffer) {
     if (brand === 'avif' || brand === 'avis') return 'avif';
   }
 
-  const head = bytes.subarray(0, Math.min(bytes.length, 512)).toString('utf8').trimStart();
-  if ((head.startsWith('<svg') || head.startsWith('<?xml')) && head.includes('<svg')) {
+  const head = bytes.subarray(0, Math.min(bytes.length, 2048)).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+  if (head.includes('<svg')) {
     return 'svg';
   }
 
