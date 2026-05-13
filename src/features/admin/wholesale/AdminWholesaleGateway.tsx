@@ -28,6 +28,8 @@ type Manager = {
   displayPassword: string;
 };
 
+type ManagerRole = Manager['role'];
+
 type ManagerDraft = {
   name: string;
   login: string;
@@ -37,6 +39,11 @@ type ManagerDraft = {
   password: string;
   isActive: boolean;
 };
+
+const MANAGER_ROLE_TABS: Array<{ value: ManagerRole; label: string }> = [
+  { value: 'manager', label: 'Менеджер по развитию' },
+  { value: 'support_manager', label: 'Менеджер по сопровождению' },
+];
 
 type PriceList = {
   id: number;
@@ -415,6 +422,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [savedManagerId, setSavedManagerId] = useState<number | null>(null);
   const [managerCreated, setManagerCreated] = useState(false);
+  const [managerRoleTab, setManagerRoleTab] = useState<ManagerRole>('manager');
   const [managerPasswordDrafts, setManagerPasswordDrafts] = useState<Record<number, string>>({});
   const [managerPasswordEditIds, setManagerPasswordEditIds] = useState<Record<number, boolean>>({});
   const [catalogQuery, setCatalogQuery] = useState('');
@@ -524,6 +532,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     [managers],
   );
   const developmentManagers = useMemo(() => managers.filter((manager) => manager.role === 'manager'), [managers]);
+  const supportManagerRows = useMemo(() => managers.filter((manager) => manager.role === 'support_manager'), [managers]);
+  const managerRoleLabel = managerRoleTab === 'support_manager' ? 'менеджера по сопровождению' : 'менеджера по развитию';
+  const managerRoleTitle = managerRoleTab === 'support_manager' ? 'Менеджер по сопровождению' : 'Менеджер по развитию';
+  const managerRoleRows = managerRoleTab === 'support_manager' ? supportManagerRows : developmentManagers;
 
   const showStatus = (message: string) => {
     setStatus(message);
@@ -683,7 +695,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
   const createManager = async () => {
     if (!managerDraft.name.trim() || !managerDraft.login.trim() || !managerDraft.password.trim()) {
-      showStatus('Заполните имя, логин и пароль менеджера');
+      showStatus(`Заполните имя, логин и пароль ${managerRoleLabel}`);
       return;
     }
     if (!validateManagerPassword(managerDraft.password.trim())) return;
@@ -697,7 +709,9 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         name: managerDraft.name.trim(),
         login: managerDraft.login.trim(),
         email: managerDraft.email.trim(),
-        phone: managerDraft.phone.trim(),
+        phone: managerRoleTab === 'manager' ? managerDraft.phone.trim() : '',
+        role: managerRoleTab,
+        supportManagerId: managerRoleTab === 'manager' ? managerDraft.supportManagerId : null,
         password: managerDraft.password.trim(),
       }),
     });
@@ -710,7 +724,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     const data = await res.json().catch(() => ({}));
     const createdId = Number(data.id);
     if (Number.isInteger(createdId) && createdId > 0) saveManagerPassword(createdId, managerDraft.password.trim());
-    showStatus('Менеджер добавлен');
+    showStatus(`${managerRoleTitle} добавлен`);
     setManagerCreated(true);
     setManagerDraft(emptyManager);
     await loadManagers();
@@ -979,7 +993,24 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           managerManagementContent={(
           <div className={styles.wholesaleManagersAdminBlock}>
 
-        <h3>Добавить менеджера по развитию</h3>
+        <div className={styles.userRoleTabs}>
+          {MANAGER_ROLE_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              aria-pressed={managerRoleTab === tab.value}
+              onClick={() => {
+                setManagerRoleTab(tab.value);
+                setManagerCreated(false);
+                setManagerDraft(emptyManager);
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <h3>Добавить {managerRoleLabel}</h3>
         <div className={styles.userCreateCard}>
           <div className={styles.autofillGuard} aria-hidden="true">
             <input tabIndex={-1} autoComplete="username" />
@@ -999,26 +1030,28 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           </label>
           <label>
             <span>Роль</span>
-            <select value="manager" disabled>
-              <option value="manager">Менеджер по развитию</option>
+            <select value={managerRoleTab} disabled>
+              <option value={managerRoleTab}>{managerRoleTitle}</option>
             </select>
           </label>
-          <label>
-            <span>Менеджер по сопровождению</span>
-            <select
-              value={managerDraft.supportManagerId ?? ''}
-              disabled={supportManagers.length === 0}
-              onChange={(event) => setManagerDraft({ ...managerDraft, supportManagerId: event.target.value ? Number(event.target.value) : null })}
-            >
-              <option value="">Не выбран</option>
-              {supportManagers.map((manager) => (
-                <option key={manager.id} value={manager.id}>
-                  {manager.name || manager.login}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
+          {managerRoleTab === 'manager' && (
+            <label>
+              <span>Менеджер по сопровождению</span>
+              <select
+                value={managerDraft.supportManagerId ?? ''}
+                disabled={supportManagers.length === 0}
+                onChange={(event) => setManagerDraft({ ...managerDraft, supportManagerId: event.target.value ? Number(event.target.value) : null })}
+              >
+                <option value="">Не выбран</option>
+                {supportManagers.map((manager) => (
+                  <option key={manager.id} value={manager.id}>
+                    {manager.name || manager.login}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className={managerRoleTab === 'manager' ? undefined : styles.userPasswordWide}>
             <span>Пароль</span>
             <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} autoComplete="new-password" />
             <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
@@ -1028,13 +1061,14 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             Активен
           </label>
           <button className={managerCreated ? styles.savedButton : undefined} disabled={busy} onClick={createManager}>
-            {managerCreated ? 'Менеджер по развитию добавлен' : 'Добавить менеджера по развитию'}
+            {managerCreated ? 'Сохранено' : `Добавить ${managerRoleLabel}`}
           </button>
         </div>
 
-        <h3>Менеджеры и статистика</h3>
-        <div className={styles.managerCards}>
-          {developmentManagers.map((manager) => {
+        <h3>{managerRoleTab === 'manager' ? 'Менеджеры и статистика' : 'Менеджеры по сопровождению'}</h3>
+        {managerRoleTab === 'manager' ? (
+          <div className={styles.managerCards}>
+          {managerRoleRows.map((manager) => {
             const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
             const displayPassword = manager.displayPassword || '';
             const availableSupportManagers = supportManagers.filter((supportManager) => supportManager.id !== manager.id);
@@ -1167,8 +1201,114 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             </article>
             );
           })}
-          {developmentManagers.length === 0 ? <p className={styles.mutedText}>Менеджеров по развитию пока нет</p> : null}
+          {managerRoleRows.length === 0 ? <p className={styles.mutedText}>Менеджеров по развитию пока нет</p> : null}
         </div>
+        ) : (
+          <div className={styles.userAccessList}>
+            {managerRoleRows.map((manager) => {
+              const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
+              const displayPassword = manager.displayPassword || '';
+
+              return (
+                <article className={styles.userAccessCard} key={manager.id}>
+                  <div className={styles.userAccessFields}>
+                    <label>
+                      <span>Имя</span>
+                      <input value={manager.name} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, name: event.target.value } : item))} />
+                    </label>
+                    <label>
+                      <span>Логин</span>
+                      <input value={manager.login} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, login: event.target.value } : item))} />
+                    </label>
+                    <label>
+                      <span>Email</span>
+                      <input value={manager.email} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, email: event.target.value } : item))} />
+                    </label>
+                    <label>
+                      <span>Роль</span>
+                      <select value={manager.role} disabled>
+                        <option value="support_manager">Менеджер по сопровождению</option>
+                      </select>
+                    </label>
+                    <label className={styles.userPasswordWide}>
+                      <span>Пароль</span>
+                      <div className={styles.userPasswordCopyField}>
+                        <input
+                          className={styles.userPasswordCopyInput}
+                          type="text"
+                          autoComplete="new-password"
+                          spellCheck={false}
+                          readOnly
+                          placeholder="Пароль не сохранён"
+                          value={displayPassword}
+                          onClick={() => copyManagerPassword(displayPassword)}
+                        />
+                        <button
+                          className={styles.userPasswordCopyButton}
+                          type="button"
+                          disabled={!displayPassword}
+                          title="Скопировать пароль"
+                          onClick={() => copyManagerPassword(displayPassword)}
+                        >
+                          Скопировать
+                        </button>
+                      </div>
+                      {passwordIsEdited && (
+                        <>
+                          <input
+                            className={styles.userPasswordEditInput}
+                            type="password"
+                            autoComplete="new-password"
+                            placeholder="Введите новый пароль"
+                            value={managerPasswordDrafts[manager.id] || ''}
+                            onChange={(event) => setManagerPasswordDrafts((current) => ({ ...current, [manager.id]: event.target.value }))}
+                          />
+                          <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
+                        </>
+                      )}
+                    </label>
+                  </div>
+                  <div className={styles.userAccessMeta}>
+                    <label className={styles.userActiveToggle}>
+                      <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
+                      Активен
+                    </label>
+                    <div className={styles.userAccessBadges}>
+                      <span>Менеджер по сопровождению</span>
+                      <span>Прайсов: {manager.priceListCount}</span>
+                    </div>
+                    <div className={styles.userAccessActions}>
+                      <button
+                        className={styles.secondary}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setManagerPasswordEditIds((current) => ({ ...current, [manager.id]: !current[manager.id] }));
+                          setManagerPasswordDrafts((current) => {
+                            const next = { ...current };
+                            delete next[manager.id];
+                            return next;
+                          });
+                        }}
+                      >
+                        {passwordIsEdited ? 'Отменить пароль' : 'Изменить пароль'}
+                      </button>
+                      <button
+                        className={savedManagerId === manager.id ? styles.savedButton : undefined}
+                        disabled={busy}
+                        onClick={() => saveManager(manager)}
+                      >
+                        {savedManagerId === manager.id ? 'Сохранено' : 'Сохранить'}
+                      </button>
+                      <button className={styles.danger} disabled={busy} onClick={() => deleteManager(manager.id)}>Удалить</button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+            {managerRoleRows.length === 0 ? <p className={styles.mutedText}>Менеджеров по сопровождению пока нет</p> : null}
+          </div>
+        )}
           </div>
           )}
         />

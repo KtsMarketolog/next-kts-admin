@@ -26,8 +26,9 @@ export async function POST(request: Request) {
   const email = normalizeTextField(body.email, 160);
   const phone = normalizeTextField(body.phone, 60);
   const password = typeof body.password === 'string' ? body.password : '';
+  const role = body.role === 'support_manager' ? 'support_manager' : 'manager';
   const supportManagerId = Number(body.supportManagerId);
-  const normalizedSupportManagerId = Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
+  const normalizedSupportManagerId = role === 'manager' && Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
 
   if (!name || !login || !password) {
     return Response.json({ error: 'Имя, логин и пароль обязательны' }, { status: 400 });
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
       login,
       email,
       phone,
+      role,
       supportManagerId: normalizedSupportManagerId,
       passwordHash: hashPassword(password),
       isActive: Boolean(body.isActive ?? true),
@@ -62,7 +64,7 @@ export async function POST(request: Request) {
     ip: getClientIp(request),
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { login, email, phone, supportManagerId: normalizedSupportManagerId },
+    metadata: { login, email, phone, role, supportManagerId: normalizedSupportManagerId },
   });
 
   return Response.json({ id });

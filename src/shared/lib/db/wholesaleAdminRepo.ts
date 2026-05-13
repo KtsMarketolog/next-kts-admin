@@ -1604,17 +1604,19 @@ export async function createWholesaleManager(input: {
   login: string;
   email: string;
   phone: string;
+  role?: WholesaleManagerRole;
   supportManagerId?: number | null;
   passwordHash: string;
   isActive: boolean;
 }) {
   await ensureSiteSchema();
-  const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId);
+  const role = normalizeManagerRole(input.role);
+  const supportManagerId = role === 'manager' ? await normalizeWholesaleSupportManagerId(input.supportManagerId) : null;
   const result = await query<{ id: string }>(
-    `insert into wholesale_managers (name, login, email, phone, support_manager_id, password_hash, is_active, password_changed_at)
-     values ($1, $2, $3, $4, $5, $6, $7, now())
+    `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, is_active, password_changed_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, now())
      returning id`,
-    [input.name, normalizeLogin(input.login), input.email, input.phone, supportManagerId, input.passwordHash, input.isActive],
+    [input.name, normalizeLogin(input.login), input.email, input.phone, role, supportManagerId, input.passwordHash, input.isActive],
   );
   return Number(result.rows[0].id);
 }
