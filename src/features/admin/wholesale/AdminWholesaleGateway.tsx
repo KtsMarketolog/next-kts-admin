@@ -979,34 +979,56 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           managerManagementContent={(
           <div className={styles.wholesaleManagersAdminBlock}>
 
-        <h3>Добавить менеджера</h3>
-        <div className={styles.wholesaleRow}>
-          <input value={managerDraft.name} onChange={(event) => setManagerDraft({ ...managerDraft, name: event.target.value })} placeholder="Имя менеджера" autoComplete="off" />
-          <input value={managerDraft.login} onChange={(event) => setManagerDraft({ ...managerDraft, login: event.target.value })} placeholder="Логин" autoComplete="new-password" />
-          <input value={managerDraft.email} onChange={(event) => setManagerDraft({ ...managerDraft, email: event.target.value })} placeholder="Email" autoComplete="new-password" />
-          <input value={managerDraft.phone} onChange={(event) => setManagerDraft({ ...managerDraft, phone: event.target.value })} placeholder="Телефон" autoComplete="tel" />
-          <select
-            value={managerDraft.supportManagerId ?? ''}
-            disabled={supportManagers.length === 0}
-            onChange={(event) => setManagerDraft({ ...managerDraft, supportManagerId: event.target.value ? Number(event.target.value) : null })}
-          >
-            <option value="">Менеджер по сопровождению</option>
-            {supportManagers.map((manager) => (
-              <option key={manager.id} value={manager.id}>
-                {manager.name || manager.login}
-              </option>
-            ))}
-          </select>
-          <label className={styles.wholesaleInlineField}>
-            <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} placeholder="Пароль" autoComplete="new-password" />
+        <h3>Добавить менеджера по развитию</h3>
+        <div className={styles.userCreateCard}>
+          <div className={styles.autofillGuard} aria-hidden="true">
+            <input tabIndex={-1} autoComplete="username" />
+            <input tabIndex={-1} type="password" autoComplete="current-password" />
+          </div>
+          <label>
+            <span>Имя</span>
+            <input value={managerDraft.name} onChange={(event) => setManagerDraft({ ...managerDraft, name: event.target.value })} autoComplete="off" />
+          </label>
+          <label>
+            <span>Логин</span>
+            <input value={managerDraft.login} onChange={(event) => setManagerDraft({ ...managerDraft, login: event.target.value })} autoComplete="new-password" />
+          </label>
+          <label>
+            <span>Email</span>
+            <input value={managerDraft.email} onChange={(event) => setManagerDraft({ ...managerDraft, email: event.target.value })} autoComplete="new-password" />
+          </label>
+          <label>
+            <span>Роль</span>
+            <select value="manager" disabled>
+              <option value="manager">Менеджер по развитию</option>
+            </select>
+          </label>
+          <label>
+            <span>Менеджер по сопровождению</span>
+            <select
+              value={managerDraft.supportManagerId ?? ''}
+              disabled={supportManagers.length === 0}
+              onChange={(event) => setManagerDraft({ ...managerDraft, supportManagerId: event.target.value ? Number(event.target.value) : null })}
+            >
+              <option value="">Не выбран</option>
+              {supportManagers.map((manager) => (
+                <option key={manager.id} value={manager.id}>
+                  {manager.name || manager.login}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Пароль</span>
+            <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} autoComplete="new-password" />
             <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
           </label>
-          <label className={styles.checkbox}>
+          <label className={styles.userActiveToggle}>
             <input type="checkbox" checked={managerDraft.isActive} onChange={(event) => setManagerDraft({ ...managerDraft, isActive: event.target.checked })} />
             Активен
           </label>
           <button className={managerCreated ? styles.savedButton : undefined} disabled={busy} onClick={createManager}>
-            {managerCreated ? 'Менеджер добавлен' : 'Добавить менеджера'}
+            {managerCreated ? 'Менеджер по развитию добавлен' : 'Добавить менеджера по развитию'}
           </button>
         </div>
 
