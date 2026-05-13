@@ -7,7 +7,8 @@ import styles from '@/app/admin/admin.module.scss';
 
 type Period = '7d' | '30d' | 'all';
 type ExportFormat = 'pdf' | 'xls';
-type Tab = 'overview' | 'managers' | 'managerRatings' | 'prices' | 'clients' | 'public' | 'pdf' | 'excel' | 'events';
+type Tab = 'overview' | 'managers' | 'managerRatings' | 'prices' | 'clients' | 'publicActivity' | 'events';
+type PublicActivityTab = 'public' | 'pdf' | 'excel';
 export type AdminWholesaleAnalyticsTab = Tab;
 
 type Problem = 'EMPTY' | 'NO_CLIENT' | 'NO_EXPIRATION' | 'EXPIRED' | 'EXPIRING_SOON' | 'STALE' | 'NO_VIEWS';
@@ -408,14 +409,23 @@ const tabs: Array<{ value: Tab; label: string; description: string }> = [
   { value: 'managerRatings', label: 'Рейтинг менеджеров', description: 'Рейтинг и качество воронки' },
   { value: 'prices', label: 'Статистика прайсов', description: 'Проблемы, сроки и карточки' },
   { value: 'clients', label: 'Клиенты', description: 'Активность, приоритет и история' },
-  { value: 'public', label: 'Публичные ссылки', description: 'Открытия и повторные просмотры' },
-  { value: 'pdf', label: 'PDF', description: 'Скачивания PDF' },
-  { value: 'excel', label: 'EXCEL', description: 'Скачивания Excel' },
+  { value: 'publicActivity', label: 'Публичная активность', description: 'Ссылки, PDF и Excel' },
   { value: 'events', label: 'Журнал событий', description: 'Действия и фильтры' },
 ];
 
+const publicActivityTabs: Array<{ value: PublicActivityTab; label: string }> = [
+  { value: 'public', label: 'Публичные ссылки' },
+  { value: 'pdf', label: 'PDF' },
+  { value: 'excel', label: 'EXCEL' },
+];
+
 function resolveTab(value: string | null): Tab {
+  if (value === 'public' || value === 'pdf' || value === 'excel') return 'publicActivity';
   return tabs.some((item) => item.value === value) ? (value as Tab) : 'overview';
+}
+
+function resolvePublicActivityTab(value: string | null): PublicActivityTab {
+  return publicActivityTabs.some((item) => item.value === value) ? (value as PublicActivityTab) : 'public';
 }
 
 const eventLabels: Record<string, string> = {
@@ -797,6 +807,9 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
   const searchParams = useSearchParams();
   const [period, setPeriod] = useState<Period>('30d');
   const [tab, setTab] = useState<Tab>(() => resolveTab(searchParams.get('tab')));
+  const [publicActivityTab, setPublicActivityTab] = useState<PublicActivityTab>(() =>
+    resolvePublicActivityTab(searchParams.get('activity') ?? searchParams.get('tab')),
+  );
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -840,7 +853,9 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
 
   useEffect(() => {
     const nextTab = resolveTab(searchParams.get('tab'));
+    const nextPublicActivityTab = resolvePublicActivityTab(searchParams.get('activity') ?? searchParams.get('tab'));
     setTab((current) => (current === nextTab ? current : nextTab));
+    setPublicActivityTab((current) => (current === nextPublicActivityTab ? current : nextPublicActivityTab));
     onTabChange?.(nextTab);
   }, [onTabChange, searchParams]);
 
@@ -864,9 +879,16 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
     if (tab === 'managerRatings') return <ManagerRatingsTab analytics={analytics} routerPush={router.push} />;
     if (tab === 'prices') return <PricesTab analytics={analytics} routerPush={router.push} />;
     if (tab === 'clients') return <ClientsTab analytics={analytics} routerPush={router.push} />;
-    if (tab === 'public') return <PublicLinksTab analytics={analytics} routerPush={router.push} />;
-    if (tab === 'pdf') return <PdfTab analytics={analytics} routerPush={router.push} />;
-    if (tab === 'excel') return <ExcelTab analytics={analytics} routerPush={router.push} />;
+    if (tab === 'publicActivity') {
+      return (
+        <PublicActivitySection
+          activeTab={publicActivityTab}
+          analytics={analytics}
+          onTabChange={selectPublicActivityTab}
+          routerPush={router.push}
+        />
+      );
+    }
 
     return (
       <EventsTab
@@ -887,6 +909,19 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
     onTabChange?.(nextTab);
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', nextTab);
+    if (nextTab === 'publicActivity') {
+      params.set('activity', publicActivityTab);
+    } else {
+      params.delete('activity');
+    }
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const selectPublicActivityTab = (nextTab: PublicActivityTab) => {
+    setPublicActivityTab(nextTab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', 'publicActivity');
+    params.set('activity', nextTab);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
@@ -1226,6 +1261,47 @@ function ClientsTab({ analytics, routerPush }: { analytics: Analytics; routerPus
       <ClientsTable title="Клиенты без просмотров" rows={analytics.clients.clientsWithoutViewsList} routerPush={routerPush} empty="Клиентов без просмотров нет" />
       <ClientsTable title="Топ клиентов по активности" rows={analytics.clients.topClientsByActivity} routerPush={routerPush} empty="Нет данных за выбранный период" />
     </>
+  );
+}
+
+function PublicActivitySection({
+  activeTab,
+  analytics,
+  onTabChange,
+  routerPush,
+}: {
+  activeTab: PublicActivityTab;
+  analytics: Analytics;
+  onTabChange: (tab: PublicActivityTab) => void;
+  routerPush: (href: string) => void;
+}) {
+  const content =
+    activeTab === 'pdf' ? (
+      <PdfTab analytics={analytics} routerPush={routerPush} />
+    ) : activeTab === 'excel' ? (
+      <ExcelTab analytics={analytics} routerPush={routerPush} />
+    ) : (
+      <PublicLinksTab analytics={analytics} routerPush={routerPush} />
+    );
+
+  return (
+    <div className={styles.analyticsNestedTabs}>
+      <div className={styles.analyticsTabs} role="tablist" aria-label="Публичная активность">
+        {publicActivityTabs.map((item) => (
+          <button
+            className={activeTab === item.value ? styles.analyticsTabActive : styles.analyticsTab}
+            key={item.value}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === item.value}
+            onClick={() => onTabChange(item.value)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className={styles.analyticsNestedBody}>{content}</div>
+    </div>
   );
 }
 

@@ -87,6 +87,12 @@
   border-color: #e1e3ef !important;
   background: #f2f3f8 !important;
   color: #242633 !important;
+
+  &:hover {
+    border-color: #d3d6e4 !important;
+    background: #e9ebf4 !important;
+    color: #260b86 !important;
+  }
 }
 
 .analyticsTabActive {
@@ -94,6 +100,16 @@
   background: #260b86 !important;
   color: #fff !important;
   box-shadow: 0 $apx-6 $apx-16 rgba(38, 11, 134, 0.22);
+}
+
+.analyticsNestedTabs {
+  display: grid;
+  gap: $apx-18;
+}
+
+.analyticsNestedBody {
+  display: grid;
+  gap: $apx-18;
 }
 
 .analyticsDashboardLayout {
