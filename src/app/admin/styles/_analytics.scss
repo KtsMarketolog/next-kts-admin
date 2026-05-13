@@ -5,6 +5,10 @@
   gap: $apx-18;
 }
 
+.analyticsAdminSection > .analyticsPanel {
+  padding: $apx-22;
+}
+
 .analyticsManagerMeta {
   display: flex;
   flex-wrap: wrap;
@@ -95,21 +99,21 @@
 .analyticsDashboardLayout {
   display: grid;
   grid-template-columns: minmax($apx-250, $apx-286) minmax(0, 1fr);
-  gap: $apx-18;
+  gap: $apx-22;
   align-items: start;
-  margin-top: $apx-8;
+  margin-top: $apx-12;
 }
 
 .analyticsSidebar {
   position: sticky;
   top: $apx-16;
   display: grid;
-  gap: $apx-12;
+  gap: $apx-14;
   border: $apx-1 solid #dde2ee;
-  border-radius: $apx-16;
-  background: linear-gradient(180deg, #ffffff 0%, #f8f9ff 100%);
+  border-radius: $apx-14;
+  background: #fff;
   box-shadow: 0 $apx-10 $apx-30 rgba(30, 34, 58, 0.06);
-  padding: $apx-12;
+  padding: $apx-16;
 }
 
 .analyticsSidebarHeader {
@@ -128,26 +132,28 @@
 
   strong {
     color: #242633;
-    font-size: $apx-15;
+    font-size: $apx-14;
+    font-weight: 800;
     line-height: 1.2;
   }
 }
 
 .analyticsSideNav {
   display: grid;
-  gap: $apx-4;
+  gap: $apx-6;
 }
 
 .analyticsSideNavItem,
 .analyticsSideNavActive {
   position: relative;
   display: grid;
-  gap: $apx-2;
+  gap: $apx-4;
   width: 100%;
-  min-height: $apx-58;
+  min-height: $apx-54 !important;
   border: $apx-1 solid transparent;
-  border-radius: $apx-12;
-  padding: $apx-10 $apx-12 $apx-10 $apx-18;
+  border-radius: $apx-10 !important;
+  padding: $apx-10 $apx-12 $apx-10 $apx-16 !important;
+  font-weight: 600 !important;
   text-align: left;
   cursor: pointer;
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease,
@@ -166,46 +172,65 @@
 
   span {
     font-size: $apx-13;
-    font-weight: 900;
+    font-weight: 700;
     line-height: 1.2;
   }
 
   small {
     font-size: $apx-10;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1.25;
   }
 }
 
 .analyticsSideNavItem {
-  border-color: #edf0f7;
-  background: #fff;
-  color: #242633;
+  border-color: #edf0f7 !important;
+  background: #f8f9fc !important;
+  color: #242633 !important;
   box-shadow: 0 $apx-4 $apx-14 rgba(30, 34, 58, 0.03);
 
+  span {
+    color: #242633 !important;
+  }
+
   small {
-    color: #73778a;
+    color: #73778a !important;
   }
 
   &:hover {
     transform: translateY(calc(#{$apx-1} * -1));
-    border-color: #dddff0;
-    background: #fbfbff;
+    border-color: #cbcfe0 !important;
+    background: #f1f3f8 !important;
+    color: #260b86 !important;
+    box-shadow: 0 $apx-8 $apx-18 rgba(30, 34, 58, 0.07);
+
+    span {
+      color: #260b86 !important;
+    }
+
+    small {
+      color: #5d6174 !important;
+    }
   }
 }
 
 .analyticsSideNavActive {
-  border-color: #260b86;
-  background: #fff;
-  color: #260b86;
-  box-shadow: 0 $apx-8 $apx-22 rgba(38, 11, 134, 0.14), inset $apx-4 0 0 #260b86;
+  border-color: #260b86 !important;
+  background: #f4f1ff !important;
+  color: #260b86 !important;
+  box-shadow: 0 $apx-8 $apx-20 rgba(38, 11, 134, 0.16), inset $apx-4 0 0 #260b86;
 
   &::before {
     background: #260b86;
   }
 
+  span {
+    color: #260b86 !important;
+    font-weight: 800;
+  }
+
   small {
-    color: #5d4ca0;
+    color: #5d4ca0 !important;
   }
 }
 
@@ -262,7 +287,8 @@
 
 .analyticsContentBody {
   display: grid;
-  gap: $apx-14;
+  gap: $apx-18;
+  padding: $apx-2;
 }
 
 .analyticsFilters {
@@ -352,7 +378,7 @@
   border-radius: $apx-14;
   background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
   box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
-  padding: $apx-18;
+  padding: $apx-20;
 }
 
 .analyticsPanelHeader {

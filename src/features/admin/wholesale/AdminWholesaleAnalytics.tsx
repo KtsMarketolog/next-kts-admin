@@ -406,7 +406,7 @@ const tabs: Array<{ value: Tab; label: string; description: string }> = [
   { value: 'overview', label: 'Обзор', description: 'Главные KPI, воронка и риски' },
   { value: 'managers', label: 'Менеджеры', description: 'Добавление, управление и статистика' },
   { value: 'managerRatings', label: 'Рейтинг менеджеров', description: 'Рейтинг и качество воронки' },
-  { value: 'prices', label: 'Прайсы', description: 'Проблемы, сроки и карточки' },
+  { value: 'prices', label: 'Статистика прайсов', description: 'Проблемы, сроки и карточки' },
   { value: 'clients', label: 'Клиенты', description: 'Активность, приоритет и история' },
   { value: 'public', label: 'Публичные ссылки', description: 'Открытия и повторные просмотры' },
   { value: 'pdf', label: 'PDF', description: 'Скачивания PDF' },
