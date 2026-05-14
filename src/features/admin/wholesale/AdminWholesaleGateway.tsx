@@ -4,6 +4,11 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import {
+  readWholesaleManagerPasswords as readManagerPasswords,
+  removeWholesaleManagerPassword as removeManagerPassword,
+  saveWholesaleManagerPassword as saveManagerPassword,
+} from '@/shared/lib/adminPasswordStorage';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import {
   getWholesalePriceWorkflowStatusLabel,
@@ -142,38 +147,6 @@ const emptyManager: ManagerDraft = {
   password: '',
   isActive: true,
 };
-
-const MANAGER_PASSWORDS_STORAGE_KEY = 'kts-admin-wholesale-manager-passwords-v1';
-
-function readManagerPasswords() {
-  if (typeof window === 'undefined') return {} as Record<string, string>;
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(MANAGER_PASSWORDS_STORAGE_KEY) || '{}');
-    if (!parsed || typeof parsed !== 'object') return {} as Record<string, string>;
-    return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'),
-    );
-  } catch {
-    return {} as Record<string, string>;
-  }
-}
-
-function writeManagerPasswords(passwords: Record<string, string>) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(MANAGER_PASSWORDS_STORAGE_KEY, JSON.stringify(passwords));
-}
-
-function saveManagerPassword(managerId: number, password: string) {
-  const passwords = readManagerPasswords();
-  passwords[String(managerId)] = password;
-  writeManagerPasswords(passwords);
-}
-
-function removeManagerPassword(managerId: number) {
-  const passwords = readManagerPasswords();
-  delete passwords[String(managerId)];
-  writeManagerPasswords(passwords);
-}
 
 function attachManagerPasswords(managers: Manager[]) {
   const passwords = readManagerPasswords();

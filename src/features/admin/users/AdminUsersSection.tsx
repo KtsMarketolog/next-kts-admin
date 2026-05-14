@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
+import {
+  moveAccessUserPassword as moveUserPassword,
+  readAccessUserPasswords as readSavedPasswords,
+  removeAccessUserPassword as removeUserPassword,
+  saveAccessUserPassword as saveUserPassword,
+} from '@/shared/lib/adminPasswordStorage';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 
 type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
@@ -50,7 +56,6 @@ const EMPTY_DRAFT: Draft = {
 };
 
 const ACTIVE_TAB_STORAGE_KEY = 'kts-admin-users-active-tab';
-const SAVED_PASSWORDS_STORAGE_KEY = 'kts-admin-users-passwords-v1';
 
 function isUserTab(value: string | null): value is UserTab {
   return value === 'admin' || value === 'manager' || value === 'support_manager';
@@ -65,43 +70,6 @@ function readActiveTab(): UserTab {
 function saveActiveTab(tab: UserTab) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, tab);
-}
-
-function readSavedPasswords() {
-  if (typeof window === 'undefined') return {} as Record<string, string>;
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(SAVED_PASSWORDS_STORAGE_KEY) || '{}');
-    if (!parsed || typeof parsed !== 'object') return {} as Record<string, string>;
-    return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'),
-    );
-  } catch {
-    return {} as Record<string, string>;
-  }
-}
-
-function writeSavedPasswords(passwords: Record<string, string>) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(SAVED_PASSWORDS_STORAGE_KEY, JSON.stringify(passwords));
-}
-
-function saveUserPassword(userId: string, password: string) {
-  const passwords = readSavedPasswords();
-  passwords[userId] = password;
-  writeSavedPasswords(passwords);
-}
-
-function moveUserPassword(previousId: string, nextId: string, password: string) {
-  const passwords = readSavedPasswords();
-  delete passwords[previousId];
-  if (password) passwords[nextId] = password;
-  writeSavedPasswords(passwords);
-}
-
-function removeUserPassword(userId: string) {
-  const passwords = readSavedPasswords();
-  delete passwords[userId];
-  writeSavedPasswords(passwords);
 }
 
 function attachSavedPasswords(users: AccessUser[]) {
