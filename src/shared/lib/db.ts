@@ -36,6 +36,7 @@ export {
   deleteWholesalePriceList,
   getWholesaleCatalog,
   getWholesaleAdminAnalytics,
+  getWholesaleDiscountReportRows,
   getWholesaleManagerById,
   getWholesaleManagerByLogin,
   getWholesaleManagerAnalytics,
@@ -51,6 +52,7 @@ export {
 } from './db/wholesaleAdminRepo';
 export type {
   WholesaleCatalogCategory,
+  WholesaleDiscountReportRow,
   WholesaleAdminAnalytics,
   WholesaleAdminAnalyticsPeriod,
   WholesaleManagerAnalytics,

@@ -301,6 +301,10 @@
     font-size: $apx-12;
     white-space: nowrap;
   }
+
+  button {
+    min-width: $apx-190;
+  }
 }
 
 .analyticsContentBody {

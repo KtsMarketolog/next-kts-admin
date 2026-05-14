@@ -1007,6 +1007,10 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
     window.location.href = `/api/admin/wholesale/analytics/export?${exportParams().toString()}`;
   };
 
+  const downloadDiscountReport = () => {
+    window.location.href = '/api/admin/wholesale/discount-report';
+  };
+
   const sendAnalyticsEmail = async () => {
     const email = exportEmail.trim();
     if (!email) {
@@ -1120,6 +1124,11 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
                   <h4>{activeTab.label}</h4>
                   <p>{activeTab.description}</p>
                 </div>
+                {tab === 'prices' ? (
+                  <button type="button" className={styles.secondary} onClick={downloadDiscountReport}>
+                    Отчёт по скидкам
+                  </button>
+                ) : null}
                 {tab === 'managers' || tab === 'managerRatings' ? <strong>{analytics.managers.length} менеджеров</strong> : null}
               </div>
               <div className={styles.analyticsContentBody}>{renderTabContent()}</div>
