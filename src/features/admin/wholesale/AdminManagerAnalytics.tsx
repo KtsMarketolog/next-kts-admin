@@ -148,15 +148,6 @@ type ClientHistory = {
   hasActiveActualPrice: boolean;
 };
 
-type ProductInterest = {
-  productId: string | null;
-  productTitle: string;
-  opens: number;
-  quantityChanges: number;
-  requests: number;
-  lastActivityAt: string | null;
-};
-
 type PeriodComparison = {
   label: string;
   current: number;
@@ -310,7 +301,6 @@ type ManagerAnalytics = {
     managerReactionNeeded: ReactionNeeded[];
     priorityClients: PriorityClient[];
     clientHistory: ClientHistory[];
-    productInterest: ProductInterest[];
     comparison: PeriodComparison[];
   };
   recentEvents?: AnalyticsEvent[];
@@ -546,22 +536,6 @@ function ManagerClientHistoryTable({ rows }: { rows: ClientHistory[] }) {
           <table className={styles.adminTable}>
             <thead><tr><th>Клиент</th><th>Прайсов</th><th>Активных</th><th>Актуальных</th><th>Просроченных</th><th>Статусы</th><th>Просмотры</th><th>PDF</th><th>Заявки</th><th>Последняя активность</th></tr></thead>
             <tbody>{rows.map((row) => <tr key={row.clientId}><td>{row.clientName}</td><td>{row.priceCount}</td><td>{row.activePrices}</td><td>{row.activeActualPrices}</td><td>{row.expiredPrices}</td><td><div className={styles.analyticsBadgesRow}>{row.statuses.map((status) => <span className={styles.analyticsBadgeOrange} key={status}>{status}</span>)}</div></td><td>{row.views}</td><td>{row.pdfDownloads}</td><td>{row.requestsSent}</td><td>{formatDate(row.lastActivityAt)}</td></tr>)}</tbody>
-          </table>
-        </div>
-      )}
-    </article>
-  );
-}
-
-function ManagerProductInterestTable({ rows }: { rows: ProductInterest[] }) {
-  return (
-    <article className={styles.analyticsPanel}>
-      <div className={styles.analyticsPanelHeader}><h3>Товарный интерес</h3><span>{rows.length}</span></div>
-      {rows.length === 0 ? <EmptyState>Интерес к товарам пока не зафиксирован</EmptyState> : (
-        <div className={styles.tableWrap}>
-          <table className={styles.adminTable}>
-            <thead><tr><th>Товар</th><th>Открывали</th><th>Меняли количество</th><th>В заявках</th><th>Последняя активность</th></tr></thead>
-            <tbody>{rows.map((row) => <tr key={row.productId ?? row.productTitle}><td>{row.productTitle}</td><td>{row.opens}</td><td>{row.quantityChanges}</td><td>{row.requests}</td><td>{formatDate(row.lastActivityAt)}</td></tr>)}</tbody>
           </table>
         </div>
       )}
@@ -816,7 +790,6 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
             <KpiCard title="За период" value={analytics.publicViews.periodViews} text={`Последний: ${formatDate(analytics.publicViews.lastViewAt)}`} />
           </div>
           <TopViewedPublicTable rows={analytics.publicViews.topPrices} />
-          {attention ? <ManagerProductInterestTable rows={attention.productInterest} /> : null}
           <EventsTable title="Последние просмотры" events={analytics.publicViews.recentViews ?? []} empty="Просмотров публичных ссылок пока нет" />
           <SimplePriceTable title="Прайсы без просмотров" rows={analytics.publicViews.pricesWithoutViewsList ?? []} empty="Прайсов без просмотров нет" managerId={managerId} routerPush={router.push} />
         </>

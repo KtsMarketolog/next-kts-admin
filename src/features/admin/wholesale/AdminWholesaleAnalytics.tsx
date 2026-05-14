@@ -181,15 +181,6 @@ type ClientHistory = {
   hasActiveActualPrice: boolean;
 };
 
-type ProductInterest = {
-  productId: string | null;
-  productTitle: string;
-  opens: number;
-  quantityChanges: number;
-  requests: number;
-  lastActivityAt: string | null;
-};
-
 type PeriodComparison = {
   label: string;
   current: number;
@@ -391,7 +382,6 @@ type Analytics = {
     managerReactionNeeded: ReactionNeeded[];
     priorityClients: PriorityClient[];
     clientHistory: ClientHistory[];
-    productInterest: ProductInterest[];
     comparison: PeriodComparison[];
   };
   problemPrices: ProblemPrice[];

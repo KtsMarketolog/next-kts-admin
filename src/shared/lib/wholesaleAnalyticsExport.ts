@@ -94,102 +94,146 @@ function problemText(problems?: string[]) {
   return problems.map((problem) => problemLabels[problem] ?? problem).join(', ');
 }
 
+function qualityText(score: number) {
+  if (score >= 90) return 'Отлично';
+  if (score >= 75) return 'Хорошо';
+  if (score >= 60) return 'Средне';
+  return 'Требует внимания';
+}
+
+function hoursText(value: number | null | undefined) {
+  return value === null || value === undefined ? 'Нет данных' : `${value} ч`;
+}
+
+function changeText(value: number | null | undefined) {
+  if (value === null || value === undefined) return 'новый рост';
+  return value > 0 ? `+${value}%` : `${value}%`;
+}
+
 function adminReport(analytics: WholesaleAdminAnalytics, period: WholesaleAdminAnalyticsPeriod): Report {
   const summary = analytics.summary;
+  const activity = analytics.managerActivity;
+  const funnel = analytics.attention.statusFunnel;
+
   return {
     title: 'Общая аналитика индивидуальных прайсов',
     subtitle: `Все менеджеры • период: ${periodLabels[period]}`,
     filenameBase: `wholesale-analytics-all-${period}`,
     metrics: [
-      { label: 'Всего прайсов', value: summary.totalPrices },
-      { label: 'Активные прайсы', value: summary.activePrices },
-      { label: 'Просроченные', value: summary.expiredPrices },
-      { label: 'Проблемные', value: summary.problemPrices },
-      { label: 'Создано за период', value: summary.pricesCreatedInSelectedPeriod },
-      { label: 'Менеджеры', value: summary.totalManagers, note: `активных: ${summary.activeManagers}` },
-      { label: 'Просмотры', value: summary.publicViewsInSelectedPeriod, note: `всего: ${summary.totalPublicViews}` },
-      { label: 'PDF', value: summary.pdfDownloadsInSelectedPeriod, note: `всего: ${summary.totalPdfDownloads}` },
-      { label: 'Клиенты с активностью', value: summary.clientsWithActivity },
-      { label: 'Среднее качество', value: summary.averageQualityScore },
+      { label: 'Всего прайсов', value: summary.totalPrices, note: 'Все индивидуальные прайсы' },
+      { label: 'Активные', value: summary.activePrices, note: 'Доступны по публичной ссылке' },
+      { label: 'Просроченные', value: summary.expiredPrices, note: 'Срок действия прошёл' },
+      { label: 'Проблемные', value: summary.problemPrices, note: 'Есть ошибки качества' },
+      { label: 'Создано за период', value: summary.pricesCreatedInSelectedPeriod, note: 'По выбранному фильтру' },
+      { label: 'Менеджеры', value: summary.totalManagers, note: `Активных: ${summary.activeManagers}` },
+      { label: 'Просмотры', value: summary.publicViewsInSelectedPeriod, note: `Всего: ${summary.totalPublicViews}` },
+      { label: 'PDF', value: summary.pdfDownloadsInSelectedPeriod, note: `Всего: ${summary.totalPdfDownloads}` },
+      { label: 'Уникальные', value: summary.uniquePublicVisitors, note: 'Посетители public-ссылок' },
+      { label: 'Клиенты', value: summary.clientsWithActivity, note: 'Смотрели или скачивали PDF' },
+      { label: 'Качество', value: summary.averageQualityScore, note: qualityText(summary.averageQualityScore) },
+      { label: 'За 30 дней', value: summary.pricesCreatedLast30Days, note: 'Созданные прайсы' },
+      { label: 'Требуют внимания', value: analytics.attention.stuckPrices.length, note: 'Застряли по статусу или сроку' },
+      { label: 'Нет реакции', value: analytics.attention.managerReactionNeeded.length, note: 'Клиент активен, менеджер не ответил действием' },
+      { label: 'Приоритетные клиенты', value: analytics.attention.priorityClients.length, note: 'С кем нужно связаться сегодня' },
+      { label: 'Главный провал', value: funnel.biggestDrop?.dropFromPrevious ?? 0, note: funnel.biggestDrop?.label ?? 'Нет данных' },
     ],
     sections: [
       {
-        title: 'Рейтинг менеджеров',
-        rows: analytics.managers.map((manager) => ({
-          Менеджер: manager.name,
-          Email: manager.email,
-          Телефон: manager.phone,
-          Прайсов: manager.totalPrices,
-          Активных: manager.activePrices,
-          Проблемных: manager.problemPrices,
-          Действий: manager.actionsInSelectedPeriod,
-          Просмотров: manager.publicViews,
-          PDF: manager.pdfDownloads,
-          Качество: manager.qualityScore,
-          'Последний вход': dateText(manager.lastLoginAt),
+        title: 'Воронка по статусам',
+        rows: funnel.steps.map((step) => ({
+          Этап: step.label,
+          Количество: step.count,
+          'От всех': `${step.conversionFromTotal}%`,
+          'От прошлого': `${step.conversionFromPrevious}%`,
+          Провал: step.dropFromPrevious,
         })),
       },
       {
-        title: 'Проблемные прайсы',
-        rows: analytics.problemPrices.slice(0, 100).map((price) => ({
-          Прайс: price.title,
-          Клиент: price.clientName,
-          Менеджер: price.managerName,
-          Проблемы: problemText(price.problems),
-          Создан: dateText(price.createdAt),
-          Обновлён: dateText(price.updatedAt),
-          Срок: price.validUntil,
-          Просмотры: price.views,
-          PDF: price.pdfDownloads,
+        title: 'Скорость воронки',
+        rows: [
+          { Показатель: 'Создание → открытие', Значение: hoursText(funnel.averageTimeToOpenHours) },
+          { Показатель: 'Открытие → PDF', Значение: hoursText(funnel.averageTimeToPdfHours) },
+          { Показатель: 'Открытие → заявка', Значение: hoursText(funnel.averageTimeToRequestHours) },
+        ],
+      },
+      {
+        title: 'Сравнение периодов',
+        rows: analytics.attention.comparison.map((row) => ({
+          Показатель: row.label,
+          'Текущий период': row.current,
+          'Прошлый период': row.previous,
+          Изменение: changeText(row.changePercent),
         })),
       },
       {
-        title: 'Топ публичных ссылок',
-        rows: analytics.publicLinks.topViewedPrices.map((price) => ({
-          Прайс: price.title,
-          Клиент: price.clientName,
-          Менеджер: price.managerName,
-          Просмотры: price.views,
-          Уникальные: price.uniqueVisitors,
-          Повторные: price.repeatViews,
-          'Последний просмотр': dateText(price.lastViewAt),
-        })),
+        title: 'Активность менеджеров',
+        rows: [
+          { Показатель: 'Действий за 7 дней', Значение: activity.actionsLast7Days },
+          { Показатель: 'Действий за 30 дней', Значение: activity.actionsLast30Days },
+          { Показатель: 'Действий за период', Значение: activity.actionsInSelectedPeriod },
+          { Показатель: 'Входов за период', Значение: activity.loginsInSelectedPeriod },
+          { Показатель: 'Активных дней', Значение: activity.activeDaysInSelectedPeriod },
+          { Показатель: 'Без активности', Значение: activity.inactiveManagersInSelectedPeriod },
+          {
+            Показатель: 'Последний вход',
+            Значение: activity.lastLogin ? `${activity.lastLogin.managerName} • ${dateText(activity.lastLogin.createdAt)}` : 'Нет данных',
+          },
+          {
+            Показатель: 'Последнее действие',
+            Значение: activity.lastAction
+              ? `${activity.lastAction.eventType} • ${activity.lastAction.managerName} • ${dateText(activity.lastAction.createdAt)}`
+              : 'Нет данных',
+          },
+        ],
       },
       {
-        title: 'Топ PDF',
-        rows: analytics.pdf.topDownloadedPrices.map((price) => ({
-          Прайс: price.title,
-          Клиент: price.clientName,
-          Менеджер: price.managerName,
-          Скачивания: price.downloads,
-          Уникальные: price.uniqueDownloaders,
-          Просмотры: price.views,
-          'Последнее скачивание': dateText(price.lastDownloadAt),
-        })),
+        title: 'Качество прайсов',
+        rows: [
+          { Показатель: 'Среднее позиций', Значение: summary.averageItemsPerPrice },
+          { Показатель: 'Медиана', Значение: summary.medianItemsPerPrice },
+          { Показатель: 'Без клиента', Значение: summary.pricesWithoutClient },
+          { Показатель: 'Без срока', Значение: summary.pricesWithoutExpiration },
+          { Показатель: 'Пустые', Значение: summary.emptyPrices },
+          { Показатель: 'Без просмотров', Значение: summary.pricesWithoutViews },
+          { Показатель: 'Без PDF', Значение: summary.pricesWithoutPdfDownloads },
+          { Показатель: 'Не обновлялись', Значение: summary.stalePrices30Days },
+        ],
       },
       {
-        title: 'Топ клиентов по активности',
-        rows: analytics.clients.topClientsByActivity.map((client) => ({
-          Клиент: client.clientName,
-          Менеджер: client.managerName,
-          Прайс: client.priceTitle,
-          Прайсов: client.priceCount,
-          Просмотры: client.views,
-          PDF: client.pdfDownloads,
-          'Последняя активность': dateText(client.lastActivityAt),
-        })),
-      },
-      {
-        title: 'Последние события',
-        rows: analytics.recentEvents.slice(0, 100).map((event) => ({
-          Дата: dateText(event.createdAt),
-          Источник: event.actorType,
-          Событие: event.eventType,
-          Менеджер: event.managerName,
-          Прайс: event.priceTitle,
-          Клиент: event.clientName,
-          Детали: event.details,
-        })),
+        title: 'Лидеры и риски',
+        rows: [
+          {
+            Показатель: 'Лучшее качество',
+            Значение: analytics.priceQuality.bestManager
+              ? `${analytics.priceQuality.bestManager.name} • ${analytics.priceQuality.bestManager.qualityScore}`
+              : 'Нет данных',
+          },
+          { Показатель: 'Требуют внимания', Значение: analytics.priceQuality.managersNeedAttention.length },
+          {
+            Показатель: 'Менеджер по просмотрам',
+            Значение: analytics.publicLinks.topManager
+              ? `${analytics.publicLinks.topManager.managerName} • ${analytics.publicLinks.topManager.views}`
+              : 'Нет данных',
+          },
+          {
+            Показатель: 'Менеджер по PDF',
+            Значение: analytics.pdf.topManager
+              ? `${analytics.pdf.topManager.managerName} • ${analytics.pdf.topManager.downloads}`
+              : 'Нет данных',
+          },
+          {
+            Показатель: 'Самый просматриваемый прайс',
+            Значение: analytics.priceInsights.topViewedPrice
+              ? `${analytics.priceInsights.topViewedPrice.title} • ${analytics.priceInsights.topViewedPrice.views}`
+              : 'Нет данных',
+          },
+          {
+            Показатель: 'Самый большой прайс',
+            Значение: analytics.priceInsights.largestPrice
+              ? `${analytics.priceInsights.largestPrice.title} • ${analytics.priceInsights.largestPrice.itemCount} поз.`
+              : 'Нет данных',
+          },
+        ],
       },
     ],
   };
@@ -284,6 +328,19 @@ function ensurePdfSpace(doc: PDFKit.PDFDocument, height: number) {
   if (doc.y + height > bottom) doc.addPage();
 }
 
+function pdfColumnWeight(column: string) {
+  if (['Показатель', 'Значение', 'Прайс', 'Клиент', 'Менеджер', 'Событие', 'Детали', 'Проблемы'].includes(column)) return 1.45;
+  if (['Дата', 'Создан', 'Обновлён', 'Срок', 'Последний просмотр', 'Последнее скачивание', 'Последняя активность'].includes(column)) return 1.15;
+  if (['Количество', 'Просмотры', 'PDF', 'Уникальные', 'Повторные', 'Прайсов', 'Активных', 'Проблемных', 'Действий'].includes(column)) return 0.85;
+  return 1;
+}
+
+function pdfColumnWidths(columns: string[], width: number) {
+  const weights = columns.map(pdfColumnWeight);
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  return weights.map((weight) => (width * weight) / totalWeight);
+}
+
 function drawMetricCard(
   doc: PDFKit.PDFDocument,
   metric: Report['metrics'][number],
@@ -321,43 +378,72 @@ function drawPdfSection(
     return;
   }
 
-  section.rows.slice(0, 35).forEach((row, rowIndex) => {
-    const entries = Object.entries(row);
-    const [mainLabel, mainValue] = entries[0] ?? ['Запись', '—'];
-    const details = entries.slice(1);
-    const detailRows = Math.ceil(details.length / 2);
-    const rowHeight = Math.max(48, 31 + detailRows * 16);
-    ensurePdfSpace(doc, rowHeight + 8);
+  const rows = section.rows.slice(0, 35);
+  const columns = Object.keys(rows[0] ?? {});
+  const columnWidths = pdfColumnWidths(columns, width);
+  const headerHeight = 23;
+  const cellPadding = 6;
+  const bodyFontSize = columns.length > 6 ? 6.8 : 7.4;
+
+  const drawHeader = () => {
+    const y = doc.y;
+    doc.rect(left, y, width, headerHeight).fill('#eef1f7');
+    doc.rect(left, y, width, headerHeight).stroke('#dfe3ef');
+    let x = left;
+    columns.forEach((column, columnIndex) => {
+      const columnWidth = columnWidths[columnIndex];
+      doc.font(fonts.boldFont)
+        .fontSize(6.6)
+        .fillColor('#5f6274')
+        .text(column.toUpperCase(), x + cellPadding, y + 7, { width: columnWidth - cellPadding * 2 });
+      x += columnWidth;
+    });
+    doc.y = y + headerHeight;
+  };
+
+  ensurePdfSpace(doc, headerHeight + 28);
+  drawHeader();
+
+  rows.forEach((row, rowIndex) => {
+    const values = columns.map((column) => compactText(row[column], columns.length > 6 ? 70 : 95));
+    doc.font(fonts.regularFont).fontSize(bodyFontSize);
+    const rowHeight = Math.max(
+      24,
+      Math.max(
+        ...values.map((value, columnIndex) => doc.heightOfString(value, { width: columnWidths[columnIndex] - cellPadding * 2 })),
+      ) + 13,
+    );
+
+    const bottom = doc.page.height - doc.page.margins.bottom;
+    if (doc.y + rowHeight > bottom) {
+      doc.addPage();
+      drawHeader();
+    }
 
     const y = doc.y;
-    doc.roundedRect(left, y, width, rowHeight, 6).fill('#fbfcff');
-    doc.roundedRect(left, y, width, rowHeight, 6).stroke('#e3e5ef');
-    doc.font(fonts.boldFont)
-      .fontSize(9)
-      .fillColor('#242633')
-      .text(`${rowIndex + 1}. ${mainLabel}: ${compactText(mainValue, 120)}`, left + 10, y + 8, { width: width - 20 });
-
-    const detailWidth = (width - 30) / 2;
-    details.forEach(([label, value], detailIndex) => {
-      const column = detailIndex % 2;
-      const line = Math.floor(detailIndex / 2);
-      const detailX = left + 10 + column * (detailWidth + 10);
-      const detailY = y + 28 + line * 16;
+    const background = rowIndex % 2 === 0 ? '#ffffff' : '#fbfcff';
+    let x = left;
+    columns.forEach((column, columnIndex) => {
+      const columnWidth = columnWidths[columnIndex];
+      doc.rect(x, y, columnWidth, rowHeight).fill(background);
+      doc.rect(x, y, columnWidth, rowHeight).stroke('#edf0f6');
       doc.font(fonts.regularFont)
-        .fontSize(8)
-        .fillColor('#4b4e61')
-        .text(`${label}: ${compactText(value, 62)}`, detailX, detailY, { width: detailWidth });
+        .fontSize(bodyFontSize)
+        .fillColor('#303342')
+        .text(values[columnIndex], x + cellPadding, y + 6, { width: columnWidth - cellPadding * 2 });
+      x += columnWidth;
     });
-
     doc.fillColor('#000');
-    doc.y = y + rowHeight + 7;
+    doc.y = y + rowHeight;
   });
 
-  if (section.rows.length > 35) {
+  doc.moveDown(0.9);
+
+  if (section.rows.length > rows.length) {
     doc.font(fonts.regularFont)
       .fontSize(8)
       .fillColor('#77798a')
-      .text(`Показаны первые 35 записей из ${section.rows.length}. Полный список доступен в Excel-отчёте.`);
+      .text(`Показаны первые ${rows.length} записей из ${section.rows.length}. Полный список доступен в Excel-отчёте.`);
     doc.fillColor('#000').moveDown(0.5);
   }
 }
