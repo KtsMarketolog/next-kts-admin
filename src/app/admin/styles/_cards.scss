@@ -367,7 +367,12 @@
   }
 
   label:nth-of-type(6) {
-    grid-column: 4 / 13;
+    grid-column: 4 / 7;
+    grid-row: 2;
+  }
+
+  label:nth-of-type(7) {
+    grid-column: 7 / 13;
     grid-row: 2;
   }
 }

@@ -1083,6 +1083,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                   <input value={manager.phone} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, phone: event.target.value } : item))} />
                 </label>
                 <label>
+                  <span>Роль</span>
+                  <select value={manager.role} disabled>
+                    <option value="manager">Менеджер по развитию</option>
+                  </select>
+                </label>
+                <label>
                   <span>Менеджер по сопровождению</span>
                   <select
                     value={manager.supportManagerId ?? ''}
