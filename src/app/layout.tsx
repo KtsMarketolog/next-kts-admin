@@ -4,6 +4,7 @@ import { Montserrat } from "next/font/google";
 import "./globals.css";
 import "./fix-ios-zoom.scss";
 import Header from "@/widgets/layout/Header/Header";
+import Loader from "@/widgets/layout/Loader";
 import { ConditionalFooter } from "@/widgets/layout/ConditionalFooter";
 import ScrollToHashWrapper from "@/shared/lib/ScrollToHashWrapper";
 import CookieBanner from '@/shared/ui/CookieBanner/CookieBanner';
@@ -38,20 +39,32 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 
     <html lang="ru" data-scroll-behavior="smooth">
 
-      <body className={montserrat.variable}>
+      <body className={`${montserrat.variable} preload-bg`}>
 
-        {/* Весь контент сайта */}
+        <div id="ssr-loader" className="loaderRoot" role="progressbar" aria-busy="true" aria-label="Загрузка">
+
+          <div className="posterLayer" aria-hidden="true" />
+          <div className="glassOverlay" />
+          <div className="blurPulse" />
+
+        </div>
+
+        {/* Весь контент — в обертке, которую скрываем до hydrated */}
         <div id="app-content">
 
           <Header />
 
-          <ScrollToHashWrapper>
+          <Loader>
+
+            <ScrollToHashWrapper>
               
-            {children}
+              {children}
 
-            <CookieBanner />
+              <CookieBanner />
 
-          </ScrollToHashWrapper>
+            </ScrollToHashWrapper>
+
+          </Loader>
 
           <ConditionalFooter />
 
