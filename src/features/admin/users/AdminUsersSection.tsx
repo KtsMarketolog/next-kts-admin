@@ -385,7 +385,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
         ))}
       </div>
 
-      <div className={styles.userCreateCard}>
+      <div className={`${styles.userCreateCard} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
         <div className={styles.autofillGuard} aria-hidden="true">
           <input tabIndex={-1} autoComplete="username" />
           <input tabIndex={-1} type="password" autoComplete="current-password" />
@@ -476,7 +476,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
 
             return (
             <article className={styles.userAccessCard} key={user.id}>
-              <div className={styles.userAccessFields}>
+              <div className={`${styles.userAccessFields} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
                 <label>
                   <span>Имя</span>
                   <input value={user.name} onChange={(event) => updateUser(user.id, { name: event.target.value })} />

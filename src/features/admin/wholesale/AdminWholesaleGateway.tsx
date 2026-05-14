@@ -1001,7 +1001,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           ))}
         </div>
 
-        <div className={styles.userCreateCard}>
+        <div className={`${styles.userCreateCard} ${managerRoleTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
           <div className={styles.autofillGuard} aria-hidden="true">
             <input tabIndex={-1} autoComplete="username" />
             <input tabIndex={-1} type="password" autoComplete="current-password" />
@@ -1201,7 +1201,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
               return (
                 <article className={styles.userAccessCard} key={manager.id}>
-                  <div className={styles.userAccessFields}>
+                  <div className={`${styles.userAccessFields} ${managerRoleTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
                     <label>
                       <span>Имя</span>
                       <input value={manager.name} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, name: event.target.value } : item))} />
