@@ -1803,7 +1803,10 @@
 }
 
 .priceCategoryMeta {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $apx-8 $apx-24;
   margin-top: $apx-4;
   color: #6f7182;
   font-size: $apx-12;
@@ -1816,6 +1819,10 @@
 
 .priceCategoryAddedActive {
   color: #178a45;
+}
+
+.priceCategoryDiscount {
+  color: #c51f1a;
 }
 
 .priceCategoryToggle {
