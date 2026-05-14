@@ -331,19 +331,21 @@ function getSavedGroupDiscountPercent(
   for (const product of group.products) {
     for (const variant of product.variants) {
       const key = `${product.id}:${variant.id ?? 'base'}`;
+      const priceItem = itemByKey.get(key);
+      if (!priceItem?.visible) continue;
+
       const base = catalogDiscountBaseByKey.get(key)?.amount;
-      const custom = parseCatalogAmount(itemByKey.get(key)?.customWholesalePrice);
+      const custom = parseCatalogAmount(priceItem.customWholesalePrice);
       if (!base || custom === null) continue;
 
       const discount = (1 - custom / base) * 100;
       if (discount < -0.05 || discount > 100) return null;
-      discounts.push(discount);
+      discounts.push(discount <= 0.05 ? 0 : discount);
     }
   }
 
   if (discounts.length === 0) return null;
   const first = discounts[0];
-  if (first <= 0.05) return null;
   if (discounts.some((discount) => Math.abs(discount - first) > 0.15)) return null;
 
   return formatDiscountPercent(first);
