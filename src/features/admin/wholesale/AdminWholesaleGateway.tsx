@@ -50,6 +50,23 @@ const MANAGER_ROLE_TABS: Array<{ value: ManagerRole; label: string }> = [
   { value: 'support_manager', label: 'Менеджер по сопровождению' },
 ];
 
+const MANAGER_ROLE_TAB_STORAGE_KEY = 'kts-admin-wholesale-manager-role-tab';
+
+function isManagerRole(value: string | null): value is ManagerRole {
+  return value === 'manager' || value === 'support_manager';
+}
+
+function readManagerRoleTab(): ManagerRole {
+  if (typeof window === 'undefined') return 'manager';
+  const value = window.localStorage.getItem(MANAGER_ROLE_TAB_STORAGE_KEY);
+  return isManagerRole(value) ? value : 'manager';
+}
+
+function saveManagerRoleTab(tab: ManagerRole) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MANAGER_ROLE_TAB_STORAGE_KEY, tab);
+}
+
 type PriceList = {
   id: number;
   title: string;
@@ -395,7 +412,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [savedManagerId, setSavedManagerId] = useState<number | null>(null);
   const [managerCreated, setManagerCreated] = useState(false);
-  const [managerRoleTab, setManagerRoleTab] = useState<ManagerRole>('manager');
+  const [managerRoleTab, setManagerRoleTab] = useState<ManagerRole>(() => readManagerRoleTab());
   const [managerPasswordDrafts, setManagerPasswordDrafts] = useState<Record<number, string>>({});
   const [managerPasswordEditIds, setManagerPasswordEditIds] = useState<Record<number, boolean>>({});
   const [catalogQuery, setCatalogQuery] = useState('');
@@ -974,6 +991,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               aria-pressed={managerRoleTab === tab.value}
               onClick={() => {
                 setManagerRoleTab(tab.value);
+                saveManagerRoleTab(tab.value);
                 setManagerCreated(false);
                 setManagerDraft(emptyManager);
               }}
@@ -983,7 +1001,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           ))}
         </div>
 
-        <h3>Добавить {managerRoleLabel}</h3>
         <div className={styles.userCreateCard}>
           <div className={styles.autofillGuard} aria-hidden="true">
             <input tabIndex={-1} autoComplete="username" />
