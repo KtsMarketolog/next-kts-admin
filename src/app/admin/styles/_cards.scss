@@ -729,6 +729,8 @@
   }
 
   &.userSupportManagerLayout {
+    align-items: start;
+
     label:nth-of-type(1) {
       grid-column: 1 / 5;
     }
@@ -751,6 +753,8 @@
 
     label.userActiveToggle {
       grid-column: 11 / 13;
+      align-self: start;
+      margin-top: $apx-20;
     }
 
     > button {
