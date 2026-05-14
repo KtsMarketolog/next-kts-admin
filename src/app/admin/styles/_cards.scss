@@ -649,7 +649,7 @@
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: $apx-10;
-  align-items: end;
+  align-items: start;
   border: $apx-1 solid #e1e3ee;
   border-radius: $apx-10;
   background: #f8f9fc;
@@ -718,6 +718,8 @@
   label.userActiveToggle {
     grid-column: 10 / 13;
     grid-row: 2;
+    align-self: start;
+    margin-top: $apx-20;
   }
 
   > button {
@@ -753,8 +755,6 @@
 
     label.userActiveToggle {
       grid-column: 11 / 13;
-      align-self: start;
-      margin-top: $apx-20;
     }
 
     > button {

@@ -1318,7 +1318,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             </h2>
           </div>
           <div className={styles.topbarActions}>
-            <button className={styles.secondary} onClick={onBack}>
+            <button className={styles.secondary} onClick={() => (canManageWholesale ? router.push('/admin/wholesale/admin') : onBack())}>
               Вернуться в панель управления
             </button>
             <button onClick={() => router.push('/admin/wholesale/create')}>Создать прайс</button>
