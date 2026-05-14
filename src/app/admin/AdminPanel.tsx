@@ -61,7 +61,7 @@ function wait(ms: number) {
 }
 
 async function fetchAdminSessionSnapshot(): Promise<AdminSessionResponse> {
-  const response = await fetch('/api/admin/session', { cache: 'no-store' });
+  const response = await fetch('/api/admin/session', { cache: 'no-store', credentials: 'same-origin' });
 
   if (!response.ok) {
     throw new Error(`Admin session check failed: ${response.status}`);
@@ -70,15 +70,27 @@ async function fetchAdminSessionSnapshot(): Promise<AdminSessionResponse> {
   return response.json();
 }
 
-async function fetchAdminSessionWithRetry() {
-  const first = await fetchAdminSessionSnapshot();
+async function fetchAdminSessionWithRetry(attempts = 4) {
+  let lastError: unknown = null;
 
-  if (first.authenticated) {
-    return first;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      const data = await fetchAdminSessionSnapshot();
+      if (data.authenticated || index === attempts - 1) return data;
+    } catch (error) {
+      lastError = error;
+      if (index === attempts - 1) throw error;
+    }
+
+    await wait([250, 500, 900][index] ?? 1200);
   }
 
-  await wait(350);
-  return fetchAdminSessionSnapshot();
+  if (lastError) throw lastError;
+  return { authenticated: false, role: null };
+}
+
+function normalizeSessionRole(role: AdminSessionResponse['role']) {
+  return isManagerRole(role) ? (role as AdminSession['role']) : role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
 }
 
 export default function AdminPanel({ initialArea = 'home', initialSession = null }: AdminPanelProps) {
@@ -87,6 +99,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   const searchParams = useSearchParams();
 
   const [authenticated, setAuthenticated] = useState(Boolean(initialSession));
+  const [sessionReady, setSessionReady] = useState(Boolean(initialSession));
   const [sessionRole, setSessionRole] = useState<AdminSession['role'] | null>(initialSession?.role ?? null);
   const [activeArea, setActiveArea] = useState<AdminArea>(
     initialSession?.role !== 'admin' && initialArea === 'site' ? 'home' : initialArea,
@@ -99,6 +112,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   const [busy, setBusy] = useState(false);
   const [savedSetting, setSavedSetting] = useState<SettingKey | null>(null);
   const loadAdminDataRef = useRef<() => Promise<void>>(async () => {});
+  const authenticatedRef = useRef(Boolean(initialSession));
 
   const showStatus = (message: string) => {
     setStatus(message);
@@ -161,7 +175,18 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
     const responses = [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes];
 
     if (responses.some((response) => response.status === 401 || response.status === 403)) {
-      setAuthenticated(false);
+      const session = await fetchAdminSessionWithRetry().catch((error) => {
+        console.error('Failed to recheck admin session after protected data response', error);
+        return null;
+      });
+
+      if (!session?.authenticated) {
+        setSessionRole(null);
+        setAuthenticated(false);
+      } else {
+        setSessionRole(normalizeSessionRole(session.role));
+        setAuthenticated(true);
+      }
       return;
     }
 
@@ -199,18 +224,26 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   }, [loadAdminData]);
 
   useEffect(() => {
+    authenticatedRef.current = authenticated;
+  }, [authenticated]);
+
+  useEffect(() => {
     let cancelled = false;
+
+    if (!authenticatedRef.current) {
+      setSessionReady(false);
+    }
 
     fetchAdminSessionWithRetry()
       .then((data) => {
         if (cancelled) return;
 
         if (data.authenticated) {
-          const nextRole: AdminSession['role'] =
-            isManagerRole(data.role) ? (data.role as AdminSession['role']) : data.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
+          const nextRole = normalizeSessionRole(data.role);
           setSessionRole(nextRole);
+          setAuthenticated(true);
+          setSessionReady(true);
           if (nextRole !== 'admin') {
-            setAuthenticated(true);
             if (pathname.startsWith('/admin/site')) {
               router.replace('/admin', { scroll: false });
             }
@@ -222,10 +255,17 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
         } else {
           setSessionRole(null);
           setAuthenticated(false);
+          setSessionReady(true);
         }
       })
       .catch((error) => {
+        if (cancelled) return;
         console.error('Failed to verify admin session', error);
+        if (!authenticatedRef.current) {
+          setSessionRole(null);
+          setAuthenticated(false);
+        }
+        setSessionReady(true);
       });
 
     return () => {
@@ -292,6 +332,22 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
     return data.url as string;
   };
 
+  if (!sessionReady) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.topbar}>
+          <div>
+            <p>Панель управления</p>
+            <h1>Проверяем доступ</h1>
+          </div>
+        </div>
+        <section className={styles.section}>
+          <p className={styles.mutedText}>Проверяем авторизацию и восстанавливаем сессию...</p>
+        </section>
+      </main>
+    );
+  }
+
   if (!authenticated) {
     return (
       <LoginPanel
@@ -299,6 +355,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
         onEmployeeAuthenticated={async (role) => {
           setSessionRole(role);
           setAuthenticated(true);
+          setSessionReady(true);
           if (role === 'admin') {
             await loadAdminData().catch((error) => {
               console.error('Failed to load admin data after login', error);
@@ -341,6 +398,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
               await fetch('/api/admin/logout', { method: 'POST' });
               setSessionRole(null);
               setAuthenticated(false);
+              setSessionReady(true);
             }}
           >
             Выйти
