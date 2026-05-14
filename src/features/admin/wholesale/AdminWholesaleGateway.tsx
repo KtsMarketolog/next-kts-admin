@@ -356,19 +356,28 @@ function getTextareaRows(value: string) {
   return Math.max(2, visualRows + 1);
 }
 
+function getInitialCustomWholesalePrice(row: CatalogRow, item?: PriceItem) {
+  if (item?.customWholesalePrice?.trim()) return item.customWholesalePrice;
+  const base = getDiscountBaseAmount(row);
+  return base === null ? '' : formatCatalogAmount(base);
+}
+
 function mergeEditorItems(categories: CatalogCategory[], items: PriceItem[]) {
   const current = new Map(items.map((item) => [`${item.productId}:${item.variantId ?? 'base'}`, item]));
-  return flatCatalogItems(categories).map(({ product, variant }, index) => {
+  return flatCatalogItems(categories).map((row, index) => {
+    const { product, variant } = row;
     const key = `${product.id}:${variant.id ?? 'base'}`;
-    return (
-      current.get(key) ?? {
-        productId: product.id,
-        variantId: variant.id,
-        customWholesalePrice: variant.wholesalePrice,
-        visible: false,
-        sortOrder: index + 1,
-      }
-    );
+    const currentItem = current.get(key);
+    const customWholesalePrice = getInitialCustomWholesalePrice(row, currentItem);
+    if (currentItem) return { ...currentItem, customWholesalePrice };
+
+    return {
+      productId: product.id,
+      variantId: variant.id,
+      customWholesalePrice,
+      visible: false,
+      sortOrder: index + 1,
+    };
   });
 }
 
