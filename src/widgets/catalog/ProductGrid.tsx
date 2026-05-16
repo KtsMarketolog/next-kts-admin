@@ -56,12 +56,6 @@ function prettyBrandName(brandTitle?: string | null, brandSlug?: string) {
 
 }
 
-function stockLabel(product: ProductUI) {
-  const stock = Number(product.stock ?? 0);
-  if (stock > 0) return `В наличии: ${stock} шт.`;
-  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
-}
-
 export default function ProductGrid({ items }: { items: ProductUI[] }) {
 
   if (!items?.length) {
@@ -108,8 +102,6 @@ export default function ProductGrid({ items }: { items: ProductUI[] }) {
                 {sub && <span className={styles.tag}>#{sub}</span>}
 
               </div>
-
-              <span className={styles.stock}>{stockLabel(p)}</span>
 
             </div>
 
