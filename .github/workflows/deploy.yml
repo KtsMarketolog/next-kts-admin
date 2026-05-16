@@ -22,6 +22,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
       - name: Validate deployment secrets
         run: |
           set -euo pipefail
@@ -46,36 +52,89 @@ jobs:
             "echo Connected to VPS as \$(whoami)" || \
             (echo "::error title=SSH connection failed::Check VPS_HOST, VPS_USER, VPS_SSH_KEY and authorized_keys on the server" && exit 1)
 
-      - name: Sync files to server
+      - name: Build application
         run: |
           set -euo pipefail
-          rsync -az --delete \
-            --exclude='.git/' \
-            --exclude='.github/' \
-            --exclude='.env*' \
-            --exclude='.cache/' \
-            --exclude='.next/' \
-            --exclude='node_modules/' \
-            --exclude='public/uploads/' \
-            -e "ssh -i ~/.ssh/kts_deploy -o IdentitiesOnly=yes" \
-            ./ "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PROJECT_PATH }}/"
+          npm ci
+          npm run build
 
-      - name: Build and restart on server
+      - name: Prepare release artifact
+        run: |
+          set -euo pipefail
+          RELEASE_ID="$(date -u +'%Y%m%d%H%M%S')-${GITHUB_SHA::7}"
+          echo "RELEASE_ID=${RELEASE_ID}" >> "$GITHUB_ENV"
+
+          rm -rf deploy-artifact
+          mkdir -p deploy-artifact/.next deploy-artifact/public
+
+          cp -R .next/standalone/. deploy-artifact/
+          cp -R .next/static deploy-artifact/.next/static
+          rsync -a --exclude='uploads/' public/ deploy-artifact/public/
+          cp ecosystem.config.cjs deploy-artifact/ecosystem.config.cjs
+
+          tar -czf "kts-release-${RELEASE_ID}.tar.gz" -C deploy-artifact .
+
+      - name: Upload release artifact
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/kts_deploy -o IdentitiesOnly=yes \
+            "kts-release-${RELEASE_ID}.tar.gz" \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/kts-release-${RELEASE_ID}.tar.gz"
+
+      - name: Activate release on server
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/kts_deploy -o IdentitiesOnly=yes \
             "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "set -eu && \
-             export PATH=\"\$HOME/.npm-global/bin:\$PATH\" && \
-             mkdir -p \"\$HOME/.npm-global\" && \
-             npm config set prefix \"\$HOME/.npm-global\" && \
-             cd '${{ secrets.VPS_PROJECT_PATH }}' && \
-             npm ci --include=dev && \
-             npm run build && \
-             (command -v pm2 >/dev/null || npm install -g pm2) && \
-             (pm2 delete kts-next-admin >/dev/null 2>&1 || true) && \
-             sleep 2 && \
-             PORT_PIDS=\$(ss -ltnp 'sport = :3000' 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u | tr '\n' ' ') && \
-             if [ -n \"\$PORT_PIDS\" ]; then kill \$PORT_PIDS || true; sleep 2; fi && \
-             pm2 start ecosystem.config.cjs --update-env && \
-             pm2 save"
+            "PROJECT_PATH='${{ secrets.VPS_PROJECT_PATH }}' RELEASE_ID='${RELEASE_ID}' bash -s" <<'EOF'
+          set -euo pipefail
+
+          export PATH="$HOME/.npm-global/bin:$PATH"
+          mkdir -p "$HOME/.npm-global"
+          npm config set prefix "$HOME/.npm-global"
+          command -v pm2 >/dev/null || npm install -g pm2
+
+          BASE="$PROJECT_PATH"
+          RELEASES="$BASE/releases"
+          SHARED="$BASE/shared"
+          CURRENT="$BASE/current"
+          PREVIOUS="$BASE/previous"
+          RELEASE="$RELEASES/$RELEASE_ID"
+          ARCHIVE="/tmp/kts-release-$RELEASE_ID.tar.gz"
+
+          mkdir -p "$RELEASES" "$SHARED/public/uploads"
+
+          if [ -d "$BASE/public/uploads" ] && [ ! -e "$SHARED/public/uploads/.migrated-from-legacy" ]; then
+            cp -a "$BASE/public/uploads/." "$SHARED/public/uploads/" 2>/dev/null || true
+            touch "$SHARED/public/uploads/.migrated-from-legacy"
+          fi
+
+          rm -rf "$RELEASE"
+          mkdir -p "$RELEASE"
+          tar -xzf "$ARCHIVE" -C "$RELEASE"
+          rm -f "$ARCHIVE"
+
+          if [ -f "$BASE/.env.local" ]; then
+            ln -sfn "$BASE/.env.local" "$RELEASE/.env.local"
+          fi
+
+          mkdir -p "$RELEASE/public"
+          rm -rf "$RELEASE/public/uploads"
+          ln -sfn "$SHARED/public/uploads" "$RELEASE/public/uploads"
+
+          if [ -L "$CURRENT" ] || [ -e "$CURRENT" ]; then
+            CURRENT_TARGET="$(readlink -f "$CURRENT" || true)"
+            if [ -n "$CURRENT_TARGET" ] && [ -d "$CURRENT_TARGET" ]; then
+              ln -sfn "$CURRENT_TARGET" "$PREVIOUS"
+            fi
+          fi
+
+          ln -sfn "$RELEASE" "$CURRENT"
+
+          (pm2 delete kts-next-admin >/dev/null 2>&1 || true)
+          pm2 start "$CURRENT/ecosystem.config.cjs" --update-env
+          pm2 save
+
+          cd "$RELEASES"
+          ls -1dt */ | tail -n +4 | xargs -r rm -rf
+          EOF

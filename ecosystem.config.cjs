@@ -25,10 +25,14 @@ module.exports = {
     {
       name: "kts-next-admin",
       cwd: __dirname,
-      script: "node_modules/next/dist/bin/next",
+      script: "server.js",
       interpreter: "node",
-      args: "start --hostname 127.0.0.1 --port 3000",
-      env: loadEnvFile(path.join(__dirname, ".env.local")),
+      env: {
+        ...loadEnvFile(path.join(__dirname, ".env.local")),
+        HOSTNAME: "127.0.0.1",
+        NODE_ENV: "production",
+        PORT: "3000",
+      },
     },
   ],
 };

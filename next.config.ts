@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   compress: true,
   poweredByHeader: false,
+  output: "standalone",
   serverExternalPackages: ["pdfkit"],
   outputFileTracingRoot: __dirname,
   experimental: {
