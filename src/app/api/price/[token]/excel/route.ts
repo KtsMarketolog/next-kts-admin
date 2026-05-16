@@ -68,6 +68,7 @@ function hasPriceValue(value: string | null) {
 
 function formatIndividualPrice(variant: PublicPriceVariant) {
   const currencyPrices = [
+    { value: variant.priceUsd, currency: 'USD' },
     { value: variant.priceEur, currency: 'EUR' },
     { value: variant.priceRub, currency: 'RUB' },
     { value: variant.priceCny, currency: 'CNY' },

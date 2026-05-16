@@ -1364,7 +1364,10 @@
   label:nth-child(7),
   label:nth-child(8),
   label:nth-child(9),
-  label:nth-child(10) {
+  label:nth-child(10),
+  label:nth-child(11),
+  label:nth-child(12),
+  label:nth-child(13) {
     grid-column: span 3;
   }
 }
@@ -1914,6 +1917,7 @@
   display: grid;
   grid-template-columns:
     minmax($apx-80, 0.55fr)
+    minmax($apx-80, 0.55fr)
     minmax($apx-90, 0.65fr)
     minmax($apx-80, 0.55fr)
     minmax($apx-130, 0.85fr)
@@ -1922,7 +1926,7 @@
   gap: $apx-8 $apx-12;
   align-items: center;
 
-  > div:nth-child(-n + 6) {
+  > div:nth-child(-n + 7) {
     color: #6f7182;
     font-size: $apx-12;
     font-weight: 700;

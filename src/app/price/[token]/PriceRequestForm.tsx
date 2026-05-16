@@ -44,6 +44,7 @@ type PublicPriceVariant = PublicWholesaleCategory['products'][number]['variants'
 
 function getVariantRequestPrices(variant: PublicPriceVariant) {
   const currencyPrices = [
+    { amount: parsePriceNumber(variant.priceUsd), currency: 'USD' },
     { amount: parsePriceNumber(variant.priceEur), currency: 'EUR' },
     { amount: parsePriceNumber(variant.priceRub), currency: 'RUB' },
     { amount: parsePriceNumber(variant.priceCny), currency: 'CNY' },
@@ -59,6 +60,7 @@ function getVariantRequestPrices(variant: PublicPriceVariant) {
 
 function formatIndividualPrices(variant: PublicPriceVariant) {
   const currencyPrices = [
+    { value: variant.priceUsd, currency: 'USD' },
     { value: variant.priceEur, currency: 'EUR' },
     { value: variant.priceRub, currency: 'RUB' },
     { value: variant.priceCny, currency: 'CNY' },

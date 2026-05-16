@@ -86,6 +86,7 @@ export type WholesaleCatalogProduct = {
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
+  priceUsd: string | null;
   stock: number;
   isExpected: boolean;
   stockUpdatedAt: string | null;
@@ -1743,6 +1744,7 @@ export async function getWholesaleCatalog() {
     price_eur: string | null;
     price_rub: string | null;
     price_cny: string | null;
+    price_usd: string | null;
     stock: string | null;
     is_expected: boolean | null;
     stock_updated_at: string | null;
@@ -1764,6 +1766,7 @@ export async function getWholesaleCatalog() {
       p.price_eur::text,
       p.price_rub::text,
       p.price_cny::text,
+      p.price_usd::text,
       p.stock::text,
       p.is_expected,
       p.stock_updated_at::text,
@@ -1813,6 +1816,7 @@ export async function getWholesaleCatalog() {
         priceEur: row.price_eur,
         priceRub: row.price_rub,
         priceCny: row.price_cny,
+        priceUsd: row.price_usd,
         stock: Number(row.stock ?? 0),
         isExpected: Boolean(row.is_expected),
         stockUpdatedAt: row.stock_updated_at,
@@ -1898,6 +1902,7 @@ type WholesaleDiscountReportSourceRow = {
   price_rub: string | null;
   retail_price: string | null;
   wholesale_price: string | null;
+  price_usd: string | null;
   price_eur: string | null;
   price_cny: string | null;
 };
@@ -1922,6 +1927,7 @@ function resolveDiscountReportValue(rows: WholesaleDiscountReportSourceRow[]) {
       parseDiscountReportAmount(row.price_rub) ??
       parseDiscountReportAmount(row.retail_price) ??
       parseDiscountReportAmount(row.wholesale_price) ??
+      parseDiscountReportAmount(row.price_usd) ??
       parseDiscountReportAmount(row.price_eur) ??
       parseDiscountReportAmount(row.price_cny);
     const actualPrice =
@@ -1954,6 +1960,7 @@ export async function getWholesaleDiscountReportRows(): Promise<WholesaleDiscoun
             p.price_rub::text as price_rub,
             coalesce(v.retail_price, p.retail_price)::text as retail_price,
             coalesce(v.wholesale_price, p.wholesale_price)::text as wholesale_price,
+            p.price_usd::text as price_usd,
             p.price_eur::text as price_eur,
             p.price_cny::text as price_cny
      from wholesale_price_list_items i

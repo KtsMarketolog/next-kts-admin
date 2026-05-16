@@ -60,6 +60,7 @@ export type StockEmailImportResult = {
 
 const HEADER_TITLE_ALIASES = ['Наименование'];
 const HEADER_STOCK_ALIASES = ['Остаток', 'Остатки'];
+const HEADER_UNIT_ALIASES = ['Ед. изм.', 'Ед. изм', 'Единица измерения'];
 const HEADER_EXPECTED_ALIASES = ['Ожидается'];
 const LOCK_KEY = 'email';
 const MAX_ERRORS = 200;
@@ -131,9 +132,11 @@ async function ensureStockImportSchema() {
     alter table catalog_products add column if not exists stock integer not null default 0;
     alter table catalog_products add column if not exists is_expected boolean not null default false;
     alter table catalog_products add column if not exists stock_updated_at timestamptz;
+    alter table catalog_products add column if not exists unit text;
     alter table wholesale_products add column if not exists stock integer not null default 0;
     alter table wholesale_products add column if not exists is_expected boolean not null default false;
     alter table wholesale_products add column if not exists stock_updated_at timestamptz;
+    alter table wholesale_products add column if not exists unit text;
 
     create table if not exists stock_import_logs (
       id bigserial primary key,
@@ -235,6 +238,7 @@ export async function importStockFromExcelBuffer(input: {
         const rawName = readCellByAliases(row, HEADER_TITLE_ALIASES);
         const name = normalizeStockProductName(rawName);
         const stock = parseStock(readRawCellByAliases(row, HEADER_STOCK_ALIASES));
+        const unit = normalizeStockProductName(readCellByAliases(row, HEADER_UNIT_ALIASES)).slice(0, 80);
         const rawExpected = readCellByAliases(row, HEADER_EXPECTED_ALIASES);
         const isExpected = rawExpected ? parseExpected(rawExpected) : false;
 
@@ -278,19 +282,21 @@ export async function importStockFromExcelBuffer(input: {
           `update catalog_products
            set stock = $2,
                is_expected = $3,
+               unit = coalesce(nullif($4, ''), unit),
                stock_updated_at = now(),
                updated_at = now()
            where id = $1`,
-          [productId, stock, isExpected],
+          [productId, stock, isExpected, unit],
         );
         await client.query(
           `update wholesale_products
            set stock = $2,
                is_expected = $3,
+               unit = coalesce(nullif($4, ''), unit),
                stock_updated_at = now(),
                updated_at = now()
            where catalog_product_id = $1`,
-          [productId, stock, isExpected],
+          [productId, stock, isExpected, unit],
         );
         updatedRows += 1;
       }

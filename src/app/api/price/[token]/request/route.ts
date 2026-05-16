@@ -135,6 +135,7 @@ export async function POST(request: Request, context: Context) {
     const dbItem = dbItemsById.get(item.id);
     if (!dbItem) throw new Error('Validated item disappeared');
     const currencyPrices = [
+      { amount: parseMoneyValue(dbItem.priceUsd), currency: 'USD' },
       { amount: parseMoneyValue(dbItem.priceEur), currency: 'EUR' },
       { amount: parseMoneyValue(dbItem.priceRub), currency: 'RUB' },
       { amount: parseMoneyValue(dbItem.priceCny), currency: 'CNY' },

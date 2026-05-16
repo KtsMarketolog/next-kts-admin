@@ -12,9 +12,13 @@ export type CatalogProductInput = {
   category?: string | null;
   subcategory?: string | null;
   priceGroup?: string | null;
+  unit?: string | null;
   priceEur?: string | number | null;
   priceRub?: string | number | null;
   priceCny?: string | number | null;
+  priceUsd?: string | number | null;
+  manualDiscount?: string | number | null;
+  manualDiscountRop?: string | number | null;
   stock?: string | number | null;
   isExpected?: boolean | null;
   isActive?: boolean;
@@ -28,9 +32,13 @@ export type CatalogAdminProduct = {
   category: string;
   subcategory: string;
   priceGroup: string;
+  unit: string | null;
   priceEur: string;
   priceRub: string;
   priceCny: string;
+  priceUsd: string;
+  manualDiscount: string;
+  manualDiscountRop: string;
   stock: number;
   isExpected: boolean;
   stockUpdatedAt: string | null;
@@ -76,9 +84,13 @@ type NormalizedCatalogProductInput = {
   category: string;
   subcategory: string;
   priceGroup: string;
+  unit: string | null;
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
+  priceUsd: string | null;
+  manualDiscount: string | null;
+  manualDiscountRop: string | null;
   stock: number | null;
   isExpected: boolean | null;
   isActive: boolean;
@@ -370,9 +382,13 @@ async function syncWholesaleProduct(
     input.brand,
     input.subcategory,
     input.priceGroup,
+    input.unit,
     normalizeCatalogPrice(input.priceEur),
     normalizeCatalogPrice(input.priceRub),
     normalizeCatalogPrice(input.priceCny),
+    normalizeCatalogPrice(input.priceUsd),
+    normalizeCatalogPrice(input.manualDiscount),
+    normalizeCatalogPrice(input.manualDiscountRop),
     input.stock,
     input.isExpected,
     sortOrder,
@@ -389,18 +405,22 @@ async function syncWholesaleProduct(
            brand_title = $6,
            subcategory_title = $7,
            price_group = $8,
-           price_eur = $9,
-           price_rub = $10,
-           price_cny = $11,
-           stock = coalesce($12, stock),
-           is_expected = coalesce($13, is_expected),
+           unit = coalesce($9, unit),
+           price_eur = $10,
+           price_rub = $11,
+           price_cny = $12,
+           price_usd = $13,
+           manual_discount = $14,
+           manual_discount_rop = $15,
+           stock = coalesce($16, stock),
+           is_expected = coalesce($17, is_expected),
            stock_updated_at = case
-             when $12::integer is not null and wholesale_products.stock is distinct from $12 then now()
-             when $13::boolean is not null and wholesale_products.is_expected is distinct from $13 then now()
+             when $16::integer is not null and wholesale_products.stock is distinct from $16 then now()
+             when $17::boolean is not null and wholesale_products.is_expected is distinct from $17 then now()
              else wholesale_products.stock_updated_at
            end,
-           sort_order = $14,
-           is_active = $15,
+           sort_order = $18,
+           is_active = $19,
            updated_at = now()
        where catalog_product_id = $1`,
       values,
@@ -418,31 +438,41 @@ async function syncWholesaleProduct(
        brand_title,
        subcategory_title,
        price_group,
+       unit,
        price_eur,
        price_rub,
        price_cny,
+       price_usd,
+       manual_discount,
+       manual_discount_rop,
        stock,
        is_expected,
        stock_updated_at,
        sort_order,
        is_active
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, coalesce($12, 0), coalesce($13, false), null, $14, $15)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, coalesce($16, 0), coalesce($17, false), null, $18, $19)`,
     values,
   );
 }
 
 function normalizeInput(input: CatalogProductInput): NormalizedCatalogProductInput {
+  const article = normalizeText(input.article, 120);
+  const unit = normalizeText(input.unit, 80);
   return {
-    title: normalizeText(input.title, 500),
-    article: normalizeText(input.article, 120),
+    title: normalizeText(input.title, 500) || article,
+    article,
     brand: normalizeText(input.brand, 180),
     category: normalizeText(input.category, 180),
     subcategory: normalizeText(input.subcategory, 180),
     priceGroup: normalizeText(input.priceGroup, 180),
+    unit: unit || null,
     priceEur: normalizeCatalogPrice(input.priceEur),
     priceRub: normalizeCatalogPrice(input.priceRub),
     priceCny: normalizeCatalogPrice(input.priceCny),
+    priceUsd: normalizeCatalogPrice(input.priceUsd),
+    manualDiscount: normalizeCatalogPrice(input.manualDiscount),
+    manualDiscountRop: normalizeCatalogPrice(input.manualDiscountRop),
     stock: normalizeStockValue(input.stock),
     isExpected: input.isExpected === null || input.isExpected === undefined ? null : Boolean(input.isExpected),
     isActive: input.isActive ?? true,
@@ -458,18 +488,20 @@ function createCache(): EntityCache {
   };
 }
 
-function catalogProductImportKey(input: Pick<NormalizedCatalogProductInput, 'title'>) {
-  return cacheKey(normalizeText(input.title, 500));
+function catalogProductImportKey(input: Pick<NormalizedCatalogProductInput, 'article' | 'title'>) {
+  return cacheKey(normalizeText(input.article, 120)) || cacheKey(normalizeText(input.title, 500));
 }
 
 async function getExistingCatalogProducts(client: PoolClient) {
   const result = await client.query<{
     id: string;
     title: string;
+    article: string | null;
     sort_order: string | null;
   }>(`
     select p.id::text,
            p.title,
+           p.article,
            coalesce(wp.sort_order, 0)::text as sort_order
     from catalog_products p
     left join wholesale_products wp on wp.catalog_product_id = p.id
@@ -478,7 +510,7 @@ async function getExistingCatalogProducts(client: PoolClient) {
 
   const products = new Map<string, Array<{ id: number; sortOrder: number }>>();
   for (const row of result.rows) {
-    const key = catalogProductImportKey({ title: row.title });
+    const key = catalogProductImportKey({ article: row.article ?? '', title: row.title });
     if (!key) continue;
     const bucket = products.get(key) ?? [];
     bucket.push({
@@ -505,9 +537,13 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
        title,
        article,
        price_group,
+       unit,
        price_eur,
        price_rub,
        price_cny,
+       price_usd,
+       manual_discount,
+       manual_discount_rop,
        stock,
        is_expected,
        stock_updated_at,
@@ -517,7 +553,7 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
        subcategory_id,
        is_active
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, case when $11 = true then now() else null end, false, $12, $13, $14, $15)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, case when $15 = true then now() else null end, false, $16, $17, $18, $19)
      returning id::text`,
     [
       `excel:${sortOrder + 1}`,
@@ -525,9 +561,13 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
       input.title,
       input.article,
       input.priceGroup,
+      input.unit,
       input.priceEur,
       input.priceRub,
       input.priceCny,
+      input.priceUsd,
+      input.manualDiscount,
+      input.manualDiscountRop,
       input.stock ?? 0,
       input.isExpected ?? false,
       input.stock !== null || input.isExpected !== null,
@@ -562,20 +602,24 @@ async function updateCatalogProductFromImport(
          title = $4,
          article = $5,
          price_group = $6,
-         price_eur = $7,
-         price_rub = $8,
-         price_cny = $9,
-         brand_id = $10,
-         category_id = $11,
-         subcategory_id = $12,
-         stock = coalesce($13, stock),
-         is_expected = coalesce($14, is_expected),
+         unit = coalesce($7, unit),
+         price_eur = $8,
+         price_rub = $9,
+         price_cny = $10,
+         price_usd = $11,
+         manual_discount = $12,
+         manual_discount_rop = $13,
+         brand_id = $14,
+         category_id = $15,
+         subcategory_id = $16,
+         stock = coalesce($17, stock),
+         is_expected = coalesce($18, is_expected),
          stock_updated_at = case
-           when $13::integer is not null and stock is distinct from $13 then now()
-           when $14::boolean is not null and is_expected is distinct from $14 then now()
+           when $17::integer is not null and stock is distinct from $17 then now()
+           when $18::boolean is not null and is_expected is distinct from $18 then now()
            else stock_updated_at
          end,
-         is_active = $15,
+         is_active = $19,
          updated_at = now()
      where id = $1`,
     [
@@ -585,9 +629,13 @@ async function updateCatalogProductFromImport(
       input.title,
       input.article,
       input.priceGroup,
+      input.unit,
       input.priceEur,
       input.priceRub,
       input.priceCny,
+      input.priceUsd,
+      input.manualDiscount,
+      input.manualDiscountRop,
       brandId,
       categoryId,
       subcategoryId,
@@ -687,9 +735,13 @@ function mapAdminProduct(row: {
   category: string | null;
   subcategory: string | null;
   price_group: string | null;
+  unit: string | null;
   price_eur: string | null;
   price_rub: string | null;
   price_cny: string | null;
+  price_usd: string | null;
+  manual_discount: string | null;
+  manual_discount_rop: string | null;
   stock: number | string | null;
   is_expected: boolean | null;
   stock_updated_at: string | null;
@@ -705,9 +757,13 @@ function mapAdminProduct(row: {
     category: row.category ?? '',
     subcategory: row.subcategory ?? '',
     priceGroup: row.price_group ?? '',
+    unit: row.unit ?? '',
     priceEur: row.price_eur ?? '',
     priceRub: row.price_rub ?? '',
     priceCny: row.price_cny ?? '',
+    priceUsd: row.price_usd ?? '',
+    manualDiscount: row.manual_discount ?? '',
+    manualDiscountRop: row.manual_discount_rop ?? '',
     stock: Number(row.stock ?? 0),
     isExpected: Boolean(row.is_expected),
     stockUpdatedAt: row.stock_updated_at,
@@ -733,9 +789,13 @@ export async function getCatalogAdminProducts(filters: CatalogAdminProductFilter
             c.title as category,
             s.title as subcategory,
             p.price_group,
+            p.unit,
             p.price_eur::text,
             p.price_rub::text,
             p.price_cny::text,
+            p.price_usd::text,
+            p.manual_discount::text,
+            p.manual_discount_rop::text,
             p.stock,
             p.is_expected,
             p.stock_updated_at::text,
@@ -775,9 +835,13 @@ export async function getCatalogAdminProductById(id: number) {
             c.title as category,
             s.title as subcategory,
             p.price_group,
+            p.unit,
             p.price_eur::text,
             p.price_rub::text,
             p.price_cny::text,
+            p.price_usd::text,
+            p.manual_discount::text,
+            p.manual_discount_rop::text,
             p.stock,
             p.is_expected,
             p.stock_updated_at::text,
@@ -799,7 +863,7 @@ export async function createCatalogAdminProduct(input: CatalogProductInput) {
   await ensureCatalogSchema();
   await ensureSiteSchema();
   const normalized = normalizeInput(input);
-  if (!normalized.title) throw new Error('Название товара обязательно');
+  if (!normalized.article) throw new Error('Артикул товара обязателен');
 
   const id = await withTransaction(async (client) => {
     const count = await client.query<{ count: string }>('select count(*)::text as count from catalog_products');
@@ -814,7 +878,7 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
   const normalizedId = Number(id);
   if (!Number.isInteger(normalizedId) || normalizedId <= 0) throw new Error('Некорректный товар');
   const normalized = normalizeInput(input);
-  if (!normalized.title) throw new Error('Название товара обязательно');
+  if (!normalized.article) throw new Error('Артикул товара обязателен');
 
   await withTransaction(async (client) => {
     const existing = await client.query<{ id: string; sort_order: string }>(
@@ -841,20 +905,24 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
            title = $3,
            article = $4,
            price_group = $5,
-           price_eur = $6,
-           price_rub = $7,
-           price_cny = $8,
-           brand_id = $9,
-           category_id = $10,
-           subcategory_id = $11,
-           stock = coalesce($12, stock),
-           is_expected = coalesce($13, is_expected),
+           unit = coalesce($6, unit),
+           price_eur = $7,
+           price_rub = $8,
+           price_cny = $9,
+           price_usd = $10,
+           manual_discount = $11,
+           manual_discount_rop = $12,
+           brand_id = $13,
+           category_id = $14,
+           subcategory_id = $15,
+           stock = coalesce($16, stock),
+           is_expected = coalesce($17, is_expected),
            stock_updated_at = case
-             when $12::integer is not null and stock is distinct from $12 then now()
-             when $13::boolean is not null and is_expected is distinct from $13 then now()
+             when $16::integer is not null and stock is distinct from $16 then now()
+             when $17::boolean is not null and is_expected is distinct from $17 then now()
              else stock_updated_at
            end,
-           is_active = $14,
+           is_active = $18,
            updated_at = now()
        where id = $1`,
       [
@@ -863,9 +931,13 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
         normalized.title,
         normalized.article,
         normalized.priceGroup,
+        normalized.unit,
         normalized.priceEur,
         normalized.priceRub,
         normalized.priceCny,
+        normalized.priceUsd,
+        normalized.manualDiscount,
+        normalized.manualDiscountRop,
         brandId,
         categoryId,
         subcategoryId,
@@ -894,8 +966,8 @@ export async function deleteCatalogAdminProduct(id: number) {
 export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promise<CatalogImportResult> {
   await ensureCatalogSchema();
   await ensureSiteSchema();
-  const normalizedRows = rows.map(normalizeInput).filter((row) => row.title);
-  if (normalizedRows.length === 0) throw new Error('В файле нет товаров для импорта');
+  const normalizedRows = rows.map(normalizeInput).filter((row) => row.article);
+  if (normalizedRows.length === 0) throw new Error('В файле нет товаров с заполненным артикулом');
 
   await withTransaction(async (client) => {
     const cache = createCache();

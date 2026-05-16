@@ -10,6 +10,7 @@ export type PublicWholesaleVariant = {
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
+  priceUsd: string | null;
 };
 
 export type PublicWholesaleProduct = {
@@ -92,6 +93,7 @@ type PriceItemRow = {
   price_eur: string | null;
   price_rub: string | null;
   price_cny: string | null;
+  price_usd: string | null;
 };
 
 export type PublicWholesaleRequestItem = {
@@ -103,6 +105,7 @@ export type PublicWholesaleRequestItem = {
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
+  priceUsd: string | null;
 };
 
 export async function getPublicWholesalePriceList(token: string): Promise<PublicWholesalePriceList | null> {
@@ -160,7 +163,8 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
        p.price_eur::text as price_eur,
        p.price_rub::text as price_rub,
-       p.price_cny::text as price_cny
+       p.price_cny::text as price_cny,
+       p.price_usd::text as price_usd
      from wholesale_price_lists pl
      join wholesale_price_list_items i on i.price_list_id = pl.id
      join wholesale_products p on p.id = i.wholesale_product_id
@@ -229,6 +233,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
       priceEur: row.price_eur,
       priceRub: row.price_rub,
       priceCny: row.price_cny,
+      priceUsd: row.price_usd,
     });
   }
 
@@ -268,6 +273,7 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
     price_eur: string | null;
     price_rub: string | null;
     price_cny: string | null;
+    price_usd: string | null;
   }>(
     `select
        i.id::text,
@@ -277,7 +283,8 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
        coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
        p.price_eur::text as price_eur,
        p.price_rub::text as price_rub,
-       p.price_cny::text as price_cny
+       p.price_cny::text as price_cny,
+       p.price_usd::text as price_usd
      from wholesale_price_lists pl
      join wholesale_price_list_items i on i.price_list_id = pl.id
      join wholesale_products p on p.id = i.wholesale_product_id
@@ -301,5 +308,6 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
     priceEur: row.price_eur,
     priceRub: row.price_rub,
     priceCny: row.price_cny,
+    priceUsd: row.price_usd,
   }));
 }

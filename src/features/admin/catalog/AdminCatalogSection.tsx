@@ -12,9 +12,13 @@ type CatalogProduct = {
   category: string;
   subcategory: string;
   priceGroup: string;
+  unit: string;
   priceEur: string;
   priceRub: string;
   priceCny: string;
+  priceUsd: string;
+  manualDiscount: string;
+  manualDiscountRop: string;
   stock: number;
   isExpected: boolean;
   stockUpdatedAt?: string | null;
@@ -69,9 +73,13 @@ const EMPTY_DRAFT: CatalogDraft = {
   category: '',
   subcategory: '',
   priceGroup: '',
+  unit: '',
   priceEur: '',
   priceRub: '',
   priceCny: '',
+  priceUsd: '',
+  manualDiscount: '',
+  manualDiscountRop: '',
   stock: 0,
   isExpected: false,
   isActive: true,
@@ -104,9 +112,13 @@ function productPayload(product: CatalogDraft | CatalogProduct) {
     category: product.category,
     subcategory: product.subcategory,
     priceGroup: product.priceGroup,
+    unit: product.unit,
     priceEur: product.priceEur,
     priceRub: product.priceRub,
     priceCny: product.priceCny,
+    priceUsd: product.priceUsd,
+    manualDiscount: product.manualDiscount,
+    manualDiscountRop: product.manualDiscountRop,
     stock: product.stock,
     isExpected: product.isExpected,
     isActive: product.isActive,
@@ -401,7 +413,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       <form className={styles.catalogImportCard} onSubmit={importExcel}>
         <div>
           <h3>Загрузка Excel</h3>
-          <p>Импорт полностью заменяет публичный каталог. Категории, подкатегории и бренды из файла добавятся автоматически.</p>
+          <p>Импорт полностью заменяет публичный каталог. Обязательное поле: Артикул. Дополнительно принимаются USD, Ручная скидка и Ручная скидка роп.</p>
           {importResult && <span>{importResult}</span>}
         </div>
         <label className={styles.fileInput}>
@@ -427,7 +439,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
           )}
         </div>
         <div>
-          <p>Файл .xlsx: Остатки*.xlsx, колонки Наименование, Остаток/Остатки. Ожидается можно не указывать, тогда будет “нет”.</p>
+          <p>Файл .xlsx: Остатки*.xlsx, колонки Наименование, Остаток/Остатки и Ед. изм. Ожидается можно не указывать, тогда будет “нет”.</p>
         </div>
         <button type="button" disabled={busyId === 'stock-email'} onClick={checkStockEmail}>
           {busyId === 'stock-email' ? 'Проверка...' : 'Проверить почту сейчас'}
@@ -548,6 +560,10 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
           <input value={draft.priceGroup} onChange={(event) => setDraft((current) => ({ ...current, priceGroup: event.target.value }))} />
         </label>
         <label>
+          <span>Цена USD</span>
+          <input value={draft.priceUsd} onChange={(event) => setDraft((current) => ({ ...current, priceUsd: event.target.value }))} />
+        </label>
+        <label>
           <span>Цена EUR</span>
           <input value={draft.priceEur} onChange={(event) => setDraft((current) => ({ ...current, priceEur: event.target.value }))} />
         </label>
@@ -558,6 +574,14 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
         <label>
           <span>Цена CNY</span>
           <input value={draft.priceCny} onChange={(event) => setDraft((current) => ({ ...current, priceCny: event.target.value }))} />
+        </label>
+        <label>
+          <span>Ручная скидка</span>
+          <input value={draft.manualDiscount} onChange={(event) => setDraft((current) => ({ ...current, manualDiscount: event.target.value }))} />
+        </label>
+        <label>
+          <span>Ручная скидка РОП</span>
+          <input value={draft.manualDiscountRop} onChange={(event) => setDraft((current) => ({ ...current, manualDiscountRop: event.target.value }))} />
         </label>
         <label>
           <span>Остаток</span>
@@ -671,6 +695,10 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
                     <input value={product.priceGroup} onChange={(event) => updateProduct(product.id, { priceGroup: event.target.value })} />
                   </label>
                   <label>
+                    <span>USD</span>
+                    <input value={product.priceUsd} onChange={(event) => updateProduct(product.id, { priceUsd: event.target.value })} />
+                  </label>
+                  <label>
                     <span>EUR</span>
                     <input value={product.priceEur} onChange={(event) => updateProduct(product.id, { priceEur: event.target.value })} />
                   </label>
@@ -681,6 +709,14 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
                   <label>
                     <span>CNY</span>
                     <input value={product.priceCny} onChange={(event) => updateProduct(product.id, { priceCny: event.target.value })} />
+                  </label>
+                  <label>
+                    <span>Ручная скидка</span>
+                    <input value={product.manualDiscount} onChange={(event) => updateProduct(product.id, { manualDiscount: event.target.value })} />
+                  </label>
+                  <label>
+                    <span>Ручная скидка РОП</span>
+                    <input value={product.manualDiscountRop} onChange={(event) => updateProduct(product.id, { manualDiscountRop: event.target.value })} />
                   </label>
                   <label>
                     <span>Остаток</span>

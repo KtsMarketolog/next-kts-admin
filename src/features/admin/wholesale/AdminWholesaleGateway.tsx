@@ -107,6 +107,7 @@ type CatalogProduct = {
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
+  priceUsd: string | null;
   stock: number;
   isExpected: boolean;
   stockUpdatedAt: string | null;
@@ -316,6 +317,7 @@ function getDiscountBaseAmount(row: CatalogRow) {
     parseCatalogAmount(row.product.priceRub) ??
     parseCatalogAmount(row.variant.retailPrice) ??
     parseCatalogAmount(row.variant.wholesalePrice) ??
+    parseCatalogAmount(row.product.priceUsd) ??
     parseCatalogAmount(row.product.priceEur) ??
     parseCatalogAmount(row.product.priceCny)
   );
@@ -532,6 +534,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         product.sku,
         product.description,
         product.priceGroup,
+        product.priceUsd,
         product.priceEur,
         product.priceRub,
         product.priceCny,
@@ -1643,6 +1646,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                                   </div>
                                 </div>
                                 <div className={styles.variantTable}>
+                                  <div>USD</div>
                                   <div>EUR</div>
                                   <div>RUB</div>
                                   <div>CNY</div>
@@ -1654,6 +1658,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                                     const item = itemByKey.get(key);
                                     return (
                                       <div className={styles.variantRow} key={key}>
+                                        <span>{product.priceUsd || '—'}</span>
                                         <span>{product.priceEur || '—'}</span>
                                         <span>{product.priceRub || '—'}</span>
                                         <span>{product.priceCny || '—'}</span>
