@@ -58,8 +58,8 @@ export type StockEmailImportResult = {
   };
 };
 
-const HEADER_TITLE_ALIASES = ['Наименование'];
-const HEADER_STOCK_ALIASES = ['Остаток', 'Остатки'];
+const HEADER_ARTICLE_ALIASES = ['Номенклатура.Код', 'Номенклатура. Код', 'Артикул'];
+const HEADER_STOCK_ALIASES = ['Сейчас', 'Остаток', 'Остатки'];
 const HEADER_UNIT_ALIASES = ['Ед. изм.', 'Ед. изм', 'Единица измерения'];
 const HEADER_EXPECTED_ALIASES = ['Ожидается'];
 const LOCK_KEY = 'email';
@@ -114,11 +114,18 @@ function parseStock(value: unknown) {
   return Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
 }
 
+function parseCurrentStock(value: unknown) {
+  if (value === null || value === undefined || value === '') return 0;
+  const text = String(value).replace(/\u00a0/g, ' ').trim();
+  if (!text) return 0;
+  return parseStock(value);
+}
+
 function parseExpected(value: unknown) {
   const text = String(value ?? '').replace(/\u00a0/g, ' ').trim().toLowerCase();
-  if (['да', 'true', '1'].includes(text)) return true;
-  if (['нет', 'false', '0'].includes(text)) return false;
-  return null;
+  if (!text) return false;
+  if (['нет', 'false', '0', '0.0', '0,0'].includes(text)) return false;
+  return true;
 }
 
 function pushError(errors: StockImportError[], error: StockImportError) {
@@ -157,8 +164,8 @@ async function ensureStockImportSchema() {
       locked_at timestamptz not null default now()
     );
 
-    create index if not exists catalog_products_stock_title_norm_idx
-      on catalog_products (lower(trim(regexp_replace(replace(title, chr(160), ' '), $$\s+$$, ' ', 'g'))));
+    create index if not exists catalog_products_stock_article_norm_idx
+      on catalog_products (lower(trim(coalesce(article, ''))));
     create index if not exists stock_import_logs_created_idx on stock_import_logs(created_at desc);
   `);
 }
@@ -235,45 +242,39 @@ export async function importStockFromExcelBuffer(input: {
     await withTransaction(async (client) => {
       for (const [index, row] of rows.entries()) {
         const rowNumber = index + 2;
-        const rawName = readCellByAliases(row, HEADER_TITLE_ALIASES);
-        const name = normalizeStockProductName(rawName);
-        const stock = parseStock(readRawCellByAliases(row, HEADER_STOCK_ALIASES));
+        const rawArticle = readCellByAliases(row, HEADER_ARTICLE_ALIASES);
+        const article = normalizeStockProductName(rawArticle);
+        const stock = parseCurrentStock(readRawCellByAliases(row, HEADER_STOCK_ALIASES));
         const unit = normalizeStockProductName(readCellByAliases(row, HEADER_UNIT_ALIASES)).slice(0, 80);
-        const rawExpected = readCellByAliases(row, HEADER_EXPECTED_ALIASES);
-        const isExpected = rawExpected ? parseExpected(rawExpected) : false;
+        const isExpected = parseExpected(readRawCellByAliases(row, HEADER_EXPECTED_ALIASES));
 
-        if (!name) {
+        if (!article) {
           failedRows += 1;
-          pushError(errors, { row: rowNumber, name: '', error: 'Не заполнено наименование' });
+          pushError(errors, { row: rowNumber, name: '', error: 'Не заполнен Номенклатура.Код' });
           continue;
         }
         if (stock === null) {
           failedRows += 1;
-          pushError(errors, { row: rowNumber, name, error: 'Остаток не является целым неотрицательным числом' });
-          continue;
-        }
-        if (isExpected === null) {
-          failedRows += 1;
-          pushError(errors, { row: rowNumber, name, error: 'Ожидается должно быть да/нет, true/false или 1/0' });
+          pushError(errors, { row: rowNumber, name: article, error: 'Сейчас не является целым неотрицательным числом' });
           continue;
         }
 
         const products = await client.query<{ id: string }>(
           `select id::text
            from catalog_products
-           where lower(trim(regexp_replace(replace(title, chr(160), ' '), $$\s+$$, ' ', 'g'))) = lower($1)`,
-          [name],
+           where lower(trim(coalesce(article, ''))) = lower($1)`,
+          [article],
         );
 
         if (products.rowCount === 0) {
           notFoundRows += 1;
-          pushError(errors, { row: rowNumber, name, error: 'Товар не найден' });
+          pushError(errors, { row: rowNumber, name: article, error: 'Товар с таким Номенклатура.Код не найден' });
           continue;
         }
 
         if ((products.rowCount ?? 0) > 1) {
           failedRows += 1;
-          pushError(errors, { row: rowNumber, name, error: 'Найдено несколько товаров с таким названием' });
+          pushError(errors, { row: rowNumber, name: article, error: 'Найдено несколько товаров с таким Номенклатура.Код' });
           continue;
         }
 

@@ -439,7 +439,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
           )}
         </div>
         <div>
-          <p>Файл .xlsx: Остатки*.xlsx, колонки Наименование, Остаток/Остатки и Ед. изм. Ожидается можно не указывать, тогда будет “нет”.</p>
+          <p>Файл .xlsx: Остатки*.xlsx, колонки Номенклатура.Код, Сейчас, Ожидается и Ед. изм. Артикул в каталоге должен совпадать с Номенклатура.Код.</p>
         </div>
         <button type="button" disabled={busyId === 'stock-email'} onClick={checkStockEmail}>
           {busyId === 'stock-email' ? 'Проверка...' : 'Проверить почту сейчас'}
@@ -751,7 +751,13 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
                     <span>{product.category || 'Без категории'}</span>
                     <span>{product.subcategory || 'Без подкатегории'}</span>
                     <span>Арт.: {product.article || '-'}</span>
-                    <span>{product.stock > 0 ? `В наличии: ${product.stock} шт.` : product.isExpected ? 'Скоро поступление' : 'Под заказ'}</span>
+                    <span>
+                      {product.stock > 0
+                        ? `В наличии: ${product.stock} ${product.unit?.trim() || 'шт.'}`
+                        : product.isExpected
+                          ? 'Скоро поступление'
+                          : 'Под заказ'}
+                    </span>
                   </div>
                   <div className={styles.userAccessActions}>
                     <button

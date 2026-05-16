@@ -109,6 +109,7 @@ type CatalogProduct = {
   priceCny: string | null;
   priceUsd: string | null;
   stock: number;
+  unit: string | null;
   isExpected: boolean;
   stockUpdatedAt: string | null;
   variants: CatalogVariant[];
@@ -187,7 +188,8 @@ function getDefaultPriceTitle() {
 }
 
 function stockLabel(product: CatalogProduct) {
-  if (product.stock > 0) return `${product.stock} шт.`;
+  const unit = product.unit?.trim() || 'шт.';
+  if (product.stock > 0) return `${product.stock} ${unit}`;
   return product.isExpected ? 'Скоро поступление' : 'Под заказ';
 }
 

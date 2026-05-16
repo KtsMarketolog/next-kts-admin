@@ -22,6 +22,7 @@ export type PublicWholesaleProduct = {
   priceGroupImageUrl: string | null;
   imageUrl: string | null;
   stock: number;
+  unit: string | null;
   isExpected: boolean;
   stockUpdatedAt: string | null;
   variants: PublicWholesaleVariant[];
@@ -84,6 +85,7 @@ type PriceItemRow = {
   price_group_image_url: string | null;
   image_url: string | null;
   stock: string | null;
+  unit: string | null;
   is_expected: boolean | null;
   stock_updated_at: string | null;
   variant_id: string | null;
@@ -155,6 +157,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        pgi.image_url as price_group_image_url,
        img.image_url,
        p.stock::text,
+       p.unit,
        p.is_expected,
        p.stock_updated_at::text,
        v.id::text as variant_id,
@@ -216,6 +219,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
         priceGroupImageUrl: row.price_group_image_url,
         imageUrl: row.image_url,
         stock: Number(row.stock ?? 0),
+        unit: row.unit,
         isExpected: Boolean(row.is_expected),
         stockUpdatedAt: row.stock_updated_at,
         variants: [],

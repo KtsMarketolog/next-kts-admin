@@ -117,7 +117,8 @@ function formatIndividualPrice(variant: PublicPriceVariant) {
 }
 
 function stockLabel(product: PublicPriceProduct) {
-  if (product.stock > 0) return `В наличии: ${product.stock} шт.`;
+  const unit = product.unit?.trim() || 'шт.';
+  if (product.stock > 0) return `В наличии: ${product.stock} ${unit}`;
   return product.isExpected ? 'Скоро поступление' : 'Под заказ';
 }
 

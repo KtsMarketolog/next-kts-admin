@@ -88,6 +88,7 @@ export type WholesaleCatalogProduct = {
   priceCny: string | null;
   priceUsd: string | null;
   stock: number;
+  unit: string | null;
   isExpected: boolean;
   stockUpdatedAt: string | null;
   variants: WholesaleCatalogVariant[];
@@ -1746,6 +1747,7 @@ export async function getWholesaleCatalog() {
     price_cny: string | null;
     price_usd: string | null;
     stock: string | null;
+    unit: string | null;
     is_expected: boolean | null;
     stock_updated_at: string | null;
     variant_id: string | null;
@@ -1768,6 +1770,7 @@ export async function getWholesaleCatalog() {
       p.price_cny::text,
       p.price_usd::text,
       p.stock::text,
+      p.unit,
       p.is_expected,
       p.stock_updated_at::text,
       v.id::text as variant_id,
@@ -1818,6 +1821,7 @@ export async function getWholesaleCatalog() {
         priceCny: row.price_cny,
         priceUsd: row.price_usd,
         stock: Number(row.stock ?? 0),
+        unit: row.unit,
         isExpected: Boolean(row.is_expected),
         stockUpdatedAt: row.stock_updated_at,
         variants: [],
