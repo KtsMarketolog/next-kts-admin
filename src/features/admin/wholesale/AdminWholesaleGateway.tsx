@@ -1460,7 +1460,11 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           </label>
           <label>
             <span>Token ссылки</span>
-            <input value={editor.token} onChange={(event) => setEditor({ ...editor, token: event.target.value })} />
+            <input
+              value={editor.token}
+              disabled={screen === 'edit'}
+              onChange={(event) => setEditor({ ...editor, token: event.target.value })}
+            />
           </label>
           <label>
             <span>Срок действия</span>
@@ -1654,7 +1658,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                                         <span>{product.priceRub || '—'}</span>
                                         <span>{product.priceCny || '—'}</span>
                                         <span>{stockLabel(product)}</span>
-                                        <input value={item?.customWholesalePrice ?? ''} onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })} />
+                                        <input value={item?.customWholesalePrice ?? ''} disabled readOnly />
                                         <label className={styles.checkbox}>
                                           <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
                                           Показывать

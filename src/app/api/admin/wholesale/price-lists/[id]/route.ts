@@ -10,13 +10,9 @@ import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import {
-  isTokenUnchanged,
-  isValidNewPublicPriceToken,
   normalizeOptionalDate,
-  normalizePublicPriceToken,
   normalizeTextField,
   normalizeWholesalePrice,
-  shortToken,
 } from '@/shared/lib/wholesaleSecurity';
 
 type Context = {
@@ -77,11 +73,6 @@ export async function PUT(request: Request, context: Context) {
 
   const title = normalizeTextField(body.title, 160);
   if (!title) return Response.json({ error: 'Title is required' }, { status: 400 });
-  const nextToken = normalizePublicPriceToken(body.token);
-  if (!nextToken) return Response.json({ error: 'Token is required' }, { status: 400 });
-  if (!isTokenUnchanged(existing.token, nextToken) && !isValidNewPublicPriceToken(nextToken)) {
-    return Response.json({ error: 'Token must be 24-128 letters, digits, _ or -' }, { status: 400 });
-  }
   const validUntil = normalizeOptionalDate(body.validUntil);
   if (typeof body.validUntil === 'string' && body.validUntil.trim() && !validUntil) {
     return Response.json({ error: 'Invalid expiration date' }, { status: 400 });
@@ -94,7 +85,7 @@ export async function PUT(request: Request, context: Context) {
       clientName: normalizeTextField(body.clientName, 200),
       managerId: Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null,
       validUntil,
-      token: nextToken,
+      token: existing.token,
       comment: normalizeTextField(body.comment, 2000),
       workflowStatus: normalizeWholesalePriceWorkflowStatus(body.workflowStatus),
       showRetailPrices: Boolean(body.showRetailPrices),
@@ -104,26 +95,6 @@ export async function PUT(request: Request, context: Context) {
     },
     session,
   );
-
-  if (!isTokenUnchanged(existing.token, nextToken)) {
-    await recordSecurityEvent({
-      eventType: 'price_token_changed',
-      actorType: isManagerSessionRole(session.role) ? 'manager' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
-      adminUserId: session.adminUserId,
-      managerId: isManagerSessionRole(session.role) ? session.managerId : undefined,
-      sessionId: session.sessionId,
-      entityType: 'wholesale_price_list',
-      entityId: numericId,
-      ip: getClientIp(request),
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer'),
-      metadata: {
-        oldToken: shortToken(existing.token),
-        newToken: shortToken(nextToken),
-        title,
-      },
-    });
-  }
 
   return Response.json({ ok: true });
 }
