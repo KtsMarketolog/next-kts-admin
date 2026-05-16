@@ -322,7 +322,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
     }
   };
 
-  const uploadImage = async (file: File, kind: 'image' | 'brandLogo' | 'priceGroup' = 'image') => {
+  const uploadImage = async (file: File, kind: 'image' | 'brandLogo' | 'priceGroup' | 'categoryIcon' = 'image') => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('kind', kind);
@@ -547,7 +547,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
               />
             )}
 
-            {activeSection === 'catalog' && <AdminCatalogSection showStatus={showStatus} />}
+            {activeSection === 'catalog' && <AdminCatalogSection showStatus={showStatus} uploadImage={(file) => uploadImage(file, 'categoryIcon')} />}
 
             {activeSection === 'priceGroups' && (
               <AdminPriceGroupsSection

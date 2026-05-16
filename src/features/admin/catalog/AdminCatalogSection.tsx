@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
+import { AdminImagePicker } from '@/features/admin/shared/AdminImagePicker';
 
 type CatalogProduct = {
   id: number;
@@ -31,6 +32,15 @@ type CatalogStats = {
   categories: number;
   subcategories: number;
   brands: number;
+};
+
+type CatalogCategory = {
+  id: number;
+  title: string;
+  slug: string;
+  iconUrl: string;
+  productCount: number;
+  isActive: boolean;
 };
 
 type CatalogDraft = Omit<CatalogProduct, 'id'>;
@@ -64,6 +74,7 @@ type CatalogFilters = {
 
 type AdminCatalogSectionProps = {
   showStatus: (message: string) => void;
+  uploadImage: (file: File) => Promise<string>;
 };
 
 const EMPTY_DRAFT: CatalogDraft = {
@@ -165,9 +176,10 @@ function renderCatalogSkeleton() {
   );
 }
 
-export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
+export function AdminCatalogSection({ showStatus, uploadImage }: AdminCatalogSectionProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
+  const [categories, setCategories] = useState<CatalogCategory[]>([]);
   const [stats, setStats] = useState<CatalogStats | null>(null);
   const [filterOptions, setFilterOptions] = useState<CatalogFilterOptions>({ categories: [], subcategories: [], brands: [] });
   const [filters, setFilters] = useState<CatalogFilters>(EMPTY_FILTERS);
@@ -180,6 +192,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const [importResult, setImportResult] = useState<string>('');
   const [stockLogs, setStockLogs] = useState<StockImportLog[]>([]);
   const [stockHistoryExpanded, setStockHistoryExpanded] = useState(false);
+  const [categoryBusyId, setCategoryBusyId] = useState<number | null>(null);
 
   const loadCatalog = useCallback(async (nextSearch = '', nextFilters: CatalogFilters = EMPTY_FILTERS) => {
     setLoading(true);
@@ -215,6 +228,24 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   useEffect(() => {
     void loadCatalog('');
   }, [loadCatalog]);
+
+  const loadCategories = useCallback(async () => {
+    try {
+      const response = await fetch('/api/admin/catalog/categories', { cache: 'no-store' });
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось загрузить категории'));
+        return;
+      }
+      const data = await response.json();
+      setCategories(Array.isArray(data.categories) ? data.categories : []);
+    } catch {
+      showStatus('Не удалось загрузить категории');
+    }
+  }, [showStatus]);
+
+  useEffect(() => {
+    void loadCategories();
+  }, [loadCategories]);
 
   const loadStockLogs = useCallback(async () => {
     const response = await fetch('/api/admin/stock-import/logs?limit=10', { cache: 'no-store' });
@@ -270,6 +301,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     setFileName('');
     if (fileInputRef.current) fileInputRef.current.value = '';
     await loadCatalog('', filters);
+    await loadCategories();
     showStatus('Каталог загружен из Excel');
   };
 
@@ -378,6 +410,44 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     showStatus('Товар удалён');
   };
 
+  const saveCategoryIcon = async (categoryId: number, iconUrl: string) => {
+    setCategoryBusyId(categoryId);
+    try {
+      const response = await fetch(`/api/admin/catalog/categories/${categoryId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ iconUrl }),
+      });
+
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось сохранить иконку категории'));
+        return;
+      }
+
+      const data = await response.json();
+      if (data.category) {
+        setCategories((current) => current.map((category) => (category.id === categoryId ? data.category : category)));
+        markSaved(`category-${categoryId}`);
+        showStatus(iconUrl ? 'Иконка категории сохранена' : 'Иконка категории убрана');
+      }
+    } catch {
+      showStatus('Не удалось сохранить иконку категории');
+    } finally {
+      setCategoryBusyId((current) => (current === categoryId ? null : current));
+    }
+  };
+
+  const uploadCategoryIcon = async (categoryId: number, file: File) => {
+    setCategoryBusyId(categoryId);
+    try {
+      const iconUrl = await uploadImage(file);
+      await saveCategoryIcon(categoryId, iconUrl);
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Не удалось загрузить иконку категории');
+      setCategoryBusyId((current) => (current === categoryId ? null : current));
+    }
+  };
+
   const visibleStockLogs = stockHistoryExpanded ? stockLogs : stockLogs.slice(0, 1);
   const hiddenStockLogCount = Math.max(stockLogs.length - 1, 0);
 
@@ -408,6 +478,51 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
           <span>Брендов</span>
           <strong>{stats?.brands ?? 0}</strong>
         </div>
+      </div>
+
+      <div className={styles.catalogCategoriesCard}>
+        <div className={styles.stockLogHeader}>
+          <div>
+            <h3>Категории</h3>
+            <p>Иконки отображаются в каталоге в списке категорий.</p>
+          </div>
+          <span className={styles.stockLogCount}>{categories.length}</span>
+        </div>
+
+        {categories.length === 0 ? (
+          <p className={styles.mutedText}>Категории пока не найдены</p>
+        ) : (
+          <div className={styles.catalogCategoryIconList}>
+            {categories.map((category) => (
+              <article className={styles.catalogCategoryIconRow} key={category.id}>
+                <AdminImagePicker
+                  imageUrl={category.iconUrl}
+                  emptyText="Иконка не загружена"
+                  uploadLabel={categoryBusyId === category.id ? 'Загрузка...' : 'Добавить/заменить иконку'}
+                  accept="image/png,image/jpeg,image/webp,image/avif,image/svg+xml"
+                  onUpload={(file) => uploadCategoryIcon(category.id, file)}
+                />
+                <div className={styles.catalogCategoryIconInfo}>
+                  <strong>{category.title}</strong>
+                  <span>Товаров: {category.productCount}</span>
+                  <code>{category.slug}</code>
+                </div>
+                <div className={styles.catalogCategoryIconActions}>
+                  {category.iconUrl && (
+                    <button
+                      type="button"
+                      className={savedId === `category-${category.id}` ? styles.savedButton : styles.secondary}
+                      disabled={categoryBusyId === category.id}
+                      onClick={() => saveCategoryIcon(category.id, '')}
+                    >
+                      {savedId === `category-${category.id}` ? 'Сохранено' : 'Убрать иконку'}
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
 
       <form className={styles.catalogImportCard} onSubmit={importExcel}>

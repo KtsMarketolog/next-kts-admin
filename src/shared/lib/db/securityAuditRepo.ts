@@ -23,6 +23,7 @@ export type SecurityEventType =
   | 'catalog_product_created'
   | 'catalog_product_updated'
   | 'catalog_product_deleted'
+  | 'catalog_category_icon_updated'
   | 'stock_import_check_email'
   | 'stock_import_check_email_failed'
   | 'price_deleted'

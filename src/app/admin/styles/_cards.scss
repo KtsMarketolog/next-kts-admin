@@ -1062,6 +1062,86 @@
   }
 }
 
+.catalogCategoriesCard {
+  display: grid;
+  gap: $apx-14;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+  margin-bottom: $apx-18;
+}
+
+.catalogCategoryIconList {
+  display: grid;
+  gap: $apx-10;
+}
+
+.catalogCategoryIconRow {
+  display: grid;
+  grid-template-columns: minmax($apx-220, $apx-320) minmax(0, 1fr) auto;
+  gap: $apx-14;
+  align-items: center;
+  border: $apx-1 solid #e7e9f2;
+  border-radius: $apx-10;
+  background: #f9fafc;
+  padding: $apx-12;
+
+  .newsPreview {
+    gap: $apx-8;
+
+    img {
+      max-height: $apx-96;
+      object-fit: contain;
+      background: #eef0f5;
+    }
+
+    > span {
+      min-height: $apx-96;
+    }
+  }
+}
+
+.catalogCategoryIconInfo {
+  display: grid;
+  gap: $apx-6;
+  min-width: 0;
+
+  strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1.2;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+
+  code {
+    width: fit-content;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    border-radius: $apx-999;
+    background: #f0eefb;
+    color: #260b86;
+    font-size: $apx-12;
+    font-weight: 800;
+    padding: $apx-5 $apx-8;
+  }
+}
+
+.catalogCategoryIconActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $apx-8;
+
+  button {
+    min-width: $apx-140;
+  }
+}
+
 .stockLogCard {
   display: grid;
   gap: $apx-14;
@@ -1660,6 +1740,7 @@
   .catalogProductFields,
   .catalogProductMeta,
   .catalogImportCard,
+  .catalogCategoryIconRow,
   .catalogStatsGrid,
   .catalogFilters,
   .wholesaleCatalogTools {
@@ -1711,6 +1792,7 @@
   .catalogProductFields,
   .catalogProductMeta,
   .catalogImportCard,
+  .catalogCategoryIconRow,
   .catalogStatsGrid,
   .catalogToolbar,
   .catalogFilters,
