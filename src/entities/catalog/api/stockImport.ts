@@ -6,6 +6,10 @@ import { query, withTransaction } from '@/shared/lib/db/client';
 import { ensureCatalogSchema } from './catalogDb';
 
 type RawRow = Record<string, unknown>;
+type ParsedStockRow = {
+  rowNumber: number;
+  row: RawRow;
+};
 
 export type StockImportError = {
   row: number;
@@ -108,10 +112,22 @@ function readRawCellByAliases(row: RawRow, aliases: string[]) {
 
 function parseStock(value: unknown) {
   if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') {
+    const amount = Math.round(value);
+    return Math.abs(value - amount) < 0.000001 && Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
+  }
+
   const text = String(value).replace(/\u00a0/g, ' ').trim().replace(/\s+/g, '');
-  if (!/^\d+$/.test(text)) return null;
-  const amount = Number(text);
-  return Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
+  let normalized = text;
+  if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(normalized)) {
+    normalized = normalized.replace(/,/g, '');
+  } else if (/^\d+,\d+$/.test(normalized)) {
+    normalized = normalized.replace(',', '.');
+  }
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const amount = Number(normalized);
+  const rounded = Math.round(amount);
+  return Math.abs(amount - rounded) < 0.000001 && Number.isSafeInteger(rounded) && rounded >= 0 ? rounded : null;
 }
 
 function parseCurrentStock(value: unknown) {
@@ -212,12 +228,44 @@ async function releaseImportLock() {
   await query(`delete from stock_import_locks where key = $1`, [LOCK_KEY]).catch(() => {});
 }
 
-function parseStockWorkbook(buffer: Buffer) {
+function buildRawRow(headers: unknown[], row: unknown[]): RawRow {
+  return Object.fromEntries(
+    headers.map((header, columnIndex) => {
+      const key = normalizeStockProductName(header) || `__EMPTY_${columnIndex}`;
+      return [key, row[columnIndex] ?? ''];
+    }),
+  );
+}
+
+function isStockHeaderRow(row: unknown[]) {
+  const normalized = row.map(normalizeHeader);
+  const aliases = (values: string[]) => values.map(normalizeHeader);
+  return (
+    aliases(HEADER_ARTICLE_ALIASES).some((header) => normalized.includes(header)) &&
+    aliases(HEADER_STOCK_ALIASES).some((header) => normalized.includes(header)) &&
+    aliases(HEADER_UNIT_ALIASES).some((header) => normalized.includes(header))
+  );
+}
+
+function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('В Excel-файле нет листов');
   const sheet = workbook.Sheets[sheetName];
-  return XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: null, raw: true });
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
+  const headerIndex = rows.findIndex(isStockHeaderRow);
+
+  if (headerIndex === -1) {
+    return XLSX.utils
+      .sheet_to_json<RawRow>(sheet, { defval: null, raw: true })
+      .map((row, index) => ({ rowNumber: index + 2, row }));
+  }
+
+  const headers = rows[headerIndex] ?? [];
+  return rows.slice(headerIndex + 1).map((row, index) => ({
+    rowNumber: headerIndex + index + 2,
+    row: buildRawRow(headers, row),
+  }));
 }
 
 export async function importStockFromExcelBuffer(input: {
@@ -235,13 +283,13 @@ export async function importStockFromExcelBuffer(input: {
     await ensureStockImportSchema();
     const rows = parseStockWorkbook(input.buffer);
     const errors: StockImportError[] = [];
+    let totalRows = 0;
     let updatedRows = 0;
     let notFoundRows = 0;
     let failedRows = 0;
 
     await withTransaction(async (client) => {
-      for (const [index, row] of rows.entries()) {
-        const rowNumber = index + 2;
+      for (const { rowNumber, row } of rows) {
         const rawArticle = readCellByAliases(row, HEADER_ARTICLE_ALIASES);
         const article = normalizeStockProductName(rawArticle);
         const stock = parseCurrentStock(readRawCellByAliases(row, HEADER_STOCK_ALIASES));
@@ -249,10 +297,9 @@ export async function importStockFromExcelBuffer(input: {
         const isExpected = parseExpected(readRawCellByAliases(row, HEADER_EXPECTED_ALIASES));
 
         if (!article) {
-          failedRows += 1;
-          pushError(errors, { row: rowNumber, name: '', error: 'Не заполнен Номенклатура.Код' });
           continue;
         }
+        totalRows += 1;
         if (stock === null) {
           failedRows += 1;
           pushError(errors, { row: rowNumber, name: article, error: 'Сейчас не является целым неотрицательным числом' });
@@ -310,7 +357,7 @@ export async function importStockFromExcelBuffer(input: {
       emailFrom: input.emailFrom ?? '',
       emailSubject: input.emailSubject ?? '',
       status,
-      totalRows: rows.length,
+      totalRows,
       updatedRows,
       notFoundRows,
       failedRows,
