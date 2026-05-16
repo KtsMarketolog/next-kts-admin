@@ -108,6 +108,8 @@ type CatalogProduct = {
   priceRub: string | null;
   priceCny: string | null;
   priceUsd: string | null;
+  manualDiscount: string | null;
+  manualDiscountRop: string | null;
   stock: number;
   unit: string | null;
   isExpected: boolean;
@@ -308,10 +310,30 @@ function normalizeDiscountPercent(value: string) {
   return Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : null;
 }
 
+function parseDiscountLimit(value: string | null | undefined) {
+  if (!value?.trim()) return null;
+  const percent = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  return Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : null;
+}
+
 function formatDiscountPercent(value: number) {
   const rounded = Math.round(value * 100) / 100;
   const formatted = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
   return formatted.replace('.', ',');
+}
+
+function getProductDiscountLimit(product: CatalogProduct) {
+  return parseDiscountLimit(product.manualDiscountRop) ?? parseDiscountLimit(product.manualDiscount);
+}
+
+function getGroupDiscountLimit(group: CatalogGroup) {
+  let limit: number | null = null;
+  for (const product of group.products) {
+    const productLimit = getProductDiscountLimit(product);
+    if (productLimit === null) continue;
+    limit = limit === null ? productLimit : Math.min(limit, productLimit);
+  }
+  return limit;
 }
 
 function getDiscountBaseAmount(row: CatalogRow) {
@@ -513,6 +535,17 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       ),
     [catalogRows],
   );
+  const catalogDiscountLimitByGroupKey = useMemo(() => {
+    const limits = new Map<string, number>();
+    for (const { product } of catalogRows) {
+      const groupKey = (product.priceGroup || NO_PRICE_GROUP_TITLE).toLowerCase();
+      const productLimit = getProductDiscountLimit(product);
+      if (productLimit === null) continue;
+      const currentLimit = limits.get(groupKey);
+      limits.set(groupKey, currentLimit === undefined ? productLimit : Math.min(currentLimit, productLimit));
+    }
+    return limits;
+  }, [catalogRows]);
   const catalogPriceGroups = useMemo(() => {
     const groups = new Set<string>();
     for (const { product } of catalogRows) {
@@ -879,6 +912,11 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     const percent = normalizeDiscountPercent(value);
     if (percent === null) {
       showStatus('Введите процент скидки');
+      return;
+    }
+    const maxDiscount = catalogDiscountLimitByGroupKey.get(groupKey);
+    if (maxDiscount !== undefined && percent - maxDiscount > 0.000001) {
+      showStatus(`Максимальная скидка для группы: ${formatDiscountPercent(maxDiscount)}%`);
       return;
     }
     const changedCount = editor.items.filter((item) => {
@@ -1573,6 +1611,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                 );
                 const groupDiscountPercent =
                   appliedGroupDiscounts[group.id] ?? getSavedGroupDiscountPercent(group, itemByKey, catalogDiscountBaseByKey);
+                const groupMaxDiscount = getGroupDiscountLimit(group);
 
                 return (
                   <div className={styles.priceCategory} key={group.id}>
@@ -1617,7 +1656,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
                                   [group.id]: event.target.value,
                                 }))
                               }
-                              placeholder="Например 20"
+                              inputMode="decimal"
+                              placeholder={
+                                groupMaxDiscount === null
+                                  ? 'Максимальная скидка не задана'
+                                  : `Максимальная скидка ${formatDiscountPercent(groupMaxDiscount)}`
+                              }
                             />
                             <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
                               Рассчитать

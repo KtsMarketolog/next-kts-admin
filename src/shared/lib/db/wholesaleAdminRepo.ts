@@ -87,6 +87,8 @@ export type WholesaleCatalogProduct = {
   priceRub: string | null;
   priceCny: string | null;
   priceUsd: string | null;
+  manualDiscount: string | null;
+  manualDiscountRop: string | null;
   stock: number;
   unit: string | null;
   isExpected: boolean;
@@ -1746,6 +1748,8 @@ export async function getWholesaleCatalog() {
     price_rub: string | null;
     price_cny: string | null;
     price_usd: string | null;
+    manual_discount: string | null;
+    manual_discount_rop: string | null;
     stock: string | null;
     unit: string | null;
     is_expected: boolean | null;
@@ -1769,6 +1773,8 @@ export async function getWholesaleCatalog() {
       p.price_rub::text,
       p.price_cny::text,
       p.price_usd::text,
+      p.manual_discount::text,
+      p.manual_discount_rop::text,
       p.stock::text,
       p.unit,
       p.is_expected,
@@ -1820,6 +1826,8 @@ export async function getWholesaleCatalog() {
         priceRub: row.price_rub,
         priceCny: row.price_cny,
         priceUsd: row.price_usd,
+        manualDiscount: row.manual_discount,
+        manualDiscountRop: row.manual_discount_rop,
         stock: Number(row.stock ?? 0),
         unit: row.unit,
         isExpected: Boolean(row.is_expected),
