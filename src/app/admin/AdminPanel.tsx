@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AdminBrandPortfolioSection } from '@/features/admin/brand-portfolio/AdminBrandPortfolioSection';
+import { AdminCategoriesSection } from '@/features/admin/categories/AdminCategoriesSection';
 import { AdminCatalogSection } from '@/features/admin/catalog/AdminCatalogSection';
 import { AdminDashboard } from '@/features/admin/dashboard/AdminDashboard';
 import { AdminGroupCompaniesSection } from '@/features/admin/group-companies/AdminGroupCompaniesSection';
@@ -25,7 +26,17 @@ import type { AdminSession } from '@/shared/lib/adminAuth';
 
 import styles from './admin.module.scss';
 
-const ADMIN_SECTIONS: AdminSection[] = ['info', 'slider', 'news', 'groupCompanies', 'brands', 'catalog', 'priceGroups', 'users'];
+const ADMIN_SECTIONS: AdminSection[] = [
+  'info',
+  'slider',
+  'news',
+  'groupCompanies',
+  'brands',
+  'catalog',
+  'categories',
+  'priceGroups',
+  'users',
+];
 
 const SITE_NAV_ITEMS: Array<{ value: AdminSection; label: string; description: string }> = [
   { value: 'info', label: 'Информация', description: 'Телефон, email и адрес' },
@@ -34,6 +45,7 @@ const SITE_NAV_ITEMS: Array<{ value: AdminSection; label: string; description: s
   { value: 'groupCompanies', label: 'Группа компаний', description: 'Логотипы и ссылки' },
   { value: 'brands', label: 'Портфель брендов', description: 'Бренды и категории' },
   { value: 'catalog', label: 'Каталог', description: 'Товары и импорт' },
+  { value: 'categories', label: 'Категории', description: 'Иконки категорий' },
   { value: 'priceGroups', label: 'Ценовая группа', description: 'Картинки ценовых групп' },
   { value: 'users', label: 'Пользователи и доступы', description: 'Роли и права' },
 ];
@@ -547,7 +559,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
               />
             )}
 
-            {activeSection === 'catalog' && <AdminCatalogSection showStatus={showStatus} uploadImage={(file) => uploadImage(file, 'categoryIcon')} />}
+            {activeSection === 'catalog' && <AdminCatalogSection showStatus={showStatus} />}
+
+            {activeSection === 'categories' && (
+              <AdminCategoriesSection showStatus={showStatus} uploadImage={(file) => uploadImage(file, 'categoryIcon')} />
+            )}
 
             {activeSection === 'priceGroups' && (
               <AdminPriceGroupsSection
