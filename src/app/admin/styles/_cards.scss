@@ -1102,6 +1102,23 @@
   }
 }
 
+.catalogCategoryIconUpload {
+  display: grid;
+  gap: $apx-6;
+  align-content: start;
+}
+
+.catalogCategoryIconSize {
+  width: fit-content;
+  border-radius: $apx-999;
+  background: #f0eefb;
+  color: #3f3d74;
+  padding: $apx-4 $apx-8;
+  font-size: $apx-12;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
 .catalogCategoryIconInfo {
   display: grid;
   gap: $apx-6;
