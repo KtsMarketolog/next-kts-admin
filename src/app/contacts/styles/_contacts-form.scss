@@ -1,0 +1,282 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+@use "sass:color";
+
+.sectionTitle {
+  font-weight: 600;
+  margin: $apx-10 0 $apx-8;
+}
+
+.purposeBtn {
+  width: $apx-208;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-wrap: nowrap;
+
+  border: $apx-1 solid #ccc;
+  border-radius: $apx-10;
+  padding: $apx-14 $apx-16 !important;
+
+  font-size: $apx-14;
+  color: #323232 !important;
+  background-color: #D7D5E6 !important;
+  transition: 0.2s;
+  cursor: pointer;
+}
+
+.active {
+  background-color: #8D81C4 !important;
+  color: #fff !important;
+}
+
+.purposeButtons {
+  display: flex;
+  gap: $apx-14;
+  margin-bottom: $apx-16;
+  width: $apx-833;
+}
+
+.fileAttach {
+  display: flex;
+  font-size: $apx-25;
+  align-items: center;
+  gap: $apx-8;
+  margin-top: $apx-10;
+  margin-bottom: $apx-10;
+  color: #fff;
+  width: $apx-311;
+  cursor: pointer;
+
+  img {
+    width: $apx-30;
+    height: $apx-30;
+  }
+
+  input[type='file'] { display: none; }
+}
+
+.floating {
+  position: relative;
+  width: $apx-311;
+  background: none;
+
+  input,
+  select {
+    width: 100%;
+    padding: $apx-20 $apx-16 $apx-8;
+    font-size: $apx-16;
+    background: #303639;
+    border: $apx-1 solid rgba(160, 130, 220, 0.3);
+    border-radius: $apx-16;
+    color: #B1B1B1;
+    font-family: inherit;
+    appearance: none;
+
+    &:hover {
+      border-color: rgba(160, 130, 220, 0.5);
+    }
+
+    &:focus {
+      border-color: #a082dc;
+      box-shadow: 0 0 0 $apx-3 rgba(160, 130, 220, 0.25);
+      outline: none;
+    }
+  }
+
+  label {
+    position: absolute;
+    left: $apx-16;
+    top: $apx-18;
+    color: #999;
+    font-size: $apx-16;
+    pointer-events: none;
+    transition: 0.2s ease all;
+  }
+
+  input:focus + label,
+  input:not(:placeholder-shown) + label {
+    top: $apx-4;
+    left: $apx-14;
+    font-size: $apx-12;
+    color: #a082dc;
+  }
+
+  select:focus + label,
+  select:valid + label {
+    top: $apx-4;
+    left: $apx-14;
+    font-size: $apx-12;
+    color: #a082dc;
+  }
+
+  select:required:invalid { color: #666; }
+
+  input:not(:placeholder-shown),
+  textarea:not(:placeholder-shown),
+  select:valid {
+    background: #303639;
+    color: #B1B1B1;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: $apx-206 !important;
+    padding: $apx-20 $apx-16 $apx-8;
+    font-size: $apx-16;
+    background: #303639;
+    border: $apx-1 solid rgba(160, 130, 220, 0.3);
+    border-radius: $apx-16;
+    color: #B1B1B1;
+    font-family: inherit;
+    resize: none;
+    appearance: none;
+
+    &:hover {
+      border-color: rgba(160, 130, 220, 0.5);
+    }
+
+    &:focus {
+      border-color: #a082dc;
+      box-shadow: 0 0 0 $apx-3 rgba(160, 130, 220, 0.25);
+      outline: none;
+    }
+  }
+
+  textarea:not(:placeholder-shown) + label,
+  textarea:focus + label {
+    top: $apx-4;
+    left: $apx-14;
+    font-size: $apx-12;
+    color: #a082dc;
+  }
+}
+
+.labelWithIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: $apx-6;
+}
+
+.labelWithIcon img {
+  width: $apx-20;
+  height: $apx-20;
+  transition: opacity .2s ease, visibility .2s ease;
+}
+
+.floating input:focus + label img { display: none; }
+.floating input:not(:placeholder-shown) + label img {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* === autofill fix (Chrome/Safari/Edge) === */
+.floating input:-webkit-autofill,
+.floating input:-webkit-autofill:hover,
+.floating input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #303639 inset !important;
+  box-shadow: 0 0 0 1000px #303639 inset !important;
+
+  -webkit-text-fill-color: #B1B1B1 !important;
+  caret-color: #B1B1B1;
+
+  transition: background-color 99999s ease-in-out 0s !important;
+}
+
+/* чтобы лейбл поднимался и при автозаполнении */
+.floating input:-webkit-autofill + label {
+  top: $apx-4;
+  left: $apx-14;
+  font-size: $apx-12;
+  color: #a082dc;
+}
+
+/* === Firefox === */
+.floating input:-moz-autofill {
+  box-shadow: 0 0 0 1000px #303639 inset !important;
+  -moz-text-fill-color: #B1B1B1 !important;
+}
+
+.floating input:-webkit-autofill:focus,
+.floating input:-moz-autofill:focus {
+  border-color: #a082dc !important;
+  box-shadow:
+    0 0 0 $apx-3 rgba(160,130,220,0.25),
+    0 0 0 1000px #303639 inset !important;
+}
+
+.floating:has(input:focus) label img,
+.floating:has(input:not(:placeholder-shown)) label img,
+.floating:has(input:-webkit-autofill) label img,
+.floating:has(input:-webkit-autofill:hover) label img,
+.floating:has(input:-webkit-autofill:focus) label img {
+  display: none !important;
+  visibility: hidden !important;
+  transition: opacity .15s ease;
+}
+
+.floating:has(input:-moz-autofill) label img {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+//алерты
+.popupOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.popup {
+  background: #303639;
+  color: #fff;
+  border-radius: $apx-16;
+  padding: $apx-30 $apx-40;
+  max-width: $apx-400;
+  width: 90%;
+  box-shadow: 0 0 $apx-20 rgba(0, 0, 0, 0.4);
+  text-align: center;
+  animation: slideUp 0.35s ease forwards;
+
+  p {
+    font-size: $apx-18;
+    margin-bottom: $apx-20;
+    line-height: 1.4;
+  }
+
+  button {
+    background: #a082dc;
+    color: #fff;
+    border: none;
+    padding: $apx-12 $apx-24;
+    border-radius: $apx-10;
+    font-size: $apx-16;
+    cursor: pointer;
+    transition: background 0.2s ease;
+
+    &:hover {
+      background: color.adjust(#a082dc, $lightness: -8%);
+    }
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY($apx-20);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+

@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import CreatableSelect from 'react-select/creatable';
-import type { SingleValue, ActionMeta } from 'react-select';
+import type { SingleValue } from 'react-select';
 import { customSelectStyles } from './SelectStyles';
 import styles from './CitySelect.module.scss';
 
@@ -58,12 +58,7 @@ export default function CitySelect({ onChange, value }: Props) {
   }, [options, value]);
 
   // Когда выбрали из меню — пишем наверх и чистим строку поиска
-  const handleChange = (
-    
-    selected: SingleValue<OptionType>,
-    _meta: ActionMeta<OptionType>
-
-  ) => {
+  const handleChange = (selected: SingleValue<OptionType>) => {
 
     onChange(selected?.value || '');
     setInputValue('');
@@ -71,7 +66,7 @@ export default function CitySelect({ onChange, value }: Props) {
   };
 
   // Создание кастомного города
-  const handleCreate = (createdLabel: string) => {
+  const handleCreate = useCallback((createdLabel: string) => {
 
     const v = createdLabel.trim();
     if (!v) return;
@@ -87,31 +82,9 @@ export default function CitySelect({ onChange, value }: Props) {
     onChange(v);
     setInputValue('');
 
-  };
+  }, [onChange]);
 
-  // Если юзер ушёл из поля с набранным текстом — коммитим
-  const handleBlur = () => {
-
-    setIsFocused(false);
-    commitInputIfAny();
-
-  };
-
-  // Очищаем строку поиска когда значение уже выбрано извне
-  useEffect(() => {
-
-    if (value) setInputValue('');
-
-  }, [value]);
-
-  useEffect(() => {
-
-    if (!inputValue || isFocused) return;
-    commitInputIfAny();
-
-  }, [inputValue, isFocused, options]);
-
-  const commitInputIfAny = () => {
+  const commitInputIfAny = useCallback(() => {
 
     const draft = inputValue.trim();
 
@@ -135,7 +108,29 @@ export default function CitySelect({ onChange, value }: Props) {
 
     }
 
+  }, [handleCreate, inputValue, onChange, options]);
+
+  // Если юзер ушёл из поля с набранным текстом — коммитим
+  const handleBlur = () => {
+
+    setIsFocused(false);
+    commitInputIfAny();
+
   };
+
+  // Очищаем строку поиска когда значение уже выбрано извне
+  useEffect(() => {
+
+    if (value) setInputValue('');
+
+  }, [value]);
+
+  useEffect(() => {
+
+    if (!inputValue || isFocused) return;
+    commitInputIfAny();
+
+  }, [commitInputIfAny, inputValue, isFocused]);
 
   return (
 

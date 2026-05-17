@@ -1,0 +1,112 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+@use "sass:color";
+
+.infoBlock {
+  width: $apx-581;
+  color: #fff;
+
+  h3 {
+    font-size: $apx-53;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0;
+    margin-bottom: $apx-58;
+  }
+
+  p {
+    font-size: $apx-16;
+    margin-bottom: $apx-12;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
+
+  .mapWrap {
+    margin-top: $apx-20;
+    overflow: hidden;
+    box-shadow: 0 0 $apx-8 rgba(0, 0, 0, 0.1);
+
+    iframe{
+      width: $apx-581 !important;
+      height: $apx-294 !important;
+    }
+  }
+
+  .contactIntro{
+    display: flex;
+    align-items: center;
+    gap: $apx-30;
+    margin-bottom: $apx-60;
+
+    img{
+      width: $apx-106;
+      height: $apx-106;
+    }
+
+    p{
+      font-size: $apx-18;
+      font-weight: 300;
+      line-height: 1.2;
+      letter-spacing: 0;
+      margin: 0;
+    }
+  }
+
+  .contacts{
+    display: grid;
+    grid-template-columns: max-content max-content;
+    column-gap: $apx-42;
+    row-gap: $apx-23;
+    margin-bottom: $apx-48;
+
+    a{
+      text-decoration: none;
+
+      &:hover,
+      &:focus,
+      &:active {
+        text-decoration: none;
+      }
+
+      &:hover{
+        color: #8D81C4;
+      }
+    }
+
+    p{
+      font-size: $apx-22;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: 0;
+      margin: 0;
+    }
+
+    .contactAddressLine {
+      white-space: nowrap;
+    }
+  }
+
+  .contactTg{
+    display: block;
+    font-size: $apx-22;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0;
+    margin-bottom: $apx-32;
+
+    text-decoration: none;
+
+    &:hover,
+    &:focus,
+    &:active {
+      text-decoration: none;
+    }
+
+    &:hover{
+      color: #8D81C4;
+    }
+  }
+}
+

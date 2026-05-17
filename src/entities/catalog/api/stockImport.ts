@@ -71,6 +71,8 @@ const MAX_ERRORS = 200;
 const MAX_SKIP_SAMPLES = 5;
 const DEFAULT_MAIL_SCAN_LIMIT = 300;
 const DEFAULT_STOCK_ALLOWED_FROM = ['saunakva@yandex.ru'];
+const MAX_STOCK_WORKBOOK_BYTES = 15 * 1024 * 1024;
+const MAX_STOCK_WORKBOOK_ROWS = 50_000;
 
 type StockEmailCandidate = {
   uid: number | string;
@@ -247,11 +249,13 @@ function isStockHeaderRow(row: unknown[]) {
 }
 
 function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
+  if (buffer.byteLength > MAX_STOCK_WORKBOOK_BYTES) throw new Error('Excel-С„Р°Р№Р» СЃ РѕСЃС‚Р°С‚РєР°РјРё СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№');
+  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, sheetRows: MAX_STOCK_WORKBOOK_ROWS + 5 });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('В Excel-файле нет листов');
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
+  if (rows.length > MAX_STOCK_WORKBOOK_ROWS) throw new Error('Excel-С„Р°Р№Р» СЃ РѕСЃС‚Р°С‚РєР°РјРё СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№');
   const headerIndex = rows.findIndex(isStockHeaderRow);
 
   if (headerIndex === -1) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 import {
@@ -14,6 +14,7 @@ import { AdminWholesaleAnalytics } from './AdminWholesaleAnalytics';
 import { WholesaleManagerManagement } from './WholesaleManagerManagement';
 import { WholesalePriceListCards } from './WholesalePriceListCards';
 import { WholesalePriceEditorScreen } from './WholesalePriceEditorScreen';
+import { useAdminWholesaleGatewayPath } from './useAdminWholesaleGatewayPath';
 
 import {
   NO_PRICE_GROUP_TITLE,
@@ -42,10 +43,17 @@ import {
   type PriceList,
 } from './AdminWholesaleModel';
 export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: AdminWholesaleGatewayProps) {
-  const pathname = usePathname();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const startsInEditor = pathname.endsWith('/create') || /\/admin\/wholesale\/\d+\/edit$/.test(pathname);
+  const {
+    analyticsBackHref,
+    createManagerId,
+    editId,
+    editorBackHref,
+    managerAnalyticsId,
+    managerDetailId,
+    screen,
+    startsInEditor,
+  } = useAdminWholesaleGatewayPath(canManageWholesale);
   const [managers, setManagers] = useState<Manager[]>([]);
   const [currentManager, setCurrentManager] = useState<CurrentManager | null>(null);
   const [managerDraft, setManagerDraft] = useState(emptyManager);
@@ -68,36 +76,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [catalogCategoryId, setCatalogCategoryId] = useState('all');
   const [catalogPriceGroup, setCatalogPriceGroup] = useState('all');
   const deferredCatalogQuery = useDeferredValue(catalogQuery);
-
-  const editMatch = pathname.match(/\/admin\/wholesale\/(\d+)\/edit$/);
-  const editId = editMatch ? Number(editMatch[1]) : null;
-  const managerAnalyticsMatch = pathname.match(/\/admin\/wholesale\/admin\/managers\/(\d+)\/analytics$/);
-  const managerAnalyticsId = managerAnalyticsMatch ? Number(managerAnalyticsMatch[1]) : null;
-  const managerDetailMatch = pathname.match(/\/admin\/wholesale\/admin\/managers\/(\d+)$/);
-  const managerDetailId = managerDetailMatch ? Number(managerDetailMatch[1]) : null;
-  const screen = pathname.endsWith('/admin')
-    ? 'admin'
-    : managerAnalyticsId
-      ? 'managerAnalytics'
-      : managerDetailId
-        ? 'managerDetail'
-        : pathname.endsWith('/manager')
-          ? 'manager'
-          : pathname.endsWith('/create')
-            ? 'create'
-            : editId
-              ? 'edit'
-              : 'home';
-  const analyticsManagerIdParam = Number(searchParams.get('analyticsManagerId'));
-  const createManagerIdParam = Number(searchParams.get('managerId'));
-  const createManagerId = Number.isInteger(createManagerIdParam) && createManagerIdParam > 0 ? createManagerIdParam : null;
-  const analyticsBackHref =
-    canManageWholesale && screen === 'edit' && Number.isInteger(analyticsManagerIdParam) && analyticsManagerIdParam > 0
-      ? `/admin/wholesale/admin/managers/${analyticsManagerIdParam}/analytics`
-      : null;
-  const editorBackHref =
-    analyticsBackHref ??
-    (canManageWholesale && screen === 'create' && createManagerId ? `/admin/wholesale/admin/managers/${createManagerId}` : '/admin/wholesale/manager');
 
   const catalogRows = useMemo(() => flatCatalogItems(catalog), [catalog]);
   const catalogDiscountBaseByKey = useMemo(

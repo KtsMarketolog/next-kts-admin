@@ -21,6 +21,7 @@ const EXCEL_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const EXCEL_SESSION_LIMIT = 30;
 const EXCEL_USER_LIMIT = 60;
 const EXCEL_GLOBAL_LIMIT = 500;
+const MAX_PRICE_EXPORT_ROWS = 15_000;
 
 function getHeaderIp(headersList: Headers) {
   const forwardedFor = headersList.get('x-forwarded-for')?.split(',')[0]?.trim();
@@ -183,10 +184,20 @@ function createExcelXml(priceList: PublicPriceList) {
 </Workbook>`;
 }
 
+function countPriceExportRows(priceList: PublicPriceList) {
+  return priceList.categories.reduce(
+    (sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.variants.length, 0),
+    0,
+  );
+}
+
 export async function GET(request: Request, context: Context) {
   const { token } = await context.params;
   const priceList = await getPublicWholesalePriceList(token);
   if (!priceList) return Response.json({ error: 'Not found' }, { status: 404 });
+  if (countPriceExportRows(priceList) > MAX_PRICE_EXPORT_ROWS) {
+    return Response.json({ error: 'Price export is too large' }, { status: 413 });
+  }
 
   const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
   const sessionId = publicSession.sessionId;

@@ -93,13 +93,13 @@ export default function PhoneInput({
   }, [initial.dial, initial.local]);
 
   // эмит наверх
-  const fullPhone = `${country.dial} ${localDigits}`.trim();
+  const fullPhone = useMemo(() => `${country.dial} ${localDigits}`.trim(), [country.dial, localDigits]);
 
   useEffect(() => {
 
     onChange(fullPhone);
 
-  }, [country, localDigits]);
+  }, [fullPhone, onChange]);
 
   const onCountryChange = (opt: SingleValue<CountryOption>) => { if (opt) setCountry(opt); };
   const onLocalChange: React.ChangeEventHandler<HTMLInputElement> = (e) => setLocalDigits(parseLocal(e.target.value));
@@ -108,7 +108,7 @@ export default function PhoneInput({
 
   return (
 
-    <div className={styles.phoneGroup} aria-disabled={disabled}>
+    <div className={styles.phoneGroup} aria-disabled={disabled} aria-required={required}>
 
       <Select<CountryOption, false>
 

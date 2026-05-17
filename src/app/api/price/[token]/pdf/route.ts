@@ -41,6 +41,7 @@ const PDF_SESSION_LIMIT = 20;
 const PDF_USER_LIMIT = 40;
 const PDF_GLOBAL_LIMIT = 300;
 const MAX_CONCURRENT_PDF_GENERATIONS = 3;
+const MAX_PRICE_EXPORT_ROWS = 15_000;
 
 let activePdfGenerations = 0;
 
@@ -170,6 +171,13 @@ function createPdfRows(priceList: PublicPriceList): PdfRow[] {
     }
   }
   return rows;
+}
+
+function countPriceExportRows(priceList: PublicPriceList) {
+  return priceList.categories.reduce(
+    (sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.variants.length, 0),
+    0,
+  );
 }
 
 function ensureSpace(doc: PdfDocument, requiredHeight: number) {
@@ -338,6 +346,9 @@ export async function GET(request: Request, context: Context) {
   const { token } = await context.params;
   const priceList = await getPublicWholesalePriceList(token);
   if (!priceList) return Response.json({ error: 'Not found' }, { status: 404 });
+  if (countPriceExportRows(priceList) > MAX_PRICE_EXPORT_ROWS) {
+    return Response.json({ error: 'Price export is too large' }, { status: 413 });
+  }
 
   const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
   const sessionId = publicSession.sessionId;
