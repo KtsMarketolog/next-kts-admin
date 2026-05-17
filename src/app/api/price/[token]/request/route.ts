@@ -97,11 +97,11 @@ function splitRecipients(value: string) {
     .filter(Boolean);
 }
 
-function priceRequestRecipients(managerEmail: string) {
+function priceRequestRecipients(managerEmails: string[]) {
   const recipients = [
     ...splitRecipients(process.env.SMTP_TO || DEFAULT_PRICE_REQUEST_RECIPIENT),
     DEFAULT_PRICE_REQUEST_RECIPIENT,
-    managerEmail.trim(),
+    ...managerEmails.map((email) => email.trim()),
   ].filter(Boolean);
   const seen = new Set<string>();
 
@@ -206,7 +206,7 @@ export async function POST(request: Request, context: Context) {
       },
     });
     const mailFrom = process.env.SMTP_FROM || `"KTS" <${requireEnv('SMTP_USER')}>`;
-    const mailTo = priceRequestRecipients(priceList.managerEmail).join(', ');
+    const mailTo = priceRequestRecipients([priceList.managerEmail, priceList.supportManagerEmail]).join(', ');
     const subject = `Заявка из индивидуального прайса: ${priceList.title || 'Без названия'}`;
     const itemRows = rows
       .map(
