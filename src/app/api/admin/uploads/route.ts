@@ -6,6 +6,7 @@ import sanitizeHtml from 'sanitize-html';
 import { requireAdmin } from '@/shared/lib/adminAuth';
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
+const MAX_CATEGORY_ICON_FILE_SIZE = 500 * 1024;
 const MAX_SVG_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_PRICE_GROUP_SVG_WIDTH = 900;
 const MAX_PRICE_GROUP_SVG_HEIGHT = 600;
@@ -106,6 +107,10 @@ export async function POST(request: Request) {
 
   if (file.size > MAX_FILE_SIZE) {
     return Response.json({ error: 'File is too large' }, { status: 400 });
+  }
+
+  if (kind === 'categoryIcon' && file.size > MAX_CATEGORY_ICON_FILE_SIZE) {
+    return Response.json({ error: 'Иконка категории должна быть не больше 500 КБ' }, { status: 400 });
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());

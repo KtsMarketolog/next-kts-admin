@@ -19,6 +19,14 @@ type AdminCategoriesSectionProps = {
   uploadImage: (file: File) => Promise<string>;
 };
 
+const CATEGORY_ICON_MAX_FILE_SIZE = 500 * 1024;
+
+function formatFileSize(bytes: number) {
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) return `${Math.ceil(kilobytes)} КБ`;
+  return `${(kilobytes / 1024).toFixed(1).replace('.', ',')} МБ`;
+}
+
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -82,6 +90,11 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
   };
 
   const uploadCategoryIcon = async (categoryId: number, file: File) => {
+    if (file.size > CATEGORY_ICON_MAX_FILE_SIZE) {
+      showStatus(`Размер изображения превышает 500 КБ. Сейчас: ${formatFileSize(file.size)}`);
+      return;
+    }
+
     setCategoryBusyId(categoryId);
     try {
       const iconUrl = await uploadImage(file);

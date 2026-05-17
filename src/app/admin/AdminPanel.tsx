@@ -38,6 +38,8 @@ const ADMIN_SECTIONS: AdminSection[] = [
   'users',
 ];
 
+const CATEGORY_ICON_MAX_FILE_SIZE = 500 * 1024;
+
 const SITE_NAV_ITEMS: Array<{ value: AdminSection; label: string; description: string }> = [
   { value: 'info', label: 'Информация', description: 'Телефон, email и адрес' },
   { value: 'slider', label: 'Слайдер', description: 'Главные слайды сайта' },
@@ -335,6 +337,10 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   };
 
   const uploadImage = async (file: File, kind: 'image' | 'brandLogo' | 'priceGroup' | 'categoryIcon' = 'image') => {
+    if (kind === 'categoryIcon' && file.size > CATEGORY_ICON_MAX_FILE_SIZE) {
+      throw new Error('Иконка категории должна быть не больше 500 КБ');
+    }
+
     const formData = new FormData();
     formData.append('file', file);
     formData.append('kind', kind);
