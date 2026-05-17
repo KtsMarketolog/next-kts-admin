@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import styles from './ContactsPage.module.scss';
+import { useSiteSettings } from '@/shared/lib/useSiteSettings';
 import Container from '@/shared/ui/Container';
 
 const PhoneInput = dynamic(() => import('@/shared/ui/PhoneInput/PhoneInput'), { ssr: false });
@@ -33,7 +34,25 @@ const CitySelect = dynamic(() => import('@/shared/ui/CitySelect/CitySelect'), { 
 //   ),
 // });
 
+function splitAddress(address: string) {
+  const normalized = address.trim();
+  const explicitLines = normalized
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (explicitLines.length > 1) return explicitLines;
+
+  const commaIndex = normalized.indexOf(',');
+  if (commaIndex === -1) return normalized ? [normalized] : [];
+
+  return [normalized.slice(0, commaIndex + 1).trim(), normalized.slice(commaIndex + 1).trim()].filter(Boolean);
+}
+
 export default function ContactsPage() {
+
+  const { phone, email, address } = useSiteSettings();
+  const addressLines = splitAddress(address);
 
   const [isHuman, setIsHuman] = useState(false);
   const [purpose, setPurpose] = useState('');
@@ -387,10 +406,16 @@ export default function ContactsPage() {
 
               <div className={styles.contacts}>
 
-                <p>+7 964 860 90 10</p>
-                <p>Республика Марий Эл,</p>
-                <p><a href="mailto:info@kts-impex.ru">info@kts-impex.ru</a></p>
-                <p>г. Волжск, ул. Мамасево, д. 1</p>
+                <div className={styles.contactPrimary}>
+                  <p>{phone}</p>
+                  <p><a href={`mailto:${email}`}>{email}</a></p>
+                </div>
+
+                <div className={styles.contactAddress}>
+                  {addressLines.map((line) => (
+                    <p key={line}>{line}</p>
+                  ))}
+                </div>
 
               </div>
 
