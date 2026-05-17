@@ -497,6 +497,7 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
         });
       }
       let candidate: StockEmailCandidate | null = null;
+      const supersededCandidateUids: Array<number | string> = [];
       for await (const message of client.fetch(uids.join(','), { uid: true, source: true }, { uid: true })) {
         if (!message.source || !message.uid) continue;
         const parsed = await simpleParser(message.source as Buffer);
@@ -525,6 +526,7 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
         }
 
         if (!candidate || dateMs > candidate.dateMs || (dateMs === candidate.dateMs && uidNumber > candidate.uidNumber)) {
+          if (candidate) supersededCandidateUids.push(candidate.uid);
           candidate = {
             uid: message.uid,
             uidNumber,
@@ -534,6 +536,8 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
             emailFrom: fromAddress,
             emailSubject: subject,
           };
+        } else {
+          supersededCandidateUids.push(message.uid);
         }
       }
 
@@ -546,6 +550,9 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
             emailSubject: candidate.emailSubject,
           });
           await moveMessage(client, candidate.uid, result.status === 'failed' ? errorFolder : processedFolder);
+          if (result.status !== 'failed') {
+            await Promise.all(supersededCandidateUids.map((uid) => moveMessage(client, uid, processedFolder)));
+          }
           return createEmailResult({
             processed: 1,
             result,
