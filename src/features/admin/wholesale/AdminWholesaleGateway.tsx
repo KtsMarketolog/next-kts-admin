@@ -1,468 +1,46 @@
 'use client';
 
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 import {
-  readWholesaleManagerPasswords as readManagerPasswords,
   removeWholesaleManagerPassword as removeManagerPassword,
   saveWholesaleManagerPassword as saveManagerPassword,
 } from '@/shared/lib/adminPasswordStorage';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
-import {
-  getWholesalePriceWorkflowStatusLabel,
-  WHOLESALE_PRICE_WORKFLOW_STATUSES,
-  type WholesalePriceWorkflowStatus,
-} from '@/shared/lib/wholesalePriceWorkflowStatus';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
 import { AdminWholesaleAnalytics } from './AdminWholesaleAnalytics';
+import { WholesaleManagerManagement } from './WholesaleManagerManagement';
+import { WholesalePriceListCards } from './WholesalePriceListCards';
+import { WholesalePriceEditorScreen } from './WholesalePriceEditorScreen';
 
-type Manager = {
-  id: number;
-  name: string;
-  login: string;
-  email: string;
-  phone: string;
-  role: 'manager' | 'support_manager';
-  supportManagerId: number | null;
-  supportManagerName: string;
-  isActive: boolean;
-  priceListCount: number;
-  password?: string;
-  displayPassword: string;
-};
-
-type ManagerRole = Manager['role'];
-
-type ManagerDraft = {
-  name: string;
-  login: string;
-  email: string;
-  phone: string;
-  supportManagerId: number | null;
-  password: string;
-  isActive: boolean;
-};
-
-const MANAGER_ROLE_TABS: Array<{ value: ManagerRole; label: string }> = [
-  { value: 'manager', label: 'Менеджер по развитию' },
-  { value: 'support_manager', label: 'Менеджер по сопровождению' },
-];
-
-const MANAGER_ROLE_TAB_STORAGE_KEY = 'kts-admin-wholesale-manager-role-tab';
-
-function isManagerRole(value: string | null): value is ManagerRole {
-  return value === 'manager' || value === 'support_manager';
-}
-
-function readManagerRoleTab(): ManagerRole {
-  if (typeof window === 'undefined') return 'manager';
-  const value = window.localStorage.getItem(MANAGER_ROLE_TAB_STORAGE_KEY);
-  return isManagerRole(value) ? value : 'manager';
-}
-
-function saveManagerRoleTab(tab: ManagerRole) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(MANAGER_ROLE_TAB_STORAGE_KEY, tab);
-}
-
-type PriceList = {
-  id: number;
-  title: string;
-  clientName: string;
-  token: string;
-  validUntil: string | null;
-  workflowStatus: WholesalePriceWorkflowStatus;
-  workflowStatusLabel: string;
-  showRetailPrices: boolean;
-  showStock: boolean;
-  isActive: boolean;
-  managerId: number | null;
-  managerName: string | null;
-  itemCount: number;
-  priceGroupCount: number;
-  createdAt: string;
-  updatedAt: string;
-  lastChangedAt: string | null;
-  lastChangedTitle: string | null;
-  lastChangedByName: string | null;
-};
-
-type CatalogVariant = {
-  id: number | null;
-  title: string;
-  retailPrice: string | null;
-  wholesalePrice: string | null;
-};
-
-type CatalogProduct = {
-  id: number;
-  title: string;
-  sku: string;
-  description: string;
-  imageUrl: string | null;
-  priceGroup: string;
-  priceGroupImageUrl: string | null;
-  priceEur: string | null;
-  priceRub: string | null;
-  priceCny: string | null;
-  priceUsd: string | null;
-  manualDiscount: string | null;
-  manualDiscountRop: string | null;
-  stock: number;
-  unit: string | null;
-  isExpected: boolean;
-  stockUpdatedAt: string | null;
-  variants: CatalogVariant[];
-};
-
-type CatalogCategory = {
-  id: number;
-  title: string;
-  products: CatalogProduct[];
-};
-
-type PriceItem = {
-  productId: number;
-  variantId: number | null;
-  customWholesalePrice: string | null;
-  visible: boolean;
-  sortOrder: number;
-};
-
-type PriceEditor = {
-  id?: number;
-  title: string;
-  clientName: string;
-  token: string;
-  validUntil: string;
-  comment: string;
-  workflowStatus: WholesalePriceWorkflowStatus;
-  showRetailPrices: boolean;
-  showStock: boolean;
-  isActive: boolean;
-  managerId: number | null;
-  items: PriceItem[];
-};
-
-type AdminWholesaleGatewayProps = {
-  canManageWholesale?: boolean;
-  onBack: () => void;
-};
-
-type CurrentManager = {
-  id: number;
-  name: string;
-  login: string;
-  email: string;
-  phone: string;
-};
-
-const emptyManager: ManagerDraft = {
-  name: '',
-  login: '',
-  email: '',
-  phone: '',
-  supportManagerId: null,
-  password: '',
-  isActive: true,
-};
-
-function attachManagerPasswords(managers: Manager[]) {
-  const passwords = readManagerPasswords();
-  return managers.map((manager) => ({
-    ...manager,
-    displayPassword: manager.displayPassword || passwords[String(manager.id)] || '',
-  }));
-}
-
-const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
-
-function makeToken() {
-  const bytes = new Uint8Array(12);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-function getDefaultPriceTitle() {
-  return `Прайс от ${new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow' }).format(new Date())}`;
-}
-
-function stockLabel(product: CatalogProduct) {
-  const unit = product.unit?.trim() || 'шт.';
-  if (product.stock > 0) return `${product.stock} ${unit}`;
-  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
-}
-
-function emptyEditor(): PriceEditor {
-  return {
-    title: getDefaultPriceTitle(),
-    clientName: '',
-    token: makeToken(),
-    validUntil: '',
-    comment: '',
-    workflowStatus: 'not_sent',
-    showRetailPrices: false,
-    showStock: true,
-    isActive: true,
-    managerId: null,
-    items: [],
-  };
-}
-
-function formatDate(value: string | null) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('ru-RU');
-}
-
-async function readApiError(response: Response, fallback: string) {
-  const data = await response.json().catch(() => ({}));
-  return typeof data.error === 'string' ? data.error : fallback;
-}
-
-function renderLastPriceChange(item: PriceList) {
-  if (!item.lastChangedAt) return '—';
-
-  return (
-    <>
-      {formatDate(item.lastChangedAt)}
-      {item.lastChangedByName ? (
-        <>
-          <br />
-          <span>{item.lastChangedByName}</span>
-        </>
-      ) : null}
-    </>
-  );
-}
-
-function flatCatalogItems(categories: CatalogCategory[]) {
-  return categories.flatMap((category) =>
-    category.products.flatMap((product) =>
-      product.variants.map((variant) => ({
-        category,
-        product,
-        variant,
-        key: `${product.id}:${variant.id ?? 'base'}`,
-      })),
-    ),
-  );
-}
-
-type CatalogRow = ReturnType<typeof flatCatalogItems>[number];
-
-type CatalogGroup = {
-  id: string;
-  title: string;
-  imageUrl: string | null;
-  products: CatalogProduct[];
-};
-
-function groupCatalogRowsByPriceGroup(rows: CatalogRow[]) {
-  const groups = new Map<string, CatalogGroup>();
-  const products = new Map<string, CatalogProduct>();
-
-  for (const row of rows) {
-    const groupTitle = row.product.priceGroup || NO_PRICE_GROUP_TITLE;
-    const groupKey = groupTitle.toLowerCase();
-    let group = groups.get(groupKey);
-    if (!group) {
-      group = { id: groupKey, title: groupTitle, imageUrl: row.product.priceGroupImageUrl || row.product.imageUrl, products: [] };
-      groups.set(groupKey, group);
-    }
-
-    if (!group.imageUrl && (row.product.priceGroupImageUrl || row.product.imageUrl)) {
-      group.imageUrl = row.product.priceGroupImageUrl || row.product.imageUrl;
-    }
-
-    const productKey = `${groupKey}:${row.product.id}`;
-    let product = products.get(productKey);
-    if (!product) {
-      product = { ...row.product, variants: [] };
-      products.set(productKey, product);
-      group.products.push(product);
-    }
-
-    product.variants.push(row.variant);
-  }
-
-  return Array.from(groups.values());
-}
-
-function parseCatalogAmount(value: string | null | undefined) {
-  if (!value) return null;
-  const normalized = value.replace(/\s+/g, '').replace(',', '.');
-  const amount = Number(normalized);
-  return Number.isFinite(amount) && amount > 0 ? amount : null;
-}
-
-function formatCatalogAmount(value: number) {
-  const rounded = Math.round(value * 100) / 100;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function normalizeDiscountPercent(value: string) {
-  if (!value.trim()) return null;
-  const percent = Number(value.replace(',', '.'));
-  return Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : null;
-}
-
-function parseDiscountLimit(value: string | null | undefined) {
-  if (!value?.trim()) return null;
-  const percent = Number(value.replace(/\s+/g, '').replace(',', '.'));
-  return Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : null;
-}
-
-function formatDiscountPercent(value: number) {
-  const rounded = Math.round(value * 100) / 100;
-  const formatted = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-  return formatted.replace('.', ',');
-}
-
-function getProductDiscountLimit(product: CatalogProduct) {
-  return parseDiscountLimit(product.manualDiscountRop) ?? parseDiscountLimit(product.manualDiscount);
-}
-
-function getGroupDiscountLimit(group: CatalogGroup) {
-  let limit: number | null = null;
-  for (const product of group.products) {
-    const productLimit = getProductDiscountLimit(product);
-    if (productLimit === null) continue;
-    limit = limit === null ? productLimit : Math.min(limit, productLimit);
-  }
-  return limit;
-}
-
-function getDiscountBaseAmount(row: CatalogRow) {
-  return (
-    parseCatalogAmount(row.product.priceRub) ??
-    parseCatalogAmount(row.variant.retailPrice) ??
-    parseCatalogAmount(row.variant.wholesalePrice) ??
-    parseCatalogAmount(row.product.priceUsd) ??
-    parseCatalogAmount(row.product.priceEur) ??
-    parseCatalogAmount(row.product.priceCny)
-  );
-}
-
-function getSavedGroupDiscountPercent(
-  group: CatalogGroup,
-  itemByKey: Map<string, PriceItem>,
-  catalogDiscountBaseByKey: Map<string, { amount: number | null; groupKey: string }>,
-) {
-  const discounts: number[] = [];
-
-  for (const product of group.products) {
-    for (const variant of product.variants) {
-      const key = `${product.id}:${variant.id ?? 'base'}`;
-      const priceItem = itemByKey.get(key);
-      if (!priceItem?.visible) continue;
-
-      const base = catalogDiscountBaseByKey.get(key)?.amount;
-      const custom = parseCatalogAmount(priceItem.customWholesalePrice);
-      if (!base || custom === null) continue;
-
-      const discount = (1 - custom / base) * 100;
-      if (discount < -0.05 || discount > 100) return null;
-      discounts.push(discount <= 0.05 ? 0 : discount);
-    }
-  }
-
-  if (discounts.length === 0) return null;
-  const first = discounts[0];
-  if (discounts.some((discount) => Math.abs(discount - first) > 0.15)) return null;
-
-  return formatDiscountPercent(first);
-}
-
-function getTextareaRows(value: string) {
-  const visualRows = value.split(/\r\n|\r|\n/).reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 120)), 0);
-  return Math.max(2, visualRows + 1);
-}
-
-function getInitialCustomWholesalePrice(row: CatalogRow, item?: PriceItem) {
-  if (item?.customWholesalePrice?.trim()) return item.customWholesalePrice;
-  const base = getDiscountBaseAmount(row);
-  return base === null ? '' : formatCatalogAmount(base);
-}
-
-function mergeEditorItems(categories: CatalogCategory[], items: PriceItem[]) {
-  const current = new Map(items.map((item) => [`${item.productId}:${item.variantId ?? 'base'}`, item]));
-  return flatCatalogItems(categories).map((row, index) => {
-    const { product, variant } = row;
-    const key = `${product.id}:${variant.id ?? 'base'}`;
-    const currentItem = current.get(key);
-    const customWholesalePrice = getInitialCustomWholesalePrice(row, currentItem);
-    if (currentItem) return { ...currentItem, customWholesalePrice };
-
-    return {
-      productId: product.id,
-      variantId: variant.id,
-      customWholesalePrice,
-      visible: false,
-      sortOrder: index + 1,
-    };
-  });
-}
-
-function renderWholesaleEditorSkeleton() {
-  return (
-    <div className={styles.editorSkeleton} aria-busy="true">
-      <div className={styles.skeletonEditorGrid}>
-        {Array.from({ length: 6 }, (_, index) => (
-          <div className={styles.skeletonField} key={index}>
-            <span className={styles.skeletonLabelLine} />
-            <span className={styles.skeletonInputLine} />
-          </div>
-        ))}
-        <div className={`${styles.skeletonField} ${styles.wholesaleWide}`}>
-          <span className={styles.skeletonLabelLine} />
-          <span className={styles.skeletonTextareaLine} />
-        </div>
-      </div>
-
-      <div className={styles.skeletonOptions}>
-        <span />
-        <span />
-        <span />
-      </div>
-
-      <div className={styles.skeletonSearchBlock}>
-        <span />
-        <span />
-        <span />
-      </div>
-
-      {Array.from({ length: 2 }, (_, groupIndex) => (
-        <div className={styles.skeletonPriceGroup} key={groupIndex}>
-          <div className={styles.skeletonGroupHeader}>
-            <span className={styles.skeletonImage} />
-            <span className={styles.skeletonTitleLine} />
-            <span className={styles.skeletonWideLine} />
-          </div>
-          {Array.from({ length: 3 }, (_, productIndex) => (
-            <div className={styles.skeletonProductCard} key={productIndex}>
-              <div>
-                <span className={styles.skeletonTitleLine} />
-                <span className={styles.skeletonShortLine} />
-                <span className={styles.skeletonShortLine} />
-              </div>
-              <div className={styles.skeletonVariantGrid}>
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
+import {
+  NO_PRICE_GROUP_TITLE,
+  attachManagerPasswords,
+  emptyEditor,
+  emptyManager,
+  flatCatalogItems,
+  formatCatalogAmount,
+  formatDiscountPercent,
+  getDiscountBaseAmount,
+  getProductDiscountLimit,
+  getTextareaRows,
+  groupCatalogRowsByPriceGroup,
+  makeToken,
+  mergeEditorItems,
+  normalizeDiscountPercent,
+  readApiError,
+  readManagerRoleTab,
+  type AdminWholesaleGatewayProps,
+  type CatalogCategory,
+  type CurrentManager,
+  type Manager,
+  type ManagerRole,
+  type PriceEditor,
+  type PriceItem,
+  type PriceList,
+} from './AdminWholesaleModel';
 export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: AdminWholesaleGatewayProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -610,12 +188,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const managerRoleTitle = managerRoleTab === 'support_manager' ? 'Менеджер по сопровождению' : 'Менеджер по развитию';
   const managerRoleRows = managerRoleTab === 'support_manager' ? supportManagerRows : developmentManagers;
 
-  const showStatus = (message: string) => {
+  const showStatus = useCallback((message: string) => {
     setStatus(message);
     window.setTimeout(() => {
       setStatus((current) => (current === message ? '' : current));
     }, 2000);
-  };
+  }, []);
 
   const loadManagers = async () => {
     const res = await fetch('/api/admin/wholesale/managers', { cache: 'no-store' });
@@ -638,7 +216,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     setCurrentManager(data.manager ?? null);
   };
 
-  const loadManagerPriceLists = async (managerId: number) => {
+  const loadManagerPriceLists = useCallback(async (managerId: number) => {
     const res = await fetch(`/api/admin/wholesale/managers/${managerId}/price-lists`, { cache: 'no-store' });
     if (!res.ok) {
       showStatus('Менеджер не найден');
@@ -647,7 +225,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     const data = await res.json();
     setCurrentManager(data.manager ?? null);
     setPriceLists(Array.isArray(data.priceLists) ? data.priceLists : []);
-  };
+  }, [showStatus]);
 
   const loadCatalog = async () => {
     const res = await fetch('/api/admin/wholesale/catalog', { cache: 'no-store' });
@@ -667,7 +245,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     if (canManageWholesale && screen === 'managerDetail' && managerDetailId) {
       void loadManagerPriceLists(managerDetailId);
     }
-  }, [canManageWholesale, managerDetailId, screen]);
+  }, [canManageWholesale, loadManagerPriceLists, managerDetailId, screen]);
 
   useEffect(() => {
     if (!canManageWholesale && (screen === 'admin' || screen === 'managerDetail' || screen === 'managerAnalytics')) {
@@ -733,7 +311,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     return () => {
       isActive = false;
     };
-  }, [canManageWholesale, createManagerId, editId, screen]);
+  }, [canManageWholesale, createManagerId, editId, screen, showStatus]);
 
   const validateManagerPassword = (password: string) => {
     const passwordPolicy = validatePasswordPolicy(password);
@@ -991,73 +569,15 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   };
 
   const renderPriceListCards = (emptyText: string) => (
-    <div className={styles.priceListCards}>
-      {priceLists.map((item) => (
-        <article className={styles.priceListCard} key={item.id}>
-          <div className={styles.priceListHeader}>
-            <div className={styles.priceListTitle}>
-              <strong>{item.title}</strong>
-              <span>Позиций: {item.itemCount} · Ценовых групп: {item.priceGroupCount}</span>
-            </div>
-            <div className={styles.priceListPrimaryActions}>
-              <button onClick={() => router.push(`/admin/wholesale/${item.id}/edit`)}>Изменить</button>
-              <button className={styles.secondary} onClick={() => window.open(`/price/${item.token}`, '_blank')}>Открыть</button>
-            </div>
-          </div>
-
-          <div className={styles.priceListDetails}>
-            <div className={styles.priceListField}>
-              <span>Клиент</span>
-              <strong>{item.clientName || '—'}</strong>
-            </div>
-            <div className={styles.priceListField}>
-              <span>Менеджер</span>
-              <strong>{item.managerName || '—'}</strong>
-            </div>
-            <div className={styles.priceListField}>
-              <span>Действует до</span>
-              <strong>{item.validUntil || '—'}</strong>
-            </div>
-            <div className={styles.priceListField}>
-              <span>Дата создания</span>
-              <strong>{formatDate(item.createdAt)}</strong>
-            </div>
-            <div className={styles.priceListField}>
-              <span>Последнее изменение</span>
-              <strong>{renderLastPriceChange(item)}</strong>
-            </div>
-          </div>
-
-          <div className={styles.priceListFooter}>
-            <div className={styles.priceListStatuses}>
-              <div className={styles.priceListField}>
-                <span>Статус</span>
-                <strong className={item.isActive ? styles.priceStatusActive : styles.priceStatusHidden}>
-                  {item.isActive ? 'Активен' : 'Скрыт'}
-                </strong>
-              </div>
-              <div className={styles.priceListField}>
-                <span>Этап работы</span>
-                <strong className={`${styles.priceWorkflowStatus} ${styles[`priceWorkflowStatus_${item.workflowStatus}`] ?? ''}`}>
-                  {item.workflowStatusLabel || getWholesalePriceWorkflowStatusLabel(item.workflowStatus)}
-                </strong>
-              </div>
-            </div>
-            <div className={styles.priceListActions}>
-              <button
-                className={`${styles.secondary} ${copiedToken === item.token ? styles.savedButton : ''}`}
-                type="button"
-                onClick={() => copyLink(item)}
-              >
-                {copiedToken === item.token ? 'Скопировано' : 'Скопировать ссылку'}
-              </button>
-              <button className={styles.danger} onClick={() => deletePriceList(item.id)}>Удалить</button>
-            </div>
-          </div>
-        </article>
-      ))}
-      {priceLists.length === 0 ? <p className={styles.mutedText}>{emptyText}</p> : null}
-    </div>
+    <WholesalePriceListCards
+      priceLists={priceLists}
+      copiedToken={copiedToken}
+      emptyText={emptyText}
+      onEdit={(item) => router.push(`/admin/wholesale/${item.id}/edit`)}
+      onOpen={(item) => window.open(`/price/${item.token}`, '_blank')}
+      onCopyLink={copyLink}
+      onDelete={deletePriceList}
+    />
   );
 
   if (screen === 'managerAnalytics' && managerAnalyticsId) {
@@ -1081,331 +601,30 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
         <AdminWholesaleAnalytics
           managerManagementContent={(
-          <div className={styles.wholesaleManagersAdminBlock}>
-
-        <div className={styles.userRoleTabs}>
-          {MANAGER_ROLE_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              aria-pressed={managerRoleTab === tab.value}
-              onClick={() => {
-                setManagerRoleTab(tab.value);
-                saveManagerRoleTab(tab.value);
-                setManagerCreated(false);
-                setManagerDraft(emptyManager);
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className={`${styles.userCreateCard} ${managerRoleTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
-          <div className={styles.autofillGuard} aria-hidden="true">
-            <input tabIndex={-1} autoComplete="username" />
-            <input tabIndex={-1} type="password" autoComplete="current-password" />
-          </div>
-          <label>
-            <span>Имя</span>
-            <input value={managerDraft.name} onChange={(event) => setManagerDraft({ ...managerDraft, name: event.target.value })} autoComplete="off" />
-          </label>
-          <label>
-            <span>Логин</span>
-            <input value={managerDraft.login} onChange={(event) => setManagerDraft({ ...managerDraft, login: event.target.value })} autoComplete="new-password" />
-          </label>
-          <label>
-            <span>Email</span>
-            <input value={managerDraft.email} onChange={(event) => setManagerDraft({ ...managerDraft, email: event.target.value })} autoComplete="new-password" />
-          </label>
-          <label>
-            <span>Роль</span>
-            <select value={managerRoleTab} disabled>
-              <option value={managerRoleTab}>{managerRoleTitle}</option>
-            </select>
-          </label>
-          {managerRoleTab === 'manager' && (
-            <label>
-              <span>Менеджер по сопровождению</span>
-              <select
-                value={managerDraft.supportManagerId ?? ''}
-                disabled={supportManagers.length === 0}
-                onChange={(event) => setManagerDraft({ ...managerDraft, supportManagerId: event.target.value ? Number(event.target.value) : null })}
-              >
-                <option value="">Не выбран</option>
-                {supportManagers.map((manager) => (
-                  <option key={manager.id} value={manager.id}>
-                    {manager.name || manager.login}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label className={managerRoleTab === 'manager' ? undefined : styles.userPasswordWide}>
-            <span>Пароль</span>
-            <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} autoComplete="new-password" />
-            <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
-          </label>
-          <label className={styles.userActiveToggle}>
-            <input type="checkbox" checked={managerDraft.isActive} onChange={(event) => setManagerDraft({ ...managerDraft, isActive: event.target.checked })} />
-            Активен
-          </label>
-          <button className={managerCreated ? styles.savedButton : undefined} disabled={busy} onClick={createManager}>
-            {managerCreated ? 'Сохранено' : `Добавить ${managerRoleLabel}`}
-          </button>
-        </div>
-
-        <h3>{managerRoleTab === 'manager' ? 'Менеджеры и статистика' : 'Менеджеры по сопровождению'}</h3>
-        {managerRoleTab === 'manager' ? (
-          <div className={styles.managerCards}>
-          {managerRoleRows.map((manager) => {
-            const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
-            const displayPassword = manager.displayPassword || '';
-            const availableSupportManagers = supportManagers.filter((supportManager) => supportManager.id !== manager.id);
-
-            return (
-            <article className={styles.managerCard} key={manager.id}>
-              <div className={styles.managerFields}>
-                <label>
-                  <span>Имя</span>
-                  <input value={manager.name} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, name: event.target.value } : item))} />
-                </label>
-                <label>
-                  <span>Логин</span>
-                  <input value={manager.login} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, login: event.target.value } : item))} />
-                </label>
-                <label>
-                  <span>Email</span>
-                  <input value={manager.email} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, email: event.target.value } : item))} />
-                </label>
-                <label>
-                  <span>Телефон</span>
-                  <input value={manager.phone} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, phone: event.target.value } : item))} />
-                </label>
-                <label>
-                  <span>Роль</span>
-                  <select value={manager.role} disabled>
-                    <option value="manager">Менеджер по развитию</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Менеджер по сопровождению</span>
-                  <select
-                    value={manager.supportManagerId ?? ''}
-                    disabled={manager.role !== 'manager' || availableSupportManagers.length === 0}
-                    onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, supportManagerId: event.target.value ? Number(event.target.value) : null } : item))}
-                  >
-                    <option value="">{manager.role === 'manager' ? 'Не выбран' : 'Не назначается'}</option>
-                    {availableSupportManagers.map((supportManager) => (
-                      <option key={supportManager.id} value={supportManager.id}>
-                        {supportManager.name || supportManager.login}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={styles.managerPasswordField}>
-                  <span>Пароль</span>
-                  <div className={styles.userPasswordCopyField}>
-                    <input
-                      className={styles.userPasswordCopyInput}
-                      type="text"
-                      autoComplete="new-password"
-                      spellCheck={false}
-                      readOnly
-                      placeholder="Пароль не сохранён"
-                      value={displayPassword}
-                      onClick={() => copyManagerPassword(displayPassword)}
-                    />
-                    <button
-                      className={styles.userPasswordCopyButton}
-                      type="button"
-                      disabled={!displayPassword}
-                      title="Скопировать пароль"
-                      onClick={() => copyManagerPassword(displayPassword)}
-                    >
-                      Скопировать
-                    </button>
-                  </div>
-                  {passwordIsEdited && (
-                    <>
-                      <input
-                        className={styles.userPasswordEditInput}
-                        type="password"
-                        autoComplete="new-password"
-                        placeholder="Введите новый пароль"
-                        value={managerPasswordDrafts[manager.id] || ''}
-                        onChange={(event) => setManagerPasswordDrafts((current) => ({ ...current, [manager.id]: event.target.value }))}
-                      />
-                      <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
-                    </>
-                  )}
-                </label>
-              </div>
-              <div className={styles.managerControls}>
-                <button
-                  className={styles.managerMetric}
-                  type="button"
-                  onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}`)}
-                >
-                  <span>Прайсов</span>
-                  <strong>{manager.priceListCount}</strong>
-                </button>
-                <label className={styles.managerActive}>
-                  <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
-                  <span>Активен</span>
-                </label>
-                <div className={styles.managerActions}>
-                  <button
-                    className={styles.secondary}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      setManagerPasswordEditIds((current) => ({ ...current, [manager.id]: !current[manager.id] }));
-                      setManagerPasswordDrafts((current) => {
-                        const next = { ...current };
-                        delete next[manager.id];
-                        return next;
-                      });
-                    }}
-                  >
-                    {passwordIsEdited ? 'Отменить пароль' : 'Изменить пароль'}
-                  </button>
-                  <button
-                    className={styles.secondary}
-                    type="button"
-                    onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}/analytics`)}
-                  >
-                    Аналитика
-                  </button>
-                  <button
-                    className={styles.secondary}
-                    type="button"
-                    onClick={() => router.push(`/admin/wholesale/admin/managers/${manager.id}`)}
-                  >
-                    Прайсы
-                  </button>
-                  <button
-                    className={savedManagerId === manager.id ? styles.savedButton : undefined}
-                    disabled={busy}
-                    onClick={() => saveManager(manager)}
-                  >
-                    {savedManagerId === manager.id ? 'Сохранено' : 'Сохранить'}
-                  </button>
-                  <button className={styles.danger} disabled={busy} onClick={() => deleteManager(manager.id)}>Удалить</button>
-                </div>
-              </div>
-            </article>
-            );
-          })}
-          {managerRoleRows.length === 0 ? <p className={styles.mutedText}>Менеджеров по развитию пока нет</p> : null}
-        </div>
-        ) : (
-          <div className={styles.userAccessList}>
-            {managerRoleRows.map((manager) => {
-              const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
-              const displayPassword = manager.displayPassword || '';
-
-              return (
-                <article className={styles.userAccessCard} key={manager.id}>
-                  <div className={`${styles.userAccessFields} ${managerRoleTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
-                    <label>
-                      <span>Имя</span>
-                      <input value={manager.name} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, name: event.target.value } : item))} />
-                    </label>
-                    <label>
-                      <span>Логин</span>
-                      <input value={manager.login} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, login: event.target.value } : item))} />
-                    </label>
-                    <label>
-                      <span>Email</span>
-                      <input value={manager.email} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, email: event.target.value } : item))} />
-                    </label>
-                    <label>
-                      <span>Роль</span>
-                      <select value={manager.role} disabled>
-                        <option value="support_manager">Менеджер по сопровождению</option>
-                      </select>
-                    </label>
-                    <label className={styles.userPasswordWide}>
-                      <span>Пароль</span>
-                      <div className={styles.userPasswordCopyField}>
-                        <input
-                          className={styles.userPasswordCopyInput}
-                          type="text"
-                          autoComplete="new-password"
-                          spellCheck={false}
-                          readOnly
-                          placeholder="Пароль не сохранён"
-                          value={displayPassword}
-                          onClick={() => copyManagerPassword(displayPassword)}
-                        />
-                        <button
-                          className={styles.userPasswordCopyButton}
-                          type="button"
-                          disabled={!displayPassword}
-                          title="Скопировать пароль"
-                          onClick={() => copyManagerPassword(displayPassword)}
-                        >
-                          Скопировать
-                        </button>
-                      </div>
-                      {passwordIsEdited && (
-                        <>
-                          <input
-                            className={styles.userPasswordEditInput}
-                            type="password"
-                            autoComplete="new-password"
-                            placeholder="Введите новый пароль"
-                            value={managerPasswordDrafts[manager.id] || ''}
-                            onChange={(event) => setManagerPasswordDrafts((current) => ({ ...current, [manager.id]: event.target.value }))}
-                          />
-                          <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
-                        </>
-                      )}
-                    </label>
-                  </div>
-                  <div className={styles.userAccessMeta}>
-                    <label className={styles.userActiveToggle}>
-                      <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
-                      Активен
-                    </label>
-                    <div className={styles.userAccessBadges}>
-                      <span>Менеджер по сопровождению</span>
-                      <span>Прайсов: {manager.priceListCount}</span>
-                    </div>
-                    <div className={styles.userAccessActions}>
-                      <button
-                        className={styles.secondary}
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setManagerPasswordEditIds((current) => ({ ...current, [manager.id]: !current[manager.id] }));
-                          setManagerPasswordDrafts((current) => {
-                            const next = { ...current };
-                            delete next[manager.id];
-                            return next;
-                          });
-                        }}
-                      >
-                        {passwordIsEdited ? 'Отменить пароль' : 'Изменить пароль'}
-                      </button>
-                      <button
-                        className={savedManagerId === manager.id ? styles.savedButton : undefined}
-                        disabled={busy}
-                        onClick={() => saveManager(manager)}
-                      >
-                        {savedManagerId === manager.id ? 'Сохранено' : 'Сохранить'}
-                      </button>
-                      <button className={styles.danger} disabled={busy} onClick={() => deleteManager(manager.id)}>Удалить</button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-            {managerRoleRows.length === 0 ? <p className={styles.mutedText}>Менеджеров по сопровождению пока нет</p> : null}
-          </div>
-        )}
-          </div>
+            <WholesaleManagerManagement
+              managerRoleTab={managerRoleTab}
+              managerDraft={managerDraft}
+              managerRoleTitle={managerRoleTitle}
+              managerRoleLabel={managerRoleLabel}
+              supportManagers={supportManagers}
+              managerRoleRows={managerRoleRows}
+              managerPasswordEditIds={managerPasswordEditIds}
+              managerPasswordDrafts={managerPasswordDrafts}
+              busy={busy}
+              managerCreated={managerCreated}
+              savedManagerId={savedManagerId}
+              router={router}
+              setManagerRoleTab={setManagerRoleTab}
+              setManagerCreated={setManagerCreated}
+              setManagerDraft={setManagerDraft}
+              setManagers={setManagers}
+              setManagerPasswordDrafts={setManagerPasswordDrafts}
+              setManagerPasswordEditIds={setManagerPasswordEditIds}
+              createManager={createManager}
+              copyManagerPassword={copyManagerPassword}
+              saveManager={saveManager}
+              deleteManager={deleteManager}
+            />
           )}
         />
       </section>
@@ -1468,276 +687,43 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
   if (screen === 'create' || screen === 'edit') {
     return (
-      <section className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <div>
-            <p>Индивидуальные прайсы</p>
-            <h2>{screen === 'edit' ? 'Изменить прайс' : 'Создать оптовый прайс'}</h2>
-          </div>
-          <div className={styles.topbarActions}>
-            {analyticsBackHref ? (
-              <button className={styles.secondary} type="button" onClick={() => router.push(analyticsBackHref)}>
-                Вернуться в аналитику
-              </button>
-            ) : null}
-            <button className={styles.secondary} type="button" onClick={() => router.push('/admin/wholesale/manager')}>
-              Вернуться в панель управления
-            </button>
-          </div>
-        </div>
-
-        {status ? <p className={styles.status}>{status}</p> : null}
-
-        {editorLoading ? (
-          renderWholesaleEditorSkeleton()
-        ) : (
-          <>
-        <div className={styles.wholesaleEditorGrid}>
-          <label>
-            <span>Название прайса</span>
-            <input value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} />
-          </label>
-          <label>
-            <span>Клиент / компания</span>
-            <input value={editor.clientName} onChange={(event) => setEditor({ ...editor, clientName: event.target.value })} />
-          </label>
-          <label>
-            <span>Token ссылки</span>
-            <input
-              value={editor.token}
-              disabled={screen === 'edit'}
-              onChange={(event) => setEditor({ ...editor, token: event.target.value })}
-            />
-          </label>
-          <label>
-            <span>Срок действия</span>
-            <input type="date" value={editor.validUntil} onChange={(event) => setEditor({ ...editor, validUntil: event.target.value })} />
-          </label>
-          <label>
-            <span>Статус прайса</span>
-            <select
-              value={editor.workflowStatus}
-              onChange={(event) => setEditor({ ...editor, workflowStatus: event.target.value as WholesalePriceWorkflowStatus })}
-            >
-              {WHOLESALE_PRICE_WORKFLOW_STATUSES.map((statusItem) => (
-                <option key={statusItem.value} value={statusItem.value}>
-                  {statusItem.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {canManageWholesale && (
-            <label>
-              <span>Менеджер</span>
-              <select value={editor.managerId ?? ''} onChange={(event) => setEditor({ ...editor, managerId: event.target.value ? Number(event.target.value) : null })}>
-                <option value="">Не назначен</option>
-                {developmentManagers.map((manager) => (
-                  <option key={manager.id} value={manager.id}>{manager.name}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label className={styles.wholesaleWide}>
-            <span>Комментарий</span>
-            <textarea rows={commentRows} value={editor.comment} onChange={(event) => setEditor({ ...editor, comment: event.target.value })} />
-          </label>
-          <label className={styles.checkbox}>
-            <input type="checkbox" checked={editor.isActive} onChange={(event) => setEditor({ ...editor, isActive: event.target.checked })} />
-            Активен
-          </label>
-          <label className={styles.checkbox}>
-            <input type="checkbox" checked={editor.showStock} onChange={(event) => setEditor({ ...editor, showStock: event.target.checked })} />
-            Показывать остатки в прайсе
-          </label>
-          <label className={styles.checkbox}>
-            <input type="checkbox" checked={editor.showRetailPrices} onChange={(event) => setEditor({ ...editor, showRetailPrices: event.target.checked })} />
-            Показать розничные цены
-          </label>
-        </div>
-
-        {catalog.length === 0 ? (
-          <p className={styles.mutedText}>В базе прайс-товаров пока нет позиций. Сначала нужно добавить отдельные wholesale-товары.</p>
-        ) : (
-          <>
-            <div className={styles.wholesaleCatalogTools}>
-              <label>
-                <span>Поиск товаров</span>
-                <input
-                  value={catalogQuery}
-                  onChange={(event) => setCatalogQuery(event.target.value)}
-                  placeholder="Название, бренд, категория или артикул"
-                />
-              </label>
-              <label>
-                <span>Категория</span>
-                <select value={catalogCategoryId} onChange={(event) => setCatalogCategoryId(event.target.value)}>
-                  <option value="all">Все категории</option>
-                  {catalog.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Ценовая группа</span>
-                <select value={catalogPriceGroup} onChange={(event) => setCatalogPriceGroup(event.target.value)}>
-                  <option value="all">Все группы</option>
-                  {catalogPriceGroups.map((group) => (
-                    <option key={group} value={group}>
-                      {group}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p>
-                Ценовых групп: {filteredCatalogGroups.length}. Позиции: {filteredCatalogRows.length} из {catalogRows.length}.
-              </p>
-            </div>
-
-            {filteredCatalogRows.length === 0 ? (
-              <p className={styles.mutedText}>По выбранному фильтру товары не найдены.</p>
-            ) : (
-              filteredCatalogGroups.map((group) => {
-                const isExpanded = expandedPriceGroups[group.id] === true;
-                const groupAddedCount = group.products.reduce(
-                  (sum, product) =>
-                    sum +
-                    product.variants.filter((variant) => {
-                      const key = `${product.id}:${variant.id ?? 'base'}`;
-                      return Boolean(itemByKey.get(key)?.visible);
-                    }).length,
-                  0,
-                );
-                const groupDiscountPercent =
-                  appliedGroupDiscounts[group.id] ?? getSavedGroupDiscountPercent(group, itemByKey, catalogDiscountBaseByKey);
-                const groupMaxDiscount = getGroupDiscountLimit(group);
-
-                return (
-                  <div className={styles.priceCategory} key={group.id}>
-                    <div className={styles.priceCategoryHeader}>
-                      <div className={styles.priceCategoryTitle}>
-                        <div className={styles.priceGroupImageBox}>
-                          {group.imageUrl ? <img src={group.imageUrl} alt="" /> : <span>Нет фото</span>}
-                        </div>
-                        <div>
-                          <h3>{group.title}</h3>
-                          <span className={styles.priceCategoryMeta}>
-                            <span>Товаров: всего - {group.products.length}</span>
-                            <span className={`${styles.priceCategoryAdded} ${groupAddedCount > 0 ? styles.priceCategoryAddedActive : ''}`}>
-                              добавлено - {groupAddedCount}
-                            </span>
-                            {groupDiscountPercent ? (
-                              <span className={styles.priceCategoryDiscount}>скидка - {groupDiscountPercent}%</span>
-                            ) : null}
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        className={`${styles.secondary} ${styles.priceCategoryToggle}`}
-                        type="button"
-                        onClick={() => togglePriceGroupExpanded(group.id)}
-                        aria-expanded={isExpanded}
-                      >
-                        {isExpanded ? 'Скрыть' : 'Раскрыть'}
-                      </button>
-                    </div>
-
-                    {isExpanded ? (
-                      <>
-                        <div className={styles.priceGroupTools}>
-                          <div className={styles.priceGroupDiscount}>
-                            <span>Скидка для группы, %</span>
-                            <input
-                              value={groupDiscounts[group.id] ?? ''}
-                              onChange={(event) =>
-                                setGroupDiscounts((current) => ({
-                                  ...current,
-                                  [group.id]: event.target.value,
-                                }))
-                              }
-                              inputMode="decimal"
-                              placeholder={
-                                groupMaxDiscount === null
-                                  ? 'Максимальная скидка не задана'
-                                  : `Максимальная скидка ${formatDiscountPercent(groupMaxDiscount)}`
-                              }
-                            />
-                            <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
-                              Рассчитать
-                            </button>
-                          </div>
-                          <div className={styles.priceGroupVisibility}>
-                            <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, true)}>Показать все</button>
-                            <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, false)}>Убрать все</button>
-                          </div>
-                        </div>
-                        <div className={styles.priceGroupProducts}>
-                          {group.products.map((product) => {
-                            const hasSeveralPositions = product.variants.length > 1;
-
-                            return (
-                              <article className={styles.priceProduct} key={product.id}>
-                                <div className={styles.priceProductInfo}>
-                                  <div>
-                                    <strong>{product.title}</strong>
-                                    {product.sku ? <p>Арт.: {product.sku}</p> : null}
-                                    {product.description ? <p>{product.description}</p> : null}
-                                    {hasSeveralPositions ? (
-                                      <div className={styles.actions}>
-                                        <button className={styles.secondary} onClick={() => setProductVisible(product.id, true)}>Показать все позиции</button>
-                                        <button className={styles.secondary} onClick={() => setProductVisible(product.id, false)}>Убрать все позиции</button>
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                </div>
-                                <div className={styles.variantTable}>
-                                  <div>USD</div>
-                                  <div>EUR</div>
-                                  <div>RUB</div>
-                                  <div>CNY</div>
-                                  <div>Остаток</div>
-                                  <div>Цена в прайсе</div>
-                                  <div>Показ</div>
-                                  {product.variants.map((variant) => {
-                                    const key = `${product.id}:${variant.id ?? 'base'}`;
-                                    const item = itemByKey.get(key);
-                                    return (
-                                      <div className={styles.variantRow} key={key}>
-                                        <span>{product.priceUsd || '—'}</span>
-                                        <span>{product.priceEur || '—'}</span>
-                                        <span>{product.priceRub || '—'}</span>
-                                        <span>{product.priceCny || '—'}</span>
-                                        <span>{stockLabel(product)}</span>
-                                        <input value={item?.customWholesalePrice ?? ''} disabled readOnly />
-                                        <label className={styles.checkbox}>
-                                          <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
-                                          Показывать
-                                        </label>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </article>
-                            );
-                          })}
-                        </div>
-                      </>
-                    ) : null}
-                  </div>
-                );
-              })
-            )}
-          </>
-        )}
-
-        <div className={styles.actions}>
-          <button disabled={busy} onClick={savePriceList}>Сохранить прайс</button>
-          <button className={styles.secondary} onClick={() => router.push(editorBackHref)}>Отмена</button>
-        </div>
-          </>
-        )}
-      </section>
+      <WholesalePriceEditorScreen
+        screen={screen}
+        status={status}
+        analyticsBackHref={analyticsBackHref}
+        editorBackHref={editorBackHref}
+        editorLoading={editorLoading}
+        editor={editor}
+        setEditor={setEditor}
+        commentRows={commentRows}
+        canManageWholesale={canManageWholesale}
+        developmentManagers={developmentManagers}
+        catalog={catalog}
+        catalogQuery={catalogQuery}
+        setCatalogQuery={setCatalogQuery}
+        catalogCategoryId={catalogCategoryId}
+        setCatalogCategoryId={setCatalogCategoryId}
+        catalogPriceGroup={catalogPriceGroup}
+        setCatalogPriceGroup={setCatalogPriceGroup}
+        catalogPriceGroups={catalogPriceGroups}
+        filteredCatalogGroups={filteredCatalogGroups}
+        filteredCatalogRows={filteredCatalogRows}
+        catalogRows={catalogRows}
+        expandedPriceGroups={expandedPriceGroups}
+        togglePriceGroupExpanded={togglePriceGroupExpanded}
+        groupDiscounts={groupDiscounts}
+        appliedGroupDiscounts={appliedGroupDiscounts}
+        setGroupDiscounts={setGroupDiscounts}
+        itemByKey={itemByKey}
+        catalogDiscountBaseByKey={catalogDiscountBaseByKey}
+        calculateDiscount={calculateDiscount}
+        setPriceGroupVisible={setPriceGroupVisible}
+        setProductVisible={setProductVisible}
+        updateItem={updateItem}
+        savePriceList={savePriceList}
+        busy={busy}
+        router={router}
+      />
     );
   }
 

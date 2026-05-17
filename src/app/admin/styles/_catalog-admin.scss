@@ -1,0 +1,487 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.catalogStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-10;
+  margin-bottom: $apx-16;
+
+  > div {
+    display: grid;
+    gap: $apx-8;
+    border: $apx-1 solid #e1e3ee;
+    border-left: $apx-4 solid #260b86;
+    border-radius: $apx-8;
+    background: #fff;
+    padding: $apx-14;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-28;
+    line-height: 1;
+  }
+}
+
+.catalogImportCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-220, $apx-320) auto;
+  gap: $apx-12;
+  align-items: end;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #f8f9fc;
+  padding: $apx-14;
+  margin-bottom: $apx-18;
+
+  h3 {
+    margin: 0 0 $apx-6;
+    font-size: $apx-18;
+  }
+
+  p,
+  span {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-13;
+    line-height: 1.4;
+  }
+
+  button {
+    min-width: $apx-160;
+  }
+}
+
+.catalogCategoriesCard {
+  display: grid;
+  gap: $apx-14;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+  margin-bottom: $apx-18;
+}
+
+.catalogCategoryIconList {
+  display: grid;
+  gap: $apx-10;
+}
+
+.catalogCategoryIconRow {
+  display: grid;
+  grid-template-columns: minmax($apx-220, $apx-320) minmax(0, 1fr) auto;
+  gap: $apx-14;
+  align-items: center;
+  border: $apx-1 solid #e7e9f2;
+  border-radius: $apx-10;
+  background: #f9fafc;
+  padding: $apx-12;
+
+  .newsPreview {
+    gap: $apx-8;
+
+    img {
+      max-height: $apx-96;
+      object-fit: contain;
+      background: #eef0f5;
+    }
+
+    > span {
+      min-height: $apx-96;
+    }
+  }
+}
+
+.catalogCategoryIconUpload {
+  display: grid;
+  gap: $apx-6;
+  align-content: start;
+}
+
+.catalogCategoryIconSize {
+  width: fit-content;
+  border-radius: $apx-999;
+  background: #f0eefb;
+  color: #3f3d74;
+  padding: $apx-4 $apx-8;
+  font-size: $apx-12;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.catalogCategoryIconInfo {
+  display: grid;
+  gap: $apx-6;
+  min-width: 0;
+
+  strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1.2;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+
+  code {
+    width: fit-content;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    border-radius: $apx-999;
+    background: #f0eefb;
+    color: #260b86;
+    font-size: $apx-12;
+    font-weight: 800;
+    padding: $apx-5 $apx-8;
+  }
+}
+
+.catalogCategoryIconActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $apx-8;
+
+  button {
+    min-width: $apx-140;
+  }
+}
+
+.stockLogCard {
+  display: grid;
+  gap: $apx-14;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+  margin: 0 0 $apx-18;
+}
+
+.stockLogHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $apx-14;
+
+  h3 {
+    margin: 0 0 $apx-4;
+    font-size: $apx-18;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-13;
+    line-height: 1.4;
+  }
+}
+
+.stockLogCount {
+  display: inline-flex;
+  min-width: $apx-34;
+  height: $apx-28;
+  align-items: center;
+  justify-content: center;
+  border-radius: $apx-999;
+  background: #f0eefb;
+  color: #260b86;
+  font-size: $apx-13;
+  font-weight: 800;
+}
+
+.stockLogHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: $apx-8;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.stockLogToggle {
+  border: 0;
+  border-radius: $apx-8;
+  background: #ececf4;
+  color: #260b86;
+  cursor: pointer;
+  font-size: $apx-12;
+  font-weight: 800;
+  padding: $apx-7 $apx-10;
+
+  &:hover {
+    background: #e1e3ee;
+  }
+}
+
+.stockLogList {
+  display: grid;
+  gap: $apx-10;
+}
+
+.stockLogItem {
+  display: grid;
+  gap: $apx-12;
+  border: $apx-1 solid #e7e9f2;
+  border-radius: $apx-10;
+  background: #f9fafc;
+  padding: $apx-12;
+}
+
+.stockLogMain {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $apx-12;
+}
+
+.stockLogFile {
+  display: block;
+  color: #242633;
+  font-size: $apx-15;
+  line-height: 1.25;
+}
+
+.stockLogMeta {
+  display: block;
+  margin-top: $apx-4;
+  color: #6f7182;
+  font-size: $apx-12;
+}
+
+.stockLogStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: $apx-86;
+  border-radius: $apx-999;
+  padding: $apx-6 $apx-10;
+  font-size: $apx-12;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.stockLogStatusSuccess {
+  background: #e8f7ef;
+  color: #11733b;
+}
+
+.stockLogStatusPartial {
+  background: #fff4d8;
+  color: #946000;
+}
+
+.stockLogStatusFailed {
+  background: #ffe9e7;
+  color: #b3261e;
+}
+
+.stockLogMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax($apx-110, 1fr));
+  gap: $apx-8;
+}
+
+.stockLogMetric {
+  display: grid;
+  gap: $apx-4;
+  border: $apx-1 solid #e7e9f2;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: $apx-10;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-11;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-18;
+    line-height: 1;
+  }
+}
+
+.stockLogErrors {
+  border-top: $apx-1 solid #e7e9f2;
+  padding-top: $apx-10;
+  color: #6f7182;
+  font-size: $apx-13;
+
+  summary {
+    cursor: pointer;
+    color: #260b86;
+    font-weight: 800;
+  }
+
+  ul {
+    margin: $apx-8 0 0;
+    padding-left: $apx-18;
+  }
+}
+
+.catalogProductForm {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+  gap: $apx-10;
+  align-items: end;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  padding: $apx-14;
+  margin-bottom: $apx-18;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  input,
+  select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  label:first-child {
+    grid-column: span 2;
+  }
+}
+
+.catalogToolbar {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $apx-10;
+  margin-bottom: $apx-10;
+}
+
+.catalogFilters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax($apx-170, 1fr));
+  gap: $apx-10;
+}
+
+.catalogSearch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: $apx-10;
+  align-items: center;
+}
+
+.catalogProductList {
+  display: grid;
+  gap: $apx-12;
+  min-width: 0;
+}
+
+.catalogSkeletonList {
+  display: grid;
+  gap: $apx-12;
+  min-width: 0;
+
+  .catalogProductMeta {
+    align-items: stretch;
+  }
+
+  .skeletonInputLine {
+    width: 100%;
+  }
+}
+
+.catalogProductCard {
+  display: grid;
+  gap: $apx-12;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+  box-sizing: border-box;
+}
+
+.catalogProductFields {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: $apx-10;
+  min-width: 0;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  label:nth-child(1) {
+    grid-column: span 6;
+  }
+
+  label:nth-child(2),
+  label:nth-child(3) {
+    grid-column: span 3;
+  }
+
+  label:nth-child(4),
+  label:nth-child(5),
+  label:nth-child(6),
+  label:nth-child(7),
+  label:nth-child(8),
+  label:nth-child(9),
+  label:nth-child(10),
+  label:nth-child(11),
+  label:nth-child(12),
+  label:nth-child(13) {
+    grid-column: span 3;
+  }
+}
+
+.catalogProductMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-12;
+  align-items: center;
+  padding-top: $apx-10;
+  border-top: $apx-1 solid #edf0f6;
+  min-width: 0;
+
+  .userAccessBadges {
+    flex: 1 1 $apx-420;
+    min-width: 0;
+  }
+
+  .userAccessActions {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+}

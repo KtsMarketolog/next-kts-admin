@@ -3,7 +3,14 @@
 @use "./styles/forms";
 @use "./styles/order";
 @use "./styles/cards";
+@use "./styles/wholesale-cards";
+@use "./styles/users";
+@use "./styles/catalog-admin";
+@use "./styles/wholesale-editor";
 @use "./styles/analytics";
+@use "./styles/analytics-events";
+@use "./styles/analytics-export";
+@use "./styles/analytics-lists";
 
 @media (max-width: 1024px) {
   .page {

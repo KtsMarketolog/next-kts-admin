@@ -1,0 +1,65 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.analyticsReportTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-520, $apx-650);
+  gap: $apx-16;
+  align-items: start;
+}
+
+.analyticsExportPanel {
+  display: grid;
+  gap: $apx-8;
+  justify-self: end;
+  width: min(100%, $apx-650);
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f8ff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.05);
+  padding: $apx-12;
+}
+
+.analyticsExportHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $apx-10;
+
+  strong {
+    color: #242633;
+    font-size: $apx-14;
+  }
+
+  span {
+    color: #77798a;
+    font-size: $apx-12;
+    font-weight: 700;
+  }
+}
+
+.analyticsExportGrid,
+.analyticsExportMail {
+  display: grid;
+  gap: $apx-8;
+}
+
+.analyticsExportGrid {
+  grid-template-columns: minmax($apx-190, 1fr) minmax($apx-105, 0.45fr) auto;
+}
+
+.analyticsExportMail {
+  grid-template-columns: minmax($apx-220, 1fr) auto;
+}
+
+.analyticsExportStatus {
+  margin: 0;
+  color: #4b4e61;
+  font-size: $apx-12;
+  font-weight: 700;
+}
+
+.analyticsExportSuccess {
+  background: #15803d !important;
+  color: #fff !important;
+  box-shadow: 0 $apx-10 $apx-22 rgba(21, 128, 61, 0.18);
+}
