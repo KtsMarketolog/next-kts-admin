@@ -3,7 +3,7 @@
 .tabCaret { display: none; }
 .open {} 
 
-$cat-line: #E42B34;
+$cat-line: #A9AFC0;
 $sub-line: #474464;
 $card-border: #ECECF4;
 $bg-soft: #fff;
@@ -342,7 +342,7 @@ $text-accent: #4D46C2;
   content: '';
   position: absolute; left: $apx-13; top: $apx-6; bottom: $apx-4;
   width: $apx-2;
-  background: var(--cat-line, #E42B34);
+  background: var(--cat-line, #A9AFC0);
   border-radius: $apx-2;
 
 }
