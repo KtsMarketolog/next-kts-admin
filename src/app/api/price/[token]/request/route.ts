@@ -22,6 +22,7 @@ const MAX_QUANTITY = 999;
 const REQUEST_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const REQUEST_SESSION_LIMIT = 3;
 const REQUEST_GLOBAL_LIMIT = 100;
+const DEFAULT_PRICE_REQUEST_RECIPIENT = 'ktsmarketolog@yandex.ru';
 
 function getHeaderIp(headersList: Headers) {
   const forwardedFor = headersList.get('x-forwarded-for')?.split(',')[0]?.trim();
@@ -87,6 +88,29 @@ function requireEnv(name: string) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not configured`);
   return value;
+}
+
+function splitRecipients(value: string) {
+  return value
+    .split(/[;,]/)
+    .map((recipient) => recipient.trim())
+    .filter(Boolean);
+}
+
+function priceRequestRecipients(managerEmail: string) {
+  const recipients = [
+    ...splitRecipients(process.env.SMTP_TO || DEFAULT_PRICE_REQUEST_RECIPIENT),
+    DEFAULT_PRICE_REQUEST_RECIPIENT,
+    managerEmail.trim(),
+  ].filter(Boolean);
+  const seen = new Set<string>();
+
+  return recipients.filter((recipient) => {
+    const key = recipient.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function POST(request: Request, context: Context) {
@@ -182,7 +206,7 @@ export async function POST(request: Request, context: Context) {
       },
     });
     const mailFrom = process.env.SMTP_FROM || `"KTS" <${requireEnv('SMTP_USER')}>`;
-    const mailTo = process.env.SMTP_TO || 'ktsmarketolog@yandex.ru';
+    const mailTo = priceRequestRecipients(priceList.managerEmail).join(', ');
     const subject = `Заявка из индивидуального прайса: ${priceList.title || 'Без названия'}`;
     const itemRows = rows
       .map(
