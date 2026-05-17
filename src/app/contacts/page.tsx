@@ -406,16 +406,15 @@ export default function ContactsPage() {
 
               <div className={styles.contacts}>
 
-                <div className={styles.contactPrimary}>
-                  <p>{phone}</p>
-                  <p><a href={`mailto:${email}`}>{email}</a></p>
-                </div>
+                <p className={styles.contactPhone}>{phone}</p>
 
-                <div className={styles.contactAddress}>
-                  {addressLines.map((line) => (
-                    <p key={line}>{line}</p>
-                  ))}
-                </div>
+                {addressLines[0] && <p className={styles.contactRegion}>{addressLines[0]}</p>}
+
+                <p className={styles.contactEmail}><a href={`mailto:${email}`}>{email}</a></p>
+
+                {addressLines.slice(1).map((line) => (
+                  <p className={styles.contactAddressLine} key={line}>{line}</p>
+                ))}
 
               </div>
 

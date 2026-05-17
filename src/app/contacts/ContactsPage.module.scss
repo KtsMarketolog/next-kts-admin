@@ -245,22 +245,10 @@
 
   .contacts{
     display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    column-gap: $apx-67;
+    grid-template-columns: max-content max-content;
+    column-gap: $apx-42;
     row-gap: $apx-23;
     margin-bottom: $apx-48;
-
-    .contactPrimary,
-    .contactAddress {
-      display: flex;
-      flex-direction: column;
-      gap: $apx-23;
-    }
-
-    .contactAddress {
-      justify-self: end;
-      max-width: $apx-286;
-    }
 
     a{
       text-decoration: none;
@@ -282,6 +270,10 @@
       line-height: 1;
       letter-spacing: 0;
       margin: 0;
+    }
+
+    .contactAddressLine {
+      white-space: nowrap;
     }
   }
 
@@ -809,19 +801,11 @@
 
     .contacts{
       display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
-      flex-wrap: nowrap;
+      justify-content: space-between;
+      flex-wrap: wrap;
       column-gap: $apx-l-67;
-      row-gap: $apx-l-12;
+      row-gap: $apx-l-23;
       margin-bottom: $apx-l-48;
-
-      .contactPrimary,
-      .contactAddress {
-        display: flex;
-        flex-direction: column;
-        gap: $apx-l-12;
-      }
 
       p{
         font-size: $apx-l-14;
@@ -829,6 +813,10 @@
         line-height: 1;
         letter-spacing: 0;
         margin: 0;
+      }
+
+      .contactAddressLine {
+        white-space: normal;
       }
     }
 
@@ -1269,19 +1257,11 @@
 
     .contacts{
       display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
-      flex-wrap: nowrap;
+      justify-content: space-between;
+      flex-wrap: wrap;
       column-gap: 0;
-      row-gap: $apx-m-10;
+      row-gap: 0;
       margin-bottom: $apx-m-23;
-
-      .contactPrimary,
-      .contactAddress {
-        display: flex;
-        flex-direction: column;
-        gap: $apx-m-10;
-      }
 
       p{
         font-size: $apx-m-14;
@@ -1289,6 +1269,10 @@
         line-height: 1.4;
         letter-spacing: 0;
         margin: 0;
+      }
+
+      .contactAddressLine {
+        white-space: normal;
       }
     }
 
