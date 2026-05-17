@@ -242,8 +242,7 @@ function isStockHeaderRow(row: unknown[]) {
   const aliases = (values: string[]) => values.map(normalizeHeader);
   return (
     aliases(HEADER_ARTICLE_ALIASES).some((header) => normalized.includes(header)) &&
-    aliases(HEADER_STOCK_ALIASES).some((header) => normalized.includes(header)) &&
-    aliases(HEADER_UNIT_ALIASES).some((header) => normalized.includes(header))
+    aliases(HEADER_STOCK_ALIASES).some((header) => normalized.includes(header))
   );
 }
 
