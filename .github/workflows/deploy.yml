@@ -132,6 +132,15 @@ jobs:
           ln -sfn "$RELEASE" "$CURRENT"
 
           (pm2 delete kts-next-admin >/dev/null 2>&1 || true)
+
+          PORT_PIDS="$(ss -ltnp 'sport = :3000' 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u || true)"
+          if [ -n "$PORT_PIDS" ]; then
+            echo "Stopping stale listeners on port 3000: $PORT_PIDS"
+            kill $PORT_PIDS 2>/dev/null || true
+            sleep 2
+            kill -9 $PORT_PIDS 2>/dev/null || true
+          fi
+
           pm2 start "$CURRENT/ecosystem.config.cjs" --update-env
           pm2 save
 
