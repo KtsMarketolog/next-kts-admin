@@ -20,6 +20,18 @@ const socialIcons = [
 
 ];
 
+const footerHrefMap: Record<string, string> = {
+
+  'Главная': '/#top',
+  'Каталог': '/catalog',
+  'О нас': '/about',
+  'Преимущества': '/#benefits',
+  'Контакты': '/contacts',
+  'Сотрудничество': '/#cooperation',
+  'Политика конфиденциальности': '/#contacts',
+
+};
+
 export const Footer = () => {
 
   const router = useRouter();
@@ -56,7 +68,20 @@ export const Footer = () => {
 
   const handleFooterClick = (item: string) => (e: React.MouseEvent) => {
 
+    const targetHref = footerHrefMap[item];
+    const footerAnchor = idMap[item];
+    const directRoute = targetHref === '/about' || targetHref === '/contacts' || targetHref === '/catalog';
+
+    if (!footerAnchor && !directRoute) {
+      return;
+    }
+
     e.preventDefault();
+
+    if (directRoute) {
+      router.push(targetHref);
+      return;
+    }
 
     if (item === 'О нас') {
 
@@ -134,7 +159,7 @@ export const Footer = () => {
 
                     <li key = { item }>
 
-                      <a href="#" onClick = { handleFooterClick(item) }>{ item }</a>
+                      <a href={footerHrefMap[item] ?? '/'} onClick = { handleFooterClick(item) }>{ item }</a>
 
                     </li>
 
@@ -154,7 +179,7 @@ export const Footer = () => {
 
                     <li key = { item }>
 
-                      <a href="#" onClick = { handleFooterClick(item) }>{ item }</a>
+                      <a href={footerHrefMap[item] ?? '/'} onClick = { handleFooterClick(item) }>{ item }</a>
 
                     </li>
 

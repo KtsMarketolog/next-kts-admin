@@ -40,5 +40,12 @@
   },
   "overrides": {
     "postcss": "8.5.10"
-  }
+  },
+  "browserslist": [
+    "Chrome >= 111",
+    "Edge >= 111",
+    "Firefox >= 111",
+    "Safari >= 16.4",
+    "iOS >= 16.4"
+  ]
 }

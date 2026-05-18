@@ -43,8 +43,8 @@ export const fallbackSlides: Slide[] = [
     tabletBg: "/img/banner/slide-tablet5.jpg",
     mobileBg: "/img/banner/slide-mobile5.jpg",
     className: styles.slideFour,
-    title: <></>,
-    subtitle: <></>,
+    title: null,
+    subtitle: null,
     buttons: [],
     popup: {
       ariaLabel: "Информация",
@@ -99,8 +99,8 @@ export const fallbackSlides: Slide[] = [
     tabletBg: "/img/banner/slide-tablet7.jpg",
     mobileBg: "/img/banner/slide-mobile7.jpg",
     className: styles.slideFour,
-    title: <></>,
-    subtitle: <></>,
+    title: null,
+    subtitle: null,
     buttons: [],
      href: "/klimatika",
   },
@@ -111,8 +111,8 @@ export const fallbackSlides: Slide[] = [
     tabletBg: "/img/banner/slide-tablet4.jpg",
     mobileBg: "/img/banner/slide-mobile4.jpg",
     className: styles.slideFour,
-    title: <></>,
-    subtitle: <></>,
+    title: null,
+    subtitle: null,
     buttons: [],
     actions: [
       // пример:
@@ -185,8 +185,8 @@ export const fallbackSlides: Slide[] = [
     tabletBg: "/img/banner/slide-tablet6.jpg",
     mobileBg: "/img/banner/slide-mobile6.jpg",
     className: styles.slideFour,
-    title: <></>,
-    subtitle: <></>,
+    title: null,
+    subtitle: null,
     buttons: [],
     popup: {
       ariaLabel: "Информация",
@@ -308,8 +308,8 @@ export function mapManagedSlide(slide: {
   return {
     ...(fallback ?? {
       className: styles.slideFour,
-      title: <></>,
-      subtitle: <></>,
+      title: null,
+      subtitle: null,
       buttons: [],
     }),
     id: String(slide.id),

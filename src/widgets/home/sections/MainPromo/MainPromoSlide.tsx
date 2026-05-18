@@ -10,8 +10,8 @@ import type { Slide, SlideAction } from "./MainPromo.model";
 const heroImageSizes = "(max-width: 450px) 100vw, (max-width: 1024px) 100vw, 82vw";
 
 const heroImageDimensions = {
-  desktop: { width: 1920, height: 900 },
-  tablet: { width: 1024, height: 486 },
+  desktop: { width: 1567, height: 723 },
+  tablet: { width: 988, height: 723 },
   mobile: { width: 800, height: 848 },
 };
 
