@@ -1,3 +1,5 @@
+import { revalidatePath } from 'next/cache';
+
 import { createBrandCategory, getBrandPortfolio } from '@/shared/lib/db';
 import { requireAdmin } from '@/shared/lib/adminAuth';
 
@@ -30,5 +32,6 @@ export async function POST(request: Request) {
     isActive: Boolean(body.isActive ?? true),
   });
 
+  revalidatePath('/');
   return Response.json({ id });
 }

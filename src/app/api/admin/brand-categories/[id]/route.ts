@@ -1,3 +1,5 @@
+import { revalidatePath } from 'next/cache';
+
 import { deleteBrandCategory, updateBrandCategory } from '@/shared/lib/db';
 import { requireAdmin } from '@/shared/lib/adminAuth';
 
@@ -24,6 +26,7 @@ export async function PUT(request: Request, context: Context) {
     isActive: typeof body.isActive === 'boolean' ? body.isActive : undefined,
   });
 
+  revalidatePath('/');
   return Response.json({ ok: true });
 }
 
@@ -36,5 +39,6 @@ export async function DELETE(_request: Request, context: Context) {
   if (!Number.isFinite(numericId)) return Response.json({ error: 'Invalid id' }, { status: 400 });
 
   await deleteBrandCategory(numericId);
+  revalidatePath('/');
   return Response.json({ ok: true });
 }

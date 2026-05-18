@@ -1,3 +1,5 @@
+import { revalidatePath } from 'next/cache';
+
 import { deleteHeroSlide, updateHeroSlide } from '@/shared/lib/db';
 import { requireAdmin } from '@/shared/lib/adminAuth';
 
@@ -29,6 +31,7 @@ export async function PUT(request: Request, { params }: Params) {
     isActive: typeof body.isActive === 'boolean' ? body.isActive : undefined,
   });
 
+  revalidatePath('/');
   return Response.json({ ok: true });
 }
 
@@ -43,5 +46,6 @@ export async function DELETE(_request: Request, { params }: Params) {
   }
 
   await deleteHeroSlide(slideId);
+  revalidatePath('/');
   return Response.json({ ok: true });
 }

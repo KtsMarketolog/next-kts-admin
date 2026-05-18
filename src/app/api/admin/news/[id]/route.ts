@@ -1,3 +1,5 @@
+import { revalidatePath } from 'next/cache';
+
 import { deleteNewsItem, updateNewsItem } from '@/shared/lib/db';
 import { requireAdmin } from '@/shared/lib/adminAuth';
 
@@ -30,6 +32,7 @@ export async function PUT(request: Request, context: Context) {
     isActive: Boolean(body.isActive),
   });
 
+  revalidatePath('/');
   return Response.json({ ok: true });
 }
 
@@ -44,5 +47,6 @@ export async function DELETE(_request: Request, context: Context) {
   }
 
   await deleteNewsItem(numericId);
+  revalidatePath('/');
   return Response.json({ ok: true });
 }

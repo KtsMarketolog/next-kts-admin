@@ -6,29 +6,16 @@ import { ArrowCircleRightIcon } from '@/shared/icons/ArrowCircleRightIcon';
 import Button from "@/shared/ui/Button/Button";
 import { DEFAULT_NEWS, type NewsItem } from "@/entities/site/model/defaultNews";
 
-export const NewsBlock = () => {
+type NewsBlockProps = {
+  initialNews?: NewsItem[];
+};
+
+export const NewsBlock = ({ initialNews = DEFAULT_NEWS }: NewsBlockProps) => {
 
   const gridRef = useRef<HTMLDivElement | null>( null );
   const [ scrolled, setScrolled ] = useState( false );
   const [ scrollDirection, setScrollDirection ] = useState<"right" | "left">("right");
-  const [ news, setNews ] = useState<NewsItem[]>(DEFAULT_NEWS);
-
-  useEffect(() => {
-    let alive = true;
-
-    fetch('/api/home-news', { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (alive && Array.isArray(data?.news)) {
-          setNews(data.news);
-        }
-      })
-      .catch(() => undefined);
-
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const news = Array.isArray(initialNews) ? initialNews : DEFAULT_NEWS;
 
   useEffect(() => {
 
@@ -181,7 +168,7 @@ export const NewsBlock = () => {
 
             <div className = { styles.cardImage }>
 
-              <img src = { item.imageUrl } alt = { item.title } />
+              <img src = { item.imageUrl } alt = { item.title } loading="lazy" decoding="async" />
 
             </div>
 

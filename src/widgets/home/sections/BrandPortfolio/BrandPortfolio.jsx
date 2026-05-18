@@ -1,31 +1,32 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Container from '@/shared/ui/Container';
 import styles from './BrandPortfolio.module.scss';
 import { ArrowCircleRightIcon } from '@/shared/icons/ArrowCircleRightIcon';
 
-export const BrandPortfolio = () => {
-  const [categories, setCategories] = useState([]);
-  const [brands, setBrands] = useState([]);
-  const [activeTab, setActiveTab] = useState('');
+/**
+ * @param {{
+ *   initialCategories?: Array<{ id: number; key: string; title: string; sortOrder?: number; isActive?: boolean }>;
+ *   initialBrands?: Array<{ id: number; categoryId: number; name: string; imageUrl: string; iconKey?: string; sortOrder?: number; isActive?: boolean }>;
+ * }} props
+ */
+export const BrandPortfolio = ({ initialCategories = [], initialBrands = [] }) => {
+  const categories = useMemo(
+    () => (Array.isArray(initialCategories) ? initialCategories : []),
+    [initialCategories],
+  );
+  const brands = useMemo(
+    () => (Array.isArray(initialBrands) ? initialBrands : []),
+    [initialBrands],
+  );
+  const [activeTab, setActiveTab] = useState(() => categories[0]?.key || '');
   const [scrollDirection, setScrollDirection] = useState('right');
   const tabsRef = useRef(null);
 
   useEffect(() => {
-    fetch('/api/brand-portfolio', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((data) => {
-        const nextCategories = Array.isArray(data.categories) ? data.categories : [];
-        setCategories(nextCategories);
-        setBrands(Array.isArray(data.brands) ? data.brands : []);
-        setActiveTab((current) => current || nextCategories[0]?.key || '');
-      })
-      .catch(() => {
-        setCategories([]);
-        setBrands([]);
-      });
-  }, []);
+    setActiveTab((current) => current || categories[0]?.key || '');
+  }, [categories]);
 
   const scrollTabs = () => {
     if (!tabsRef.current) return;
@@ -109,7 +110,7 @@ export const BrandPortfolio = () => {
           {activeBrands.length > 0 ? (
             activeBrands.map((brand) => (
               <div key={brand.id} className={styles.card}>
-                {brand.imageUrl ? <img src={brand.imageUrl} alt={brand.name} /> : brand.name}
+                {brand.imageUrl ? <img src={brand.imageUrl} alt={brand.name} loading="lazy" decoding="async" /> : brand.name}
               </div>
             ))
           ) : (

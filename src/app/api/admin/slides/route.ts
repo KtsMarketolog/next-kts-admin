@@ -1,3 +1,5 @@
+import { revalidatePath } from 'next/cache';
+
 import { createHeroSlide, getHeroSlides } from '@/shared/lib/db';
 import { requireAdmin } from '@/shared/lib/adminAuth';
 
@@ -34,5 +36,6 @@ export async function POST(request: Request) {
     isActive: Boolean(body.isActive ?? true),
   });
 
+  revalidatePath('/');
   return Response.json({ id });
 }

@@ -12,16 +12,29 @@ import React, {
 import styles from "./MainPromo.module.scss";
 import Container from '@/shared/ui/Container';
 import { useRouter } from "next/navigation";
+import type { HeroSlide } from "@/entities/site/model/defaultSlides";
 import { fallbackSlides, mapManagedSlide, type Slide, type SlideAction, type Viewport } from "./MainPromo.model";
 import { MainPromoPagination } from "./MainPromoPagination";
 import { MainPromoPopup } from "./MainPromoPopup";
 import { MainPromoSlide } from "./MainPromoSlide";
 
 
-export const MainPromo = () => {
+type MainPromoProps = {
+  initialSlides?: HeroSlide[];
+};
+
+function prepareSlides(initialSlides?: HeroSlide[]) {
+  const managedSlides = Array.isArray(initialSlides)
+    ? initialSlides.filter((slide) => typeof slide.imageUrl === "string" && slide.imageUrl)
+    : [];
+
+  return managedSlides.length ? managedSlides.map((slide) => mapManagedSlide(slide)) : fallbackSlides;
+}
+
+export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
-  const [slides, setSlides] = useState<Slide[]>(fallbackSlides);
+  const slides = useMemo<Slide[]>(() => prepareSlides(initialSlides), [initialSlides]);
   const router = useRouter();
 
   // единый стейт брейкпоинтов — и для extraSvg, и для actions
@@ -68,39 +81,6 @@ export const MainPromo = () => {
       pageIndexRef.current = nextIndex;
     }, AUTO_DELAY);
   }, [slides.length]);
-
-  useEffect(() => {
-    let alive = true;
-
-    fetch('/api/home-slides', { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!alive || !Array.isArray(data?.slides) || data.slides.length === 0) return;
-
-        setSlides(
-          data.slides
-            .filter((slide: { imageUrl?: unknown }) => typeof slide.imageUrl === 'string' && slide.imageUrl)
-            .map((slide: {
-              id: number | string;
-              imageUrl: string;
-              tabletImageUrl?: string | null;
-              mobileImageUrl?: string | null;
-              popupImageUrl?: string | null;
-              popupTabletImageUrl?: string | null;
-              popupMobileImageUrl?: string | null;
-              popupTitle?: string | null;
-              popupText?: string | null;
-              linkUrl?: string | null;
-              title?: string;
-            }) => mapManagedSlide(slide)),
-        );
-      })
-      .catch(() => undefined);
-
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   const pauseAndRestart = useCallback(
     (delay = 3000) => {

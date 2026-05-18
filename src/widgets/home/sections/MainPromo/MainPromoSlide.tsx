@@ -45,6 +45,7 @@ export function MainPromoSlide({
             alt=""
             className={styles.bgImage}
             loading={isFirstSlide ? "eager" : "lazy"}
+            fetchPriority={isFirstSlide ? "high" : undefined}
             decoding={isFirstSlide ? "auto" : "async"}
           />
         </picture>
