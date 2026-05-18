@@ -135,13 +135,40 @@ jobs:
 
           PORT_PIDS="$(ss -ltnp 'sport = :3000' 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u || true)"
           if [ -n "$PORT_PIDS" ]; then
-            echo "Stopping stale listeners on port 3000: $PORT_PIDS"
-            kill $PORT_PIDS 2>/dev/null || true
-            sleep 2
-            kill -9 $PORT_PIDS 2>/dev/null || true
+            STALE_PIDS="$(
+              for pid in $PORT_PIDS; do
+                current="$pid"
+                for _ in 1 2 3 4; do
+                  [ -n "$current" ] || break
+                  [ "$current" = "1" ] && break
+
+                  cwd="$(readlink "/proc/$current/cwd" 2>/dev/null || true)"
+                  args="$(ps -o args= -p "$current" 2>/dev/null || true)"
+                  if [ "$cwd" = "$BASE" ] || [[ "$cwd" == "$BASE/"* ]] || echo "$args" | grep -Eq 'next start|npm run start|server\.js'; then
+                    echo "$current"
+                  fi
+
+                  current="$(ps -o ppid= -p "$current" 2>/dev/null | tr -d ' ' || true)"
+                done
+              done | sort -u
+            )"
+
+            if [ -n "$STALE_PIDS" ]; then
+              echo "Stopping stale listeners on port 3000: $STALE_PIDS"
+              kill $STALE_PIDS 2>/dev/null || true
+              sleep 2
+              kill -9 $STALE_PIDS 2>/dev/null || true
+            fi
           fi
 
           pm2 start "$CURRENT/ecosystem.config.cjs" --update-env
+          sleep 2
+          APP_PID="$(pm2 pid kts-next-admin || true)"
+          if [ -z "$APP_PID" ] || [ "$APP_PID" = "0" ]; then
+            pm2 logs kts-next-admin --lines 80 --nostream || true
+            exit 1
+          fi
+          curl -fsS "http://127.0.0.1:3000/" >/dev/null
           pm2 save
 
           cd "$RELEASES"
