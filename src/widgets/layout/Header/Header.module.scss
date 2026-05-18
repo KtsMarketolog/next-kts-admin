@@ -16,6 +16,17 @@
 
 }
 
+.container {
+
+  max-width: $apx-1600;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: $apx-18;
+  padding-right: $apx-18;
+  width: 100%;
+
+}
+
 .header.atTop {
 
   background-color: transparent;
@@ -198,7 +209,55 @@
 
 }
 
+.phoneLink {
+
+  color: inherit;
+  text-decoration: none;
+
+}
+
+.phoneLink .phoneButton {
+
+  cursor: pointer;
+
+}
+
+.phoneButton {
+
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 500;
+  font-size: $apx-18;
+  line-height: 1;
+  letter-spacing: 0;
+  color: #66628E;
+  background-color: #fff;
+  border: $apx-2 solid #A49AD0;
+  border-radius: $apx-10;
+  padding: $apx-14 $apx-76;
+  cursor: default;
+  display: inline-block;
+  white-space: nowrap;
+  transition: background .2s, color .2s, border .2s;
+
+}
+
+.phoneButton:hover {
+
+  background-color: #8D81C4;
+  border-color: #fff;
+  color: #fff;
+
+}
+
 @media (max-width: 1024px) {
+
+  .container {
+
+    max-width: $apx-l-988;
+    padding-left: $apx-l-2;
+    padding-right: $apx-l-2;
+
+  }
 
   .header {
 
@@ -295,9 +354,27 @@
 
   }
 
+  .phoneButton {
+
+    font-size: $apx-l-18;
+    border: $apx-l-2 solid #A49AD0;
+    border-radius: $apx-l-10;
+    padding: $apx-l-14 $apx-l-76;
+    background-color: transparent;
+
+  }
+
 }
 
 @media (max-width: 450px) {
+
+  .container {
+
+    max-width: $apx-m-400;
+    padding-left: $apx-m-8;
+    padding-right: $apx-m-8;
+
+  }
 
   .header{
 
@@ -376,11 +453,21 @@
     margin-right: $apx-m-20;
     margin-left: $apx-m-20;
 
-    button{
+    .phoneButton{
 
       font-size: $apx-m-16 !important;
 
     }
+
+  }
+
+  .phoneButton {
+
+    font-size: $apx-m-12;
+    font-weight: 600;
+    border: $apx-m-2 solid #A49AD0;
+    border-radius: $apx-m-49;
+    padding: $apx-m-8 $apx-m-18;
 
   }
 

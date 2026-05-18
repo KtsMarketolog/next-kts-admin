@@ -1,7 +1,11 @@
 import styles from './layout.module.scss';
-import CatalogSidebar from '@/widgets/catalog/Sidebar/CatalogSidebar';
+import dynamic from 'next/dynamic';
 import { ReactNode } from 'react';
 import Container from '@/shared/ui/Container';
+
+const CatalogSidebar = dynamic(() => import('@/widgets/catalog/Sidebar/CatalogSidebar'), {
+  loading: () => <div className={styles.sidebarFallback} aria-hidden="true" />,
+});
 
 export default function CatalogLayout({ children }: { children: ReactNode }) {
   return (

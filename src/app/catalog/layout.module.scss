@@ -15,6 +15,12 @@
 
 }
 
+.sidebarFallback {
+
+  min-height: $apx-260;
+
+}
+
 .content {
 
   min-height: $apx-400;
@@ -36,6 +42,12 @@
   .sidebar {
 
     border-radius: $apx-l-8;
+
+  }
+
+  .sidebarFallback {
+
+    min-height: $apx-l-260;
 
   }
 
@@ -62,6 +74,12 @@
 
     border-radius: $apx-m-8;
     order: -1;
+
+  }
+
+  .sidebarFallback {
+
+    min-height: $apx-m-80;
 
   }
 

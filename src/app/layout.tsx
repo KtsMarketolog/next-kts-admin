@@ -7,7 +7,7 @@ import Header from "@/widgets/layout/Header/Header";
 import Loader from "@/widgets/layout/Loader";
 import { ConditionalFooter } from "@/widgets/layout/ConditionalFooter";
 import ScrollToHashWrapper from "@/shared/lib/ScrollToHashWrapper";
-import CookieBanner from '@/shared/ui/CookieBanner/CookieBanner';
+import CookieBannerLoader from '@/shared/ui/CookieBanner/CookieBannerLoader';
 
 const montserrat = Montserrat({
 
@@ -60,7 +60,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               
               {children}
 
-              <CookieBanner />
+              <CookieBannerLoader />
 
             </ScrollToHashWrapper>
 

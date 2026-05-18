@@ -1,8 +1,12 @@
 // src/components/layout/ConditionalFooter.tsx
 'use client';
 
+import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
-import { Footer } from '../layout/Footer/Footer';
+
+const Footer = dynamic(() => import('../layout/Footer/Footer').then((mod) => mod.Footer), {
+  ssr: false,
+});
 
 export const ConditionalFooter = () => {
 

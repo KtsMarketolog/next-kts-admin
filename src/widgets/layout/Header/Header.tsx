@@ -1,14 +1,17 @@
 "use client";
 
-import BurgerMenu from "../BurgerMenu/BurgerMenu";
-import Button from '@/shared/ui/Button/Button';
-import Container from '@/shared/ui/Container';
 import styles from "./Header.module.scss";
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { phoneHref } from "@/shared/lib/phone";
 import { useSiteSettings } from "@/shared/lib/useSiteSettings";
+
+const BurgerMenu = dynamic(() => import("../BurgerMenu/BurgerMenu"), {
+  loading: () => null,
+  ssr: false,
+});
 
 const menuItems = ["Главная", "Каталог", "Климатика", "О нас", "Контакты", "Новости", "Акции"];
 
@@ -115,7 +118,7 @@ const Header = () => {
 
     <header className={`${styles.header} ${atTop ? styles.transparent : ""}`}>
 
-      <Container>
+      <div className={styles.container}>
 
         <div className={styles.headerInner}>
 
@@ -306,16 +309,16 @@ const Header = () => {
 
             {isMobile ? (
 
-              <a href={phoneHref(phone)}>
+              <a href={phoneHref(phone)} className={styles.phoneLink}>
                 
 
-                <Button variant="primary">{phone}</Button>
+                <span className={styles.phoneButton}>{phone}</span>
 
               </a>
 
             ) : (
 
-              <Button variant="primary">{phone}</Button>
+              <span className={styles.phoneButton}>{phone}</span>
 
             )}
 
@@ -331,7 +334,7 @@ const Header = () => {
           />
         )}
 
-      </Container>
+      </div>
 
     </header>
 
