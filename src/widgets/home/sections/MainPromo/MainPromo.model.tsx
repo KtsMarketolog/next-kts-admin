@@ -276,8 +276,6 @@ export const fallbackSlides: Slide[] = [
     tabletBg: "/img/banner/slide-tablet2.png",
     mobileBg: "/img/banner/slide-mobile2.png",
     className: styles.slideTwo,
-    // extraSvg: "/img/banner/slide2-extra.svg",
-    // extraSvgTablet: "/img/banner/slide2-extra-tablet.svg",
     // title: <></>,
     // subtitle: <></>,
     title: <>Telegram канал КТС</>,
