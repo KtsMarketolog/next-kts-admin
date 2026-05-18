@@ -9,7 +9,6 @@ import {
 import { notFound } from 'next/navigation';
 
 export const revalidate = 60;
-export const dynamic = 'force-dynamic';
 
 type Params = { brand: string };
 

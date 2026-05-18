@@ -1,4 +1,5 @@
 import { updateCatalogAdminCategoryIcon } from '@/entities/catalog/api/catalogAdmin';
+import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
@@ -35,6 +36,7 @@ export async function PUT(request: Request, context: Context) {
 
   try {
     const category = await updateCatalogAdminCategoryIcon(categoryId, iconUrl);
+    revalidatePublicCatalog();
     await recordSecurityEvent({
       eventType: 'catalog_category_icon_updated',
       actorType: 'admin',

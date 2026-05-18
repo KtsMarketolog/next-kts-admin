@@ -1,5 +1,6 @@
 import { parseCatalogExcel } from '@/entities/catalog/api/catalogExcel';
 import { replaceCatalogFromRows } from '@/entities/catalog/api/catalogAdmin';
+import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const rows = parseCatalogExcel(buffer);
     const result = await replaceCatalogFromRows(rows);
+    revalidatePublicCatalog();
 
     await recordSecurityEvent({
       eventType: 'catalog_imported',

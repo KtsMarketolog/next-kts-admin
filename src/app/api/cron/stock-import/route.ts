@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 
+import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { importStockFromEmail } from '@/entities/catalog/api/stockImport';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getClientIp } from '@/shared/lib/rateLimit';
@@ -42,6 +43,9 @@ export async function POST(request: Request) {
 
   try {
     const result = await importStockFromEmail();
+    if ((result.result?.updatedRows ?? 0) > 0) {
+      revalidatePublicCatalog();
+    }
     await recordSecurityEvent({
       eventType: 'stock_import_check_email',
       actorType: 'system',

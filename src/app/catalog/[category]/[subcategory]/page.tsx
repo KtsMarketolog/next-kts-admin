@@ -2,7 +2,6 @@ import ProductGrid from '@/widgets/catalog/ProductGrid';
 import { fetchProductsBySubcategory, fetchSubcategoryMeta } from '@/entities/catalog/api/catalogApi';
 
 export const revalidate = 60;
-export const dynamic = 'force-dynamic';
 
 type Params = { category: string; subcategory: string };
 

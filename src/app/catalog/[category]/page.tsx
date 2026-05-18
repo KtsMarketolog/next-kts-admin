@@ -3,7 +3,6 @@ import SubcategoryGrid from '@/widgets/catalog/SubcategoryGrid';
 import { fetchPromoProducts, fetchSubcategories } from '@/entities/catalog/api/catalogApi';
 
 export const revalidate = 60;
-export const dynamic = 'force-dynamic';
 
 type Params = { category: string };
 

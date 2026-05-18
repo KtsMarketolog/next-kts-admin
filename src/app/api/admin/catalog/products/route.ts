@@ -5,6 +5,7 @@ import {
   getCatalogAdminStats,
   type CatalogProductInput,
 } from '@/entities/catalog/api/catalogAdmin';
+import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   try {
     const product = await createCatalogAdminProduct(productInputFromBody(body as Record<string, unknown>));
+    revalidatePublicCatalog();
     await recordSecurityEvent({
       eventType: 'catalog_product_created',
       actorType: 'admin',

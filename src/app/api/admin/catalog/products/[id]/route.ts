@@ -3,6 +3,7 @@ import {
   updateCatalogAdminProduct,
   type CatalogProductInput,
 } from '@/entities/catalog/api/catalogAdmin';
+import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
@@ -58,6 +59,7 @@ export async function PUT(request: Request, context: Context) {
   const body = await request.json().catch(() => ({}));
   try {
     const product = await updateCatalogAdminProduct(productId, productInputFromBody(body as Record<string, unknown>));
+    revalidatePublicCatalog();
     await recordSecurityEvent({
       eventType: 'catalog_product_updated',
       actorType: 'admin',
@@ -90,6 +92,7 @@ export async function DELETE(request: Request, context: Context) {
 
   try {
     await deleteCatalogAdminProduct(productId);
+    revalidatePublicCatalog();
     await recordSecurityEvent({
       eventType: 'catalog_product_deleted',
       actorType: 'admin',

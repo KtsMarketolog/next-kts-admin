@@ -5,7 +5,6 @@ import {
 } from '@/entities/catalog/api/catalogApi';
 
 export const revalidate = 60;
-export const dynamic = 'force-dynamic';
 
 type Params = { category: string; subcategory: string; brand: string };
 

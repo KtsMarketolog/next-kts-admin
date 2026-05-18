@@ -1,4 +1,5 @@
 import { importStockFromEmail } from '@/entities/catalog/api/stockImport';
+import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
@@ -17,6 +18,9 @@ export async function POST(request: Request) {
 
   try {
     const result = await importStockFromEmail();
+    if ((result.result?.updatedRows ?? 0) > 0) {
+      revalidatePublicCatalog();
+    }
     await recordSecurityEvent({
       eventType: 'stock_import_check_email',
       actorType: 'admin',
