@@ -12,7 +12,7 @@ const heroImageSizes = "(max-width: 450px) 100vw, (max-width: 1024px) 100vw, 82v
 const heroImageDimensions = {
   desktop: { width: 1920, height: 900 },
   tablet: { width: 1024, height: 486 },
-  mobile: { width: 450, height: 445 },
+  mobile: { width: 800, height: 848 },
 };
 
 type MainPromoSlideProps = {

@@ -143,6 +143,12 @@
     border: none;
     border-radius: $apx-l-15;
     cursor: pointer;
+    padding: 0;
+    min-width: $apx-l-50;
+    min-height: $apx-l-50;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
     img{
       
@@ -194,6 +200,11 @@
   }
 
   .tgIcon{
+    min-width: $apx-m-58;
+    min-height: $apx-m-58;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
     img{
 
@@ -274,6 +285,12 @@
     border: none;
     border-radius: $apx-m-15;
     cursor: pointer;
+    padding: 0;
+    min-width: $apx-m-50;
+    min-height: $apx-m-50;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
     img{
       

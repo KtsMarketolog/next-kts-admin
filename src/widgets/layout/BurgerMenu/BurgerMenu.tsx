@@ -1,5 +1,4 @@
 import styles from './BurgerMenu.module.scss';
-import { useEffect, useRef  } from "react";
 import { useRouter, usePathname } from 'next/navigation'; // ← добавить
 
 
@@ -121,11 +120,18 @@ export default function BurgerMenu({ open, onClose, menuItems, activeIndex = -1,
 
           <button type="button" className={styles.logo} onClick={handleLogoClick}>
             
-            <img src="/img/logo.svg" alt="Логотип" />
+            <img src="/img/logo.svg" alt="Логотип" width={208} height={65} />
 
           </button>
 
-          <img src="/img/exit.svg" alt="Закрыть" className = { styles.closeBtn } onClick = { onClose } />
+          <button
+            type="button"
+            className={styles.closeBtn}
+            onClick={onClose}
+            aria-label="Закрыть меню"
+          >
+            <img src="/img/exit.svg" alt="" width={50} height={50} />
+          </button>
 
         </div>
 
@@ -156,11 +162,12 @@ export default function BurgerMenu({ open, onClose, menuItems, activeIndex = -1,
               href = "https://t.me/your_channel" 
               target = "_blank" 
               rel = "noopener noreferrer"
+              aria-label = "Telegram"
               className = { styles.tgIcon }
 
             >
 
-              <img src="/img/social/tg.svg" alt="Telegram" />
+              <img src="/img/social/tg.svg" alt="" width={58} height={58} />
 
             </a>
              

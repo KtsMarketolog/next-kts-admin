@@ -149,7 +149,7 @@ const Header = () => {
 
           >
 
-            <img src="/img/logo.svg" alt="Логотип" />
+            <img src="/img/logo.svg" alt="Логотип" width={208} height={65} />
 
           </Link>
 
@@ -320,13 +320,13 @@ const Header = () => {
 
         </div>
 
-        <BurgerMenu
-
-          open={burgerOpen}
-          onClose={() => setBurgerOpen(false)}
-          menuItems={menuItems}
-
-        />
+        {burgerOpen && (
+          <BurgerMenu
+            open={burgerOpen}
+            onClose={() => setBurgerOpen(false)}
+            menuItems={menuItems}
+          />
+        )}
 
       </Container>
 

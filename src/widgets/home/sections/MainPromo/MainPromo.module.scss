@@ -55,8 +55,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  // object-fit: cover;
-   object-fit:fill;
+  object-fit: cover;
   object-position: $apx-1 center;
   z-index: 0;
 }
@@ -353,20 +352,20 @@
 
   .scrollWrapper {
     gap: $apx-m-16;
-    min-height: $apx-m-445;
+    min-height: $apx-m-408;
   }
 
   .visual {
     border-radius: $apx-m-30;
-    min-height: $apx-m-445;
+    min-height: $apx-m-408;
     padding: $apx-m-40 $apx-m-20 $apx-m-30;
   }
 
   /* единое поведение картинок на мобилке для ВСЕХ */
   .bgImage {
-    object-fit:fill;
+    object-fit: cover;
     width: 100%;
-    height: $apx-m-445;
+    height: $apx-m-408;
   }
 
   .contentCardBase {

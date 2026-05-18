@@ -34,13 +34,15 @@ export const GroupCompanies = async () => {
         <div className={styles.list}>
           {companies.map((company, index) => {
             const href = normalizeCompanyHref(company.linkUrl);
+            const label = `Компания ${index + 1}`;
             const logo = (
               <Image
                 className={styles.logo}
                 src={company.imageUrl}
-                alt=""
+                alt={label}
                 width={220}
                 height={110}
+                quality={60}
                 sizes="(max-width: 450px) 140px, (max-width: 1024px) 170px, 220px"
               />
             );
@@ -53,12 +55,11 @@ export const GroupCompanies = async () => {
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label={`Компания ${index + 1}`}
                   >
                     {logo}
                   </a>
                 ) : (
-                  <div className={styles.disabled} aria-label={`Компания ${index + 1}`}>
+                  <div className={styles.disabled}>
                     {logo}
                   </div>
                 )}
