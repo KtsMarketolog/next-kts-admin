@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
   },
   images: {
     formats: ["image/avif", "image/webp"],
+    qualities: [45, 65, 75],
     remotePatterns: [
       { protocol: "https", hostname: "api.kts-impex.ru", pathname: "/uploads/**" },
       { protocol: "http", hostname: "api.kts-impex.ru", pathname: "/uploads/**" },

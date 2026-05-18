@@ -8,6 +8,7 @@ import styles from "./MainPromo.module.scss";
 import type { Slide, SlideAction } from "./MainPromo.model";
 
 const heroImageSizes = "(max-width: 450px) 100vw, (max-width: 1024px) 100vw, 82vw";
+const heroImageQuality = 65;
 
 const heroImageDimensions = {
   desktop: { width: 1567, height: 723 },
@@ -46,7 +47,7 @@ export function MainPromoSlide({
     src: slide.bg,
     alt: "",
     sizes: heroImageSizes,
-    quality: 75,
+    quality: heroImageQuality,
     loading,
     decoding,
     width: heroImageDimensions.desktop.width,
@@ -58,7 +59,7 @@ export function MainPromoSlide({
     src: slide.tabletBg || slide.bg,
     alt: "",
     sizes: heroImageSizes,
-    quality: 75,
+    quality: heroImageQuality,
     loading,
     decoding,
     width: heroImageDimensions.tablet.width,
@@ -70,7 +71,7 @@ export function MainPromoSlide({
     src: slide.mobileBg || slide.tabletBg || slide.bg,
     alt: "",
     sizes: heroImageSizes,
-    quality: 75,
+    quality: heroImageQuality,
     loading,
     decoding,
     width: heroImageDimensions.mobile.width,
