@@ -4,7 +4,8 @@ import { Montserrat } from "next/font/google";
 import "./globals.css";
 import "./fix-ios-zoom.scss";
 import Header from "@/widgets/layout/Header/Header";
-import Loader from "@/widgets/layout/Loader";
+// TEMP: Loader is disabled while measuring Lighthouse without the preload overlay.
+// import Loader from "@/widgets/layout/Loader";
 import { ConditionalFooter } from "@/widgets/layout/ConditionalFooter";
 import ScrollToHashWrapper from "@/shared/lib/ScrollToHashWrapper";
 import CookieBannerLoader from '@/shared/ui/CookieBanner/CookieBannerLoader';
@@ -39,8 +40,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 
     <html lang="ru" data-scroll-behavior="smooth">
 
-      <body className={`${montserrat.variable} preload-bg`}>
+      <body className={montserrat.variable}>
 
+        {/* TEMP: Loader is disabled while measuring Lighthouse without the preload overlay.
         <div id="ssr-loader" className="loaderRoot" role="progressbar" aria-busy="true" aria-label="Загрузка">
 
           <div className="posterLayer" aria-hidden="true" />
@@ -48,23 +50,22 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <div className="blurPulse" />
 
         </div>
+        */}
 
-        {/* Весь контент — в обертке, которую скрываем до hydrated */}
+        {/* TEMP: app content is visible immediately while Loader is disabled. */}
         <div id="app-content">
 
           <Header />
 
-          <Loader>
+          {/* TEMP: Loader wrapper is disabled to avoid hiding content until window.load. */}
 
-            <ScrollToHashWrapper>
+          <ScrollToHashWrapper>
               
-              {children}
+            {children}
 
-              <CookieBannerLoader />
+            <CookieBannerLoader />
 
-            </ScrollToHashWrapper>
-
-          </Loader>
+          </ScrollToHashWrapper>
 
           <ConditionalFooter />
 
