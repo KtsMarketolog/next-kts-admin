@@ -1,5 +1,3 @@
-'use client';
-
 import Button from '@/shared/ui/Button/Button';
 import Container from '@/shared/ui/Container';
 import styles from './PartnersBanner.module.scss';

@@ -1,5 +1,3 @@
-'use client';
-
 import Container from '@/shared/ui/Container/index';
 import styles from './TechSolutions.module.scss';
 

@@ -1,5 +1,3 @@
-'use client';
-
 import styles from '@/app/admin/admin.module.scss';
 
 type AdminStatusToastProps = {

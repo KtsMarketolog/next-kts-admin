@@ -27,6 +27,9 @@
   .titleArrow{
 
     display: none;
+    border: 0;
+    padding: 0;
+    background: transparent;
 
   }
 
@@ -94,6 +97,10 @@
     grid-template-columns: repeat(auto-fill, minmax($apx-239, 1fr));
     gap: $apx-25;
     
+  }
+
+  .grid[hidden] {
+    display: none;
   }
 
   .card {
@@ -290,6 +297,9 @@
       transform-origin: center center;
 
       cursor: pointer;
+      border: 0;
+      padding: 0;
+      background: transparent;
       transition: transform 0.3s ease;
 
       &.rotated {

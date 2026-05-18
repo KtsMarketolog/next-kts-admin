@@ -1,6 +1,4 @@
-"use client";
-
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment } from "react";
 import Container from '@/shared/ui/Container';
 import { ArrowHorizontal } from '@/shared/icons/ArrowHorizontal';
 import { ArrowVertical } from '@/shared/icons/ArrowVertical';
@@ -35,62 +33,12 @@ const FACTS: FactConfig[] = [
 ];
 
 export const AboutKTS = () => {
-  const sectionRef = useRef<HTMLDivElement | null>(null);
-  const revealedRef = useRef(false);
-  const [visible, setVisible] = useState(true);
-
-  useEffect(() => {
-    const node = sectionRef.current;
-    if (!node) {
-      return;
-    }
-
-    const prefersReducedMotion =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-
-    if (prefersReducedMotion || !("IntersectionObserver" in window)) {
-      setVisible(true);
-      return;
-    }
-
-    const rect = node.getBoundingClientRect();
-    const onScreen = rect.top < window.innerHeight && rect.bottom > 0;
-
-    if (!onScreen) {
-      setVisible(false);
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.target !== node) {
-            return;
-          }
-
-          if (entry.isIntersecting) {
-            revealedRef.current = true;
-            setVisible(true);
-            observer.unobserve(entry.target);
-          } else if (!revealedRef.current) {
-            setVisible(false);
-          }
-        });
-      },
-      { threshold: 0.2 }
-    );
-
-    observer.observe(node);
-
-    return () => observer.disconnect();
-  }, []);
-
   return (
-    <section className={styles.aboutKts} ref={sectionRef}>
+    <section className={styles.aboutKts}>
       <Container>
         <h2>КТС – ЭТО</h2>
         <div className={styles.grid}>
-          <div className={`${styles.bigCard} ${visible ? styles.visible : ""}`}>
+          <div className={styles.bigCard}>
             <div className={styles.title}>
               Всё для <br />
               холода -
@@ -103,12 +51,10 @@ export const AboutKTS = () => {
           </div>
 
           <div className={styles.facts}>
-            {FACTS.map(({ icon: Icon, number, description }, index) => (
+            {FACTS.map(({ icon: Icon, number, description }) => (
               <div
                 key={number}
-                className={`${styles.fact} ${
-                  visible ? styles[`factVisible${index + 1}`] : ""
-                }`}
+                className={styles.fact}
               >
                 <Icon className={styles.icon} aria-hidden />
                 <span className={styles.number}>{number}</span>

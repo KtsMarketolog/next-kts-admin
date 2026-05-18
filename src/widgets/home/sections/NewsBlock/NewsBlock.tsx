@@ -1,202 +1,64 @@
-"use client";
+import { Fragment } from "react";
 
-import React, { useRef, useEffect, useState } from "react";
-import styles from "./NewsBlock.module.scss";
-import { ArrowCircleRightIcon } from '@/shared/icons/ArrowCircleRightIcon';
-import Button from "@/shared/ui/Button/Button";
 import { DEFAULT_NEWS, type NewsItem } from "@/entities/site/model/defaultNews";
+import Button from "@/shared/ui/Button/Button";
+import { HorizontalScrollGrid } from "@/widgets/home/sections/shared/HorizontalScrollGrid";
+import styles from "./NewsBlock.module.scss";
 
 type NewsBlockProps = {
   initialNews?: NewsItem[];
 };
 
 export const NewsBlock = ({ initialNews = DEFAULT_NEWS }: NewsBlockProps) => {
-
-  const gridRef = useRef<HTMLDivElement | null>( null );
-  const [ scrolled, setScrolled ] = useState( false );
-  const [ scrollDirection, setScrollDirection ] = useState<"right" | "left">("right");
   const news = Array.isArray(initialNews) ? initialNews : DEFAULT_NEWS;
 
-  useEffect(() => {
-
-    const grid = gridRef.current;
-
-    if (!grid) return;
-
-    const onScroll = () => {
-
-      setScrolled(grid.scrollLeft > 0);
-
-      if (grid.scrollLeft <= 2) {
-
-        setScrollDirection("right");
-
-      } else if (
-
-        grid.scrollLeft + grid.clientWidth >=
-        grid.scrollWidth - 2
-
-      ) {
-
-        setScrollDirection("left");
-
-      }
-
-    };
-
-    grid.addEventListener("scroll", onScroll);
-
-    onScroll();
-
-    return () => grid.removeEventListener("scroll", onScroll);
-
-  }, []);
-
-  const scrollGrid = () => {
-
-    if (!gridRef.current) return;
-
-    const container = gridRef.current;
-    const scrollAmount = 300;
-
-    if (scrollDirection === "right") {
-      
-      const distanceToEnd = container.scrollWidth - container.clientWidth - container.scrollLeft;
-      const amount = distanceToEnd < scrollAmount ? distanceToEnd : scrollAmount;
-
-      container.scrollBy({ left: amount, behavior: "smooth" });
-
-      setTimeout(() => {
-
-        if (
-
-          container.scrollLeft + container.clientWidth >=
-          container.scrollWidth - 2
-
-        ) {
-
-          setScrollDirection("left");
-
-        }
-
-      }, 400);
-      
-    } else {
-
-      const distanceToStart = container.scrollLeft;
-      const amount = distanceToStart < scrollAmount ? distanceToStart : scrollAmount;
-
-      container.scrollBy({ left: -amount, behavior: "smooth" });
-
-      setTimeout(() => {
-
-        if (container.scrollLeft <= 2) {
-
-          setScrollDirection("right");
-
-        }
-
-      }, 400);
-
-    }
-
-  };
-
   return (
-
-    <section className = { styles.newsBlock } id="news">
-
-      <div className = { styles.title }>
-
-        НОВОСТИ
-
-        <div
-
-          className = { styles.titleArrow }
-          onClick = { scrollGrid }
-          style = { {
-            transform:
-              scrollDirection === "left"
-                ? "rotate(180deg)"
-                : "rotate(0deg)",
-            transition: "transform 0.3s ease",
-          } }
-
-        >
-
-          <ArrowCircleRightIcon circleFill = "#C32133"/>
-
-        </div>
-
-      </div>
-
-      <div
-
-        className = { `${styles.grid} ${scrolled ? styles.scrolled : ''}` }
-        ref = { gridRef }
-
+    <section className={styles.newsBlock} id="news">
+      <HorizontalScrollGrid
+        title="НОВОСТИ"
+        titleClassName={styles.title}
+        titleArrowClassName={styles.titleArrow}
+        gridClassName={styles.grid}
+        scrolledClassName={styles.scrolled}
+        arrowCircleFill="#C32133"
+        arrowLabel="Прокрутить новости"
       >
-
-        { news.map((item, idx) => (
+        {news.map((item, idx) => (
           <a
-
             key={idx}
             href={item.linkUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className = { styles.card }
-
+            className={styles.card}
           >
+            <span className={styles.date}>{item.date}</span>
 
-            <span className = { styles.date }>{ item.date }</span>
-
-            {/* <div className = { styles.cardTitle }>{ item.title }</div> */}
             <div className={styles.cardTitle}>
-
-              { item.title.split('\n').map((part, i) => (
-
-                <React.Fragment key = { i }>
-
-                  { i > 0 && <br /> }
-                  { part }
-
-                </React.Fragment>
-
-              )) }
-
+              {item.title.split('\n').map((part, i) => (
+                <Fragment key={i}>
+                  {i > 0 && <br />}
+                  {part}
+                </Fragment>
+              ))}
             </div>
 
-            <div className = { styles.cardImage }>
-
-              <img src = { item.imageUrl } alt = { item.title } loading="lazy" decoding="async" />
-
+            <div className={styles.cardImage}>
+              <img src={item.imageUrl} alt={item.title} loading="lazy" decoding="async" />
             </div>
-
           </a>
+        ))}
+      </HorizontalScrollGrid>
 
-        )) }
-
-      </div>
-
-      <div className = { styles.moreButton }>
-
+      <div className={styles.moreButton}>
         <a
-
-          href = "https://t.me/your_channel" 
-          target = "_blank"
-          rel = "noopener noreferrer"
-          className = { styles.moreLink }
-
+          href="https://t.me/your_channel"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={styles.moreLink}
         >
-
-          <Button variant = "primary" >Перейти в telegram канал {'>'}</Button>
-
+          <Button variant="primary">Перейти в telegram канал {'>'}</Button>
         </a>
-
       </div>
-
     </section>
-
   );
-
 };

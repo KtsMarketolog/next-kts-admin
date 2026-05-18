@@ -25,6 +25,9 @@
   .titleArrow{
 
     display: none;
+    border: 0;
+    padding: 0;
+    background: transparent;
 
   }
 
@@ -151,6 +154,9 @@
       transform-origin: center center;
 
       cursor: pointer;
+      border: 0;
+      padding: 0;
+      background: transparent;
       transition: transform 0.3s ease;
 
       &.rotated {
@@ -306,6 +312,9 @@
       transform-origin: center center;
 
       cursor: pointer;
+      border: 0;
+      padding: 0;
+      background: transparent;
       transition: transform 0.3s ease;
 
       &.rotated {

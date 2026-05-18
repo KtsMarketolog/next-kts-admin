@@ -1,5 +1,3 @@
-'use client';
-
 export type SidebarData = {
   categories: {
     slug: string;
