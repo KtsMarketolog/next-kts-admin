@@ -169,18 +169,6 @@
 }
 
 /* Плавная задержка */
-.fact:nth-child(1) {
-  animation-delay: 0.3s;
-}
-
-.fact:nth-child(2) {
-  animation-delay: 0.6s;
-}
-
-.fact:nth-child(3) {
-  animation-delay: 0.9s;
-}
-
 .aboutKts.revealed {
   .bigCard {
     animation: aboutSlideInLeft 0.8s ease forwards;
@@ -188,6 +176,18 @@
 
   .fact {
     animation: aboutSlideInRight 0.8s ease forwards;
+  }
+
+  .fact:nth-child(1) {
+    animation-delay: 0.25s;
+  }
+
+  .fact:nth-child(2) {
+    animation-delay: 0.5s;
+  }
+
+  .fact:nth-child(3) {
+    animation-delay: 0.75s;
   }
 }
 
