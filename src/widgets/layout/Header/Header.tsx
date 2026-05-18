@@ -1,7 +1,7 @@
 "use client";
 
 import styles from "./Header.module.scss";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -17,9 +17,7 @@ const menuItems = ["Главная", "Каталог", "Климатика", "О
 
 const Header = () => {
 
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const [burgerOpen, setBurgerOpen] = useState(false);
-  const [atTop, setAtTop] = useState(true);
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
   const { phone } = useSiteSettings();
@@ -48,56 +46,6 @@ const Header = () => {
 
   const activeItem = getActiveItem();
 
-  useEffect(() => {
-
-  const menuEl = menuRef.current;
-
-  if (!menuEl) return;
-
-  const updateIndicator = () => {
-
-    const activeLink = menuEl.querySelector(`a.${styles.active}`) as HTMLElement | null;
-
-    if (!activeLink) {
-
-      menuEl.style.setProperty("--active-left", "0px");
-      menuEl.style.setProperty("--active-width", "0px");
-
-      return;
-
-    }
-
-    const menuRect = menuEl.getBoundingClientRect();
-    const linkRect = activeLink.getBoundingClientRect();
-
-    const left = linkRect.left - menuRect.left;
-    const width = linkRect.width;
-
-    menuEl.style.setProperty("--active-left", `${left}px`);
-    menuEl.style.setProperty("--active-width", `${width}px`);
-
-  };
-
-  requestAnimationFrame(updateIndicator);
-
-  window.addEventListener("resize", updateIndicator);
-
-  return () => window.removeEventListener("resize", updateIndicator);
-
-  }, [pathname]);
-
-  useEffect(() => {
-
-    const onScroll = () => setAtTop(window.scrollY <= 2);
-
-    if (window.scrollY > 2) setAtTop(false);
-
-    window.addEventListener("scroll", onScroll);
-
-    return () => window.removeEventListener("scroll", onScroll);
-
-  }, []);
-
   const scrollToId = (id: string) => {
 
     const el = document.querySelector(id);
@@ -116,7 +64,7 @@ const Header = () => {
 
   return (
 
-    <header className={`${styles.header} ${atTop ? styles.transparent : ""}`}>
+    <header className={styles.header}>
 
       <div className={styles.container}>
 
@@ -156,7 +104,7 @@ const Header = () => {
 
           </Link>
 
-          <nav className={styles.menu} ref={menuRef}>
+          <nav className={styles.menu}>
 
             {menuItems.map((item) => {
 

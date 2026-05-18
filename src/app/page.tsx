@@ -1,5 +1,7 @@
 // src/app/page.tsx
+import { preload } from "react-dom";
 import { DEFAULT_HERO_SLIDES } from "@/entities/site/model/defaultSlides";
+import type { HeroSlide } from "@/entities/site/model/defaultSlides";
 import { DEFAULT_NEWS } from "@/entities/site/model/defaultNews";
 import { GroupCompanies } from "@/widgets/home/sections/GroupCompanies/GroupCompanies";
 import { AboutKTS } from "@/widgets/home/sections/AboutKTS/AboutKTS";
@@ -12,6 +14,7 @@ import { BrandPortfolio } from '@/widgets/home/sections/BrandPortfolio/BrandPort
 import { NewsBlock } from "@/widgets/home/sections/NewsBlock/NewsBlock";
 import HashCleanup from "@/shared/lib/HashCleanup";
 import { getBrandPortfolio, getHeroSlides, getNewsItems } from "@/shared/lib/db";
+import { getHeroSlideImagePropsSet } from "@/widgets/home/sections/MainPromo/MainPromo.images";
 
 export const revalidate = 600;
 
@@ -42,12 +45,39 @@ async function getHomeBrandPortfolio() {
   }
 }
 
+function preloadHomeHero(slide: HeroSlide | undefined) {
+  if (!slide) return;
+
+  const { desktop, tablet, mobile } = getHeroSlideImagePropsSet(slide);
+
+  const preloadImage = (
+    image: typeof desktop,
+    media: string,
+  ) => {
+    if (!image.src) return;
+
+    preload(String(image.src), {
+      as: "image",
+      fetchPriority: "high",
+      imageSrcSet: typeof image.srcSet === "string" ? image.srcSet : undefined,
+      imageSizes: typeof image.sizes === "string" ? image.sizes : undefined,
+      media,
+    });
+  };
+
+  preloadImage(mobile, "(max-width: 450px)");
+  preloadImage(tablet, "(min-width: 451px) and (max-width: 1024px)");
+  preloadImage(desktop, "(min-width: 1025px)");
+}
+
 export default async function Home() {
   const [slides, news, brandPortfolio] = await Promise.all([
     getHomeSlides(),
     getHomeNews(),
     getHomeBrandPortfolio(),
   ]);
+
+  preloadHomeHero(slides[0]);
 
   return (
 

@@ -1,20 +1,11 @@
 "use client";
 
 import React from "react";
-import { getImageProps } from "next/image";
 
 import Button from "@/shared/ui/Button/Button";
 import styles from "./MainPromo.module.scss";
 import type { Slide, SlideAction } from "./MainPromo.model";
-
-const heroImageSizes = "(max-width: 450px) 100vw, (max-width: 1024px) 100vw, 82vw";
-const heroImageQuality = 65;
-
-const heroImageDimensions = {
-  desktop: { width: 1567, height: 723 },
-  tablet: { width: 988, height: 723 },
-  mobile: { width: 800, height: 848 },
-};
+import { getHeroImagePropsSet } from "./MainPromo.images";
 
 type MainPromoSlideProps = {
   slide: Slide;
@@ -43,41 +34,14 @@ export function MainPromoSlide({
   const loading = isFirstSlide ? "eager" : "lazy";
   const decoding = isFirstSlide ? "auto" : "async";
 
-  const desktopImage = getImageProps({
-    src: slide.bg,
-    alt: "",
-    sizes: heroImageSizes,
-    quality: heroImageQuality,
+  const { desktop: desktopImage, tablet: tabletImage, mobile: mobileImage } = getHeroImagePropsSet({
+    desktop: slide.bg,
+    tablet: slide.tabletBg,
+    mobile: slide.mobileBg,
     loading,
     decoding,
-    width: heroImageDimensions.desktop.width,
-    height: heroImageDimensions.desktop.height,
     ...(isFirstSlide ? { fetchPriority: "high" as const } : {}),
-  }).props;
-
-  const tabletImage = getImageProps({
-    src: slide.tabletBg || slide.bg,
-    alt: "",
-    sizes: heroImageSizes,
-    quality: heroImageQuality,
-    loading,
-    decoding,
-    width: heroImageDimensions.tablet.width,
-    height: heroImageDimensions.tablet.height,
-    ...(isFirstSlide ? { fetchPriority: "high" as const } : {}),
-  }).props;
-
-  const mobileImage = getImageProps({
-    src: slide.mobileBg || slide.tabletBg || slide.bg,
-    alt: "",
-    sizes: heroImageSizes,
-    quality: heroImageQuality,
-    loading,
-    decoding,
-    width: heroImageDimensions.mobile.width,
-    height: heroImageDimensions.mobile.height,
-    ...(isFirstSlide ? { fetchPriority: "high" as const } : {}),
-  }).props;
+  });
 
   return (
     <div className={styles.slide}>

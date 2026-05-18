@@ -7,12 +7,11 @@
   min-height: $apx-114;
   margin-top: $apx-20;
   margin-bottom: $apx-63;
-  background-color: transparent;
   z-index: 10;
 
   background-color: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(10px);
-  transition: background-color 0.3s ease, transform 0.3s ease;
+  transition: background-color 0.3s ease;
 
 }
 
@@ -25,19 +24,6 @@
   padding-right: $apx-18;
   width: 100%;
 
-}
-
-.header.atTop {
-
-  background-color: transparent;
-  backdrop-filter: none;
-
-}
-
-.header.hidden {
-
-  transform: translateY(-100%);
-  
 }
 
 .burgerBtn{
@@ -94,15 +80,6 @@
 
 }
 
-.center {
-
-  flex: 1 1 auto;
-  display: flex;
-  justify-content: center;
-  min-width: 0;
-
-}
-
 .menu {
 
   display: flex;
@@ -126,20 +103,6 @@
   }
 
   /* тёмный активный участок */
-  &::after {
-
-    content: "";
-    position: absolute;
-    bottom: 0;
-    height: $apx-2;
-    left: var(--active-left, 0px);
-    width: var(--active-width, 0px);
-    background-color: #A49AD0;
-    transition: left 0.25s ease, width 0.25s ease;
-    border-radius: $apx-10;
-
-  }
-
 }
 
 .menu a {
@@ -174,38 +137,17 @@
 
 }
 
-.menuUnderline {
+.menu a.active::after,
+.menu .active::after {
 
+  content: "";
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: calc(#{$apx-28} * -1);
   height: $apx-2;
-  background-color: #ededf4;
-  z-index: 0;
-  width: 100%;
-
-}
-
-.menuIndicator {
-
-  position: absolute;
-  height: $apx-2;
-  background-color: #a4a4d0;
-  border-radius: $apx-2;
-  left: 0;
-  bottom: 0;
-  z-index: 1;
-  transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
-
-}
-
-.themeToggleWrapper {
-
-  position: absolute;   
-  top: $apx-35;         
-  right: $apx-80;       
-  z-index: 10;
+  background-color: #A49AD0;
+  border-radius: $apx-10;
 
 }
 
@@ -266,14 +208,6 @@
     padding-bottom: $apx-l-36;
     margin-top: 0;
     margin-bottom: $apx-l-64;
-
-  }
-
-  .header.scrolled {
-
-    background-color: rgba(255, 255, 255, 0.8);  
-    backdrop-filter: blur($apx-10);
-    box-shadow: $apx-l-4 $apx-l-4 $apx-l-22 0 rgba(27, 3, 137, 0.07);
 
   }
 
@@ -343,17 +277,6 @@
 
   }
 
-  .themeToggleWrapper {
-
-    position: absolute;   
-    top: $apx-l-50;         
-    right: $apx-l-450;       
-    z-index: 10;
-    display: flex;
-    align-items: center;
-
-  }
-
   .phoneButton {
 
     font-size: $apx-l-18;
@@ -380,14 +303,6 @@
 
     padding: 0;
     padding-top: $apx-l-28;
-
-  }
-
-  .header.scrolled {
-
-    background-color: rgba(255, 255, 255, 0.8);  
-    backdrop-filter: blur($apx-10);
-    box-shadow: $apx-m-4 $apx-m-4 $apx-m-22 0 rgba(27, 3, 137, 0.07);
 
   }
 
@@ -468,12 +383,6 @@
     border: $apx-m-2 solid #A49AD0;
     border-radius: $apx-m-49;
     padding: $apx-m-8 $apx-m-18;
-
-  }
-
-  .themeToggleWrapper {
-
-   display: none;
 
   }
 

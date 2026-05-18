@@ -33,6 +33,7 @@ function prepareSlides(initialSlides?: HeroSlide[]) {
 
 export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const slideWidthRef = useRef(0);
   const [pageIndex, setPageIndex] = useState(0);
   const [hasMounted, setHasMounted] = useState(false);
   const slides = useMemo<Slide[]>(() => prepareSlides(initialSlides), [initialSlides]);
@@ -54,6 +55,30 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
 
   useEffect(() => {
     setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    slideWidthRef.current = container.clientWidth;
+
+    if (typeof ResizeObserver === "undefined") {
+      const updateSlideWidth = () => {
+        slideWidthRef.current = container.clientWidth;
+      };
+
+      window.addEventListener("resize", updateSlideWidth);
+      return () => window.removeEventListener("resize", updateSlideWidth);
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      slideWidthRef.current = entry.contentRect.width;
+    });
+
+    observer.observe(container);
+
+    return () => observer.disconnect();
   }, []);
 
   const clearRestart = useCallback(() => {
@@ -78,8 +103,11 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
       if (!container) return;
 
       const nextIndex = (pageIndexRef.current + 1) % slides.length;
+      const slideWidth = slideWidthRef.current || container.clientWidth;
+      if (!slideWidth) return;
+
       container.scrollTo({
-        left: nextIndex * container.clientWidth,
+        left: nextIndex * slideWidth,
         behavior: "smooth",
       });
       pageIndexRef.current = nextIndex;
@@ -137,8 +165,10 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   const handleScroll = () => {
     const container = scrollRef.current;
     if (!container) return;
-    const { scrollLeft, clientWidth } = container;
-    const index = Math.min(slides.length - 1, Math.max(0, Math.round(scrollLeft / clientWidth)));
+    const slideWidth = slideWidthRef.current || container.clientWidth;
+    if (!slideWidth) return;
+
+    const index = Math.min(slides.length - 1, Math.max(0, Math.round(container.scrollLeft / slideWidth)));
     setPageIndex((current) => (current === index ? current : index));
   };
 
@@ -146,9 +176,12 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
     const container = scrollRef.current;
     if (!container) return;
     const nextIndex = Math.min(slides.length - 1, Math.max(0, idx));
+    const slideWidth = slideWidthRef.current || container.clientWidth;
+    if (!slideWidth) return;
+
     pageIndexRef.current = nextIndex;
     setPageIndex(nextIndex);
-    container.scrollTo({ left: nextIndex * container.clientWidth, behavior: "smooth" });
+    container.scrollTo({ left: nextIndex * slideWidth, behavior: "smooth" });
     pauseAndRestart(); // пауза после ручного клика по пагинации
   };
 
