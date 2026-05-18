@@ -1,6 +1,6 @@
 'use client';
 
-import { Dispatch, SetStateAction } from 'react';
+import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
 import { Brand, BrandCategory } from '@/features/admin/types';
@@ -34,6 +34,29 @@ type AdminBrandPortfolioSectionProps = {
 };
 
 const logoAccept = 'image/png,image/jpeg,image/webp,image/avif,image/svg+xml';
+const BRAND_LOGO_SIZE_PENDING = 'определяется...';
+const BRAND_LOGO_SIZE_UNKNOWN = 'не удалось определить';
+
+type BrandLogoSize = {
+  url: string;
+  label: string;
+};
+
+function formatFileSize(bytes: number) {
+  const kilobytes = bytes / 1024;
+
+  if (kilobytes < 1024) {
+    return `${Math.ceil(kilobytes)} КБ`;
+  }
+
+  return `${(kilobytes / 1024).toFixed(1).replace('.', ',')} МБ`;
+}
+
+function formatContentLength(contentLength: string | null) {
+  const bytes = Number(contentLength);
+
+  return Number.isFinite(bytes) && bytes > 0 ? formatFileSize(bytes) : null;
+}
 
 export function AdminBrandPortfolioSection({
   brandCategories,
@@ -60,6 +83,114 @@ export function AdminBrandPortfolioSection({
   uploadImage,
   showStatus,
 }: AdminBrandPortfolioSectionProps) {
+  const [brandLogoSizes, setBrandLogoSizes] = useState<Record<number, BrandLogoSize>>({});
+  const [brandDraftLogoSize, setBrandDraftLogoSize] = useState<BrandLogoSize | null>(null);
+
+  useEffect(() => {
+    const brandsWithLogos = brands.filter((brand) => brand.imageUrl);
+
+    if (!brandsWithLogos.length) {
+      setBrandLogoSizes({});
+      return;
+    }
+
+    let isMounted = true;
+
+    setBrandLogoSizes((current) => {
+      const next: Record<number, BrandLogoSize> = {};
+
+      for (const brand of brandsWithLogos) {
+        const currentSize = current[brand.id];
+        next[brand.id] =
+          currentSize?.url === brand.imageUrl
+            ? currentSize
+            : { url: brand.imageUrl, label: BRAND_LOGO_SIZE_PENDING };
+      }
+
+      return next;
+    });
+
+    for (const brand of brandsWithLogos) {
+      const imageUrl = brand.imageUrl;
+
+      fetch(imageUrl, { method: 'HEAD', cache: 'no-store' })
+        .then((response) => (response.ok ? formatContentLength(response.headers.get('content-length')) : null))
+        .then((label) => {
+          if (!isMounted) {
+            return;
+          }
+
+          setBrandLogoSizes((current) => {
+            const currentSize = current[brand.id];
+
+            if (currentSize?.url !== imageUrl) {
+              return current;
+            }
+
+            return {
+              ...current,
+              [brand.id]: { url: imageUrl, label: label ?? BRAND_LOGO_SIZE_UNKNOWN },
+            };
+          });
+        })
+        .catch(() => {
+          if (!isMounted) {
+            return;
+          }
+
+          setBrandLogoSizes((current) => {
+            const currentSize = current[brand.id];
+
+            if (currentSize?.url !== imageUrl) {
+              return current;
+            }
+
+            return {
+              ...current,
+              [brand.id]: { url: imageUrl, label: BRAND_LOGO_SIZE_UNKNOWN },
+            };
+          });
+        });
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [brands]);
+
+  useEffect(() => {
+    if (!brandDraft.imageUrl) {
+      setBrandDraftLogoSize(null);
+      return;
+    }
+
+    if (brandDraftLogoSize?.url === brandDraft.imageUrl) {
+      return;
+    }
+
+    let isMounted = true;
+    const imageUrl = brandDraft.imageUrl;
+
+    setBrandDraftLogoSize({ url: imageUrl, label: BRAND_LOGO_SIZE_PENDING });
+
+    fetch(imageUrl, { method: 'HEAD', cache: 'no-store' })
+      .then((response) => (response.ok ? formatContentLength(response.headers.get('content-length')) : null))
+      .then((label) => {
+        if (isMounted) {
+          setBrandDraftLogoSize({ url: imageUrl, label: label ?? BRAND_LOGO_SIZE_UNKNOWN });
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setBrandDraftLogoSize({ url: imageUrl, label: BRAND_LOGO_SIZE_UNKNOWN });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [brandDraft.imageUrl, brandDraftLogoSize?.url]);
+
   const uploadLogo = async (file: File, onUploaded: (url: string) => void) => {
     try {
       const url = await uploadImage(file);
@@ -169,12 +300,24 @@ export function AdminBrandPortfolioSection({
       <div className={styles.brandAdminBlock}>
         <h3>Бренды</h3>
         <div className={styles.brandCard}>
-          <AdminImagePicker
-            imageUrl={brandDraft.imageUrl}
-            uploadLabel="Добавить/заменить логотип"
-            accept={logoAccept}
-            onUpload={(file) => uploadLogo(file, (url) => setBrandDraft((current) => ({ ...current, imageUrl: url, iconKey: '' })))}
-          />
+          <div className={styles.brandImageUpload}>
+            <AdminImagePicker
+              imageUrl={brandDraft.imageUrl}
+              uploadLabel="Добавить/заменить логотип"
+              accept={logoAccept}
+              onUpload={(file) =>
+                uploadLogo(file, (url) => {
+                  setBrandDraft((current) => ({ ...current, imageUrl: url, iconKey: '' }));
+                  setBrandDraftLogoSize({ url, label: formatFileSize(file.size) });
+                })
+              }
+            />
+            {brandDraft.imageUrl ? (
+              <span className={styles.brandImageSize}>
+                Размер: {brandDraftLogoSize?.label ?? BRAND_LOGO_SIZE_PENDING}
+              </span>
+            ) : null}
+          </div>
           <div className={styles.newsFields}>
             <select
               value={brandDraft.categoryId}
@@ -215,13 +358,28 @@ export function AdminBrandPortfolioSection({
         <div className={styles.newsList}>
           {brands.map((brand) => (
             <article className={styles.brandCard} key={brand.id}>
-              <AdminImagePicker
-                imageUrl={brand.imageUrl}
-                emptyText={brand.iconKey || 'Картинка не загружена'}
-                uploadLabel="Добавить/заменить логотип"
-                accept={logoAccept}
-                onUpload={(file) => uploadLogo(file, (url) => updateBrand(brand.id, { imageUrl: url, iconKey: '' }))}
-              />
+              <div className={styles.brandImageUpload}>
+                <AdminImagePicker
+                  imageUrl={brand.imageUrl}
+                  emptyText={brand.iconKey || 'Картинка не загружена'}
+                  uploadLabel="Добавить/заменить логотип"
+                  accept={logoAccept}
+                  onUpload={(file) =>
+                    uploadLogo(file, (url) => {
+                      updateBrand(brand.id, { imageUrl: url, iconKey: '' });
+                      setBrandLogoSizes((current) => ({
+                        ...current,
+                        [brand.id]: { url, label: formatFileSize(file.size) },
+                      }));
+                    })
+                  }
+                />
+                {brand.imageUrl ? (
+                  <span className={styles.brandImageSize}>
+                    Размер: {brandLogoSizes[brand.id]?.label ?? BRAND_LOGO_SIZE_PENDING}
+                  </span>
+                ) : null}
+              </div>
               <div className={styles.newsFields}>
                 <select
                   value={brand.categoryId}
