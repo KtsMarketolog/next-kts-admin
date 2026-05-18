@@ -1,9 +1,0 @@
-export { Origami1 } from './Origami1';
-export { Origami2 } from './Origami2';
-export { Origami3 } from './Origami3';
-export { Origami4 } from './Origami4';
-export { Origami5 } from './Origami5';
-export { Origami6 } from './Origami6';
-export { Origami7 } from './Origami7';
-export { Origami8 } from './Origami8';
-export { TeamworkIcon } from './TeamworkIcon';
