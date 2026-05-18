@@ -1,5 +1,6 @@
 import Container from '@/shared/ui/Container';
 import { ArrowCircleRightIcon } from '@/shared/icons/ArrowCircleRightIcon';
+import { BrandPortfolioClient } from './BrandPortfolioClient';
 import { BrandPortfolioControls } from './BrandPortfolioControls';
 import styles from './BrandPortfolio.module.scss';
 
@@ -15,6 +16,10 @@ export const BrandPortfolio = ({ initialCategories = [], initialBrands = [] }) =
   const categories = Array.isArray(initialCategories) ? initialCategories : [];
   const brands = Array.isArray(initialBrands) ? initialBrands : [];
   const activeKey = categories[0]?.key || '';
+
+  if (categories.length === 0 || brands.length === 0) {
+    return <BrandPortfolioClient initialCategories={categories} initialBrands={brands} />;
+  }
 
   return (
     <section className={styles.brandPortfolio} id={ROOT_ID}>
