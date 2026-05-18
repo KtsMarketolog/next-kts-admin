@@ -3,12 +3,14 @@
 import styles from '@/app/admin/admin.module.scss';
 
 type ResponsiveImageTarget = 'desktop' | 'tablet' | 'mobile';
+export type ResponsiveImageSizes = Partial<Record<ResponsiveImageTarget, string>>;
 
 type AdminResponsiveImagesProps = {
   groupTitle: string;
   imageUrl?: string | null;
   tabletImageUrl?: string | null;
   mobileImageUrl?: string | null;
+  imageSizes?: ResponsiveImageSizes;
   uploadLabelPrefix?: string;
   onClear?: (target: ResponsiveImageTarget) => void;
   onUpload?: (target: ResponsiveImageTarget, file: File) => Promise<void> | void;
@@ -25,6 +27,7 @@ export function AdminResponsiveImages({
   imageUrl,
   tabletImageUrl,
   mobileImageUrl,
+  imageSizes,
   uploadLabelPrefix = 'Добавить/заменить',
   onClear,
   onUpload,
@@ -39,7 +42,12 @@ export function AdminResponsiveImages({
 
         return (
           <div className={styles.previewItem} key={preview.target}>
-            <span>{preview.label}</span>
+            <span className={styles.previewLabel}>
+              <span>{preview.label}</span>
+              {url && imageSizes?.[preview.target] ? (
+                <span className={styles.imageSizePill}>Размер: {imageSizes[preview.target]}</span>
+              ) : null}
+            </span>
             <div className={styles.preview}>
               {url ? (
                 <>
