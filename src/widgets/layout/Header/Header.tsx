@@ -184,6 +184,7 @@ const Header = () => {
 
                     key={item}
                     href="/catalog"
+                    prefetch={false}
                     className={activeItem === item ? styles.active : ""}
 
                   >
@@ -237,6 +238,7 @@ const Header = () => {
 
                     key={item}
                     href="/about"
+                    prefetch={false}
                     className={activeItem === item ? styles.active : ""}
 
                   >
@@ -255,6 +257,7 @@ const Header = () => {
 
                     key={item}
                     href="/contacts"
+                    prefetch={false}
                     className={activeItem === item ? styles.active : ""}
 
                   >
