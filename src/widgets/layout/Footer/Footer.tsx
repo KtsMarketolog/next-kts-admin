@@ -108,7 +108,7 @@ export const Footer = () => {
 
             <div className = { styles.logo }>
 
-              <img src="/img/logo-footer.svg" alt="Логотип" />
+              <img src="/img/logo-footer.svg" alt="Логотип" loading="lazy" decoding="async" />
 
             </div>
 

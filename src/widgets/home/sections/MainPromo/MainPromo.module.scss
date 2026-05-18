@@ -122,17 +122,6 @@
 }
 
 
-/* extraSvg оставляем как было */
-.extraSvg {
-  position: absolute;
-  bottom: 0;
-  left: $apx-5;
-  width: $apx-1271;
-  height: auto;
-  z-index: 0;
-  pointer-events: none;
-}
-
 /* ======= Модификаторы слайдов (оставляем, но теперь они НЕ задают раскладку) ======= */
 .slideOne { /* legacy modifier */ }
 
@@ -274,13 +263,6 @@
     border-radius: $apx-l-40;
     min-height: $apx-l-722;
     padding: $apx-l-40;
-  }
-
-  .extraSvg {
-    left: $apx-l-7;
-    top: $apx-l-10;
-    width: $apx-l-675;
-    height: $apx-l-675;
   }
 
   .contentCardBase {

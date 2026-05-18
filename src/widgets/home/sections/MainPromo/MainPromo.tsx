@@ -34,12 +34,12 @@ function prepareSlides(initialSlides?: HeroSlide[]) {
 export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
+  const [hasMounted, setHasMounted] = useState(false);
   const slides = useMemo<Slide[]>(() => prepareSlides(initialSlides), [initialSlides]);
   const router = useRouter();
 
-  // единый стейт брейкпоинтов — и для extraSvg, и для actions
+  // единый стейт брейкпоинтов для actions
   const [viewport, setViewport] = useState<Viewport>("desktop");
-  const isTablet = viewport === "tablet";
 
   const [popupSlide, setPopupSlide] = useState<Slide | null>(null);
   const closePopup = () => setPopupSlide(null);
@@ -51,6 +51,10 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   const pageIndexRef = useRef(0);
 
   const AUTO_DELAY = 4000;
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   const clearRestart = useCallback(() => {
     if (restartTimerRef.current) {
@@ -67,7 +71,7 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   }, []);
 
   const startAutoplay = useCallback(() => {
-    if (autoTimerRef.current || !scrollRef.current || popupRef.current) return;
+    if (autoTimerRef.current || !scrollRef.current || popupRef.current || slides.length <= 1) return;
 
     autoTimerRef.current = window.setInterval(() => {
       const container = scrollRef.current;
@@ -134,15 +138,17 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
     const container = scrollRef.current;
     if (!container) return;
     const { scrollLeft, clientWidth } = container;
-    const index = Math.round(scrollLeft / clientWidth);
-    setPageIndex(index);
+    const index = Math.min(slides.length - 1, Math.max(0, Math.round(scrollLeft / clientWidth)));
+    setPageIndex((current) => (current === index ? current : index));
   };
 
   const scrollToSlide = (idx: number) => {
     const container = scrollRef.current;
     if (!container) return;
-    pageIndexRef.current = idx;
-    container.scrollTo({ left: idx * container.clientWidth, behavior: "smooth" });
+    const nextIndex = Math.min(slides.length - 1, Math.max(0, idx));
+    pageIndexRef.current = nextIndex;
+    setPageIndex(nextIndex);
+    container.scrollTo({ left: nextIndex * container.clientWidth, behavior: "smooth" });
     pauseAndRestart(); // пауза после ручного клика по пагинации
   };
 
@@ -208,6 +214,19 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
     [viewport]
   );
 
+  const shouldRenderSlide = useCallback(
+    (idx: number) => {
+      if (idx === pageIndex || slides.length <= 1) return true;
+      if (!hasMounted) return false;
+
+      const nextIndex = (pageIndex + 1) % slides.length;
+      const previousIndex = pageIndex === 0 ? null : pageIndex - 1;
+
+      return idx === nextIndex || idx === previousIndex;
+    },
+    [hasMounted, pageIndex, slides.length]
+  );
+
   const popupProps = useMemo(() => {
     if (!popupSlide?.popup) return null;
     return {
@@ -231,8 +250,8 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
             <MainPromoSlide
               key={slide.id}
               slide={slide}
+              renderSlide={shouldRenderSlide(idx)}
               isFirstSlide={idx === 0}
-              isTablet={isTablet}
               canOpen={canOpen}
               onSlideClick={handleSlideClick}
               onSlideKeyDown={handleSlideKeyDown}

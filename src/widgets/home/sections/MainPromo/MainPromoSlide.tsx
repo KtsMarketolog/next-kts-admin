@@ -1,15 +1,24 @@
 "use client";
 
 import React from "react";
+import { getImageProps } from "next/image";
 
 import Button from "@/shared/ui/Button/Button";
 import styles from "./MainPromo.module.scss";
 import type { Slide, SlideAction } from "./MainPromo.model";
 
+const heroImageSizes = "(max-width: 450px) 100vw, (max-width: 1024px) 100vw, 82vw";
+
+const heroImageDimensions = {
+  desktop: { width: 1920, height: 900 },
+  tablet: { width: 1024, height: 486 },
+  mobile: { width: 450, height: 445 },
+};
+
 type MainPromoSlideProps = {
   slide: Slide;
+  renderSlide: boolean;
   isFirstSlide: boolean;
-  isTablet: boolean;
   canOpen: (slide: Slide) => boolean;
   onSlideClick: (slide: Slide) => void;
   onSlideKeyDown: (slide: Slide) => (event: React.KeyboardEvent) => void;
@@ -18,14 +27,56 @@ type MainPromoSlideProps = {
 
 export function MainPromoSlide({
   slide,
+  renderSlide,
   isFirstSlide,
-  isTablet,
   canOpen,
   onSlideClick,
   onSlideKeyDown,
   shouldShowAction,
 }: MainPromoSlideProps) {
+  if (!renderSlide) {
+    return <div className={styles.slide} aria-hidden="true" />;
+  }
+
   const clickable = Boolean(slide.href) || canOpen(slide);
+  const loading = isFirstSlide ? "eager" : "lazy";
+  const decoding = isFirstSlide ? "auto" : "async";
+
+  const desktopImage = getImageProps({
+    src: slide.bg,
+    alt: "",
+    sizes: heroImageSizes,
+    quality: 75,
+    loading,
+    decoding,
+    width: heroImageDimensions.desktop.width,
+    height: heroImageDimensions.desktop.height,
+    ...(isFirstSlide ? { fetchPriority: "high" as const } : {}),
+  }).props;
+
+  const tabletImage = getImageProps({
+    src: slide.tabletBg || slide.bg,
+    alt: "",
+    sizes: heroImageSizes,
+    quality: 75,
+    loading,
+    decoding,
+    width: heroImageDimensions.tablet.width,
+    height: heroImageDimensions.tablet.height,
+    ...(isFirstSlide ? { fetchPriority: "high" as const } : {}),
+  }).props;
+
+  const mobileImage = getImageProps({
+    src: slide.mobileBg || slide.tabletBg || slide.bg,
+    alt: "",
+    sizes: heroImageSizes,
+    quality: 75,
+    loading,
+    decoding,
+    width: heroImageDimensions.mobile.width,
+    height: heroImageDimensions.mobile.height,
+    ...(isFirstSlide ? { fetchPriority: "high" as const } : {}),
+  }).props;
 
   return (
     <div className={styles.slide}>
@@ -38,27 +89,22 @@ export function MainPromoSlide({
         onKeyDown={onSlideKeyDown(slide)}
       >
         <picture className={styles.bgPicture}>
-          <source media="(max-width: 450px)" srcSet={slide.mobileBg} />
-          <source media="(max-width: 1024px)" srcSet={slide.tabletBg} />
+          <source
+            media="(max-width: 450px)"
+            srcSet={mobileImage.srcSet ?? mobileImage.src}
+            sizes={mobileImage.sizes}
+          />
+          <source
+            media="(max-width: 1024px)"
+            srcSet={tabletImage.srcSet ?? tabletImage.src}
+            sizes={tabletImage.sizes}
+          />
           <img
-            src={slide.bg}
+            {...desktopImage}
             alt=""
             className={styles.bgImage}
-            loading={isFirstSlide ? "eager" : "lazy"}
-            fetchPriority={isFirstSlide ? "high" : undefined}
-            decoding={isFirstSlide ? "auto" : "async"}
           />
         </picture>
-
-        {slide.extraSvg && (
-          <img
-            src={isTablet && slide.extraSvgTablet ? slide.extraSvgTablet : slide.extraSvg}
-            alt=""
-            className={styles.extraSvg}
-            loading={isFirstSlide ? "eager" : "lazy"}
-            decoding={isFirstSlide ? "auto" : "async"}
-          />
-        )}
 
         <div className={styles.contentCardBase}>
           {(slide.title || slide.subtitle) && (

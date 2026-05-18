@@ -31,8 +31,6 @@ export interface Slide {
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   buttons: SlideButton[];
-  extraSvg?: string;
-  extraSvgTablet?: string;
   popup?: SlidePopup;
   actions?: SlideAction[];
   href?: string;
