@@ -6,6 +6,7 @@ import { IconArrows } from '@/shared/icons/IconArrows';
 import { IconCircles } from '@/shared/icons/IconCircles';
 import { IconCrystal } from '@/shared/icons/IconCrystal';
 import { IconPathNet } from '@/shared/icons/IconPathNet';
+import { AboutKTSReveal } from "./AboutKTSReveal";
 import styles from "./AboutKTS.module.scss";
 
 type FactConfig = {
@@ -32,9 +33,12 @@ const FACTS: FactConfig[] = [
   },
 ];
 
+const ROOT_ID = 'about-kts';
+
 export const AboutKTS = () => {
   return (
-    <section className={styles.aboutKts}>
+    <section className={styles.aboutKts} id={ROOT_ID}>
+      <AboutKTSReveal rootId={ROOT_ID} />
       <Container>
         <h2>КТС – ЭТО</h2>
         <div className={styles.grid}>
