@@ -31,6 +31,9 @@ function prepareSlides(initialSlides?: HeroSlide[]) {
   return managedSlides.length ? managedSlides.map((slide) => mapManagedSlide(slide)) : fallbackSlides;
 }
 
+const AUTO_DELAY = 4000;
+const INITIAL_AUTO_DELAY = 8000;
+
 export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const slideWidthRef = useRef(0);
@@ -47,11 +50,11 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
 
   // === autoplay refs/state ===
   const autoTimerRef = useRef<number | null>(null);
+  const initialAutoTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const popupRef = useRef<Slide | null>(null);
   const pageIndexRef = useRef(0);
-
-  const AUTO_DELAY = 4000;
+  const slideStepRef = useRef(0);
 
   useEffect(() => {
     setHasMounted(true);
@@ -61,20 +64,22 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
     const container = scrollRef.current;
     if (!container) return;
 
-    slideWidthRef.current = container.clientWidth;
+    const updateSlideMetrics = () => {
+      const gap = Number.parseFloat(window.getComputedStyle(container).columnGap || "0") || 0;
+      const slideWidth = container.clientWidth;
+
+      slideWidthRef.current = slideWidth;
+      slideStepRef.current = slideWidth + gap;
+    };
+
+    updateSlideMetrics();
 
     if (typeof ResizeObserver === "undefined") {
-      const updateSlideWidth = () => {
-        slideWidthRef.current = container.clientWidth;
-      };
-
-      window.addEventListener("resize", updateSlideWidth);
-      return () => window.removeEventListener("resize", updateSlideWidth);
+      window.addEventListener("resize", updateSlideMetrics);
+      return () => window.removeEventListener("resize", updateSlideMetrics);
     }
 
-    const observer = new ResizeObserver(([entry]) => {
-      slideWidthRef.current = entry.contentRect.width;
-    });
+    const observer = new ResizeObserver(updateSlideMetrics);
 
     observer.observe(container);
 
@@ -89,29 +94,48 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   }, []);
 
   const stopAutoplay = useCallback(() => {
+    if (initialAutoTimerRef.current) {
+      clearTimeout(initialAutoTimerRef.current);
+      initialAutoTimerRef.current = null;
+    }
+
     if (autoTimerRef.current) {
       clearInterval(autoTimerRef.current);
       autoTimerRef.current = null;
     }
   }, []);
 
-  const startAutoplay = useCallback(() => {
-    if (autoTimerRef.current || !scrollRef.current || popupRef.current || slides.length <= 1) return;
+  const startAutoplay = useCallback((delay = 0) => {
+    if (autoTimerRef.current || initialAutoTimerRef.current || !scrollRef.current || popupRef.current || slides.length <= 1) {
+      return;
+    }
 
-    autoTimerRef.current = window.setInterval(() => {
-      const container = scrollRef.current;
-      if (!container) return;
+    const runAutoplay = () => {
+      initialAutoTimerRef.current = null;
+      if (autoTimerRef.current || !scrollRef.current || popupRef.current || slides.length <= 1) return;
 
-      const nextIndex = (pageIndexRef.current + 1) % slides.length;
-      const slideWidth = slideWidthRef.current || container.clientWidth;
-      if (!slideWidth) return;
+      autoTimerRef.current = window.setInterval(() => {
+        const container = scrollRef.current;
+        if (!container) return;
 
-      container.scrollTo({
-        left: nextIndex * slideWidth,
-        behavior: "smooth",
-      });
-      pageIndexRef.current = nextIndex;
-    }, AUTO_DELAY);
+        const nextIndex = (pageIndexRef.current + 1) % slides.length;
+        const slideStep = slideStepRef.current || slideWidthRef.current || container.clientWidth;
+        if (!slideStep) return;
+
+        container.scrollTo({
+          left: nextIndex * slideStep,
+          behavior: "smooth",
+        });
+        pageIndexRef.current = nextIndex;
+      }, AUTO_DELAY);
+    };
+
+    if (delay > 0) {
+      initialAutoTimerRef.current = window.setTimeout(runAutoplay, delay);
+      return;
+    }
+
+    runAutoplay();
   }, [slides.length]);
 
   const pauseAndRestart = useCallback(
@@ -136,7 +160,7 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
       return;
     }
 
-    startAutoplay();
+    startAutoplay(INITIAL_AUTO_DELAY);
 
     return () => {
       stopAutoplay();
@@ -166,9 +190,10 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
     const container = scrollRef.current;
     if (!container) return;
     const slideWidth = slideWidthRef.current || container.clientWidth;
-    if (!slideWidth) return;
+    const slideStep = slideStepRef.current || slideWidth;
+    if (!slideStep) return;
 
-    const index = Math.min(slides.length - 1, Math.max(0, Math.round(container.scrollLeft / slideWidth)));
+    const index = Math.min(slides.length - 1, Math.max(0, Math.round(container.scrollLeft / slideStep)));
     setPageIndex((current) => (current === index ? current : index));
   };
 
@@ -176,12 +201,12 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
     const container = scrollRef.current;
     if (!container) return;
     const nextIndex = Math.min(slides.length - 1, Math.max(0, idx));
-    const slideWidth = slideWidthRef.current || container.clientWidth;
-    if (!slideWidth) return;
+    const slideStep = slideStepRef.current || slideWidthRef.current || container.clientWidth;
+    if (!slideStep) return;
 
     pageIndexRef.current = nextIndex;
     setPageIndex(nextIndex);
-    container.scrollTo({ left: nextIndex * slideWidth, behavior: "smooth" });
+    container.scrollTo({ left: nextIndex * slideStep, behavior: "smooth" });
     pauseAndRestart(); // пауза после ручного клика по пагинации
   };
 
@@ -192,7 +217,7 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
         stopAutoplay();
         clearRestart();
       } else {
-        startAutoplay();
+        startAutoplay(INITIAL_AUTO_DELAY);
       }
     };
 

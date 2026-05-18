@@ -46,7 +46,7 @@ export function MainPromoSlide({
   return (
     <div className={styles.slide}>
       <div
-        className={`${styles.visual} ${slide.className} ${clickable ? styles.isClickable : ""}`}
+        className={`${styles.visual} ${slide.className ?? ""} ${clickable ? styles.isClickable : ""}`}
         onClick={() => onSlideClick(slide)}
         role={clickable ? "button" : undefined}
         tabIndex={clickable ? 0 : -1}
