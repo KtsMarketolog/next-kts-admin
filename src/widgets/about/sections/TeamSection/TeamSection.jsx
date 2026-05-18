@@ -96,7 +96,7 @@ export const TeamSection = () => {
             </h2>
 
             {/* ТОП-ЛИДЕР */}
-            <div className={styles.topLeader}>
+            {/* <div className={styles.topLeader}>
 
               <div className={styles.mainCard}>
 
@@ -130,7 +130,7 @@ export const TeamSection = () => {
 
               </div>
 
-            </div>
+            </div> */}
 
             {/* РУКОВОДИТЕЛИ */}
             <div className={styles.subLeaders}>
@@ -183,12 +183,12 @@ export const TeamSection = () => {
 
                   </div>
 
-                  <div className={styles.info}>
+                  {/* <div className={styles.info}>
 
                     <p className={styles.phone}>{expert.phone}</p>
                     <p className={styles.email}>{expert.email}</p>
 
-                  </div>
+                  </div> */}
 
                 </div>
 

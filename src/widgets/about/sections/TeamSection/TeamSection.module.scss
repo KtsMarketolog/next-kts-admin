@@ -41,110 +41,110 @@
   }
 
   /* ТОП-ЛИДЕР */
-  .topLeader {
+  // .topLeader {
 
-    display: flex;
-    justify-content: center;
+  //   display: flex;
+  //   justify-content: center;
 
-    .mainCard {
+  //   .mainCard {
 
-      position: relative;
-      display: flex;
-      flex-direction: row;
-      background: url("/img/about/bg-team.jpg") no-repeat left top;
-      background-size: cover; 
+  //     position: relative;
+  //     display: flex;
+  //     flex-direction: row;
+  //     background: url("/img/about/bg-team.jpg") no-repeat left top;
+  //     background-size: cover; 
 
-      border-radius: $apx-20;
-      padding: $apx-23 $apx-70;
-      color: #fff;
-      min-width: $apx-1802;
-      min-height: $apx-394;
+  //     border-radius: $apx-20;
+  //     padding: $apx-23 $apx-70;
+  //     color: #fff;
+  //     min-width: $apx-1802;
+  //     min-height: $apx-394;
 
-      img {
+  //     img {
 
-        position: absolute;
-        width: $apx-364;
-        height: $apx-515;
+  //       position: absolute;
+  //       width: $apx-364;
+  //       height: $apx-515;
 
-        border-radius: $apx-10;
-        object-fit: cover;
-        top: 34.6%;
-        left: 50%;
-        transform: translate(-50%, -50%);
+  //       border-radius: $apx-10;
+  //       object-fit: cover;
+  //       top: 34.6%;
+  //       left: 50%;
+  //       transform: translate(-50%, -50%);
               
-      }
+  //     }
 
-      .info {
+  //     .info {
 
-        display: flex;
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: stretch;
-        width: 100%;
-        gap: $apx-40;
+  //       display: flex;
+  //       flex-direction: row;
+  //       justify-content: space-between;
+  //       align-items: stretch;
+  //       width: 100%;
+  //       gap: $apx-40;
 
-        .left {
+  //       .left {
 
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
+  //         flex: 1;
+  //         display: flex;
+  //         flex-direction: column;
+  //         justify-content: space-between;
 
-          h3 {
+  //         h3 {
 
-            font-size: $apx-26;
-            font-weight: 800;
-            line-height: 1.1;
-            letter-spacing: 0;
-            text-transform: uppercase;
+  //           font-size: $apx-26;
+  //           font-weight: 800;
+  //           line-height: 1.1;
+  //           letter-spacing: 0;
+  //           text-transform: uppercase;
 
-          }
+  //         }
 
-          p {
+  //         p {
             
-            max-width: $apx-430;
-            font-size: $apx-26;
-            line-height: 1.2;
-            letter-spacing: 0;
+  //           max-width: $apx-430;
+  //           font-size: $apx-26;
+  //           line-height: 1.2;
+  //           letter-spacing: 0;
 
-          }
+  //         }
 
-        }
+  //       }
 
-        .right {
+  //       .right {
           
-          display: flex; 
+  //         display: flex; 
 
-          .tags {
+  //         .tags {
 
-            display: flex;
-            flex-direction: column;
-            gap: $apx-27;
-            align-items: flex-end;
+  //           display: flex;
+  //           flex-direction: column;
+  //           gap: $apx-27;
+  //           align-items: flex-end;
 
-            li {
+  //           li {
 
-              background-color: #FFFFFF;
-              border-radius: $apx-15;
-              padding: $apx-7 $apx-14 ;
-              font-size: $apx-26;
-              white-space: nowrap;
+  //             background-color: #FFFFFF;
+  //             border-radius: $apx-15;
+  //             padding: $apx-7 $apx-14 ;
+  //             font-size: $apx-26;
+  //             white-space: nowrap;
 
-              color: #170F49;
+  //             color: #170F49;
 
-               list-style: none; 
+  //              list-style: none; 
 
-            }
+  //           }
 
-          }
+  //         }
 
-        }
+  //       }
 
-      }
+  //     }
 
-    }
+  //   }
 
-  }
+  // }
 
   /* БЛОК РУКОВОДИТЕЛЕЙ */
   .subLeaders {
@@ -286,21 +286,21 @@
 
       }
 
-      .phone{
+      // .phone{
 
-        font-size: $apx-24;
-        color: #474464;
-        margin-bottom: $apx-10;
+      //   font-size: $apx-24;
+      //   color: #474464;
+      //   margin-bottom: $apx-10;
 
-      }
+      // }
 
 
-      .email {
+      // .email {
 
-        font-size: $apx-15;
-        color: #524F6E;
+      //   font-size: $apx-15;
+      //   color: #524F6E;
 
-      }
+      // }
 
     }
 
