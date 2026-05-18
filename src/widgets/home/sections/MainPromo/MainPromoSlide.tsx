@@ -32,7 +32,7 @@ export function MainPromoSlide({
 
   const clickable = Boolean(slide.href) || canOpen(slide);
   const loading = isFirstSlide ? "eager" : "lazy";
-  const decoding = isFirstSlide ? "auto" : "async";
+  const decoding = isFirstSlide ? "sync" : "async";
 
   const { desktop: desktopImage, tablet: tabletImage, mobile: mobileImage } = getHeroImagePropsSet({
     desktop: slide.bg,

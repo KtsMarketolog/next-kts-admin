@@ -294,6 +294,8 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
     };
   }, [popupSlide]);
 
+  const slidesForInitialPaint = hasMounted ? slides : slides.slice(0, 1);
+
   return (
     <section className={styles.heroBanner} id="top">
       <Container>
@@ -304,7 +306,7 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
           onTouchStart={() => pauseAndRestart(4000)}
           onPointerDown={() => pauseAndRestart(4000)}
         >
-          {slides.map((slide, idx) => (
+          {slidesForInitialPaint.map((slide, idx) => (
             <MainPromoSlide
               key={slide.id}
               slide={slide}

@@ -86,7 +86,7 @@ export function getHeroSlideImagePropsSet(slide: Pick<HeroSlide, "imageUrl" | "t
     tablet: slide.tabletImageUrl,
     mobile: slide.mobileImageUrl,
     loading: "eager",
-    decoding: "auto",
+    decoding: "sync",
     fetchPriority: "high",
   });
 }
