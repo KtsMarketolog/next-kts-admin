@@ -29,7 +29,10 @@
 }
 
 .visual {
-  background: var(--hero-bg);
+  background: var(
+    --hero-bg,
+    linear-gradient(110deg, #f2f0ff 0%, #fbfaff 48%, #e7e4ff 100%)
+  );
   position: relative;
   border-radius: $apx-40;
   overflow: hidden;
