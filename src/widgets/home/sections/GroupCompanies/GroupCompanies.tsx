@@ -1,11 +1,7 @@
-import { getImageProps } from 'next/image';
 import { DEFAULT_GROUP_COMPANIES } from '@/entities/site/model/defaultGroupCompanies';
 import { getGroupCompanies } from '@/shared/lib/db';
 import Container from '@/shared/ui/Container';
 import styles from './GroupCompanies.module.scss';
-
-const logoImageSizes = "(max-width: 450px) 140px, (max-width: 1024px) 170px, 220px";
-const logoImageQuality = 45;
 
 async function loadCompanies() {
   try {
@@ -38,20 +34,17 @@ export const GroupCompanies = async () => {
           {companies.map((company, index) => {
             const href = normalizeCompanyHref(company.linkUrl);
             const label = `Компания ${index + 1}`;
-            const logoImage = getImageProps({
-              className: styles.logo,
-              src: company.imageUrl,
-              alt: label,
-              width: 220,
-              height: 110,
-              quality: logoImageQuality,
-              sizes: logoImageSizes,
-              loading: "lazy",
-              decoding: "async",
-            }).props;
             const logo = (
               // eslint-disable-next-line @next/next/no-img-element
-              <img {...logoImage} alt={label} />
+              <img
+                className={styles.logo}
+                src={company.imageUrl}
+                alt={label}
+                width={220}
+                height={110}
+                loading="eager"
+                decoding="async"
+              />
             );
 
             return (
