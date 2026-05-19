@@ -4,7 +4,6 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
 import type { HeroSlide } from "@/entities/site/model/defaultSlides";
-import styles from "./MainPromo.module.scss";
 
 type MainPromoEnhancerLoaderProps = {
   initialSlides?: HeroSlide[];
@@ -18,11 +17,11 @@ const MainPromoEnhancer = dynamic(
 
 function StaticPagination({ count }: { count: number }) {
   return (
-    <div className={styles.pagination} aria-hidden="true">
+    <div className="kts-main-promo__pagination" aria-hidden="true">
       {Array.from({ length: count }, (_, index) => (
         <span
           key={index}
-          className={`${styles.dot} ${index === 0 ? styles.active : ""}`}
+          className={`kts-main-promo__dot${index === 0 ? " kts-main-promo__dot--active" : ""}`}
         />
       ))}
     </div>

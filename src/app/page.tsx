@@ -1,19 +1,16 @@
 // src/app/page.tsx
 import { preload } from "react-dom";
-import { DEFAULT_HERO_SLIDES } from "@/entities/site/model/defaultSlides";
-import type { HeroSlide } from "@/entities/site/model/defaultSlides";
+import { DEFAULT_GROUP_COMPANIES } from "@/entities/site/model/defaultGroupCompanies";
+import { DEFAULT_HERO_SLIDES, type HeroSlide } from "@/entities/site/model/defaultSlides";
 import { DEFAULT_NEWS } from "@/entities/site/model/defaultNews";
-import { GroupCompanies } from "@/widgets/home/sections/GroupCompanies/GroupCompanies";
-import { AboutKTS } from "@/widgets/home/sections/AboutKTS/AboutKTS";
-import { KeyAdvantages } from "@/widgets/home/sections/KeyAdvantages/KeyAdvantages";
-import { PartnersBanner } from "@/widgets/home/sections/PartnersBanner/PartnersBanner";
-import { PromotionsBlock } from "@/widgets/home/sections/PromotionsBlock/PromotionsBlock";
+import { HomeDeferredSectionsIsland } from "@/widgets/home/HomeDeferredSectionsIsland";
 import { MainPromo } from "@/widgets/home/sections/MainPromo/MainPromo";
-import { ProductsShowcase } from "@/widgets/home/sections/ProductsShowcase/ProductsShowcase";
-import { BrandPortfolio } from '@/widgets/home/sections/BrandPortfolio/BrandPortfolio';
-import { NewsBlock } from "@/widgets/home/sections/NewsBlock/NewsBlock";
-import HashCleanup from "@/shared/lib/HashCleanup";
-import { getBrandPortfolio, getHeroSlides, getNewsItems } from "@/shared/lib/db";
+import {
+  getBrandPortfolio,
+  getGroupCompanies,
+  getHeroSlides,
+  getNewsItems,
+} from "@/shared/lib/db";
 import { getHeroSlideImagePropsSet } from "@/widgets/home/sections/MainPromo/MainPromo.images";
 
 export const revalidate = 600;
@@ -45,15 +42,20 @@ async function getHomeBrandPortfolio() {
   }
 }
 
+async function getHomeGroupCompanies() {
+  try {
+    return await getGroupCompanies({ activeOnly: true });
+  } catch {
+    return DEFAULT_GROUP_COMPANIES;
+  }
+}
+
 function preloadHomeHero(slide: HeroSlide | undefined) {
   if (!slide) return;
 
   const { desktop, tablet, mobile } = getHeroSlideImagePropsSet(slide);
 
-  const preloadImage = (
-    image: typeof desktop,
-    media: string,
-  ) => {
+  const preloadImage = (image: typeof desktop, media: string) => {
     if (!image.src) return;
 
     preload(String(image.src), {
@@ -71,8 +73,9 @@ function preloadHomeHero(slide: HeroSlide | undefined) {
 }
 
 export default async function Home() {
-  const [slides, news, brandPortfolio] = await Promise.all([
+  const [slides, groupCompanies, news, brandPortfolio] = await Promise.all([
     getHomeSlides(),
+    getHomeGroupCompanies(),
     getHomeNews(),
     getHomeBrandPortfolio(),
   ]);
@@ -80,24 +83,14 @@ export default async function Home() {
   preloadHomeHero(slides[0]);
 
   return (
-
     <div>
-
       <MainPromo initialSlides={slides} />
-      <GroupCompanies />
-      <AboutKTS />
-      <KeyAdvantages />
-
-
-      <PartnersBanner />
-      <PromotionsBlock />
-      <ProductsShowcase />
-      <NewsBlock initialNews={news} />
-      <BrandPortfolio initialCategories={brandPortfolio.categories} initialBrands={brandPortfolio.brands} />
-      <HashCleanup />
-
+      <HomeDeferredSectionsIsland
+        groupCompanies={groupCompanies}
+        news={news}
+        brandCategories={brandPortfolio.categories}
+        brandBrands={brandPortfolio.brands}
+      />
     </div>
-
   );
-
 }
