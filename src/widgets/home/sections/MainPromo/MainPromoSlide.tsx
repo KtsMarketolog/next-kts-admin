@@ -9,8 +9,10 @@ import { getHeroImagePropsSet } from "./MainPromo.images";
 
 type MainPromoSlideProps = {
   slide: Slide;
+  slideIndex?: number;
   renderSlide: boolean;
   isFirstSlide: boolean;
+  asSlotContent?: boolean;
   canOpen: (slide: Slide) => boolean;
   onSlideClick: (slide: Slide) => void;
   onSlideKeyDown: (slide: Slide) => (event: React.KeyboardEvent) => void;
@@ -19,8 +21,10 @@ type MainPromoSlideProps = {
 
 export function MainPromoSlide({
   slide,
+  slideIndex,
   renderSlide,
   isFirstSlide,
+  asSlotContent = false,
   canOpen,
   onSlideClick,
   onSlideKeyDown,
@@ -43,10 +47,11 @@ export function MainPromoSlide({
     ...(isFirstSlide ? { fetchPriority: "high" as const } : {}),
   });
 
-  return (
-    <div className={styles.slide}>
+  const visual = (
       <div
         className={`${styles.visual} ${slide.className ?? ""} ${clickable ? styles.isClickable : ""}`}
+        data-main-promo-visual="true"
+        data-main-promo-index={slideIndex}
         onClick={() => onSlideClick(slide)}
         role={clickable ? "button" : undefined}
         tabIndex={clickable ? 0 : -1}
@@ -128,6 +133,15 @@ export function MainPromoSlide({
           );
         })}
       </div>
+  );
+
+  if (asSlotContent) {
+    return visual;
+  }
+
+  return (
+    <div className={styles.slide}>
+      {visual}
     </div>
   );
 }
