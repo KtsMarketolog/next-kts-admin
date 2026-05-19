@@ -1,52 +1,47 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 
 export default function ScrollToHashWrapper({
-
   children,
-
 }: {
-
   children: React.ReactNode;
-
 }) {
-
   const pathname = usePathname();
+  const isFirstRunRef = useRef(true);
+  const previousPathnameRef = useRef<string | null>(null);
 
   useEffect(() => {
-
     const hash = window.location.hash;
 
-    // 1) Если есть hash и мы на главной — скроллим к секции
     if (pathname === "/" && hash) {
-
       const el = document.querySelector(hash);
 
       if (el) {
-
-        // небольшой таймаут — чтобы DOM успел отрендериться после навигации
-        setTimeout(() => {
-
+        const timer = window.setTimeout(() => {
           el.scrollIntoView({ behavior: "smooth", block: "center" });
-
-          // опционально: очищаем hash, чтобы дальше не "залипало"
           history.replaceState(null, "", "/");
-
         }, 200);
 
-        return;
+        isFirstRunRef.current = false;
+        previousPathnameRef.current = pathname;
 
+        return () => window.clearTimeout(timer);
       }
-
     }
 
-    // 2) Во ВСЕХ остальных случаях при смене страницы — наверх
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    const isFirstRun = isFirstRunRef.current;
+    const previousPathname = previousPathnameRef.current;
 
+    isFirstRunRef.current = false;
+    previousPathnameRef.current = pathname;
+
+    if (isFirstRun) return;
+    if (previousPathname === pathname) return;
+
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [pathname]);
 
   return <>{children}</>;
-
 }
