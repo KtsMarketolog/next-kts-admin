@@ -4,35 +4,62 @@ import { useEffect, useState } from 'react';
 import styles from './CookieBanner.module.scss';
 import Button from '@/shared/ui/Button/Button';
 
-type Consent = 'accepted' | 'declined' | null;
+type Consent = 'accepted' | 'declined';
+type ConsentState = Consent | null | 'checking';
 
 export default function CookieBanner() {
 
-  const [consent, setConsent] = useState<Consent>(null);
+  const [consent, setConsent] = useState<ConsentState>('checking');
 
   useEffect(() => {
 
-    const stored = localStorage.getItem('cookieConsent') as Consent;
+    try {
 
-    if (stored) setConsent(stored);
+      const stored = localStorage.getItem('cookieConsent');
+
+      setConsent(stored === 'accepted' || stored === 'declined' ? stored : null);
+
+    } catch {
+
+      setConsent(null);
+
+    }
 
   }, []);
 
   const handleAccept = () => {
 
-    localStorage.setItem('cookieConsent', 'accepted');
+    try {
+
+      localStorage.setItem('cookieConsent', 'accepted');
+
+    } catch {
+
+      // Keep the banner state usable even if storage is unavailable.
+
+    }
+
     setConsent('accepted');
 
   };
 
   const handleDecline = () => {
 
-    localStorage.setItem('cookieConsent', 'declined');
+    try {
+
+      localStorage.setItem('cookieConsent', 'declined');
+
+    } catch {
+
+      // Keep the banner state usable even if storage is unavailable.
+
+    }
+
     setConsent('declined');
 
   };
 
-  if (consent !== null) return null;
+  if (consent === 'checking' || consent !== null) return null;
 
   return (
 
