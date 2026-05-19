@@ -160,11 +160,18 @@
 }
 
 /* ======= Пагинация ======= */
+.paginationShell {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: $apx-14;
+  margin-top: $apx-32;
+}
+
 .pagination {
   display: flex;
   justify-content: center;
   gap: $apx-16;
-  margin-top: $apx-32;
 }
 
 .dot {
@@ -404,6 +411,10 @@
 
   .pagination {
     gap: $apx-m-12;
+  }
+
+  .paginationShell {
+    min-height: $apx-m-8;
     margin-top: $apx-m-20;
   }
 

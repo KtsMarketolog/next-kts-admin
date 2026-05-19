@@ -21,7 +21,7 @@ type MainPromoEnhancerProps = {
 };
 
 const AUTO_DELAY = 4000;
-const INITIAL_AUTO_DELAY = 8000;
+const INITIAL_AUTO_DELAY = AUTO_DELAY;
 
 export function MainPromoEnhancer({ initialSlides }: MainPromoEnhancerProps) {
   const router = useRouter();

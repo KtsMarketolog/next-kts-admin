@@ -30,7 +30,11 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
             />
           ))}
         </div>
-        <MainPromoEnhancerLoader initialSlides={initialSlides} count={slides.length} />
+        {slides.length > 1 && (
+          <div className={styles.paginationShell}>
+            <MainPromoEnhancerLoader initialSlides={initialSlides} count={slides.length} />
+          </div>
+        )}
       </Container>
     </section>
   );
