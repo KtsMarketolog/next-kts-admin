@@ -42,7 +42,8 @@ export const GroupCompanies = async () => {
                 alt={label}
                 width={220}
                 height={110}
-                loading="eager"
+                loading="lazy"
+                fetchPriority="low"
                 decoding="async"
               />
             );
