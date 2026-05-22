@@ -4,8 +4,11 @@
 import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
 
+import { FooterSkeleton } from './Footer/FooterSkeleton';
+
 const Footer = dynamic(() => import('../layout/Footer/Footer').then((mod) => mod.Footer), {
   ssr: false,
+  loading: () => <FooterSkeleton />,
 });
 
 export const ConditionalFooter = () => {

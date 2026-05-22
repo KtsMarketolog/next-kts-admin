@@ -1,4 +1,5 @@
 @use "@/shared/styles/adaptive-px.scss" as *;
+@use "@/shared/styles/skeleton.scss" as skeleton;
 @use "sass:color";
 
 .sectionTitle {
@@ -148,6 +149,86 @@
     left: $apx-14;
     font-size: $apx-12;
     color: #a082dc;
+  }
+}
+
+.fieldSkeleton {
+  width: 100%;
+  height: $apx-60;
+  border: $apx-1 solid rgba(160, 130, 220, 0.3);
+  border-radius: $apx-16;
+  @include skeleton.surface($base: #303639, $opacity: 0.24, $blur: 18px, $speed: 3s);
+}
+
+.phoneSkeleton {
+  display: flex;
+  width: $apx-311;
+  height: $apx-60;
+  gap: $apx-10;
+}
+
+.phoneSkeletonCode,
+.phoneSkeletonNumber {
+  display: block;
+  height: 100%;
+  border: $apx-1 solid rgba(160, 130, 220, 0.3);
+  border-radius: $apx-16;
+  @include skeleton.surface($base: #303639, $opacity: 0.24, $blur: 18px, $speed: 3s);
+}
+
+.phoneSkeletonCode {
+  flex: 0 0 $apx-87;
+}
+
+.phoneSkeletonNumber {
+  flex: 1;
+}
+
+@media (max-width: 1024px) {
+  .fieldSkeleton {
+    height: $apx-l-60;
+    border-width: $apx-l-1;
+    border-radius: $apx-l-16;
+  }
+
+  .phoneSkeleton {
+    width: $apx-l-311;
+    height: $apx-l-60;
+    gap: $apx-l-10;
+  }
+
+  .phoneSkeletonCode,
+  .phoneSkeletonNumber {
+    border-width: $apx-l-1;
+    border-radius: $apx-l-16;
+  }
+
+  .phoneSkeletonCode {
+    flex-basis: $apx-l-87;
+  }
+}
+
+@media (max-width: 450px) {
+  .fieldSkeleton {
+    height: $apx-m-60;
+    border-width: $apx-m-1;
+    border-radius: $apx-m-16;
+  }
+
+  .phoneSkeleton {
+    width: 100%;
+    height: $apx-m-60;
+    gap: $apx-m-10;
+  }
+
+  .phoneSkeletonCode,
+  .phoneSkeletonNumber {
+    border-width: $apx-m-1;
+    border-radius: $apx-m-16;
+  }
+
+  .phoneSkeletonCode {
+    flex-basis: $apx-m-87;
   }
 }
 

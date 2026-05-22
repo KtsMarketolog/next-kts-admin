@@ -1,0 +1,259 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+@use "@/shared/styles/skeleton.scss" as skeleton;
+
+@mixin footerLine($width, $height, $radius: $apx-999) {
+  display: block;
+  width: $width;
+  height: $height;
+  border-radius: $radius;
+  @include skeleton.surface($base: rgb(255 255 255 / 0.2), $opacity: 0.24, $blur: 22px, $speed: 3.4s);
+}
+
+.footer {
+  position: relative;
+  overflow: hidden;
+  margin-top: $apx-67;
+  width: 100%;
+}
+
+.bgGradient {
+  padding: $apx-50 $apx-323;
+  background: url("/img/footer/footer-bg.png") no-repeat center top;
+  background-size: cover;
+  background-color: #f2f0ff;
+  @include skeleton.surface($base: #f2f0ff, $opacity: 0.18, $blur: 30px, $speed: 3.8s);
+}
+
+.content {
+  @include skeleton.content(1);
+
+  max-width: $apx-1274;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: auto auto auto auto;
+  grid-template-areas:
+    "logo      contacts   contacts   contacts  contacts"
+    "desc      menu       menu       button    button"
+    "socials   menu       menu       button    button"
+    "socials   bottom     bottom     bottom     bottom";
+}
+
+.logo {
+  grid-area: logo;
+  border-right: $apx-1 solid rgb(255 255 255 / 0.7);
+  border-bottom: $apx-1 solid rgb(255 255 255 / 0.7);
+  padding-right: $apx-57;
+  padding-bottom: $apx-37;
+
+  span {
+    @include footerLine($apx-220, $apx-72, $apx-12);
+  }
+}
+
+.contactsList {
+  grid-area: contacts;
+  display: flex;
+  align-items: center;
+  gap: $apx-20;
+  padding-left: $apx-47;
+  border-bottom: $apx-1 solid rgb(255 255 255 / 0.7);
+
+  span {
+    @include footerLine($apx-210, $apx-24);
+  }
+}
+
+.desc {
+  grid-area: desc;
+  display: grid;
+  align-content: start;
+  gap: $apx-10;
+  padding-top: $apx-40;
+  padding-bottom: $apx-32;
+  border-right: $apx-1 solid rgb(255 255 255 / 0.7);
+
+  span {
+    @include footerLine($apx-150, $apx-22);
+
+    &:last-child {
+      width: $apx-110;
+    }
+  }
+}
+
+.menu {
+  grid-area: menu;
+  display: flex;
+  gap: $apx-70;
+  padding: $apx-40 $apx-20 $apx-86 $apx-49;
+}
+
+.col {
+  display: grid;
+  align-content: start;
+  gap: $apx-12;
+
+  strong {
+    @include footerLine($apx-96, $apx-22);
+    margin-bottom: $apx-18;
+  }
+
+  span {
+    @include footerLine($apx-120, $apx-14);
+  }
+}
+
+.button {
+  grid-area: button;
+  justify-self: end;
+  margin-top: $apx-40;
+  @include footerLine($apx-258, $apx-64, $apx-7);
+}
+
+.socials {
+  grid-area: socials;
+  display: grid;
+  align-content: start;
+  gap: $apx-20;
+  border-right: $apx-1 solid rgb(255 255 255 / 0.7);
+
+  span {
+    @include footerLine($apx-180, $apx-18);
+  }
+
+  i {
+    @include footerLine($apx-52, $apx-51, $apx-10);
+    margin-left: $apx-62;
+  }
+}
+
+.bottom {
+  grid-area: bottom;
+  border-top: $apx-1 solid rgb(255 255 255 / 0.7);
+  padding-top: $apx-16;
+
+  span {
+    margin: 0 auto;
+    @include footerLine($apx-150, $apx-16);
+  }
+}
+
+@media (max-width: 1024px) {
+  .footer {
+    margin-top: $apx-l-18;
+  }
+
+  .bgGradient {
+    padding: $apx-l-110 $apx-l-102;
+    background: url("/img/footer/footer-tablet-bg.png") no-repeat left top;
+    background-size: cover;
+  }
+
+  .content {
+    max-width: 100%;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: auto auto auto auto auto;
+    grid-template-areas:
+      "logo      button"
+      "desc      menu"
+      "socials   menu"
+      "socials   contacts"
+      "bottom    contacts";
+  }
+
+  .logo {
+    border: 0;
+    padding: 0;
+  }
+
+  .contactsList {
+    display: grid;
+    gap: $apx-l-22;
+    padding-left: 0;
+    border: 0;
+  }
+
+  .desc,
+  .socials {
+    border: 0;
+  }
+
+  .button {
+    width: $apx-l-482;
+    justify-self: center;
+    margin-top: 0;
+  }
+
+  .menu {
+    gap: $apx-l-70;
+    padding: $apx-l-40 0 $apx-l-60;
+  }
+
+  .bottom {
+    border: 0;
+  }
+}
+
+@media (max-width: 450px) {
+  .footer {
+    margin-top: 0;
+  }
+
+  .bgGradient {
+    padding: $apx-m-80 $apx-m-5;
+    background: url("/img/footer/footer-mobile-bg.png") no-repeat left top;
+    background-size: cover;
+  }
+
+  .content {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: auto auto auto auto auto;
+    grid-template-areas:
+      "logo      desc"
+      "button    button"
+      "menu      menu"
+      "socials   contacts"
+      "socials   bottom";
+  }
+
+  .logo span {
+    width: $apx-m-120;
+    height: $apx-m-65;
+  }
+
+  .desc {
+    padding-top: 0;
+
+    span {
+      width: $apx-m-120;
+      height: $apx-m-14;
+    }
+  }
+
+  .button {
+    width: 100%;
+    height: $apx-m-62;
+    margin-top: $apx-m-10;
+    margin-bottom: $apx-m-80;
+  }
+
+  .menu {
+    gap: $apx-m-36;
+    padding: 0;
+  }
+
+  .contactsList,
+  .socials {
+    padding-top: $apx-m-80;
+  }
+
+  .contactsList span {
+    width: $apx-m-120;
+  }
+
+  .socials i {
+    width: $apx-m-58;
+    height: $apx-m-57;
+    margin-left: $apx-m-40;
+  }
+}

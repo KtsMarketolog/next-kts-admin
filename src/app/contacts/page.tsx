@@ -6,33 +6,28 @@ import styles from './ContactsPage.module.scss';
 import { useSiteSettings } from '@/shared/lib/useSiteSettings';
 import Container from '@/shared/ui/Container';
 
-const PhoneInput = dynamic(() => import('@/shared/ui/PhoneInput/PhoneInput'), { ssr: false });
-const CitySelect = dynamic(() => import('@/shared/ui/CitySelect/CitySelect'), { ssr: false });
-// // показываем простой <input> пока виджет грузится
-// const PhoneInput = dynamic(() => import("@/shared/ui/PhoneInput/PhoneInput"), {
-//   ssr: false,
-//   loading: () => (
-//     <input
-//       name="phone"
-//       placeholder="Телефон"
-//       inputMode="tel"
-//       className="phone-skeleton" // подгони класс под свои стили
-//       aria-busy="true"
-//     />
-//   ),
-// });
+function CitySelectSkeleton() {
+  return <div className={styles.fieldSkeleton} aria-hidden="true" />;
+}
 
-// const CitySelect = dynamic(() => import("@/shared/ui/CitySelect/CitySelect"), {
-//   ssr: false,
-//   loading: () => (
-//     <input
-//       name="city"
-//       placeholder="Город"
-//       className="city-skeleton"
-//       aria-busy="true"
-//     />
-//   ),
-// });
+function PhoneInputSkeleton() {
+  return (
+    <div className={styles.phoneSkeleton} aria-hidden="true">
+      <span className={styles.phoneSkeletonCode} />
+      <span className={styles.phoneSkeletonNumber} />
+    </div>
+  );
+}
+
+const PhoneInput = dynamic(() => import('@/shared/ui/PhoneInput/PhoneInput'), {
+  ssr: false,
+  loading: () => <PhoneInputSkeleton />,
+});
+
+const CitySelect = dynamic(() => import('@/shared/ui/CitySelect/CitySelect'), {
+  ssr: false,
+  loading: () => <CitySelectSkeleton />,
+});
 
 function splitAddress(address: string) {
   const normalized = address.trim();
@@ -285,7 +280,7 @@ export default function ContactsPage() {
 
                       name="phone"    
                       required={false}    
-                      onChange={(full) => {
+                      onChange={() => {
 
                       }}
 
