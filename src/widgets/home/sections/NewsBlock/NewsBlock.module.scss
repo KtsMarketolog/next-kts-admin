@@ -1,4 +1,5 @@
 @use "@/shared/styles/adaptive-px.scss" as *;
+@use "@/shared/styles/skeleton.scss" as skeleton;
 
 .newsBlock {
 
@@ -78,13 +79,15 @@
     }
 
     .cardImage {
-
       aspect-ratio: 397 / 195;
       border-radius: $apx-10;
       background: linear-gradient(135deg, #f2f0ff 0%, #fbfaff 100%);
       overflow: hidden;
+      @include skeleton.surface($base: #f2f0ff, $opacity: 0.18, $blur: 16px, $speed: 3.4s);
 
       img {
+        @include skeleton.content(1);
+
         width: 100%;
         height: 100%;
         border-radius: $apx-10;

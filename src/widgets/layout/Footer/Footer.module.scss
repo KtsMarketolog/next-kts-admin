@@ -1,4 +1,5 @@
 @use "@/shared/styles/adaptive-px.scss" as *;
+@use "@/shared/styles/skeleton.scss" as skeleton;
 
 .footer {
 
@@ -10,15 +11,17 @@
 
 
   .bgGradient {
-    
     padding: $apx-50 $apx-323;
     background: url("/img/footer/footer-bg.png") no-repeat center top;
     background-size: cover; 
+    background-color: #f2f0ff;
     color: #fff;
+    @include skeleton.surface($base: #f2f0ff, $opacity: 0.06, $blur: 24px, $speed: 4s);
 
   }
 
   .content {
+    @include skeleton.content(1);
 
     max-width: $apx-1274;
     display: grid;

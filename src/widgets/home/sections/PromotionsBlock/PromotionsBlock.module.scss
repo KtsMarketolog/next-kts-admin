@@ -1,4 +1,5 @@
 @use "@/shared/styles/adaptive-px.scss" as *;
+@use "@/shared/styles/skeleton.scss" as skeleton;
 
 .promotionsBlock {
 
@@ -40,9 +41,9 @@
   }
 
   .card {
-
     border-radius: $apx-15;
     background-color: #f2f0ff;
+    @include skeleton.surface($base: #f2f0ff, $opacity: 0.1, $blur: 18px, $speed: 3.8s);
     
   }
 

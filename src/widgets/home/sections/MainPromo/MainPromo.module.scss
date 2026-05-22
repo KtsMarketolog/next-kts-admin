@@ -1,5 +1,6 @@
 /* MainPromo.module.scss */
 @use "@/shared/styles/adaptive-px.scss" as *;
+@use "@/shared/styles/skeleton.scss" as skeleton;
 
 .heroBanner {
   padding-top: $apx-134;
@@ -45,6 +46,7 @@
   height: 100%;
   min-height: $apx-722;
   padding: $apx-40;
+  @include skeleton.surface($base: #f2f0ff, $opacity: 0.18, $blur: 22px, $speed: 3.2s);
 }
 
 /* аккуратно: курсор “рука” только там, где реально кликабельно */
@@ -61,13 +63,13 @@
   height: 100%;
   object-fit: cover;
   object-position: $apx-1 center;
-  z-index: 0;
+  z-index: 1;
 }
 
 /* ======= ЕДИНЫЙ стиль для контента всех слайдов ======= */
 .contentCardBase {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: $apx-28;
@@ -150,7 +152,7 @@
 /* ======= Action-кнопки поверх слайда ======= */
 .slideAction {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
 
   a { display: block; }
 }

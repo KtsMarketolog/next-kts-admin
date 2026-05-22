@@ -1,0 +1,50 @@
+@mixin surface($base: #f2f0ff, $opacity: 0.28, $blur: 18px, $speed: 3s, $z-index: 0) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background-color: $base;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -45%;
+    z-index: $z-index;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 30% 50%, rgb(247 246 255 / 68%), transparent 28%),
+      linear-gradient(
+        110deg,
+        rgb(255 255 255 / 0%) 28%,
+        rgb(255 255 255 / 76%) 46%,
+        rgb(255 255 255 / 20%) 58%,
+        rgb(255 255 255 / 0%) 76%
+      );
+    filter: blur($blur);
+    opacity: $opacity;
+    transform: translateX(-55%) rotate(4deg);
+    animation: skeletonSoftSweep $speed ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &::before {
+      animation: none;
+      transform: translateX(0) rotate(4deg);
+    }
+  }
+}
+
+@mixin content($z-index: 1) {
+  position: relative;
+  z-index: $z-index;
+}
+
+@keyframes skeletonSoftSweep {
+  0% {
+    transform: translateX(-55%) rotate(4deg);
+  }
+
+  55%,
+  100% {
+    transform: translateX(55%) rotate(4deg);
+  }
+}

@@ -1,4 +1,5 @@
 @use "@/shared/styles/adaptive-px.scss" as *;
+@use "@/shared/styles/skeleton.scss" as skeleton;
 
 .aboutKts {
 
@@ -28,7 +29,6 @@
   }
 
   .bigCard {
-
     position: relative;
     min-width: $apx-613;
     max-width: $apx-613;
@@ -36,6 +36,7 @@
     background: linear-gradient(179.92deg, #240C96 27.06%, #604FAD 99.93%);
 
     border-radius: $apx-15;
+    @include skeleton.surface($base: #f2f0ff, $opacity: 0.12, $blur: 22px, $speed: 3.6s);
 
     .arrowHorizontal {
 
@@ -101,7 +102,6 @@
   }
 
   .fact {
-
     position: relative;
     display: grid;
     grid-template-columns: $apx-259 auto;
@@ -114,8 +114,10 @@
     max-height: $apx-166;
     padding-left: $apx-90;
     overflow: hidden;
+    @include skeleton.surface($base: #e9e6f4, $opacity: 0.14, $blur: 18px, $speed: 3.6s);
 
     .number {
+      @include skeleton.content(1);
 
       font-size: $apx-50;
       font-weight: 700;
@@ -128,6 +130,7 @@
     }
 
     .desc {
+      @include skeleton.content(1);
       
       font-size: $apx-26;
       font-weight: 500;
