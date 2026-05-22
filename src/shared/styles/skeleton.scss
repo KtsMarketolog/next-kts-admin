@@ -4,12 +4,16 @@
   isolation: isolate;
   background-color: $base;
 
-  &::before {
+  &::before,
+  &::after {
     content: "";
     position: absolute;
-    inset: -45%;
     z-index: $z-index;
     pointer-events: none;
+  }
+
+  &::before {
+    inset: -45%;
     background:
       radial-gradient(circle at 30% 50%, rgb(247 246 255 / 68%), transparent 28%),
       linear-gradient(
@@ -25,11 +29,37 @@
     animation: skeletonSoftSweep $speed ease-in-out infinite;
   }
 
+  &::after {
+    top: 14%;
+    bottom: 14%;
+    left: -28%;
+    width: 22%;
+    border-radius: 999px;
+    background: radial-gradient(ellipse at center, rgb(255 255 255 / 82%) 0%, rgb(247 246 255 / 44%) 34%, rgb(255 255 255 / 0%) 72%);
+    filter: blur($blur);
+    opacity: $opacity * 0.72;
+    transform: translateX(-130%) rotate(15deg);
+    animation: skeletonSparkle $speed * 1.25 ease-in-out infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    &::before {
+    &::before,
+    &::after {
       animation: none;
       transform: translateX(0) rotate(4deg);
     }
+  }
+}
+
+@keyframes skeletonSparkle {
+  0%,
+  30% {
+    transform: translateX(-130%) rotate(15deg);
+  }
+
+  72%,
+  100% {
+    transform: translateX(650%) rotate(15deg);
   }
 }
 
