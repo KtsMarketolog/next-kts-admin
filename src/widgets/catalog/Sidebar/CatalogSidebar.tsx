@@ -7,6 +7,7 @@ import styles from './CatalogSidebar.module.scss';
 import getSidebarData, {
   fetchBrandsBySubcategory as getBrandsForSubcategory,
 } from '@/entities/catalog/api/catalogApiClient';
+import { CatalogSidebarSkeleton } from './CatalogSidebarSkeleton';
 import { fallbackIconLineColor, readIconBackgroundColor } from './CatalogSidebar.color';
 import type { BrandLite, CategoryLineStyle, CatLite, Hint, IconLineColor } from './CatalogSidebar.types';
 
@@ -196,6 +197,10 @@ export default function CatalogSidebar() {
       '--cat-line': iconColor ?? DEFAULT_CAT_LINE_COLOR,
     };
   };
+
+  if (!data) {
+    return <CatalogSidebarSkeleton />;
+  }
 
   return (
     <div className={styles.wrap}>
@@ -429,7 +434,7 @@ export default function CatalogSidebar() {
       </div>
 
       {/* Сайдбар (десктоп/планшет) */}
-      {!data ? null : !inBrands ? (
+      {!inBrands ? (
         <nav className={styles.tree}>
           {(filteredCategories as CatLite[]).map((cat) => {
             const isSale = cat.slug === SALE_SLUG;

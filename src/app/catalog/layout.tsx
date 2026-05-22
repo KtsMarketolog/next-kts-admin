@@ -2,9 +2,10 @@ import styles from './layout.module.scss';
 import dynamic from 'next/dynamic';
 import { ReactNode } from 'react';
 import Container from '@/shared/ui/Container';
+import { CatalogSidebarSkeleton } from '@/widgets/catalog/Sidebar/CatalogSidebarSkeleton';
 
 const CatalogSidebar = dynamic(() => import('@/widgets/catalog/Sidebar/CatalogSidebar'), {
-  loading: () => <div className={styles.sidebarFallback} aria-hidden="true" />,
+  loading: () => <CatalogSidebarSkeleton />,
 });
 
 export default function CatalogLayout({ children }: { children: ReactNode }) {

@@ -1,5 +1,136 @@
-/* src/app/catalog/loading.module.scss */
-.wrap { padding: 20px; }
-.titleSkel { height: 28px; width: 220px; margin-bottom: 16px; background: #f2f2f2; border-radius: 6px; }
-.grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
-.card { height: 140px; background: #f2f2f2; border-radius: 12px; }
+@use "@/shared/styles/adaptive-px.scss" as *;
+@use "@/shared/styles/skeleton.scss" as skeleton;
+
+.wrap {
+  width: 100%;
+}
+
+.titleSkel {
+  width: min($apx-360, 48%);
+  height: $apx-42;
+  margin-bottom: $apx-20;
+  border-radius: $apx-12;
+  @include skeleton.surface($base: #f2f0ff, $opacity: 0.42, $blur: 24px, $speed: 3s);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-20;
+}
+
+.card {
+  position: relative;
+  min-height: $apx-220;
+  overflow: hidden;
+  border: $apx-1 solid transparent;
+  border-radius: $apx-14;
+  padding: $apx-20;
+  padding-top: $apx-41;
+  @include skeleton.surface($base: #f2f0ff, $opacity: 0.42, $blur: 24px, $speed: 3s);
+}
+
+.lineWide,
+.lineShort,
+.picture {
+  position: relative;
+  z-index: 1;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 58%);
+}
+
+.lineWide {
+  width: 78%;
+  height: $apx-18;
+  margin-bottom: $apx-12;
+}
+
+.lineShort {
+  width: 54%;
+  height: $apx-14;
+}
+
+.picture {
+  position: absolute;
+  right: $apx-18;
+  bottom: $apx-16;
+  width: $apx-100;
+  height: $apx-100;
+  border-radius: $apx-18;
+}
+
+@media (max-width: 1024px) {
+  .titleSkel {
+    height: $apx-l-42;
+    margin-bottom: $apx-l-20;
+    border-radius: $apx-l-12;
+  }
+
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: $apx-l-20;
+  }
+
+  .card {
+    min-height: $apx-l-220;
+    border-width: $apx-l-1;
+    border-radius: $apx-l-10;
+    padding: $apx-l-10;
+  }
+
+  .lineWide {
+    height: $apx-l-16;
+    margin-bottom: $apx-l-10;
+  }
+
+  .lineShort {
+    height: $apx-l-14;
+  }
+
+  .picture {
+    right: $apx-l-12;
+    bottom: $apx-l-8;
+    width: $apx-l-130;
+    height: $apx-l-80;
+    border-radius: $apx-l-16;
+  }
+}
+
+@media (max-width: 450px) {
+  .titleSkel {
+    width: 72%;
+    height: $apx-m-36;
+    margin-bottom: $apx-m-16;
+    border-radius: $apx-m-12;
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $apx-m-12;
+  }
+
+  .card {
+    min-height: $apx-m-220;
+    border-width: $apx-m-1;
+    border-radius: $apx-m-12;
+    padding: $apx-m-12;
+  }
+
+  .lineWide {
+    height: $apx-m-14;
+    margin-bottom: $apx-m-8;
+  }
+
+  .lineShort {
+    width: 68%;
+    height: $apx-m-12;
+  }
+
+  .picture {
+    right: $apx-m-10;
+    bottom: $apx-m-6;
+    width: $apx-m-150;
+    height: $apx-m-100;
+    border-radius: $apx-m-16;
+  }
+}
