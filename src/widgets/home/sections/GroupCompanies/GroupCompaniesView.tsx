@@ -1,3 +1,6 @@
+"use client";
+
+import { useCallback, useState } from "react";
 import type { GroupCompany } from "@/entities/site/model/defaultGroupCompanies";
 import Container from "@/shared/ui/Container";
 import styles from "./GroupCompanies.module.scss";
@@ -21,6 +24,15 @@ function normalizeCompanyHref(value: string) {
 }
 
 export function GroupCompaniesView({ companies }: GroupCompaniesViewProps) {
+  const [loadedLogos, setLoadedLogos] = useState<Record<string, boolean>>({});
+
+  const markLogoLoaded = useCallback((key: string) => {
+    setLoadedLogos((current) => {
+      if (current[key]) return current;
+      return { ...current, [key]: true };
+    });
+  }, []);
+
   return (
     <section className={styles.groupCompanies}>
       <Container>
@@ -32,12 +44,14 @@ export function GroupCompaniesView({ companies }: GroupCompaniesViewProps) {
 
         <div className={styles.list}>
           {companies.map((company, index) => {
+            const itemKey = `${company.imageUrl}-${index}`;
             const href = normalizeCompanyHref(company.linkUrl);
             const label = `${COMPANY_LABEL} ${index + 1}`;
+            const isLoaded = Boolean(loadedLogos[itemKey]);
             const logo = (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                className={styles.logo}
+                className={`${styles.logo} ${isLoaded ? styles.logoLoaded : ""}`}
                 src={company.imageUrl}
                 alt={label}
                 width={220}
@@ -45,11 +59,16 @@ export function GroupCompaniesView({ companies }: GroupCompaniesViewProps) {
                 loading="lazy"
                 fetchPriority="low"
                 decoding="async"
+                onLoad={() => markLogoLoaded(itemKey)}
+                onError={() => markLogoLoaded(itemKey)}
               />
             );
 
             return (
-              <div key={`${company.imageUrl}-${index}`} className={styles.company}>
+              <div
+                key={itemKey}
+                className={`${styles.company} ${isLoaded ? styles.companyLoaded : ""}`}
+              >
                 {href ? (
                   <a
                     className={styles.companyLink}
