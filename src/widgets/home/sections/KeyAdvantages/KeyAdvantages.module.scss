@@ -53,7 +53,7 @@
     padding: $apx-30;
     background-color: #fff;
     transition: transform 0.4s ease, box-shadow 0.4s ease; 
-    @include skeleton.surface($base: #f7f6ff, $opacity: 0.12, $blur: 18px, $speed: 3.6s);
+    @include skeleton.surface($base: #f7f6ff, $opacity: 0.34, $blur: 24px, $speed: 3.1s);
 
      &:hover {
 

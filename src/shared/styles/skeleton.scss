@@ -1,4 +1,4 @@
-@mixin surface($base: #f2f0ff, $opacity: 0.28, $blur: 18px, $speed: 3s, $z-index: 0) {
+@mixin surface($base: #f2f0ff, $opacity: 0.42, $blur: 24px, $speed: 2.8s, $z-index: 0) {
   position: relative;
   overflow: hidden;
   isolation: isolate;
@@ -10,43 +10,51 @@
     position: absolute;
     z-index: $z-index;
     pointer-events: none;
+    will-change: transform, opacity;
   }
 
   &::before {
-    inset: -45%;
+    inset: -40% -55%;
     background:
-      radial-gradient(circle at 30% 50%, rgb(247 246 255 / 68%), transparent 28%),
+      radial-gradient(circle at 30% 50%, rgb(255 255 255 / 74%), transparent 30%),
       linear-gradient(
         110deg,
-        rgb(255 255 255 / 0%) 28%,
-        rgb(255 255 255 / 76%) 46%,
-        rgb(255 255 255 / 20%) 58%,
+        rgb(255 255 255 / 0%) 20%,
+        rgb(141 129 196 / 18%) 36%,
+        rgb(255 255 255 / 88%) 48%,
+        rgb(183 174 235 / 24%) 58%,
         rgb(255 255 255 / 0%) 76%
       );
-    filter: blur($blur);
+    filter: blur($blur) saturate(1.08);
     opacity: $opacity;
-    transform: translateX(-55%) rotate(4deg);
+    transform: translate3d(-58%, 0, 0) rotate(4deg);
     animation: skeletonSoftSweep $speed ease-in-out infinite;
   }
 
   &::after {
-    top: 14%;
-    bottom: 14%;
-    left: -28%;
-    width: 22%;
+    top: 8%;
+    bottom: 8%;
+    left: -34%;
+    width: 30%;
     border-radius: 999px;
-    background: radial-gradient(ellipse at center, rgb(255 255 255 / 82%) 0%, rgb(247 246 255 / 44%) 34%, rgb(255 255 255 / 0%) 72%);
-    filter: blur($blur);
-    opacity: $opacity * 0.72;
-    transform: translateX(-130%) rotate(15deg);
-    animation: skeletonSparkle $speed * 1.25 ease-in-out infinite;
+    background:
+      radial-gradient(ellipse at center, rgb(255 255 255 / 92%) 0%, rgb(210 203 250 / 52%) 34%, rgb(255 255 255 / 0%) 74%);
+    filter: blur($blur * 0.72);
+    opacity: $opacity * 0.95;
+    transform: translate3d(-135%, 0, 0) rotate(15deg);
+    animation: skeletonSparkle $speed * 1.15 ease-in-out infinite;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    &::before,
+    &::before {
+      animation: none;
+      transform: translate3d(0, 0, 0) rotate(4deg);
+    }
+
     &::after {
       animation: none;
-      transform: translateX(0) rotate(4deg);
+      opacity: $opacity * 0.45;
+      transform: translate3d(0, 0, 0) rotate(15deg);
     }
   }
 }
@@ -54,12 +62,12 @@
 @keyframes skeletonSparkle {
   0%,
   30% {
-    transform: translateX(-130%) rotate(15deg);
+    transform: translate3d(-135%, 0, 0) rotate(15deg);
   }
 
   72%,
   100% {
-    transform: translateX(650%) rotate(15deg);
+    transform: translate3d(650%, 0, 0) rotate(15deg);
   }
 }
 
@@ -70,11 +78,11 @@
 
 @keyframes skeletonSoftSweep {
   0% {
-    transform: translateX(-55%) rotate(4deg);
+    transform: translate3d(-58%, 0, 0) rotate(4deg);
   }
 
   55%,
   100% {
-    transform: translateX(55%) rotate(4deg);
+    transform: translate3d(58%, 0, 0) rotate(4deg);
   }
 }

@@ -1,0 +1,299 @@
+@use "@/shared/styles/skeleton.scss" as skeleton;
+
+.root {
+  width: 100%;
+}
+
+.section {
+  width: min(1600px, calc(100vw - 36px));
+  margin: 0 auto;
+  padding: clamp(56px, 6.8vw, 130px) 0;
+}
+
+.sectionNarrow {
+  width: min(1274px, calc(100vw - 36px));
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.heading {
+  width: min(560px, 72vw);
+  height: clamp(56px, 4.8vw, 92px);
+  margin: 0 auto clamp(24px, 2.1vw, 40px);
+  border-radius: 16px;
+  @include skeleton.surface($base: #f7f6ff, $opacity: 0.44, $blur: 26px, $speed: 2.9s);
+}
+
+.groupGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: clamp(14px, 1.3vw, 25px);
+}
+
+.groupCard,
+.brandCard,
+.productCard,
+.advantageCard,
+.newsImage,
+.promoCard,
+.factCard,
+.aboutBig,
+.partnerBanner,
+.catalogButton {
+  border-radius: 16px;
+  @include skeleton.surface($base: #f2f0ff, $opacity: 0.42, $blur: 26px, $speed: 3s);
+}
+
+.groupCard {
+  min-height: clamp(120px, 8.2vw, 156px);
+  border: 3px solid #1b0389;
+  background-color: #fff;
+}
+
+.aboutSection {
+  padding-top: 0;
+}
+
+.aboutGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(20px, 1.8vw, 34px);
+}
+
+.aboutBig {
+  min-height: clamp(340px, 29.5vw, 566px);
+  background: linear-gradient(179.92deg, #240c96 27.06%, #604fad 99.93%);
+}
+
+.facts {
+  display: grid;
+  gap: clamp(20px, 1.8vw, 34px);
+}
+
+.factCard {
+  min-height: clamp(118px, 8.7vw, 166px);
+  background-color: #e9e6f4;
+}
+
+.advantageBand,
+.productsBand,
+.tabsBand {
+  width: 100vw;
+  margin-left: 50%;
+  transform: translateX(-50%);
+  background-color: #f2f0ff;
+}
+
+.advantageBand {
+  padding: clamp(40px, 7vw, 130px) 0;
+  background-color: #f6f8ff;
+}
+
+.advantageGrid,
+.productGrid {
+  width: min(1274px, calc(100vw - 36px));
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(16px, 2vw, 40px);
+}
+
+.advantageCard {
+  min-height: clamp(160px, 15.3vw, 294px);
+  background-color: #fff;
+}
+
+.partnerBanner {
+  min-height: clamp(220px, 16vw, 310px);
+  border-radius: 15px;
+}
+
+.promoGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(16px, 2vw, 40px);
+}
+
+.promoCard {
+  min-height: clamp(190px, 13.5vw, 259px);
+}
+
+.promoWide {
+  grid-column: span 2;
+}
+
+.productsBand {
+  padding: clamp(56px, 6.8vw, 130px) 0 clamp(64px, 7.8vw, 150px);
+}
+
+.productGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.productCard {
+  min-height: clamp(150px, 9.6vw, 184px);
+  background-color: #fff;
+}
+
+.catalogButton {
+  min-height: 64px;
+  background-color: #f7f6ff;
+}
+
+.newsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(16px, 2vw, 40px);
+}
+
+.newsCard {
+  display: grid;
+  gap: 18px;
+}
+
+.newsImage {
+  aspect-ratio: 397 / 195;
+}
+
+.newsLine {
+  width: 78%;
+  height: 22px;
+  border-radius: 999px;
+  @include skeleton.surface($base: #f2f0ff, $opacity: 0.38, $blur: 22px, $speed: 3.2s);
+}
+
+.tabsBand {
+  padding: 20px 0;
+  margin-bottom: clamp(24px, 2.1vw, 40px);
+}
+
+.tabs {
+  width: min(1274px, calc(100vw - 36px));
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.tab {
+  width: clamp(120px, 8.8vw, 170px);
+  height: 62px;
+  border-radius: 999px;
+  @include skeleton.surface($base: #f7f6ff, $opacity: 0.38, $blur: 22px, $speed: 3.1s);
+}
+
+.brandGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: clamp(14px, 1.3vw, 25px);
+}
+
+.brandCard {
+  min-height: 120px;
+  background-color: #fff;
+}
+
+@media (max-width: 1024px) {
+  .section {
+    width: min(988px, calc(100vw - 20px));
+    padding: clamp(50px, 7.3vw, 75px) 0;
+  }
+
+  .groupGrid,
+  .brandGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .advantageGrid,
+  .productGrid {
+    width: min(988px, calc(100vw - 20px));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .promoGrid,
+  .newsGrid {
+    display: flex;
+    overflow: hidden;
+  }
+
+  .promoCard {
+    min-width: 291px;
+  }
+
+  .promoWide {
+    min-width: 609px;
+  }
+
+  .newsCard {
+    min-width: 400px;
+  }
+
+  .tabs,
+  .brandGrid {
+    width: min(988px, calc(100vw - 20px));
+  }
+}
+
+@media (max-width: 450px) {
+  .section {
+    width: min(384px, calc(100vw - 16px));
+    padding: 50px 0;
+  }
+
+  .heading {
+    width: min(320px, 86vw);
+    height: 52px;
+    margin-bottom: 20px;
+  }
+
+  .groupGrid,
+  .brandGrid,
+  .advantageGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .aboutGrid,
+  .productGrid,
+  .newsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .productGrid,
+  .advantageGrid,
+  .tabs,
+  .brandGrid {
+    width: min(384px, calc(100vw - 16px));
+  }
+
+  .productsBand {
+    padding: 40px 0;
+  }
+
+  .promoGrid {
+    display: flex;
+    overflow: hidden;
+  }
+
+  .promoCard {
+    min-width: 280px;
+  }
+
+  .promoWide {
+    min-width: 400px;
+  }
+
+  .newsGrid {
+    display: flex;
+    overflow: hidden;
+  }
+
+  .newsCard {
+    min-width: 330px;
+  }
+
+  .tabs {
+    justify-content: flex-start;
+    overflow: hidden;
+  }
+}

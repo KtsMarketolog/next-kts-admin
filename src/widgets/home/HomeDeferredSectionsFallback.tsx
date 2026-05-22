@@ -1,98 +1,103 @@
-import type { CSSProperties } from "react";
+import styles from "./HomeDeferredSectionsFallback.module.scss";
 
-const fallbackRootStyle: CSSProperties = {
-  width: "100%",
-};
-
-const groupShellStyle: CSSProperties = {
-  width: "100%",
-  maxWidth: "1600px",
-  minHeight: "260px",
-  margin: "0 auto",
-  padding: "clamp(56px, 6.8vw, 130px) 18px clamp(56px, 5.8vw, 110px)",
-};
-
-const headingStyle: CSSProperties = {
-  width: "min(520px, 68vw)",
-  height: "clamp(68px, 4.8vw, 92px)",
-  margin: "0 auto 32px",
-  borderRadius: "16px",
-  background: "linear-gradient(90deg, #f7f7fb 0%, #f0eff8 48%, #f7f7fb 100%)",
-};
-
-const groupCardsStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
-  gap: "25px",
-};
-
-const groupCardStyle: CSSProperties = {
-  minHeight: "clamp(120px, 8.2vw, 156px)",
-  border: "3px solid #1b0389",
-  borderRadius: "21px",
-  background: "linear-gradient(135deg, #ffffff 0%, #f8f7ff 100%)",
-};
-
-const aboutShellStyle: CSSProperties = {
-  width: "100%",
-  maxWidth: "1274px",
-  minHeight: "680px",
-  margin: "0 auto",
-  padding: "0 18px clamp(64px, 6.8vw, 130px)",
-};
-
-const aboutTitleStyle: CSSProperties = {
-  width: "min(360px, 60vw)",
-  height: "64px",
-  margin: "0 auto 40px",
-  borderRadius: "16px",
-  background: "linear-gradient(90deg, #f7f7fb 0%, #f0eff8 48%, #f7f7fb 100%)",
-};
-
-const aboutGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))",
-  gap: "34px",
-};
-
-const aboutBigStyle: CSSProperties = {
-  minHeight: "clamp(340px, 29.5vw, 566px)",
-  borderRadius: "15px",
-  background: "linear-gradient(179.92deg, #240c96 27.06%, #604fad 99.93%)",
-};
-
-const factsStyle: CSSProperties = {
-  display: "grid",
-  gap: "34px",
-};
-
-const factStyle: CSSProperties = {
-  minHeight: "clamp(118px, 8.7vw, 166px)",
-  borderRadius: "15px",
-  background: "#e9e6f4",
-};
+const groupCards = Array.from({ length: 5 });
+const facts = Array.from({ length: 3 });
+const advantages = Array.from({ length: 8 });
+const promotions = Array.from({ length: 5 });
+const products = Array.from({ length: 8 });
+const news = Array.from({ length: 3 });
+const tabs = Array.from({ length: 7 });
+const brands = Array.from({ length: 15 });
 
 export function HomeDeferredSectionsFallback() {
   return (
-    <div aria-hidden="true" style={fallbackRootStyle}>
-      <section style={groupShellStyle}>
-        <div style={headingStyle} />
-        <div style={groupCardsStyle}>
-          {Array.from({ length: 5 }).map((_, index) => (
-            <div key={index} style={groupCardStyle} />
+    <div aria-hidden="true" className={styles.root}>
+      <section className={styles.section}>
+        <div className={styles.heading} />
+        <div className={styles.groupGrid}>
+          {groupCards.map((_, index) => (
+            <div key={index} className={styles.groupCard} />
           ))}
         </div>
       </section>
 
-      <section style={aboutShellStyle}>
-        <div style={aboutTitleStyle} />
-        <div style={aboutGridStyle}>
-          <div style={aboutBigStyle} />
-          <div style={factsStyle}>
-            <div style={factStyle} />
-            <div style={factStyle} />
-            <div style={factStyle} />
+      <section className={`${styles.section} ${styles.sectionNarrow} ${styles.aboutSection}`}>
+        <div className={styles.heading} />
+        <div className={styles.aboutGrid}>
+          <div className={styles.aboutBig} />
+          <div className={styles.facts}>
+            {facts.map((_, index) => (
+              <div key={index} className={styles.factCard} />
+            ))}
           </div>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.heading} />
+        <div className={styles.advantageBand}>
+          <div className={styles.advantageGrid}>
+            {advantages.map((_, index) => (
+              <div key={index} className={styles.advantageCard} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.partnerBanner} />
+      </section>
+
+      <section className={`${styles.section} ${styles.sectionNarrow}`}>
+        <div className={styles.heading} />
+        <div className={styles.promoGrid}>
+          {promotions.map((_, index) => (
+            <div
+              key={index}
+              className={`${styles.promoCard} ${index > 1 ? styles.promoWide : ""}`}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.productsBand}>
+        <div className={styles.sectionNarrow}>
+          <div className={styles.heading} />
+          <div className={styles.productGrid}>
+            {products.map((_, index) => (
+              <div key={index} className={styles.productCard} />
+            ))}
+            <div className={styles.catalogButton} />
+          </div>
+        </div>
+      </section>
+
+      <section className={`${styles.section} ${styles.sectionNarrow}`}>
+        <div className={styles.heading} />
+        <div className={styles.newsGrid}>
+          {news.map((_, index) => (
+            <div key={index} className={styles.newsCard}>
+              <div className={styles.newsImage} />
+              <div className={styles.newsLine} />
+              <div className={styles.newsLine} />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.heading} />
+        <div className={styles.tabsBand}>
+          <div className={styles.tabs}>
+            {tabs.map((_, index) => (
+              <div key={index} className={styles.tab} />
+            ))}
+          </div>
+        </div>
+        <div className={styles.brandGrid}>
+          {brands.map((_, index) => (
+            <div key={index} className={styles.brandCard} />
+          ))}
         </div>
       </section>
     </div>

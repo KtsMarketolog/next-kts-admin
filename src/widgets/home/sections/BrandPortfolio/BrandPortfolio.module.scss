@@ -115,7 +115,7 @@
     padding: $apx-20;
     box-shadow: $apx-4 $apx-4 $apx-22 0 rgba(27, 3, 137, 0.07);
     transition: transform 0.4s ease, box-shadow 0.4s ease; 
-    @include skeleton.surface($base: #f7f6ff, $opacity: 0.14, $blur: 18px, $speed: 3.5s);
+    @include skeleton.surface($base: #f7f6ff, $opacity: 0.36, $blur: 24px, $speed: 3.1s);
 
     &:hover {
 

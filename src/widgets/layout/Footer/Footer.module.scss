@@ -16,7 +16,7 @@
     background-size: cover; 
     background-color: #f2f0ff;
     color: #fff;
-    @include skeleton.surface($base: #f2f0ff, $opacity: 0.06, $blur: 24px, $speed: 4s);
+    @include skeleton.surface($base: #f2f0ff, $opacity: 0.18, $blur: 30px, $speed: 3.8s);
 
   }
 

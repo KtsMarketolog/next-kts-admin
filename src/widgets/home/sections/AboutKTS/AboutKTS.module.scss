@@ -36,7 +36,7 @@
     background: linear-gradient(179.92deg, #240C96 27.06%, #604FAD 99.93%);
 
     border-radius: $apx-15;
-    @include skeleton.surface($base: #f2f0ff, $opacity: 0.12, $blur: 22px, $speed: 3.6s);
+    @include skeleton.surface($base: #f2f0ff, $opacity: 0.34, $blur: 28px, $speed: 3s);
 
     .arrowHorizontal {
 
@@ -114,7 +114,7 @@
     max-height: $apx-166;
     padding-left: $apx-90;
     overflow: hidden;
-    @include skeleton.surface($base: #e9e6f4, $opacity: 0.14, $blur: 18px, $speed: 3.6s);
+    @include skeleton.surface($base: #e9e6f4, $opacity: 0.36, $blur: 24px, $speed: 3s);
 
     .number {
       @include skeleton.content(1);
