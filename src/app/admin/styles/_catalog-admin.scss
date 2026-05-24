@@ -147,22 +147,25 @@
 }
 
 .catalogCategoryIconActions {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: $apx-170 $apx-140;
   gap: $apx-8;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: end;
+  width: calc(#{$apx-170} + #{$apx-8} + #{$apx-140});
 
   button {
-    min-width: $apx-140;
+    width: $apx-140;
   }
 }
 
 .catalogCategoryVisibility {
-  min-width: $apx-170;
+  width: $apx-170;
+  min-width: 0;
   justify-content: flex-start;
   font-size: $apx-13;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .stockLogCard {
