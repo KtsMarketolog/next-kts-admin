@@ -114,7 +114,7 @@ export function AdminCatalogView({
           <h3>Загрузка Excel</h3>
           <p>
             Импорт полностью заменяет публичный каталог. Обязательное поле: Артикул. Дополнительно принимаются USD,
-            Ручная скидка и Ручная скидка роп.
+            Общая скидка, Ручная скидка и Ручная скидка роп.
           </p>
           {importResult && <span>{importResult}</span>}
         </div>
@@ -284,6 +284,10 @@ export function AdminCatalogView({
           <input value={draft.priceCny} onChange={(event) => setDraft((current) => ({ ...current, priceCny: event.target.value }))} />
         </label>
         <label>
+          <span>Общая скидка</span>
+          <input value={draft.generalDiscount} onChange={(event) => setDraft((current) => ({ ...current, generalDiscount: event.target.value }))} />
+        </label>
+        <label>
           <span>Ручная скидка</span>
           <input value={draft.manualDiscount} onChange={(event) => setDraft((current) => ({ ...current, manualDiscount: event.target.value }))} />
         </label>
@@ -421,6 +425,10 @@ export function AdminCatalogView({
                     <input value={product.priceCny} onChange={(event) => updateProduct(product.id, { priceCny: event.target.value })} />
                   </label>
                   <label>
+                    <span>Общая скидка</span>
+                    <input value={product.generalDiscount} onChange={(event) => updateProduct(product.id, { generalDiscount: event.target.value })} />
+                  </label>
+                  <label>
                     <span>Ручная скидка</span>
                     <input value={product.manualDiscount} onChange={(event) => updateProduct(product.id, { manualDiscount: event.target.value })} />
                   </label>
@@ -490,4 +498,3 @@ export function AdminCatalogView({
     </section>
   );
 }
-

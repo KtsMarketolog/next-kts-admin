@@ -121,6 +121,7 @@ export async function ensureSiteSchema() {
       price_rub numeric(14, 2),
       price_cny numeric(14, 2),
       price_usd numeric(14, 2),
+      general_discount numeric(7, 2),
       manual_discount numeric(7, 2),
       manual_discount_rop numeric(7, 2),
       stock integer not null default 0,
@@ -339,6 +340,7 @@ export async function ensureSiteSchema() {
     alter table wholesale_products add column if not exists price_rub numeric(14, 2);
     alter table wholesale_products add column if not exists price_cny numeric(14, 2);
     alter table wholesale_products add column if not exists price_usd numeric(14, 2);
+    alter table wholesale_products add column if not exists general_discount numeric(7, 2);
     alter table wholesale_products add column if not exists manual_discount numeric(7, 2);
     alter table wholesale_products add column if not exists manual_discount_rop numeric(7, 2);
     alter table wholesale_products add column if not exists stock integer not null default 0;
@@ -449,6 +451,7 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_products add column if not exists price_rub numeric(14, 2)`);
   await query(`alter table wholesale_products add column if not exists price_cny numeric(14, 2)`);
   await query(`alter table wholesale_products add column if not exists price_usd numeric(14, 2)`);
+  await query(`alter table wholesale_products add column if not exists general_discount numeric(7, 2)`);
   await query(`alter table wholesale_products add column if not exists manual_discount numeric(7, 2)`);
   await query(`alter table wholesale_products add column if not exists manual_discount_rop numeric(7, 2)`);
   await query(`alter table wholesale_products add column if not exists stock integer not null default 0`);

@@ -94,6 +94,7 @@ export type CatalogProduct = {
   priceRub: string | null;
   priceCny: string | null;
   priceUsd: string | null;
+  generalDiscount: string | null;
   manualDiscount: string | null;
   manualDiscountRop: string | null;
   stock: number;
@@ -309,7 +310,13 @@ export function formatDiscountPercent(value: number) {
 }
 
 export function getProductDiscountLimit(product: CatalogProduct) {
-  return parseDiscountLimit(product.manualDiscountRop) ?? parseDiscountLimit(product.manualDiscount);
+  const generalDiscount = parseDiscountLimit(product.generalDiscount);
+  const manualDiscountRop = parseDiscountLimit(product.manualDiscountRop);
+  const manualDiscount = parseDiscountLimit(product.manualDiscount);
+
+  if (manualDiscountRop !== null) return Math.min(100, (generalDiscount ?? 0) + manualDiscountRop);
+  if (manualDiscount !== null) return Math.min(100, (generalDiscount ?? 0) + manualDiscount);
+  return generalDiscount;
 }
 
 export function getGroupDiscountLimit(group: CatalogGroup) {

@@ -20,6 +20,7 @@ export function productPayload(product: CatalogDraft | CatalogProduct) {
     priceRub: product.priceRub,
     priceCny: product.priceCny,
     priceUsd: product.priceUsd,
+    generalDiscount: product.generalDiscount,
     manualDiscount: product.manualDiscount,
     manualDiscountRop: product.manualDiscountRop,
     stock: product.stock,
@@ -50,7 +51,7 @@ export function CatalogSkeleton() {
       {Array.from({ length: 4 }).map((_, index) => (
         <article className={styles.catalogProductCard} key={index}>
           <div className={styles.catalogProductFields}>
-            {Array.from({ length: 10 }).map((__, fieldIndex) => (
+            {Array.from({ length: 11 }).map((__, fieldIndex) => (
               <label key={fieldIndex}>
                 <span className={styles.skeletonLabelLine} />
                 <span className={styles.skeletonInputLine} />

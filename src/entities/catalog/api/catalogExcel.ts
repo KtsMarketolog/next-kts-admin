@@ -18,6 +18,7 @@ const HEADER_PRICE_EUR = 'Цена EUR';
 const HEADER_PRICE_RUB = 'Цена RUB';
 const HEADER_PRICE_CNY = 'Цена CNY';
 const HEADER_PRICE_USD = 'USD';
+const HEADER_GENERAL_DISCOUNT = 'Общая скидка';
 const HEADER_MANUAL_DISCOUNT = 'Ручная скидка';
 const HEADER_MANUAL_DISCOUNT_ROP = 'Ручная скидка роп';
 const HEADER_ARTICLE = 'Артикул';
@@ -104,6 +105,7 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
     priceEur: findColumn(headers, (header) => includesAny(header, ['eur', 'евро'])),
     priceRub: findColumn(headers, (header) => includesAny(header, ['rub', 'руб'])),
     priceCny: findColumn(headers, (header) => includesAny(header, ['cny', 'юань'])),
+    generalDiscount: findColumn(headers, (header) => includesAny(header, ['общая скидка'])),
     manualDiscountRop: findColumn(headers, (header) => includesAny(header, ['ручная скидка роп'])),
     manualDiscount: findColumn(headers, (header) => includesAny(header, ['ручная скидка']) && !includesAny(header, ['роп'])),
   };
@@ -126,6 +128,7 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
         priceRub: columns.priceRub === null ? null : cellAt(row, columns.priceRub),
         priceCny: columns.priceCny === null ? null : cellAt(row, columns.priceCny),
         priceUsd: columns.priceUsd === null ? null : cellAt(row, columns.priceUsd),
+        generalDiscount: columns.generalDiscount === null ? null : cellAt(row, columns.generalDiscount),
         manualDiscount: columns.manualDiscount === null ? null : cellAt(row, columns.manualDiscount),
         manualDiscountRop: columns.manualDiscountRop === null ? null : cellAt(row, columns.manualDiscountRop),
         isActive: true,
@@ -168,6 +171,7 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
       priceRub: readPrice(row, HEADER_PRICE_RUB),
       priceCny: readPrice(row, HEADER_PRICE_CNY),
       priceUsd: readFirstPrice(row, [HEADER_PRICE_USD, 'Цена USD']),
+      generalDiscount: readPrice(row, HEADER_GENERAL_DISCOUNT),
       manualDiscount: readPrice(row, HEADER_MANUAL_DISCOUNT),
       manualDiscountRop: readPrice(row, HEADER_MANUAL_DISCOUNT_ROP),
       isActive: true,
