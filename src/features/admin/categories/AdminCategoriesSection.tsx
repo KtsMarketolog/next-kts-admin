@@ -282,6 +282,7 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
                       {savedId === `category-${category.id}` ? 'Сохранено' : 'Убрать иконку'}
                     </button>
                   )}
+                  {!category.iconUrl && <span className={styles.catalogCategoryIconButtonSlot} aria-hidden="true" />}
                 </div>
               </article>
             ))}

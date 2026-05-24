@@ -148,24 +148,33 @@
 
 .catalogCategoryIconActions {
   display: grid;
-  grid-template-columns: $apx-170 $apx-140;
+  grid-template-columns: minmax(0, $apx-180);
   gap: $apx-8;
   align-items: center;
+  justify-items: stretch;
   justify-content: end;
-  width: calc(#{$apx-170} + #{$apx-8} + #{$apx-140});
+  width: $apx-180;
 
   button {
-    width: $apx-140;
+    width: 100%;
+    white-space: nowrap;
   }
 }
 
 .catalogCategoryVisibility {
-  width: $apx-170;
+  width: 100%;
   min-width: 0;
   justify-content: flex-start;
   font-size: $apx-13;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.catalogCategoryIconButtonSlot {
+  display: block;
+  width: 100%;
+  min-height: $apx-42;
+  visibility: hidden;
 }
 
 .stockLogCard {
