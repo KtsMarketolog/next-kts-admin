@@ -12,6 +12,7 @@ type CatalogCategory = {
   iconUrl: string;
   productCount: number;
   isActive: boolean;
+  showOnSite: boolean;
 };
 
 type AdminCategoriesSectionProps = {
@@ -167,6 +168,33 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
     }
   };
 
+  const saveCategoryVisibility = async (categoryId: number, showOnSite: boolean) => {
+    setCategoryBusyId(categoryId);
+    try {
+      const response = await fetch(`/api/admin/catalog/categories/${categoryId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ showOnSite }),
+      });
+
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось сохранить отображение категории'));
+        return;
+      }
+
+      const data = await response.json();
+      if (data.category) {
+        setCategories((current) => current.map((category) => (category.id === categoryId ? data.category : category)));
+        markSaved(`visibility-${categoryId}`);
+        showStatus(showOnSite ? 'Категория показывается на сайте' : 'Категория скрыта на сайте');
+      }
+    } catch {
+      showStatus('Не удалось сохранить отображение категории');
+    } finally {
+      setCategoryBusyId((current) => (current === categoryId ? null : current));
+    }
+  };
+
   const uploadCategoryIcon = async (categoryId: number, file: File) => {
     if (file.size > CATEGORY_ICON_MAX_FILE_SIZE) {
       showStatus(`Размер изображения превышает 500 КБ. Сейчас: ${formatFileSize(file.size)}`);
@@ -235,6 +263,15 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
                   <code>{category.slug}</code>
                 </div>
                 <div className={styles.catalogCategoryIconActions}>
+                  <label className={`${styles.checkbox} ${styles.catalogCategoryVisibility}`}>
+                    <input
+                      type="checkbox"
+                      checked={category.showOnSite}
+                      disabled={categoryBusyId === category.id}
+                      onChange={(event) => saveCategoryVisibility(category.id, event.target.checked)}
+                    />
+                    <span>{savedId === `visibility-${category.id}` ? 'Сохранено' : 'Показывать на сайте'}</span>
+                  </label>
                   {category.iconUrl && (
                     <button
                       type="button"

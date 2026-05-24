@@ -1,4 +1,4 @@
-import { updateCatalogAdminCategoryIcon } from '@/entities/catalog/api/catalogAdmin';
+import { updateCatalogAdminCategory } from '@/entities/catalog/api/catalogAdmin';
 import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
@@ -24,7 +24,7 @@ export async function PUT(request: Request, context: Context) {
   if (denied) return denied;
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
-  const limited = await enforceAdminActionRateLimit(session, 'catalog_category_icon_update', 120);
+  const limited = await enforceAdminActionRateLimit(session, 'catalog_category_update', 120);
   if (limited) return limited;
 
   const { id } = await context.params;
@@ -32,13 +32,16 @@ export async function PUT(request: Request, context: Context) {
   if (!categoryId) return badRequest('Некорректная категория');
 
   const body = await request.json().catch(() => ({}));
-  const iconUrl = typeof body.iconUrl === 'string' ? body.iconUrl : '';
+  const update = {
+    ...(typeof body.iconUrl === 'string' ? { iconUrl: body.iconUrl } : {}),
+    ...(typeof body.showOnSite === 'boolean' ? { showOnSite: body.showOnSite } : {}),
+  };
 
   try {
-    const category = await updateCatalogAdminCategoryIcon(categoryId, iconUrl);
+    const category = await updateCatalogAdminCategory(categoryId, update);
     revalidatePublicCatalog();
     await recordSecurityEvent({
-      eventType: 'catalog_category_icon_updated',
+      eventType: 'catalog_category_updated',
       actorType: 'admin',
       adminUserId: session.adminUserId,
       sessionId: session.sessionId,
@@ -47,7 +50,7 @@ export async function PUT(request: Request, context: Context) {
       ip: getClientIp(request),
       userAgent: request.headers.get('user-agent'),
       referer: request.headers.get('referer'),
-      metadata: { title: category.title, iconUrl: category.iconUrl },
+      metadata: { title: category.title, iconUrl: category.iconUrl, showOnSite: category.showOnSite },
     });
     return Response.json({ category });
   } catch (error) {

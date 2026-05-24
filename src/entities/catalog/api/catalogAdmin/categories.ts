@@ -1,5 +1,6 @@
 export {
   getCatalogAdminCategories,
+  updateCatalogAdminCategory,
   updateCatalogAdminCategoryIcon,
 } from './core';
 

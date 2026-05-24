@@ -150,10 +150,19 @@
   display: flex;
   justify-content: flex-end;
   gap: $apx-8;
+  align-items: center;
+  flex-wrap: wrap;
 
   button {
     min-width: $apx-140;
   }
+}
+
+.catalogCategoryVisibility {
+  min-width: $apx-170;
+  justify-content: flex-start;
+  font-size: $apx-13;
+  font-weight: 800;
 }
 
 .stockLogCard {

@@ -15,6 +15,7 @@ export function ensureCatalogSchema() {
       icon_url text,
       image_url text,
       is_active boolean not null default true,
+      show_on_site boolean not null default true,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
@@ -105,9 +106,12 @@ export function ensureCatalogSchema() {
     alter table catalog_products add column if not exists stock integer not null default 0;
     alter table catalog_products add column if not exists is_expected boolean not null default false;
     alter table catalog_products add column if not exists stock_updated_at timestamptz;
+    alter table catalog_categories add column if not exists show_on_site boolean not null default true;
 
     create index if not exists catalog_categories_order_idx
       on catalog_categories (is_active, sort_order, id);
+    create index if not exists catalog_categories_site_order_idx
+      on catalog_categories (is_active, show_on_site, sort_order, id);
     create index if not exists catalog_subcategories_order_idx
       on catalog_subcategories (is_active, sort_order, id);
     create index if not exists catalog_brands_title_idx

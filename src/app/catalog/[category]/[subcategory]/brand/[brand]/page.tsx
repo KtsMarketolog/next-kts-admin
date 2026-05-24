@@ -1,6 +1,6 @@
 import ProductGrid from '@/widgets/catalog/ProductGrid';
 import {
-  fetchProductsBySubcategoryBrand,
+  fetchProductsByCategorySubcategoryBrand,
   fetchSubcategoryMeta,
 } from '@/entities/catalog/api/catalogApi';
 
@@ -13,16 +13,17 @@ export default async function SubcatBrandPage({
 }: {
   params: Promise<Params>;
 }) {
-  const { subcategory: subRaw, brand: brandRaw } = await params;
+  const { category: categoryRaw, subcategory: subRaw, brand: brandRaw } = await params;
 
+  const category = decodeURIComponent(categoryRaw ?? '').trim();
   const subcategory = decodeURIComponent(subRaw ?? '').trim();
   const brand = decodeURIComponent(brandRaw ?? '').trim();
 
   // 1) товары для подкатегории и бренда
-  const products = await fetchProductsBySubcategoryBrand(subcategory, brand);
+  const products = await fetchProductsByCategorySubcategoryBrand(category, subcategory, brand);
 
   // 2) мета — на случай, если в товарах не пришли названия
-  const meta = await fetchSubcategoryMeta(subcategory);
+  const meta = await fetchSubcategoryMeta(subcategory, category);
 
   // 3) подставляем дефолты
   const items = products.map((p) => ({
