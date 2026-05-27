@@ -142,7 +142,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        pl.show_stock_text
      from wholesale_price_lists pl
      left join wholesale_managers m on m.id = pl.manager_id
-     left join wholesale_managers support on support.id = m.support_manager_id and support.role = 'support_manager' and support.is_active = true
+     left join wholesale_managers support on support.id = pl.support_manager_id and support.role = 'support_manager' and support.is_active = true
      where pl.token = $1 and pl.is_active = true
      limit 1`,
     [normalizedToken],

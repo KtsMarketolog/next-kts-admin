@@ -1,5 +1,5 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { hashPassword, requireWholesaleAdmin, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
+import { hashPassword, requireEmployee, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
 import { createWholesaleManager, getWholesaleManagers } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
@@ -7,7 +7,7 @@ import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
 export async function GET() {
-  const denied = await requireWholesaleAdmin();
+  const { denied } = await requireEmployee();
   if (denied) return denied;
 
   const managers = await getWholesaleManagers();
@@ -27,8 +27,7 @@ export async function POST(request: Request) {
   const phone = normalizeTextField(body.phone, 60);
   const password = typeof body.password === 'string' ? body.password : '';
   const role = body.role === 'support_manager' ? 'support_manager' : 'manager';
-  const supportManagerId = Number(body.supportManagerId);
-  const normalizedSupportManagerId = role === 'manager' && Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
+  const normalizedSupportManagerId = null;
 
   if (!name || !login || !password) {
     return Response.json({ error: 'Имя, логин и пароль обязательны' }, { status: 400 });

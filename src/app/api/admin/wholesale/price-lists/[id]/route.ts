@@ -65,6 +65,11 @@ function priceGroupStockSettingsFromBody(settings: unknown): WholesalePriceGroup
     .filter((item): item is WholesalePriceGroupStockSettingInput => Boolean(item && (item.showStock || item.showStockText)));
 }
 
+function supportManagerIdFromBody(value: unknown) {
+  const supportManagerId = Number(value);
+  return Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
+}
+
 export async function GET(_request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
@@ -100,26 +105,35 @@ export async function PUT(request: Request, context: Context) {
   if (typeof body.validUntil === 'string' && body.validUntil.trim() && !validUntil) {
     return Response.json({ error: 'Invalid expiration date' }, { status: 400 });
   }
+  const supportManagerId = supportManagerIdFromBody(body.supportManagerId);
+  if (!supportManagerId) {
+    return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
+  }
 
-  await updateWholesalePriceList(
-    numericId,
-    {
-      title,
-      clientName: normalizeTextField(body.clientName, 200),
-      managerId: Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null,
-      validUntil,
-      token: existing.token,
-      comment: normalizeTextField(body.comment, 2000),
-      workflowStatus: normalizeWholesalePriceWorkflowStatus(body.workflowStatus),
-      showRetailPrices: Boolean(body.showRetailPrices),
-      showStock: body.showStock !== false,
-      showStockText: Boolean(body.showStockText),
-      isActive: Boolean(body.isActive ?? true),
-      items: itemsFromBody(body.items),
-      priceGroupStockSettings: priceGroupStockSettingsFromBody(body.priceGroupStockSettings),
-    },
-    session,
-  );
+  try {
+    await updateWholesalePriceList(
+      numericId,
+      {
+        title,
+        clientName: normalizeTextField(body.clientName, 200),
+        managerId: Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null,
+        supportManagerId,
+        validUntil,
+        token: existing.token,
+        comment: normalizeTextField(body.comment, 2000),
+        workflowStatus: normalizeWholesalePriceWorkflowStatus(body.workflowStatus),
+        showRetailPrices: Boolean(body.showRetailPrices),
+        showStock: body.showStock !== false,
+        showStockText: Boolean(body.showStockText),
+        isActive: Boolean(body.isActive ?? true),
+        items: itemsFromBody(body.items),
+        priceGroupStockSettings: priceGroupStockSettingsFromBody(body.priceGroupStockSettings),
+      },
+      session,
+    );
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить прайс' }, { status: 400 });
+  }
 
   return Response.json({ ok: true });
 }

@@ -131,6 +131,7 @@ export type WholesalePriceListEditor = {
   showStockText: boolean;
   isActive: boolean;
   managerId: number | null;
+  supportManagerId: number | null;
   items: WholesalePriceListItemInput[];
   priceGroupStockSettings: WholesalePriceGroupStockSettingInput[];
 };
@@ -1548,7 +1549,10 @@ export async function getWholesaleManagers() {
       last_event.created_at::text as last_changed_at,
       last_event.title_snapshot as last_changed_price_title
     from wholesale_managers m
-    left join wholesale_price_lists pl on pl.manager_id = m.id
+    left join wholesale_price_lists pl on (
+      (coalesce(nullif(m.role, ''), 'manager') = 'support_manager' and pl.support_manager_id = m.id)
+      or (coalesce(nullif(m.role, ''), 'manager') <> 'support_manager' and pl.manager_id = m.id)
+    )
     left join wholesale_managers support on support.id = m.support_manager_id
     left join lateral (
       select e.created_at, e.title_snapshot
@@ -1869,14 +1873,15 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
   await ensureSiteSchema();
   const managerId = sessionManagerId(session);
   const priceList = await query<
-    Omit<WholesalePriceListEditor, 'id' | 'items' | 'managerId' | 'priceGroupStockSettings'> & {
+    Omit<WholesalePriceListEditor, 'id' | 'items' | 'managerId' | 'supportManagerId' | 'priceGroupStockSettings'> & {
       id: string;
       manager_id: string | null;
+      support_manager_id: string | null;
     }
   >(
     `select id::text, title, client_name as "clientName", token, valid_until::text as "validUntil",
             comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", show_stock as "showStock",
-            show_stock_text as "showStockText", is_active as "isActive", manager_id::text
+            show_stock_text as "showStockText", is_active as "isActive", manager_id::text, support_manager_id::text
      from wholesale_price_lists
      where id = $1 and ($2::bigint is null or manager_id = $2)
      limit 1`,
@@ -1927,6 +1932,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
     showStockText: row.showStockText === true,
     isActive: row.isActive,
     managerId: row.manager_id ? Number(row.manager_id) : null,
+    supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
     items: items.rows.map((item) => ({
       productId: Number(item.product_id),
       variantId: item.variant_id ? Number(item.variant_id) : null,
@@ -2055,16 +2061,18 @@ export async function createWholesalePriceList(
 ) {
   await ensureSiteSchema();
   const managerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : input.managerId;
+  const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId);
   const result = await query<{ id: string }>(
     `insert into wholesale_price_lists (
-       title, client_name, manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, show_stock_text, is_active
+       title, client_name, manager_id, support_manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, show_stock_text, is_active
      )
-     values ($1, $2, $3, nullif($4, '')::date, $5, $6, $7, $8, $9, $10, $11)
+     values ($1, $2, $3, $4, nullif($5, '')::date, $6, $7, $8, $9, $10, $11, $12)
      returning id`,
     [
       input.title,
       input.clientName,
       managerId,
+      supportManagerId,
       input.validUntil ?? '',
       input.token,
       input.comment,
@@ -2110,6 +2118,7 @@ export async function updateWholesalePriceList(
 ) {
   await ensureSiteSchema();
   const managerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : input.managerId;
+  const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId);
   const previous = await query<{
     title: string;
     client_name: string;
@@ -2140,21 +2149,23 @@ export async function updateWholesalePriceList(
      set title = $2,
          client_name = $3,
          manager_id = $4,
-         valid_until = nullif($5, '')::date,
-         token = $6,
-         comment = $7,
-         workflow_status = $8,
-         show_retail_prices = $9,
-         show_stock = $10,
-         show_stock_text = $11,
-         is_active = $12,
+         support_manager_id = $5,
+         valid_until = nullif($6, '')::date,
+         token = $7,
+         comment = $8,
+         workflow_status = $9,
+         show_retail_prices = $10,
+         show_stock = $11,
+         show_stock_text = $12,
+         is_active = $13,
          updated_at = now()
-     where id = $1 and ($13::bigint is null or manager_id = $13)`,
+     where id = $1 and ($14::bigint is null or manager_id = $14)`,
     [
       id,
       input.title,
       input.clientName,
       managerId,
+      supportManagerId,
       input.validUntil ?? '',
       input.token,
       input.comment,

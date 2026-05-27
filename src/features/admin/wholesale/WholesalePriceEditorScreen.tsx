@@ -35,6 +35,7 @@ type WholesalePriceEditorScreenProps = {
   commentRows: number;
   canManageWholesale: boolean;
   developmentManagers: Manager[];
+  supportManagers: Manager[];
   catalog: CatalogCategory[];
   catalogQuery: string;
   setCatalogQuery: (value: string) => void;
@@ -73,6 +74,7 @@ export function WholesalePriceEditorScreen({
   commentRows,
   canManageWholesale,
   developmentManagers,
+  supportManagers,
   catalog,
   catalogQuery,
   setCatalogQuery,
@@ -169,6 +171,20 @@ export function WholesalePriceEditorScreen({
               </select>
             </label>
           )}
+          <label>
+            <span>Менеджер по сопровождению</span>
+            <select
+              required
+              value={editor.supportManagerId ?? ''}
+              onChange={(event) => setEditor({ ...editor, supportManagerId: event.target.value ? Number(event.target.value) : null })}
+              disabled={supportManagers.length === 0}
+            >
+              <option value="">Не выбран</option>
+              {supportManagers.map((manager) => (
+                <option key={manager.id} value={manager.id}>{manager.name || manager.login}</option>
+              ))}
+            </select>
+          </label>
           <label className={styles.wholesaleWide}>
             <span>Комментарий</span>
             <textarea rows={commentRows} value={editor.comment} onChange={(event) => setEditor({ ...editor, comment: event.target.value })} />

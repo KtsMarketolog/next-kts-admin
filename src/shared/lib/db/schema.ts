@@ -178,6 +178,7 @@ export async function ensureSiteSchema() {
       title text not null default '',
       client_name text not null default '',
       manager_id bigint references wholesale_managers(id) on delete set null,
+      support_manager_id bigint references wholesale_managers(id) on delete set null,
       valid_until date,
       token text not null unique,
       comment text not null default '',
@@ -340,6 +341,7 @@ export async function ensureSiteSchema() {
     );
 
     alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null;
+    alter table wholesale_price_lists add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_lists add column if not exists comment text not null default '';
     alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent';
     alter table wholesale_price_lists add column if not exists show_stock boolean not null default true;
@@ -452,6 +454,7 @@ export async function ensureSiteSchema() {
   await query(`alter table hero_slides add column if not exists popup_text text`);
   await query(`alter table group_companies add column if not exists link_url text not null default ''`);
   await query(`alter table wholesale_price_lists add column if not exists manager_id bigint references wholesale_managers(id) on delete set null`);
+  await query(`alter table wholesale_price_lists add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_price_lists add column if not exists comment text not null default ''`);
   await query(`alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent'`);
   await query(`alter table wholesale_price_lists add column if not exists show_stock boolean not null default true`);
@@ -492,6 +495,14 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_managers add column if not exists password_hash text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists password_changed_at timestamptz`);
+  await query(`
+    update wholesale_price_lists pl
+    set support_manager_id = m.support_manager_id
+    from wholesale_managers m
+    where pl.manager_id = m.id
+      and pl.support_manager_id is null
+      and m.support_manager_id is not null
+  `);
   await query(`alter table wholesale_price_list_events add column if not exists actor_role text not null default ''`);
   await query(`alter table wholesale_price_list_events add column if not exists actor_label text not null default ''`);
   await query(`alter table wholesale_price_list_events add column if not exists owner_manager_id bigint references wholesale_managers(id) on delete set null`);
@@ -499,6 +510,7 @@ export async function ensureSiteSchema() {
   await query(`create index if not exists admin_users_login_idx on admin_users(login)`);
   await query(`create index if not exists wholesale_managers_role_idx on wholesale_managers(role)`);
   await query(`create index if not exists wholesale_managers_support_idx on wholesale_managers(support_manager_id)`);
+  await query(`create index if not exists wholesale_price_lists_support_manager_idx on wholesale_price_lists(support_manager_id)`);
   await query(`create index if not exists wholesale_products_catalog_product_idx on wholesale_products(catalog_product_id)`);
   await query(`create index if not exists wholesale_price_group_stock_settings_price_list_idx on wholesale_price_list_group_stock_settings(price_list_id)`);
   await query(`create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc)`);

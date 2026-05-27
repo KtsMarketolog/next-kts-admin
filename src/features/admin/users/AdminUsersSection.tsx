@@ -62,13 +62,6 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     showStatusRef.current = showStatus;
   }, [showStatus]);
 
-  const supportManagers = useMemo(
-    () =>
-      users
-        .filter((user) => user.role === 'support_manager')
-        .sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name, 'ru')),
-    [users],
-  );
   const activeRoleOptions = roleOptionsForTab(activeTab);
   const filteredUsers = useMemo(() => users.filter((user) => tabForRole(user.role) === activeTab), [activeTab, users]);
 
@@ -101,7 +94,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       return {
         ...current,
         role,
-        supportManagerId: role === 'manager' ? current.supportManagerId : null,
+        supportManagerId: null,
       };
     });
   }, [activeTab]);
@@ -162,7 +155,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       email: draft.email.trim(),
       password: draft.password.trim(),
       role,
-      supportManagerId: role === 'manager' ? draft.supportManagerId : null,
+      supportManagerId: null,
     };
 
     if (!payload.name || !payload.login || !payload.password) {
@@ -210,7 +203,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     const response = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...user, password: nextPassword }),
+      body: JSON.stringify({ ...user, supportManagerId: null, password: nextPassword }),
     });
     setBusyId(null);
 
@@ -263,7 +256,6 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     <AdminUsersView
       users={users}
       filteredUsers={filteredUsers}
-      supportManagers={supportManagers}
       activeTab={activeTab}
       setActiveTab={setActiveTab}
       draft={draft}

@@ -138,6 +138,7 @@ export type PriceEditor = {
   showStockText: boolean;
   isActive: boolean;
   managerId: number | null;
+  supportManagerId: number | null;
   items: PriceItem[];
   priceGroupStockSettings: Record<string, PriceGroupStockSetting>;
 };
@@ -204,6 +205,7 @@ export function emptyEditor(): PriceEditor {
     showStockText: false,
     isActive: true,
     managerId: null,
+    supportManagerId: null,
     items: [],
     priceGroupStockSettings: {},
   };

@@ -216,7 +216,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   };
 
   useEffect(() => {
-    if (canManageWholesale && (screen === 'admin' || screen === 'create' || screen === 'edit')) void loadManagers();
+    if ((screen === 'create' || screen === 'edit') || (canManageWholesale && screen === 'admin')) void loadManagers();
     if (screen === 'manager') {
       void loadCurrentManager();
       void loadPriceLists();
@@ -245,7 +245,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       const nextCatalog = await loadCatalog();
       if (!isActive) return;
       if (screen === 'create') {
-        setEditor({ ...emptyEditor(), managerId: canManageWholesale ? createManagerId : null, items: mergeEditorItems(nextCatalog, []) });
+        setEditor({ ...emptyEditor(), managerId: canManageWholesale ? createManagerId : null, supportManagerId: null, items: mergeEditorItems(nextCatalog, []) });
         setEditorLoading(false);
         return;
       }
@@ -277,6 +277,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         showStockText: Boolean(priceList.showStockText),
         isActive: Boolean(priceList.isActive),
         managerId: priceList.managerId ?? null,
+        supportManagerId: priceList.supportManagerId ?? null,
         items: mergeEditorItems(nextCatalog, Array.isArray(priceList.items) ? priceList.items : []),
         priceGroupStockSettings: normalizePriceGroupStockSettings(priceList.priceGroupStockSettings),
       });
@@ -343,7 +344,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         email: managerDraft.email.trim(),
         phone: managerRoleTab === 'manager' ? managerDraft.phone.trim() : '',
         role: managerRoleTab,
-        supportManagerId: managerRoleTab === 'manager' ? managerDraft.supportManagerId : null,
+        supportManagerId: null,
         password: managerDraft.password.trim(),
       }),
     });
@@ -383,7 +384,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         email: manager.email.trim(),
         phone: manager.phone.trim(),
         password: nextPassword,
-        supportManagerId: manager.role === 'manager' ? manager.supportManagerId : null,
+        supportManagerId: null,
       }),
     });
     setBusy(false);
@@ -509,6 +510,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       showStatus('Введите название прайса');
       return;
     }
+    if (!editor.supportManagerId) {
+      showStatus('Выберите менеджера по сопровождению');
+      return;
+    }
 
     const method = screen === 'edit' ? 'PUT' : 'POST';
     const url = screen === 'edit' && editor.id ? `/api/admin/wholesale/price-lists/${editor.id}` : '/api/admin/wholesale/price-lists';
@@ -519,8 +524,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       body: JSON.stringify(editor),
     });
     setBusy(false);
-    showStatus(res.ok ? 'Прайс сохранён' : 'Не удалось сохранить прайс');
-    if (res.ok) router.push(editorBackHref);
+    if (!res.ok) {
+      showStatus(await readApiError(res, 'Не удалось сохранить прайс'));
+      return;
+    }
+    showStatus('Прайс сохранён');
+    router.push(editorBackHref);
   };
 
   const deletePriceList = async (id: number) => {
@@ -587,7 +596,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               managerDraft={managerDraft}
               managerRoleTitle={managerRoleTitle}
               managerRoleLabel={managerRoleLabel}
-              supportManagers={supportManagers}
               managerRoleRows={managerRoleRows}
               managerPasswordEditIds={managerPasswordEditIds}
               managerPasswordDrafts={managerPasswordDrafts}
@@ -679,6 +687,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         commentRows={commentRows}
         canManageWholesale={canManageWholesale}
         developmentManagers={developmentManagers}
+        supportManagers={supportManagers}
         catalog={catalog}
         catalogQuery={catalogQuery}
         setCatalogQuery={setCatalogQuery}

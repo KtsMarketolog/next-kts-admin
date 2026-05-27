@@ -22,7 +22,6 @@ type WholesaleManagerManagementProps = {
   managerDraft: ManagerDraft;
   managerRoleTitle: string;
   managerRoleLabel: string;
-  supportManagers: Manager[];
   managerRoleRows: Manager[];
   managerPasswordEditIds: Record<number, boolean>;
   managerPasswordDrafts: Record<number, string>;
@@ -47,7 +46,6 @@ export function WholesaleManagerManagement({
   managerDraft,
   managerRoleTitle,
   managerRoleLabel,
-  supportManagers,
   managerRoleRows,
   managerPasswordEditIds,
   managerPasswordDrafts,
@@ -110,23 +108,6 @@ export function WholesaleManagerManagement({
               <option value={managerRoleTab}>{managerRoleTitle}</option>
             </select>
           </label>
-          {managerRoleTab === 'manager' && (
-            <label>
-              <span>Менеджер по сопровождению</span>
-              <select
-                value={managerDraft.supportManagerId ?? ''}
-                disabled={supportManagers.length === 0}
-                onChange={(event) => setManagerDraft({ ...managerDraft, supportManagerId: event.target.value ? Number(event.target.value) : null })}
-              >
-                <option value="">Не выбран</option>
-                {supportManagers.map((manager) => (
-                  <option key={manager.id} value={manager.id}>
-                    {manager.name || manager.login}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
           <label className={managerRoleTab === 'manager' ? undefined : styles.userPasswordWide}>
             <span>Пароль</span>
             <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} autoComplete="new-password" />
@@ -147,7 +128,6 @@ export function WholesaleManagerManagement({
           {managerRoleRows.map((manager) => {
             const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
             const displayPassword = manager.displayPassword || '';
-            const availableSupportManagers = supportManagers.filter((supportManager) => supportManager.id !== manager.id);
 
             return (
             <article className={styles.managerCard} key={manager.id}>
@@ -172,21 +152,6 @@ export function WholesaleManagerManagement({
                   <span>Роль</span>
                   <select value={manager.role} disabled>
                     <option value="manager">Менеджер по развитию</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Менеджер по сопровождению</span>
-                  <select
-                    value={manager.supportManagerId ?? ''}
-                    disabled={manager.role !== 'manager' || availableSupportManagers.length === 0}
-                    onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, supportManagerId: event.target.value ? Number(event.target.value) : null } : item))}
-                  >
-                    <option value="">{manager.role === 'manager' ? 'Не выбран' : 'Не назначается'}</option>
-                    {availableSupportManagers.map((supportManager) => (
-                      <option key={supportManager.id} value={supportManager.id}>
-                        {supportManager.name || supportManager.login}
-                      </option>
-                    ))}
                   </select>
                 </label>
                 <label className={styles.managerPasswordField}>

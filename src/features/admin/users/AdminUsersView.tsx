@@ -8,7 +8,6 @@ import type { AccessUser, AccessUserRole, Draft, UserTab } from './AdminUsersTyp
 type AdminUsersViewProps = {
   users: AccessUser[];
   filteredUsers: AccessUser[];
-  supportManagers: AccessUser[];
   activeTab: UserTab;
   setActiveTab: (tab: UserTab) => void;
   draft: Draft;
@@ -31,7 +30,6 @@ type AdminUsersViewProps = {
 export function AdminUsersView({
   users,
   filteredUsers,
-  supportManagers,
   activeTab,
   setActiveTab,
   draft,
@@ -51,17 +49,6 @@ export function AdminUsersView({
   deleteUser,
 }: AdminUsersViewProps) {
   const activeRoleOptions = roleOptionsForTab(activeTab);
-  const supportManagerSelect = (value: number | null, onChange: (value: number | null) => void, disabled: boolean) => (
-    <select value={value ?? ''} disabled={disabled || supportManagers.length === 0} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)}>
-      <option value="">Не выбран</option>
-      {supportManagers.map((manager) => (
-        <option key={manager.id} value={manager.numericId}>
-          {manager.name || manager.login}
-        </option>
-      ))}
-    </select>
-  );
-
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -119,7 +106,7 @@ export function AdminUsersView({
             disabled={activeRoleOptions.length === 1}
             onChange={(event) => {
               const role = event.target.value as AccessUserRole;
-              setDraft((current) => ({ ...current, role, supportManagerId: role === 'manager' ? current.supportManagerId : null }));
+              setDraft((current) => ({ ...current, role, supportManagerId: null }));
             }}
           >
             {activeRoleOptions.map((option) => (
@@ -129,12 +116,6 @@ export function AdminUsersView({
             ))}
           </select>
         </label>
-        {activeTab === 'manager' && (
-          <label>
-            <span>Менеджер по сопровождению</span>
-            {supportManagerSelect(draft.supportManagerId, (supportManagerId) => setDraft((current) => ({ ...current, supportManagerId })), false)}
-          </label>
-        )}
         <label className={activeTab === 'manager' ? undefined : styles.userPasswordWide}>
           <span>Пароль</span>
           <input
@@ -198,12 +179,6 @@ export function AdminUsersView({
                       ))}
                     </select>
                   </label>
-                  {user.role === 'manager' && (
-                    <label>
-                      <span>Менеджер по сопровождению</span>
-                      {supportManagerSelect(user.supportManagerId, (supportManagerId) => updateUser(user.id, { supportManagerId }), false)}
-                    </label>
-                  )}
                   <label className={user.role === 'manager' ? undefined : styles.userPasswordWide}>
                     <span>Пароль</span>
                     <div className={styles.userPasswordCopyField}>
@@ -259,7 +234,6 @@ export function AdminUsersView({
                     {user.accesses.map((access) => (
                       <span key={access}>{access}</span>
                     ))}
-                    {user.role === 'manager' && user.supportManagerName && <span>Сопровождение: {user.supportManagerName}</span>}
                     {(user.role === 'manager' || user.role === 'support_manager') && <span>Прайсов: {user.priceListCount}</span>}
                   </div>
                   <div className={styles.userAccessActions}>
@@ -298,4 +272,3 @@ export function AdminUsersView({
     </section>
   );
 }
-
