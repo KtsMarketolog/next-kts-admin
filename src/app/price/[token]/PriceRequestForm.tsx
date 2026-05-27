@@ -467,7 +467,7 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
           <span>Комментарий к заявке</span>
           <textarea
             ref={commentRef}
-            rows={1}
+            rows={2}
             value={comment}
             maxLength={1000}
             placeholder="Например: условия доставки, сроки, уточнения по заказу"

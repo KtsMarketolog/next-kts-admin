@@ -510,7 +510,7 @@
   textarea {
     box-sizing: border-box;
     width: 100%;
-    min-height: $apx-44;
+    min-height: $apx-64;
     max-height: $apx-180;
     resize: none;
     overflow-y: auto;
@@ -702,7 +702,7 @@
     }
 
     textarea {
-      min-height: $apx-m-44;
+      min-height: $apx-m-64;
       max-height: $apx-m-160;
       border-radius: $apx-m-8;
       padding: $apx-m-11 $apx-m-12;
