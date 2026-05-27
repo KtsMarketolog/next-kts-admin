@@ -22,6 +22,11 @@ type ExchangeRates = {
   sourceUrl: string;
 };
 type ExchangeRateStatus = 'idle' | 'loading' | 'ready' | 'error';
+type RubConversionRequest = {
+  date: string | null;
+  rates: Record<CurrencyCode, number>;
+  itemIds: number[];
+};
 
 const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
 
@@ -217,6 +222,18 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
     }
     return variants;
   }, [categories]);
+  const priceGroupByPriceItemId = useMemo(() => {
+    const groups = new Map<number, string>();
+    for (const category of categories) {
+      for (const product of category.products) {
+        const groupTitle = product.priceGroup || NO_PRICE_GROUP_TITLE;
+        for (const variant of product.variants) {
+          groups.set(variant.priceItemId, groupTitle);
+        }
+      }
+    }
+    return groups;
+  }, [categories]);
   const requestTotalLabel = useMemo(() => {
     const totals = new Map<string, number>();
     for (const item of selectedItems) {
@@ -398,10 +415,27 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
 
     setBusy(true);
     setStatus('');
+    const convertedItemIds =
+      exchangeRates && exchangeRateStatus === 'ready'
+        ? selectedItems
+            .filter((item) => {
+              const groupTitle = priceGroupByPriceItemId.get(item.id);
+              return Boolean(groupTitle && rubConversionGroups[groupTitle]);
+            })
+            .map((item) => item.id)
+        : [];
+    const rubConversion: RubConversionRequest | null =
+      convertedItemIds.length > 0 && exchangeRates
+        ? {
+            date: exchangeRates.date,
+            rates: exchangeRates.rates,
+            itemIds: convertedItemIds,
+          }
+        : null;
     const response = await fetch(`/api/price/${encodeURIComponent(token)}/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: selectedItems, comment: comment.trim() }),
+      body: JSON.stringify({ items: selectedItems, comment: comment.trim(), rubConversion }),
     });
     setBusy(false);
 
