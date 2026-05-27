@@ -14,7 +14,8 @@ function parseDecimal(value: string | undefined) {
 }
 
 function parseCurrencyRate(xml: string, code: CurrencyCode) {
-  const block = xml.match(new RegExp(`<Valute[^>]*>[\\s\\S]*?<CharCode>${code}</CharCode>[\\s\\S]*?</Valute>`))?.[0];
+  const blocks = xml.match(/<Valute[^>]*>[\s\S]*?<\/Valute>/g) ?? [];
+  const block = blocks.find((value) => value.includes(`<CharCode>${code}</CharCode>`));
   if (!block) throw new Error(`Currency ${code} was not found in CBR response`);
 
   const nominal = parseDecimal(block.match(/<Nominal>([^<]+)<\/Nominal>/)?.[1]);
