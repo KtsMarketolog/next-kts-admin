@@ -238,6 +238,47 @@
   }
 }
 
+.conversionBar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $apx-12;
+  min-height: $apx-46;
+  border: $apx-1 solid #ececf7;
+  border-radius: $apx-12;
+  background: #fbfaff;
+  padding: $apx-10 $apx-14;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+}
+
+.conversionButton {
+  min-height: $apx-38;
+  border: 0;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-16;
+  font: inherit;
+  font-size: $apx-14;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.65;
+  }
+}
+
+.conversionError {
+  color: #b42318 !important;
+}
+
 .groupImageBox {
   width: $apx-112;
   height: $apx-78;
@@ -328,6 +369,14 @@
   display: block;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.convertedPrice {
+  display: block;
+  margin-top: $apx-4;
+  color: #0f7b4d;
+  font-size: $apx-13;
+  font-weight: 800;
 }
 
 .priceCurrency {
@@ -639,6 +688,33 @@
     width: 100%;
     min-height: $apx-m-42;
     border-radius: $apx-m-8;
+  }
+
+  .conversionBar {
+    display: grid;
+    justify-content: stretch;
+    gap: $apx-m-8;
+    min-height: auto;
+    border-radius: $apx-m-10;
+    padding: $apx-m-10 $apx-m-12;
+
+    span {
+      font-size: $apx-m-12;
+    }
+  }
+
+  .conversionButton {
+    width: 100%;
+    min-height: $apx-m-40;
+    border-radius: $apx-m-8;
+    padding: 0 $apx-m-12;
+    font-size: $apx-m-13;
+    white-space: normal;
+  }
+
+  .convertedPrice {
+    margin-top: $apx-m-4;
+    font-size: $apx-m-12;
   }
 
   .groupImageBox {

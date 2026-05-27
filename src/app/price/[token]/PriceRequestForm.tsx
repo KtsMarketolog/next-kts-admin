@@ -12,6 +12,17 @@ type PriceRequestFormProps = {
   categories: PublicWholesaleCategory[];
 };
 
+const CURRENCY_CODES = ['USD', 'EUR', 'CNY'] as const;
+
+type CurrencyCode = (typeof CURRENCY_CODES)[number];
+type DisplayCurrencyCode = CurrencyCode | 'RUB';
+type ExchangeRates = {
+  date: string | null;
+  rates: Record<CurrencyCode, number>;
+  sourceUrl: string;
+};
+type ExchangeRateStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
 
 function formatPrice(value: string | null) {
@@ -42,13 +53,19 @@ function formatAmountList(values: Array<{ amount: number; currency: string }>) {
 
 type PublicPriceVariant = PublicWholesaleCategory['products'][number]['variants'][number];
 
+function getCurrencyPriceValues(variant: PublicPriceVariant): Array<{ value: string | null; currency: DisplayCurrencyCode }> {
+  return [
+    { value: variant.priceUsd, currency: 'USD' },
+    { value: variant.priceEur, currency: 'EUR' },
+    { value: variant.priceRub, currency: 'RUB' },
+    { value: variant.priceCny, currency: 'CNY' },
+  ];
+}
+
 function getVariantRequestPrices(variant: PublicPriceVariant) {
-  const currencyPrices = [
-    { amount: parsePriceNumber(variant.priceUsd), currency: 'USD' },
-    { amount: parsePriceNumber(variant.priceEur), currency: 'EUR' },
-    { amount: parsePriceNumber(variant.priceRub), currency: 'RUB' },
-    { amount: parsePriceNumber(variant.priceCny), currency: 'CNY' },
-  ].filter((price): price is { amount: number; currency: string } => price.amount !== null);
+  const currencyPrices = getCurrencyPriceValues(variant)
+    .map((price) => ({ amount: parsePriceNumber(price.value), currency: price.currency }))
+    .filter((price): price is { amount: number; currency: DisplayCurrencyCode } => price.amount !== null);
 
   const fallbackPrice = parsePriceNumber(variant.wholesalePrice);
   return currencyPrices.length > 0
@@ -58,13 +75,19 @@ function getVariantRequestPrices(variant: PublicPriceVariant) {
       : [];
 }
 
-function formatIndividualPrices(variant: PublicPriceVariant) {
-  const currencyPrices = [
-    { value: variant.priceUsd, currency: 'USD' },
-    { value: variant.priceEur, currency: 'EUR' },
-    { value: variant.priceRub, currency: 'RUB' },
-    { value: variant.priceCny, currency: 'CNY' },
-  ].filter((price) => hasPriceValue(price.value));
+function formatRubAmount(value: number) {
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Math.round(value));
+}
+
+function getConvertedRubAmount(price: { value: string | null; currency: DisplayCurrencyCode }, exchangeRates: ExchangeRates | null) {
+  if (!exchangeRates || price.currency === 'RUB') return null;
+  const amount = parsePriceNumber(price.value);
+  if (amount === null) return null;
+  return amount * exchangeRates.rates[price.currency];
+}
+
+function formatIndividualPrices(variant: PublicPriceVariant, exchangeRates: ExchangeRates | null) {
+  const currencyPrices = getCurrencyPriceValues(variant).filter((price) => hasPriceValue(price.value));
 
   if (currencyPrices.length === 0) {
     return <span className={styles.priceValue}>{formatPrice(variant.wholesalePrice)}</span>;
@@ -72,12 +95,22 @@ function formatIndividualPrices(variant: PublicPriceVariant) {
 
   return (
     <span className={styles.currencyPrices}>
-      {currencyPrices.map((price) => (
-        <span className={styles.priceValue} key={price.currency}>
-          {formatPrice(price.value)}
-          <span className={styles.priceCurrency}>{price.currency}</span>
-        </span>
-      ))}
+      {currencyPrices.map((price) => {
+        const convertedRubAmount = getConvertedRubAmount(price, exchangeRates);
+
+        return (
+          <span className={styles.priceValue} key={price.currency}>
+            {formatPrice(price.value)}
+            <span className={styles.priceCurrency}>{price.currency}</span>
+            {convertedRubAmount !== null ? (
+              <span className={styles.convertedPrice}>
+                ≈ {formatRubAmount(convertedRubAmount)}
+                <span className={styles.priceCurrency}>RUB</span>
+              </span>
+            ) : null}
+          </span>
+        );
+      })}
     </span>
   );
 }
@@ -106,6 +139,21 @@ function resizeTextarea(element: HTMLTextAreaElement | null) {
   if (!element) return;
   element.style.height = 'auto';
   element.style.height = `${element.scrollHeight}px`;
+}
+
+function isExchangeRatesPayload(value: unknown): value is ExchangeRates {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as Record<string, unknown>;
+  const rates = payload.rates as Record<string, unknown> | undefined;
+  return (
+    Boolean(rates) &&
+    CURRENCY_CODES.every((code) => {
+      const rate = rates?.[code];
+      return typeof rate === 'number' && Number.isFinite(rate);
+    }) &&
+    (typeof payload.date === 'string' || payload.date === null) &&
+    typeof payload.sourceUrl === 'string'
+  );
 }
 
 type PriceClientEventType =
@@ -138,6 +186,10 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
   const [comment, setComment] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedPriceGroups, setExpandedPriceGroups] = useState<Record<string, boolean>>({});
+  const [rubConversionGroups, setRubConversionGroups] = useState<Record<string, boolean>>({});
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(null);
+  const [exchangeRateStatus, setExchangeRateStatus] = useState<ExchangeRateStatus>('idle');
+  const [exchangeRateError, setExchangeRateError] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
@@ -286,6 +338,38 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
     }));
   };
 
+  const loadExchangeRates = async () => {
+    if (exchangeRates || exchangeRateStatus === 'loading') return;
+
+    setExchangeRateStatus('loading');
+    setExchangeRateError('');
+
+    try {
+      const response = await fetch('/api/currency-rates', { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !isExchangeRatesPayload(payload)) {
+        throw new Error('Invalid currency rate response');
+      }
+      setExchangeRates(payload);
+      setExchangeRateStatus('ready');
+    } catch {
+      setExchangeRateStatus('error');
+      setExchangeRateError('Не удалось загрузить курс ЦБ. Попробуйте позже.');
+    }
+  };
+
+  const toggleRubConversion = (groupTitle: string) => {
+    const shouldEnable = rubConversionGroups[groupTitle] !== true;
+    setRubConversionGroups((current) => ({
+      ...current,
+      [groupTitle]: shouldEnable,
+    }));
+
+    if (shouldEnable) {
+      void loadExchangeRates();
+    }
+  };
+
   const changeQuantity = (priceItemId: number, quantity: number, productTitle: string) => {
     submittedRef.current = false;
     if (quantity > 0 && !requestStartedRef.current) {
@@ -359,6 +443,8 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
 
       {groupedProducts.map((group) => {
         const isExpanded = expandedPriceGroups[group.title] === true;
+        const isRubConversionActive = rubConversionGroups[group.title] === true;
+        const activeExchangeRates = isRubConversionActive && exchangeRates ? exchangeRates : null;
 
         return (
           <section className={styles.category} key={group.title}>
@@ -384,7 +470,26 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
               </button>
             </div>
             {isExpanded ? (
-              <div className={styles.products}>
+              <>
+                <div className={styles.conversionBar}>
+                  <button
+                    type="button"
+                    className={styles.conversionButton}
+                    onClick={() => toggleRubConversion(group.title)}
+                    disabled={isRubConversionActive && exchangeRateStatus === 'loading'}
+                  >
+                    {isRubConversionActive ? 'Скрыть пересчет в рубли' : 'Пересчитать в рубли по сегодняшнему курсу'}
+                  </button>
+                  {isRubConversionActive && exchangeRateStatus === 'loading' ? <span>Загружаем курс ЦБ...</span> : null}
+                  {isRubConversionActive && exchangeRateStatus === 'ready' && exchangeRates ? (
+                    <span>
+                      Курс ЦБ на {exchangeRates.date || 'сегодня'}: USD {formatPrice(String(exchangeRates.rates.USD))}, EUR{' '}
+                      {formatPrice(String(exchangeRates.rates.EUR))}, CNY {formatPrice(String(exchangeRates.rates.CNY))}
+                    </span>
+                  ) : null}
+                  {isRubConversionActive && exchangeRateStatus === 'error' ? <span className={styles.conversionError}>{exchangeRateError}</span> : null}
+                </div>
+                <div className={styles.products}>
                 {group.products.map(({ categoryTitle, product }) => (
                   <article
                     className={styles.product}
@@ -411,7 +516,7 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
 
                           return (
                             <tr key={`${variant.id ?? 'base'}-${index}`}>
-                              <td>{formatIndividualPrices(variant)}</td>
+                              <td>{formatIndividualPrices(variant, activeExchangeRates)}</td>
                               <td className={styles.quantityCell}>
                                 <div className={styles.quantityStepper}>
                                   <button
@@ -451,7 +556,8 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
                     </table>
                   </article>
                 ))}
-              </div>
+                </div>
+              </>
             ) : null}
           </section>
         );
