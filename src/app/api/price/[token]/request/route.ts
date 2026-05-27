@@ -29,6 +29,12 @@ type RequestPrice = {
   convertedRubLineTotal: number | null;
 };
 
+type ConvertedCurrencyTotal = {
+  currency: string;
+  amount: number;
+  rubAmount: number;
+};
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -150,7 +156,7 @@ function formatRubValues(prices: RequestPrice[], mode: 'price' | 'total') {
 
 function formatRubValuesText(prices: RequestPrice[], mode: 'price' | 'total') {
   const rubValues = formatRubValues(prices, mode);
-  return rubValues.length > 0 ? rubValues.join(' / ') : '—';
+  return rubValues.length > 0 ? rubValues.join(' / ') : '';
 }
 
 function formatRubValuesHtml(prices: RequestPrice[], mode: 'price' | 'total') {
@@ -167,6 +173,11 @@ function getConvertedRubAmount(price: { amount: number; currency: string }, rubC
 function formatRubConversionInfo(rubConversion: RubConversionInput) {
   const date = rubConversion.date || 'сегодня';
   return `Курс ЦБ на ${date}: EUR ${money(rubConversion.rates.EUR)}, CNY ${money(rubConversion.rates.CNY)}`;
+}
+
+function formatConvertedBreakdown(values: ConvertedCurrencyTotal[]) {
+  if (values.length === 0) return '';
+  return values.map((value) => `${formatAmount(value.amount, value.currency)} → ${formatConvertedRubAmount(value.rubAmount)}`).join('; ');
 }
 
 function requireEnv(name: string) {
@@ -292,6 +303,19 @@ export async function POST(request: Request, context: Context) {
     0,
   );
   const hasConvertedRubValues = totalConvertedRub > 0;
+  const convertedByCurrency = new Map<string, ConvertedCurrencyTotal>();
+  for (const row of rows) {
+    for (const price of row.prices) {
+      if (price.convertedRubLineTotal === null) continue;
+      const key = price.currency || 'Сумма';
+      const current = convertedByCurrency.get(key) ?? { currency: price.currency, amount: 0, rubAmount: 0 };
+      current.amount += price.lineTotal;
+      current.rubAmount += price.convertedRubLineTotal;
+      convertedByCurrency.set(key, current);
+    }
+  }
+  const convertedTotals = Array.from(convertedByCurrency.values());
+  const convertedBreakdownLabel = formatConvertedBreakdown(convertedTotals);
   const rubConversionInfo = rubConversion && hasConvertedRubValues ? formatRubConversionInfo(rubConversion) : '';
   const priceUrl = new URL(`/price/${encodeURIComponent(priceList.token)}`, request.url).toString();
   const commentHtml = comment ? escapeHtml(comment).replaceAll('\n', '<br>') : '';
@@ -313,8 +337,10 @@ export async function POST(request: Request, context: Context) {
     const itemRows = rows
       .map((item) => {
         const lineTotals = item.prices.map((price) => ({ amount: price.lineTotal, currency: price.currency }));
+        const itemRubPriceText = formatRubValuesText(item.prices, 'price');
+        const itemRubTotalText = formatRubValuesText(item.prices, 'total');
         const rubCells = hasConvertedRubValues
-          ? `<td>${formatRubValuesHtml(item.prices, 'price')}</td><td>${formatRubValuesHtml(item.prices, 'total')}</td>`
+          ? `<td>${itemRubPriceText ? formatRubValuesHtml(item.prices, 'price') : ''}</td><td>${itemRubTotalText ? formatRubValuesHtml(item.prices, 'total') : ''}</td>`
           : '';
 
         return `
@@ -351,6 +377,7 @@ export async function POST(request: Request, context: Context) {
         <p><b>Итого позиций:</b> ${totalQuantity}</p>
         <p><b>Итого сумма:</b> ${escapeHtml(totalPriceLabel)}</p>
         ${hasConvertedRubValues ? `<p><b>Итого в рублях по пересчету:</b> ${escapeHtml(formatConvertedRubAmount(totalConvertedRub))}</p>` : ''}
+        ${convertedBreakdownLabel ? `<p><b>В пересчет вошло:</b> ${escapeHtml(convertedBreakdownLabel)}</p>` : ''}
       `,
       text:
         `${subject}\n` +
@@ -363,8 +390,10 @@ export async function POST(request: Request, context: Context) {
         rows
           .map((item) => {
             const lineTotals = item.prices.map((price) => ({ amount: price.lineTotal, currency: price.currency }));
-            const rubText = hasConvertedRubValues
-              ? `; цена RUB ${formatRubValuesText(item.prices, 'price')}; сумма RUB ${formatRubValuesText(item.prices, 'total')}`
+            const itemRubPriceText = formatRubValuesText(item.prices, 'price');
+            const itemRubTotalText = formatRubValuesText(item.prices, 'total');
+            const rubText = itemRubPriceText || itemRubTotalText
+              ? `; цена RUB ${itemRubPriceText}; сумма RUB ${itemRubTotalText}`
               : '';
             return `${item.productTitle}; ${item.sku}; ${item.variantTitle}; ${item.quantity} шт.; цена ${formatAmountList(
               item.prices,
@@ -372,7 +401,8 @@ export async function POST(request: Request, context: Context) {
           })
           .join('\n') +
         `\n\nИтого позиций: ${totalQuantity}\nИтого сумма: ${totalPriceLabel}\n` +
-        (hasConvertedRubValues ? `Итого в рублях по пересчету: ${formatConvertedRubAmount(totalConvertedRub)}\n` : ''),
+        (hasConvertedRubValues ? `Итого в рублях по пересчету: ${formatConvertedRubAmount(totalConvertedRub)}\n` : '') +
+        (convertedBreakdownLabel ? `В пересчет вошло: ${convertedBreakdownLabel}\n` : ''),
     });
 
     await trackAnalyticsEvent({
