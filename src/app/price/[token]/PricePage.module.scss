@@ -250,6 +250,7 @@
   padding: $apx-10 $apx-14;
 
   span {
+    order: 1;
     color: #6f7182;
     font-size: $apx-13;
     font-weight: 700;
@@ -257,6 +258,7 @@
 }
 
 .conversionButton {
+  order: 2;
   min-height: $apx-38;
   border: 0;
   border-radius: $apx-8;
