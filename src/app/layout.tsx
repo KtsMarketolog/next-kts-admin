@@ -1,6 +1,5 @@
 // src/app/layout.tsx
 import type { Metadata, Viewport } from "next";
-import { Montserrat } from "next/font/google";
 import "./globals.css";
 import "./fix-ios-zoom.scss";
 import Header from "@/widgets/layout/Header/Header";
@@ -9,15 +8,6 @@ import Header from "@/widgets/layout/Header/Header";
 import { ConditionalFooter } from "@/widgets/layout/ConditionalFooter";
 import ScrollToHashWrapper from "@/shared/lib/ScrollToHashWrapper";
 import CookieBannerLoader from '@/shared/ui/CookieBanner/CookieBannerLoader';
-
-const montserrat = Montserrat({
-
-  subsets: ["latin", "cyrillic"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-  variable: "--font-montserrat",
-
-});
 
 export const metadata: Metadata = {
 
@@ -40,7 +30,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 
     <html lang="ru" data-scroll-behavior="smooth">
 
-      <body className={montserrat.variable}>
+      <body>
 
         {/* TEMP: Loader is disabled while measuring Lighthouse without the preload overlay.
         <div id="ssr-loader" className="loaderRoot" role="progressbar" aria-busy="true" aria-label="Загрузка">
