@@ -551,12 +551,11 @@
     minmax($apx-90, 0.65fr)
     minmax($apx-80, 0.55fr)
     minmax($apx-130, 0.85fr)
-    minmax($apx-180, 1fr)
-    minmax($apx-120, auto);
+    minmax($apx-180, 1fr);
   gap: $apx-8 $apx-12;
   align-items: center;
 
-  > div:nth-child(-n + 7) {
+  > div:nth-child(-n + 6) {
     color: #6f7182;
     font-size: $apx-12;
     font-weight: 700;
