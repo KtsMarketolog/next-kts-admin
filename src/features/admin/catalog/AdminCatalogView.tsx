@@ -473,7 +473,7 @@ export function AdminCatalogView({
                       {product.stock > 0
                         ? `В наличии: ${product.stock} ${product.unit?.trim() || 'шт.'}`
                         : product.isExpected
-                          ? 'Скоро поступление'
+                          ? 'Ожидается поступление'
                           : 'Под заказ'}
                     </span>
                   </div>

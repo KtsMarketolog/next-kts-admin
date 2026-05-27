@@ -63,6 +63,7 @@ export type PriceList = {
   workflowStatusLabel: string;
   showRetailPrices: boolean;
   showStock: boolean;
+  showStockText: boolean;
   isActive: boolean;
   managerId: number | null;
   managerName: string | null;
@@ -118,6 +119,12 @@ export type PriceItem = {
   sortOrder: number;
 };
 
+export type PriceGroupStockSetting = {
+  priceGroup: string;
+  showStock: boolean;
+  showStockText: boolean;
+};
+
 export type PriceEditor = {
   id?: number;
   title: string;
@@ -128,9 +135,11 @@ export type PriceEditor = {
   workflowStatus: WholesalePriceWorkflowStatus;
   showRetailPrices: boolean;
   showStock: boolean;
+  showStockText: boolean;
   isActive: boolean;
   managerId: number | null;
   items: PriceItem[];
+  priceGroupStockSettings: Record<string, PriceGroupStockSetting>;
 };
 
 export type AdminWholesaleGatewayProps = {
@@ -179,7 +188,7 @@ export function getDefaultPriceTitle() {
 export function stockLabel(product: CatalogProduct) {
   const unit = product.unit?.trim() || 'шт.';
   if (product.stock > 0) return `${product.stock} ${unit}`;
-  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
+  return product.isExpected ? 'Ожидается поступление' : 'Под заказ';
 }
 
 export function emptyEditor(): PriceEditor {
@@ -192,10 +201,31 @@ export function emptyEditor(): PriceEditor {
     workflowStatus: 'not_sent',
     showRetailPrices: false,
     showStock: true,
+    showStockText: false,
     isActive: true,
     managerId: null,
     items: [],
+    priceGroupStockSettings: {},
   };
+}
+
+export function priceGroupKey(title: string) {
+  return (title || NO_PRICE_GROUP_TITLE).toLowerCase();
+}
+
+export function normalizePriceGroupStockSettings(settings: unknown): Record<string, PriceGroupStockSetting> {
+  if (!Array.isArray(settings)) return {};
+  return settings.reduce<Record<string, PriceGroupStockSetting>>((result, item) => {
+    if (!item || typeof item !== 'object') return result;
+    const source = item as Partial<PriceGroupStockSetting>;
+    const priceGroup = typeof source.priceGroup === 'string' ? source.priceGroup.trim() : '';
+    if (!priceGroup) return result;
+    const showStock = source.showStock === true;
+    const showStockText = source.showStockText === true;
+    if (!showStock && !showStockText) return result;
+    result[priceGroupKey(priceGroup)] = { priceGroup, showStock, showStockText };
+    return result;
+  }, {});
 }
 
 export function formatDate(value: string | null) {

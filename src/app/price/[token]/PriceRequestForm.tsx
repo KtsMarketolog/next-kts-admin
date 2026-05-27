@@ -3,13 +3,13 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { PublicWholesaleCategory } from '@/shared/lib/db';
+import { formatWholesaleStockLabel, hasVisibleWholesaleStock } from '@/shared/lib/wholesaleStockDisplay';
 
 import styles from './PricePage.module.scss';
 
 type PriceRequestFormProps = {
   token: string;
   categories: PublicWholesaleCategory[];
-  showStock: boolean;
 };
 
 const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
@@ -87,9 +87,12 @@ function normalizeSearchText(value: string) {
 }
 
 function stockLabel(product: PublicWholesaleCategory['products'][number]) {
-  const unit = product.unit?.trim() || 'шт.';
-  if (product.stock > 0) return `В наличии: ${product.stock} ${unit}`;
-  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
+  return formatWholesaleStockLabel({
+    stock: product.stock,
+    unit: product.unit,
+    isExpected: product.isExpected,
+    mode: product.stockDisplayMode,
+  });
 }
 
 function normalizeQuantityInput(value: string) {
@@ -124,7 +127,7 @@ function trackPriceEvent(token: string, eventType: PriceClientEventType, metadat
   });
 }
 
-export function PriceRequestForm({ token, categories, showStock }: PriceRequestFormProps) {
+export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedPriceGroups, setExpandedPriceGroups] = useState<Record<string, boolean>>({});
@@ -380,7 +383,7 @@ export function PriceRequestForm({ token, categories, showStock }: PriceRequestF
                       <h3>{product.title}</h3>
                       {product.sku ? <p>Артикул: {product.sku}</p> : null}
                       {product.description ? <p>{product.description}</p> : null}
-                      {showStock ? <p className={styles.stockStatus}>{stockLabel(product)}</p> : null}
+                      {hasVisibleWholesaleStock(product.stockDisplayMode) ? <p className={styles.stockStatus}>{stockLabel(product)}</p> : null}
                     </div>
                     <table className={styles.prices}>
                       <thead>

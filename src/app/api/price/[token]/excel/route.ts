@@ -3,6 +3,7 @@ import { getPublicWholesalePriceList, trackAnalyticsEvent } from '@/shared/lib/d
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
+import { formatWholesaleStockLabel, hasVisibleWholesaleStock } from '@/shared/lib/wholesaleStockDisplay';
 
 type Context = {
   params: Promise<{ token: string }>;
@@ -81,9 +82,18 @@ function formatIndividualPrice(variant: PublicPriceVariant) {
 }
 
 function stockLabel(product: PublicPriceProduct) {
-  const unit = product.unit?.trim() || 'шт.';
-  if (product.stock > 0) return `В наличии: ${product.stock} ${unit}`;
-  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
+  return formatWholesaleStockLabel({
+    stock: product.stock,
+    unit: product.unit,
+    isExpected: product.isExpected,
+    mode: product.stockDisplayMode,
+  });
+}
+
+function shouldShowStockColumn(priceList: PublicPriceList) {
+  return priceList.categories.some((category) =>
+    category.products.some((product) => hasVisibleWholesaleStock(product.stockDisplayMode)),
+  );
 }
 
 function groupProductsByPriceGroup(priceList: PublicPriceList) {
@@ -106,7 +116,8 @@ function groupProductsByPriceGroup(priceList: PublicPriceList) {
 }
 
 function createExcelXml(priceList: PublicPriceList) {
-  const columnCount = priceList.showStock ? 6 : 5;
+  const showStock = shouldShowStockColumn(priceList);
+  const columnCount = showStock ? 6 : 5;
   const rows: string[] = [
     row([`<Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="Title"><Data ss:Type="String">${xmlEscape(priceList.title || 'Индивидуальный прайс')}</Data></Cell>`]),
     row([`<Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="Subtitle"><Data ss:Type="String">Клиент: ${xmlEscape(priceList.clientName || 'Не указан')}</Data></Cell>`]),
@@ -122,7 +133,7 @@ function createExcelXml(priceList: PublicPriceList) {
   rows.push(row(Array.from({ length: columnCount }, () => cell('', 'Body'))));
 
   const headers = ['Ценовая группа', 'Товар', 'Артикул', 'Описание', 'Индивидуальная цена'];
-  if (priceList.showStock) headers.push('Остаток');
+  if (showStock) headers.push('Остаток');
   rows.push(row(headers.map((title) => cell(title, 'Header'))));
 
   let hasItems = false;
@@ -137,7 +148,7 @@ function createExcelXml(priceList: PublicPriceList) {
           product.description || '—',
           formatIndividualPrice(variant),
         ];
-        if (priceList.showStock) values.push(stockLabel(product));
+        if (showStock) values.push(hasVisibleWholesaleStock(product.stockDisplayMode) ? stockLabel(product) : '');
         rows.push(row(values.map((value) => cell(value))));
       }
     }
@@ -170,7 +181,7 @@ function createExcelXml(priceList: PublicPriceList) {
    <Column ss:Width="110"/>
    <Column ss:Width="220"/>
    <Column ss:Width="170"/>
-   ${priceList.showStock ? '<Column ss:Width="130"/>' : ''}
+   ${showStock ? '<Column ss:Width="130"/>' : ''}
    ${rows.join('\n   ')}
   </Table>
   <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">

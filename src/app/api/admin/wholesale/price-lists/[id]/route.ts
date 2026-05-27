@@ -2,6 +2,7 @@ import {
   deleteWholesalePriceList,
   getWholesalePriceListEditor,
   updateWholesalePriceList,
+  type WholesalePriceGroupStockSettingInput,
   type WholesalePriceListItemInput,
 } from '@/shared/lib/db';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
@@ -40,6 +41,28 @@ function itemsFromBody(items: unknown): WholesalePriceListItemInput[] {
       };
     })
     .filter(Boolean) as WholesalePriceListItemInput[];
+}
+
+function priceGroupStockSettingsFromBody(settings: unknown): WholesalePriceGroupStockSettingInput[] {
+  const rows = Array.isArray(settings)
+    ? settings
+    : settings && typeof settings === 'object'
+      ? Object.values(settings as Record<string, unknown>)
+      : [];
+
+  return rows
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const source = item as Record<string, unknown>;
+      const priceGroup = normalizeTextField(source.priceGroup, 180);
+      if (!priceGroup) return null;
+      return {
+        priceGroup,
+        showStock: Boolean(source.showStock),
+        showStockText: Boolean(source.showStockText),
+      };
+    })
+    .filter((item): item is WholesalePriceGroupStockSettingInput => Boolean(item && (item.showStock || item.showStockText)));
 }
 
 export async function GET(_request: Request, context: Context) {
@@ -90,8 +113,10 @@ export async function PUT(request: Request, context: Context) {
       workflowStatus: normalizeWholesalePriceWorkflowStatus(body.workflowStatus),
       showRetailPrices: Boolean(body.showRetailPrices),
       showStock: body.showStock !== false,
+      showStockText: Boolean(body.showStockText),
       isActive: Boolean(body.isActive ?? true),
       items: itemsFromBody(body.items),
+      priceGroupStockSettings: priceGroupStockSettingsFromBody(body.priceGroupStockSettings),
     },
     session,
   );

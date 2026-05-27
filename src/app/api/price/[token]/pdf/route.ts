@@ -7,6 +7,7 @@ import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { readPricePdfCache, writePricePdfCache } from '@/shared/lib/pricePdfCache';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
+import { formatWholesaleStockLabel, hasVisibleWholesaleStock } from '@/shared/lib/wholesaleStockDisplay';
 
 type Context = {
   params: Promise<{ token: string }>;
@@ -118,9 +119,18 @@ function formatIndividualPrice(variant: PublicPriceVariant) {
 }
 
 function stockLabel(product: PublicPriceProduct) {
-  const unit = product.unit?.trim() || 'шт.';
-  if (product.stock > 0) return `В наличии: ${product.stock} ${unit}`;
-  return product.isExpected ? 'Скоро поступление' : 'Под заказ';
+  return formatWholesaleStockLabel({
+    stock: product.stock,
+    unit: product.unit,
+    isExpected: product.isExpected,
+    mode: product.stockDisplayMode,
+  });
+}
+
+function shouldShowStockColumn(priceList: PublicPriceList) {
+  return priceList.categories.some((category) =>
+    category.products.some((product) => hasVisibleWholesaleStock(product.stockDisplayMode)),
+  );
 }
 
 function groupProductsByPriceGroup(priceList: PublicPriceList) {
@@ -165,7 +175,7 @@ function createPdfRows(priceList: PublicPriceList): PdfRow[] {
           sku: product.sku || '—',
           description: product.description || '—',
           price: formatIndividualPrice(variant),
-          stock: priceList.showStock ? stockLabel(product) : '',
+          stock: hasVisibleWholesaleStock(product.stockDisplayMode) ? stockLabel(product) : '',
         });
       }
     }
@@ -315,7 +325,8 @@ function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWho
 
     drawPdfHeader(doc, priceList, boldFont, regularFont);
 
-    const columns = getPdfColumns(priceList.showStock);
+    const showStock = shouldShowStockColumn(priceList);
+    const columns = getPdfColumns(showStock);
     const rows = createPdfRows(priceList);
     if (rows.length === 0) {
       doc.font(regularFont).fontSize(12).fillColor(TABLE_MUTED_COLOR).text('В прайс пока не добавлены товары.');

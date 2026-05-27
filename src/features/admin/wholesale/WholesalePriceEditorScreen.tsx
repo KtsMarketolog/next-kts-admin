@@ -9,6 +9,7 @@ import {
   formatDiscountPercent,
   getGroupDiscountLimit,
   getSavedGroupDiscountPercent,
+  priceGroupKey,
   renderWholesaleEditorSkeleton,
   stockLabel,
   type CatalogCategory,
@@ -178,7 +179,15 @@ export function WholesalePriceEditorScreen({
           </label>
           <label className={styles.checkbox}>
             <input type="checkbox" checked={editor.showStock} onChange={(event) => setEditor({ ...editor, showStock: event.target.checked })} />
-            Показывать остатки в прайсе
+            Показывать остатки цифрами
+          </label>
+          <label className={styles.checkbox}>
+            <input
+              type="checkbox"
+              checked={editor.showStockText}
+              onChange={(event) => setEditor({ ...editor, showStockText: event.target.checked })}
+            />
+            Показывать остатки текстом
           </label>
           <label className={styles.checkbox}>
             <input type="checkbox" checked={editor.showRetailPrices} onChange={(event) => setEditor({ ...editor, showRetailPrices: event.target.checked })} />
@@ -243,6 +252,29 @@ export function WholesalePriceEditorScreen({
                 const groupDiscountPercent =
                   appliedGroupDiscounts[group.id] ?? getSavedGroupDiscountPercent(group, itemByKey, catalogDiscountBaseByKey);
                 const groupMaxDiscount = getGroupDiscountLimit(group);
+                const groupStockKey = priceGroupKey(group.title);
+                const groupStockSetting = editor.priceGroupStockSettings[groupStockKey] ?? {
+                  priceGroup: group.title,
+                  showStock: false,
+                  showStockText: false,
+                };
+                const updateGroupStockSetting = (patch: Partial<typeof groupStockSetting>) => {
+                  setEditor((current) => {
+                    const currentSetting = current.priceGroupStockSettings[groupStockKey] ?? {
+                      priceGroup: group.title,
+                      showStock: false,
+                      showStockText: false,
+                    };
+                    const nextSetting = { ...currentSetting, ...patch, priceGroup: group.title };
+                    const nextSettings = { ...current.priceGroupStockSettings };
+                    if (nextSetting.showStock || nextSetting.showStockText) {
+                      nextSettings[groupStockKey] = nextSetting;
+                    } else {
+                      delete nextSettings[groupStockKey];
+                    }
+                    return { ...current, priceGroupStockSettings: nextSettings };
+                  });
+                };
 
                 return (
                   <div className={styles.priceCategory} key={group.id}>
@@ -297,6 +329,25 @@ export function WholesalePriceEditorScreen({
                             <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
                               Рассчитать
                             </button>
+                          </div>
+                          <div className={styles.priceGroupStockOptions}>
+                            <span>Остатки в прайсе</span>
+                            <label className={styles.checkbox}>
+                              <input
+                                type="checkbox"
+                                checked={groupStockSetting.showStock}
+                                onChange={(event) => updateGroupStockSetting({ showStock: event.target.checked })}
+                              />
+                              Цифрами
+                            </label>
+                            <label className={styles.checkbox}>
+                              <input
+                                type="checkbox"
+                                checked={groupStockSetting.showStockText}
+                                onChange={(event) => updateGroupStockSetting({ showStockText: event.target.checked })}
+                              />
+                              Текстом
+                            </label>
                           </div>
                           <div className={styles.priceGroupVisibility}>
                             <button className={styles.secondary} onClick={() => setPriceGroupVisible(group.id, true)}>Показать все</button>

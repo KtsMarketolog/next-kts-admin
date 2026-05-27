@@ -184,9 +184,21 @@ export async function ensureSiteSchema() {
       workflow_status text not null default 'not_sent',
       show_retail_prices boolean not null default false,
       show_stock boolean not null default true,
+      show_stock_text boolean not null default false,
       is_active boolean not null default true,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
+    );
+
+    create table if not exists wholesale_price_list_group_stock_settings (
+      id bigserial primary key,
+      price_list_id bigint not null references wholesale_price_lists(id) on delete cascade,
+      price_group text not null default '',
+      show_stock_numbers boolean not null default false,
+      show_stock_text boolean not null default false,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique(price_list_id, price_group)
     );
 
     create table if not exists wholesale_price_list_items (
@@ -400,6 +412,7 @@ export async function ensureSiteSchema() {
     create index if not exists wholesale_managers_support_idx on wholesale_managers(support_manager_id);
     create index if not exists wholesale_price_list_items_price_list_idx on wholesale_price_list_items(price_list_id);
     create index if not exists wholesale_price_list_items_product_idx on wholesale_price_list_items(wholesale_product_id);
+    create index if not exists wholesale_price_group_stock_settings_price_list_idx on wholesale_price_list_group_stock_settings(price_list_id);
     create index if not exists wholesale_price_lists_manager_idx on wholesale_price_lists(manager_id);
     create index if not exists wholesale_price_lists_workflow_status_idx on wholesale_price_lists(workflow_status);
     create index if not exists wholesale_price_list_events_manager_idx on wholesale_price_list_events(manager_id, created_at desc);
@@ -442,6 +455,19 @@ export async function ensureSiteSchema() {
   await query(`alter table wholesale_price_lists add column if not exists comment text not null default ''`);
   await query(`alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent'`);
   await query(`alter table wholesale_price_lists add column if not exists show_stock boolean not null default true`);
+  await query(`alter table wholesale_price_lists add column if not exists show_stock_text boolean not null default false`);
+  await query(`
+    create table if not exists wholesale_price_list_group_stock_settings (
+      id bigserial primary key,
+      price_list_id bigint not null references wholesale_price_lists(id) on delete cascade,
+      price_group text not null default '',
+      show_stock_numbers boolean not null default false,
+      show_stock_text boolean not null default false,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique(price_list_id, price_group)
+    )
+  `);
   await query(`alter table wholesale_products add column if not exists catalog_product_id bigint`);
   await query(`alter table wholesale_products add column if not exists brand_title text not null default ''`);
   await query(`alter table wholesale_products add column if not exists subcategory_title text not null default ''`);
@@ -474,6 +500,7 @@ export async function ensureSiteSchema() {
   await query(`create index if not exists wholesale_managers_role_idx on wholesale_managers(role)`);
   await query(`create index if not exists wholesale_managers_support_idx on wholesale_managers(support_manager_id)`);
   await query(`create index if not exists wholesale_products_catalog_product_idx on wholesale_products(catalog_product_id)`);
+  await query(`create index if not exists wholesale_price_group_stock_settings_price_list_idx on wholesale_price_list_group_stock_settings(price_list_id)`);
   await query(`create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc)`);
   await query(`create index if not exists wholesale_price_lists_workflow_status_idx on wholesale_price_lists(workflow_status)`);
   await query(`create index if not exists wholesale_analytics_events_price_idx on wholesale_analytics_events(price_list_id, created_at desc)`);

@@ -1,5 +1,6 @@
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
+import { resolveWholesaleStockDisplayMode, type WholesaleStockDisplayMode } from '../wholesaleStockDisplay';
 
 export type PublicWholesaleVariant = {
   priceItemId: number;
@@ -24,6 +25,7 @@ export type PublicWholesaleProduct = {
   stock: number;
   unit: string | null;
   isExpected: boolean;
+  stockDisplayMode: WholesaleStockDisplayMode;
   stockUpdatedAt: string | null;
   variants: PublicWholesaleVariant[];
 };
@@ -51,6 +53,7 @@ export type PublicWholesalePriceList = {
   updatedAt: string;
   showRetailPrices: boolean;
   showStock: boolean;
+  showStockText: boolean;
   categories: PublicWholesaleCategory[];
 };
 
@@ -71,6 +74,7 @@ type PriceListRow = {
   updated_at: string;
   show_retail_prices: boolean;
   show_stock: boolean;
+  show_stock_text: boolean;
 };
 
 type PriceItemRow = {
@@ -87,6 +91,8 @@ type PriceItemRow = {
   stock: string | null;
   unit: string | null;
   is_expected: boolean | null;
+  group_show_stock_numbers: boolean | null;
+  group_show_stock_text: boolean | null;
   stock_updated_at: string | null;
   variant_id: string | null;
   variant_title: string | null;
@@ -132,7 +138,8 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        pl.valid_until::text,
        pl.updated_at::text,
        pl.show_retail_prices,
-       pl.show_stock
+       pl.show_stock,
+       pl.show_stock_text
      from wholesale_price_lists pl
      left join wholesale_managers m on m.id = pl.manager_id
      left join wholesale_managers support on support.id = m.support_manager_id and support.role = 'support_manager' and support.is_active = true
@@ -159,6 +166,8 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        p.stock::text,
        p.unit,
        p.is_expected,
+       gs.show_stock_numbers as group_show_stock_numbers,
+       gs.show_stock_text as group_show_stock_text,
        p.stock_updated_at::text,
        v.id::text as variant_id,
        coalesce(i.snapshot_variant_title, v.title, '') as variant_title,
@@ -174,6 +183,9 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
      left join wholesale_categories c on c.id = p.category_id
      left join wholesale_product_variants v on v.id = i.wholesale_variant_id and v.product_id = p.id
      left join price_group_images pgi on pgi.price_group = coalesce(nullif(trim(p.price_group), ''), 'Без ценовой группы')
+     left join wholesale_price_list_group_stock_settings gs
+       on gs.price_list_id = pl.id
+      and gs.price_group = coalesce(nullif(trim(p.price_group), ''), 'Без ценовой группы')
      left join lateral (
        select image_url
        from wholesale_product_images
@@ -221,6 +233,12 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
         stock: Number(row.stock ?? 0),
         unit: row.unit,
         isExpected: Boolean(row.is_expected),
+        stockDisplayMode: resolveWholesaleStockDisplayMode({
+          globalShowNumbers: priceListRow.show_stock !== false,
+          globalShowText: priceListRow.show_stock_text === true,
+          groupShowNumbers: row.group_show_stock_numbers,
+          groupShowText: row.group_show_stock_text,
+        }),
         stockUpdatedAt: row.stock_updated_at,
         variants: [],
       };
@@ -258,6 +276,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
     updatedAt: priceListRow.updated_at,
     showRetailPrices: priceListRow.show_retail_prices,
     showStock: priceListRow.show_stock !== false,
+    showStockText: priceListRow.show_stock_text === true,
     categories: Array.from(categoriesById.values()),
   };
 }

@@ -386,6 +386,11 @@
   .priceGroupVisibility {
     grid-template-columns: 1fr;
   }
+
+  .priceGroupStockOptions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
 }
 
 .priceCategory {
@@ -464,7 +469,7 @@
 
 .priceGroupTools {
   display: grid;
-  grid-template-columns: minmax($apx-300, 1fr) max-content;
+  grid-template-columns: minmax($apx-300, 1fr) minmax($apx-220, max-content) max-content;
   gap: $apx-10;
   align-items: end;
 }
@@ -486,6 +491,21 @@
   input {
     width: 100%;
     min-width: 0;
+  }
+}
+
+.priceGroupStockOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8 $apx-12;
+  align-items: center;
+
+  > span {
+    flex: 0 0 100%;
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
   }
 }
 

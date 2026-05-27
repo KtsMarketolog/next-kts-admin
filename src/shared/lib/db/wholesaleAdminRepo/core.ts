@@ -56,6 +56,7 @@ export type WholesalePriceListSummary = {
   workflowStatusLabel: string;
   showRetailPrices: boolean;
   showStock: boolean;
+  showStockText: boolean;
   isActive: boolean;
   managerId: number | null;
   managerName: string | null;
@@ -111,6 +112,12 @@ export type WholesalePriceListItemInput = {
   sortOrder: number;
 };
 
+export type WholesalePriceGroupStockSettingInput = {
+  priceGroup: string;
+  showStock: boolean;
+  showStockText: boolean;
+};
+
 export type WholesalePriceListEditor = {
   id: number;
   title: string;
@@ -121,9 +128,11 @@ export type WholesalePriceListEditor = {
   workflowStatus: WholesalePriceWorkflowStatus;
   showRetailPrices: boolean;
   showStock: boolean;
+  showStockText: boolean;
   isActive: boolean;
   managerId: number | null;
   items: WholesalePriceListItemInput[];
+  priceGroupStockSettings: WholesalePriceGroupStockSettingInput[];
 };
 
 export type WholesaleDiscountReportRow = {
@@ -735,6 +744,7 @@ type PriceListRow = {
   workflow_status: string | null;
   show_retail_prices: boolean;
   show_stock: boolean;
+  show_stock_text: boolean;
   is_active: boolean;
   manager_id: string | null;
   manager_name: string | null;
@@ -1507,6 +1517,7 @@ function mapPriceList(row: PriceListRow): WholesalePriceListSummary {
     workflowStatusLabel: getWholesalePriceWorkflowStatusLabel(row.workflow_status),
     showRetailPrices: row.show_retail_prices,
     showStock: row.show_stock !== false,
+    showStockText: row.show_stock_text === true,
     isActive: row.is_active,
     managerId: row.manager_id ? Number(row.manager_id) : null,
     managerName: row.manager_name,
@@ -1683,6 +1694,7 @@ async function getWholesalePriceListsByManagerId(managerId: number | null) {
        pl.workflow_status,
        pl.show_retail_prices,
        pl.show_stock,
+       pl.show_stock_text,
        pl.is_active,
        pl.manager_id::text,
        m.name as manager_name,
@@ -1856,9 +1868,15 @@ export async function getWholesaleCatalog() {
 export async function getWholesalePriceListEditor(id: number, session?: AdminSession | null) {
   await ensureSiteSchema();
   const managerId = sessionManagerId(session);
-  const priceList = await query<Omit<WholesalePriceListEditor, 'items'> & { id: string; manager_id: string | null }>(
+  const priceList = await query<
+    Omit<WholesalePriceListEditor, 'id' | 'items' | 'managerId' | 'priceGroupStockSettings'> & {
+      id: string;
+      manager_id: string | null;
+    }
+  >(
     `select id::text, title, client_name as "clientName", token, valid_until::text as "validUntil",
-            comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", show_stock as "showStock", is_active as "isActive", manager_id::text
+            comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", show_stock as "showStock",
+            show_stock_text as "showStockText", is_active as "isActive", manager_id::text
      from wholesale_price_lists
      where id = $1 and ($2::bigint is null or manager_id = $2)
      limit 1`,
@@ -1884,6 +1902,17 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
      order by sort_order asc, id asc`,
     [id],
   );
+  const groupStockSettings = await query<{
+    price_group: string;
+    show_stock_numbers: boolean;
+    show_stock_text: boolean;
+  }>(
+    `select price_group, show_stock_numbers, show_stock_text
+     from wholesale_price_list_group_stock_settings
+     where price_list_id = $1
+     order by lower(price_group) asc`,
+    [id],
+  );
 
   return {
     id: Number(row.id),
@@ -1895,6 +1924,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
     workflowStatus: normalizeWholesalePriceWorkflowStatus(row.workflowStatus),
     showRetailPrices: row.showRetailPrices,
     showStock: row.showStock !== false,
+    showStockText: row.showStockText === true,
     isActive: row.isActive,
     managerId: row.manager_id ? Number(row.manager_id) : null,
     items: items.rows.map((item) => ({
@@ -1903,6 +1933,11 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
       customWholesalePrice: item.custom_wholesale_price,
       visible: item.visible,
       sortOrder: item.sort_order,
+    })),
+    priceGroupStockSettings: groupStockSettings.rows.map((setting) => ({
+      priceGroup: setting.price_group,
+      showStock: setting.show_stock_numbers === true,
+      showStockText: setting.show_stock_text === true,
     })),
   };
 }
@@ -2022,9 +2057,9 @@ export async function createWholesalePriceList(
   const managerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : input.managerId;
   const result = await query<{ id: string }>(
     `insert into wholesale_price_lists (
-       title, client_name, manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, is_active
+       title, client_name, manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, show_stock_text, is_active
      )
-     values ($1, $2, $3, nullif($4, '')::date, $5, $6, $7, $8, $9, $10)
+     values ($1, $2, $3, nullif($4, '')::date, $5, $6, $7, $8, $9, $10, $11)
      returning id`,
     [
       input.title,
@@ -2036,11 +2071,13 @@ export async function createWholesalePriceList(
       input.workflowStatus,
       input.showRetailPrices,
       input.showStock,
+      input.showStockText,
       input.isActive,
     ],
   );
   const id = Number(result.rows[0].id);
   await replaceWholesalePriceListItems(id, input.items);
+  await replaceWholesalePriceListGroupStockSettings(id, input.priceGroupStockSettings);
   const actor = actorMeta(session);
   await insertPriceListEvent({
     priceListId: id,
@@ -2109,9 +2146,10 @@ export async function updateWholesalePriceList(
          workflow_status = $8,
          show_retail_prices = $9,
          show_stock = $10,
-         is_active = $11,
+         show_stock_text = $11,
+         is_active = $12,
          updated_at = now()
-     where id = $1 and ($12::bigint is null or manager_id = $12)`,
+     where id = $1 and ($13::bigint is null or manager_id = $13)`,
     [
       id,
       input.title,
@@ -2123,11 +2161,13 @@ export async function updateWholesalePriceList(
       input.workflowStatus,
       input.showRetailPrices,
       input.showStock,
+      input.showStockText,
       input.isActive,
       sessionManagerId(session),
     ],
   );
   await replaceWholesalePriceListItems(id, input.items);
+  await replaceWholesalePriceListGroupStockSettings(id, input.priceGroupStockSettings);
   const actor = actorMeta(session);
   await insertPriceListEvent({
     priceListId: id,
@@ -4034,6 +4074,27 @@ async function replaceWholesalePriceListItems(id: number, items: WholesalePriceL
        where p.id = $2
          and ($3::bigint is null or v.id is not null)`,
       [id, item.productId, item.variantId, item.customWholesalePrice ?? '', item.visible, item.sortOrder],
+    );
+  }
+}
+
+async function replaceWholesalePriceListGroupStockSettings(id: number, settings: WholesalePriceGroupStockSettingInput[]) {
+  await query(`delete from wholesale_price_list_group_stock_settings where price_list_id = $1`, [id]);
+
+  for (const setting of settings) {
+    const priceGroup = setting.priceGroup.trim().slice(0, 180);
+    if (!priceGroup || (!setting.showStock && !setting.showStockText)) continue;
+
+    await query(
+      `insert into wholesale_price_list_group_stock_settings (
+         price_list_id, price_group, show_stock_numbers, show_stock_text
+       )
+       values ($1, $2, $3, $4)
+       on conflict (price_list_id, price_group) do update
+       set show_stock_numbers = excluded.show_stock_numbers,
+           show_stock_text = excluded.show_stock_text,
+           updated_at = now()`,
+      [id, priceGroup, setting.showStock, setting.showStockText],
     );
   }
 }

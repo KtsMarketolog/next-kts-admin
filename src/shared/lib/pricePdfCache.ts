@@ -25,6 +25,7 @@ function cacheDigest(priceList: PublicWholesalePriceList) {
         updatedAt: priceList.updatedAt,
         showRetailPrices: priceList.showRetailPrices,
         showStock: priceList.showStock,
+        showStockText: priceList.showStockText,
         categories: priceList.categories,
       }),
     )

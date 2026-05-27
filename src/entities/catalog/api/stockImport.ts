@@ -63,9 +63,9 @@ export type StockEmailImportResult = {
 };
 
 const HEADER_ARTICLE_ALIASES = ['Номенклатура.Код', 'Номенклатура. Код', 'Артикул'];
-const HEADER_STOCK_ALIASES = ['Сейчас', 'Остаток', 'Остатки'];
+const HEADER_STOCK_ALIASES = ['Сейчас', 'Сейчас Доступно', 'Остаток', 'Остатки'];
 const HEADER_UNIT_ALIASES = ['Ед. изм.', 'Ед. изм', 'Единица измерения'];
-const HEADER_EXPECTED_ALIASES = ['Ожидается'];
+const HEADER_EXPECTED_ALIASES = ['Ожидается', 'Ожидается Доступно'];
 const LOCK_KEY = 'email';
 const MAX_ERRORS = 200;
 const MAX_SKIP_SAMPLES = 5;

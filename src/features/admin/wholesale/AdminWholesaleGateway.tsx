@@ -31,6 +31,7 @@ import {
   makeToken,
   mergeEditorItems,
   normalizeDiscountPercent,
+  normalizePriceGroupStockSettings,
   readApiError,
   readManagerRoleTab,
   type AdminWholesaleGatewayProps,
@@ -273,9 +274,11 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         workflowStatus: priceList.workflowStatus ?? 'not_sent',
         showRetailPrices: Boolean(priceList.showRetailPrices),
         showStock: priceList.showStock !== false,
+        showStockText: Boolean(priceList.showStockText),
         isActive: Boolean(priceList.isActive),
         managerId: priceList.managerId ?? null,
         items: mergeEditorItems(nextCatalog, Array.isArray(priceList.items) ? priceList.items : []),
+        priceGroupStockSettings: normalizePriceGroupStockSettings(priceList.priceGroupStockSettings),
       });
       setEditorLoading(false);
     }

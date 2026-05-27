@@ -59,6 +59,7 @@ export type {
   WholesaleManagerAnalyticsPeriod,
   WholesaleManager,
   WholesaleManagerProfile,
+  WholesalePriceGroupStockSettingInput,
   WholesalePriceListEditor,
   WholesalePriceListItemInput,
   WholesalePriceListSummary,
@@ -78,3 +79,4 @@ export type {
   PublicWholesaleRequestItem,
   PublicWholesaleVariant,
 } from './db/wholesaleRepo';
+export type { WholesaleStockDisplayMode } from './wholesaleStockDisplay';

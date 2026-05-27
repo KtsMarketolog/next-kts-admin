@@ -9,6 +9,7 @@ export {
 
 export type {
   WholesalePriceListEditor,
+  WholesalePriceGroupStockSettingInput,
   WholesalePriceListItemInput,
   WholesalePriceListSummary,
 } from './core';
