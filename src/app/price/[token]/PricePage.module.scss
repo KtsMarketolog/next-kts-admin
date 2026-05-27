@@ -470,9 +470,9 @@
   position: sticky;
   bottom: $apx-16;
   z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax($apx-220, 0.7fr) minmax($apx-420, 1.4fr) auto;
+  align-items: end;
   gap: $apx-16;
   background: #fff;
   border: $apx-1 solid #dedfeb;
@@ -495,7 +495,51 @@
   }
 }
 
+.requestComment {
+  display: grid;
+  gap: $apx-6;
+  min-width: 0;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: $apx-44;
+    max-height: $apx-180;
+    resize: none;
+    overflow-y: auto;
+    border: $apx-1 solid #d9dbe8;
+    border-radius: $apx-10;
+    background: #fff;
+    color: #242633;
+    padding: $apx-11 $apx-12;
+    font: inherit;
+    font-size: $apx-14;
+    line-height: 1.35;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+
+    &::placeholder {
+      color: #8c8f9d;
+    }
+
+    &:focus {
+      outline: none;
+      border-color: #260b86;
+      box-shadow: 0 0 0 $apx-3 rgba(38, 11, 134, 0.12);
+    }
+  }
+}
+
 .requestButton {
+  align-self: end;
   min-height: $apx-44;
   border: 0;
   border-radius: $apx-8;
@@ -644,10 +688,26 @@
 
   .requestBar {
     position: static;
-    display: grid;
+    grid-template-columns: 1fr;
     gap: $apx-m-12;
     border-radius: $apx-m-12;
     padding: $apx-m-14;
+  }
+
+  .requestComment {
+    gap: $apx-m-6;
+
+    span {
+      font-size: $apx-m-12;
+    }
+
+    textarea {
+      min-height: $apx-m-44;
+      max-height: $apx-m-160;
+      border-radius: $apx-m-8;
+      padding: $apx-m-11 $apx-m-12;
+      font-size: $apx-m-14;
+    }
   }
 
   .requestButton {

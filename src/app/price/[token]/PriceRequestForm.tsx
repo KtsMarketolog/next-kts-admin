@@ -102,6 +102,12 @@ function normalizeQuantityInput(value: string) {
   return Math.max(0, Math.min(999, Math.floor(quantity)));
 }
 
+function resizeTextarea(element: HTMLTextAreaElement | null) {
+  if (!element) return;
+  element.style.height = 'auto';
+  element.style.height = `${element.scrollHeight}px`;
+}
+
 type PriceClientEventType =
   | 'public_price_product_opened'
   | 'public_price_request_started'
@@ -129,10 +135,12 @@ function trackPriceEvent(token: string, eventType: PriceClientEventType, metadat
 
 export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [comment, setComment] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedPriceGroups, setExpandedPriceGroups] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const openedProductsRef = useRef<Set<number>>(new Set());
   const requestStartedRef = useRef(false);
   const submittedRef = useRef(false);
@@ -238,6 +246,10 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
   const visibleProductCount = groupedProducts.reduce((sum, group) => sum + group.products.length, 0);
 
   useEffect(() => {
+    resizeTextarea(commentRef.current);
+  }, [comment]);
+
+  useEffect(() => {
     selectionRef.current = { selectedItems: selectedItems.length, totalQuantity };
   }, [selectedItems.length, totalQuantity]);
 
@@ -306,7 +318,7 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
     const response = await fetch(`/api/price/${encodeURIComponent(token)}/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: selectedItems }),
+      body: JSON.stringify({ items: selectedItems, comment: comment.trim() }),
     });
     setBusy(false);
 
@@ -316,6 +328,7 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
     }
 
     setQuantities({});
+    setComment('');
     submittedRef.current = true;
     requestStartedRef.current = false;
     setStatus('Заявка отправлена');
@@ -450,6 +463,20 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
           <span>Общее количество: {totalQuantity}</span>
           <span>Общая сумма: {requestTotalLabel}</span>
         </div>
+        <label className={styles.requestComment}>
+          <span>Комментарий к заявке</span>
+          <textarea
+            ref={commentRef}
+            rows={1}
+            value={comment}
+            maxLength={1000}
+            placeholder="Например: условия доставки, сроки, уточнения по заказу"
+            onChange={(event) => {
+              setComment(event.target.value);
+              resizeTextarea(event.currentTarget);
+            }}
+          />
+        </label>
         <button className={styles.requestButton} type="submit" disabled={busy}>
           {busy ? 'Отправка...' : 'Отправить заявку'}
         </button>

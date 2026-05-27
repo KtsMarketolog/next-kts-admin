@@ -19,6 +19,7 @@ export const dynamic = 'force-dynamic';
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_ITEMS = 100;
 const MAX_QUANTITY = 999;
+const MAX_COMMENT_LENGTH = 1000;
 const REQUEST_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const REQUEST_SESSION_LIMIT = 3;
 const REQUEST_GLOBAL_LIMIT = 100;
@@ -54,6 +55,11 @@ function normalizeItems(input: unknown): RequestItemInput[] | null {
   }
 
   return items.length ? items : null;
+}
+
+function normalizeComment(input: unknown) {
+  if (typeof input !== 'string') return '';
+  return input.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, MAX_COMMENT_LENGTH);
 }
 
 function escapeHtml(value: string) {
@@ -144,6 +150,7 @@ export async function POST(request: Request, context: Context) {
 
   const body = await request.json().catch(() => null);
   const requestedItems = normalizeItems(body && typeof body === 'object' ? (body as Record<string, unknown>).items : null);
+  const comment = normalizeComment(body && typeof body === 'object' ? (body as Record<string, unknown>).comment : null);
   if (!requestedItems) {
     return jsonWithSession({ ok: false, error: 'INVALID_ITEMS' }, { status: 400 }, publicSession);
   }
@@ -194,6 +201,7 @@ export async function POST(request: Request, context: Context) {
   const totalAmounts = Array.from(totalByCurrency.entries()).map(([currency, amount]) => ({ currency, amount }));
   const totalPriceLabel = formatAmountList(totalAmounts);
   const priceUrl = new URL(`/price/${encodeURIComponent(priceList.token)}`, request.url).toString();
+  const commentHtml = comment ? escapeHtml(comment).replaceAll('\n', '<br>') : '';
 
   try {
     const transporter = nodemailer.createTransport({
@@ -232,6 +240,7 @@ export async function POST(request: Request, context: Context) {
         <p><b>Источник:</b> публичный прайс</p>
         <p><b>Прайс:</b> <a href="${escapeHtml(priceUrl)}">${escapeHtml(priceList.title || 'Без названия')}</a></p>
         <p><b>Клиент:</b> ${escapeHtml(priceList.clientName || 'Не указан')}</p>
+        ${commentHtml ? `<p><b>Комментарий клиента:</b><br>${commentHtml}</p>` : ''}
         <table border="1" cellpadding="6" cellspacing="0">
           <thead>
             <tr><th>Товар</th><th>Артикул</th><th>Размер</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr>
@@ -247,6 +256,7 @@ export async function POST(request: Request, context: Context) {
         `Прайс: ${priceList.title || 'Без названия'}\n` +
         `Ссылка: ${priceUrl}\n` +
         `Клиент: ${priceList.clientName || 'Не указан'}\n\n` +
+        (comment ? `Комментарий клиента:\n${comment}\n\n` : '') +
         rows
           .map(
             (item) =>
@@ -273,6 +283,8 @@ export async function POST(request: Request, context: Context) {
         totalQuantity,
         totalPrice: totalPriceLabel,
         totalByCurrency: Object.fromEntries(totalAmounts.map((item) => [item.currency || 'amount', item.amount])),
+        hasComment: Boolean(comment),
+        commentLength: comment.length,
         itemCount: rows.length,
         items: rows.slice(0, 40).map((item) => ({
           priceItemId: item.id,
