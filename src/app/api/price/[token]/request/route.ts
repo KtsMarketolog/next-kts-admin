@@ -141,29 +141,27 @@ function formatConvertedRubAmount(value: number) {
   return `≈ ${rubMoney(value)} RUB`;
 }
 
-function formatPriceListWithConversionText(prices: RequestPrice[], mode: 'price' | 'total') {
-  const base = formatAmountList(prices);
-  const convertedValues = prices
+function formatRubValues(prices: RequestPrice[], mode: 'price' | 'total') {
+  return prices
     .map((price) => (mode === 'price' ? price.convertedRubAmount : price.convertedRubLineTotal))
     .filter((value): value is number => value !== null)
     .map(formatConvertedRubAmount);
-  return convertedValues.length > 0 ? `${base} (${convertedValues.join(' / ')})` : base;
 }
 
-function formatPriceListWithConversionHtml(prices: RequestPrice[], mode: 'price' | 'total') {
-  const base = escapeHtml(formatAmountList(prices));
-  const convertedValues = prices
-    .map((price) => (mode === 'price' ? price.convertedRubAmount : price.convertedRubLineTotal))
-    .filter((value): value is number => value !== null)
-    .map(formatConvertedRubAmount);
-  if (convertedValues.length === 0) return base;
-  return `${base}<br><span style="color:#0f7b4d;font-weight:700">${escapeHtml(convertedValues.join(' / '))}</span>`;
+function formatRubValuesText(prices: RequestPrice[], mode: 'price' | 'total') {
+  const rubValues = formatRubValues(prices, mode);
+  return rubValues.length > 0 ? rubValues.join(' / ') : '—';
+}
+
+function formatRubValuesHtml(prices: RequestPrice[], mode: 'price' | 'total') {
+  return escapeHtml(formatRubValuesText(prices, mode));
 }
 
 function getConvertedRubAmount(price: { amount: number; currency: string }, rubConversion: RubConversionInput | null) {
-  if (!rubConversion || price.currency === 'RUB') return null;
+  if (!rubConversion) return null;
+  if (price.currency === 'RUB') return price.amount;
   if (price.currency !== 'EUR' && price.currency !== 'CNY') return null;
-  return price.amount * rubConversion.rates[price.currency];
+  return Math.round(price.amount * rubConversion.rates[price.currency]);
 }
 
 function formatRubConversionInfo(rubConversion: RubConversionInput) {
@@ -311,19 +309,26 @@ export async function POST(request: Request, context: Context) {
     const mailFrom = process.env.SMTP_FROM || `"KTS" <${requireEnv('SMTP_USER')}>`;
     const mailTo = priceRequestRecipients([priceList.managerEmail, priceList.supportManagerEmail]).join(', ');
     const subject = `Заявка из индивидуального прайса: ${priceList.title || 'Без названия'}`;
+    const rubHeaders = hasConvertedRubValues ? '<th>Цена RUB</th><th>Сумма RUB</th>' : '';
     const itemRows = rows
-      .map(
-        (item) => `
+      .map((item) => {
+        const lineTotals = item.prices.map((price) => ({ amount: price.lineTotal, currency: price.currency }));
+        const rubCells = hasConvertedRubValues
+          ? `<td>${formatRubValuesHtml(item.prices, 'price')}</td><td>${formatRubValuesHtml(item.prices, 'total')}</td>`
+          : '';
+
+        return `
           <tr>
             <td>${escapeHtml(item.productTitle)}</td>
             <td>${escapeHtml(item.sku)}</td>
             <td>${escapeHtml(item.variantTitle)}</td>
             <td>${item.quantity}</td>
-            <td>${formatPriceListWithConversionHtml(item.prices, 'price')}</td>
-            <td>${formatPriceListWithConversionHtml(item.prices, 'total')}</td>
+            <td>${escapeHtml(formatAmountList(item.prices))}</td>
+            <td>${escapeHtml(formatAmountList(lineTotals))}</td>
+            ${rubCells}
           </tr>
-        `,
-      )
+        `;
+      })
       .join('');
 
     await transporter.sendMail({
@@ -339,13 +344,13 @@ export async function POST(request: Request, context: Context) {
         ${rubConversionInfo ? `<p><b>Пересчет в рубли:</b> ${escapeHtml(rubConversionInfo)}</p>` : ''}
         <table border="1" cellpadding="6" cellspacing="0">
           <thead>
-            <tr><th>Товар</th><th>Артикул</th><th>Размер</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr>
+            <tr><th>Товар</th><th>Артикул</th><th>Размер</th><th>Кол-во</th><th>Цена</th><th>Сумма</th>${rubHeaders}</tr>
           </thead>
           <tbody>${itemRows}</tbody>
         </table>
         <p><b>Итого позиций:</b> ${totalQuantity}</p>
         <p><b>Итого сумма:</b> ${escapeHtml(totalPriceLabel)}</p>
-        ${hasConvertedRubValues ? `<p><b>Итого пересчет в рубли:</b> ${escapeHtml(formatConvertedRubAmount(totalConvertedRub))}</p>` : ''}
+        ${hasConvertedRubValues ? `<p><b>Итого в рублях по пересчету:</b> ${escapeHtml(formatConvertedRubAmount(totalConvertedRub))}</p>` : ''}
       `,
       text:
         `${subject}\n` +
@@ -356,16 +361,18 @@ export async function POST(request: Request, context: Context) {
         (comment ? `Комментарий клиента:\n${comment}\n\n` : '') +
         (rubConversionInfo ? `Пересчет в рубли: ${rubConversionInfo}\n\n` : '') +
         rows
-          .map(
-            (item) =>
-              `${item.productTitle}; ${item.sku}; ${item.variantTitle}; ${item.quantity} шт.; цена ${formatPriceListWithConversionText(
-                item.prices,
-                'price',
-              )}; сумма ${formatPriceListWithConversionText(item.prices, 'total')}`,
-          )
+          .map((item) => {
+            const lineTotals = item.prices.map((price) => ({ amount: price.lineTotal, currency: price.currency }));
+            const rubText = hasConvertedRubValues
+              ? `; цена RUB ${formatRubValuesText(item.prices, 'price')}; сумма RUB ${formatRubValuesText(item.prices, 'total')}`
+              : '';
+            return `${item.productTitle}; ${item.sku}; ${item.variantTitle}; ${item.quantity} шт.; цена ${formatAmountList(
+              item.prices,
+            )}; сумма ${formatAmountList(lineTotals)}${rubText}`;
+          })
           .join('\n') +
         `\n\nИтого позиций: ${totalQuantity}\nИтого сумма: ${totalPriceLabel}\n` +
-        (hasConvertedRubValues ? `Итого пересчет в рубли: ${formatConvertedRubAmount(totalConvertedRub)}\n` : ''),
+        (hasConvertedRubValues ? `Итого в рублях по пересчету: ${formatConvertedRubAmount(totalConvertedRub)}\n` : ''),
     });
 
     await trackAnalyticsEvent({
