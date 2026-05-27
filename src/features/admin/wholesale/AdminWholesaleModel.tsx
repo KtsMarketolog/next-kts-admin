@@ -94,7 +94,6 @@ export type CatalogProduct = {
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
-  priceUsd: string | null;
   generalDiscount: string | null;
   manualDiscount: string | null;
   manualDiscountRop: string | null;
@@ -366,7 +365,6 @@ export function getDiscountBaseAmount(row: CatalogRow) {
     parseCatalogAmount(row.product.priceRub) ??
     parseCatalogAmount(row.variant.retailPrice) ??
     parseCatalogAmount(row.variant.wholesalePrice) ??
-    parseCatalogAmount(row.product.priceUsd) ??
     parseCatalogAmount(row.product.priceEur) ??
     parseCatalogAmount(row.product.priceCny)
   );

@@ -16,7 +16,6 @@ export type CatalogProductInput = {
   priceEur?: string | number | null;
   priceRub?: string | number | null;
   priceCny?: string | number | null;
-  priceUsd?: string | number | null;
   generalDiscount?: string | number | null;
   manualDiscount?: string | number | null;
   manualDiscountRop?: string | number | null;
@@ -37,7 +36,6 @@ export type CatalogAdminProduct = {
   priceEur: string;
   priceRub: string;
   priceCny: string;
-  priceUsd: string;
   generalDiscount: string;
   manualDiscount: string;
   manualDiscountRop: string;
@@ -100,7 +98,6 @@ type NormalizedCatalogProductInput = {
   priceEur: string | null;
   priceRub: string | null;
   priceCny: string | null;
-  priceUsd: string | null;
   generalDiscount: string | null;
   manualDiscount: string | null;
   manualDiscountRop: string | null;
@@ -399,7 +396,7 @@ async function syncWholesaleProduct(
     normalizeCatalogPrice(input.priceEur),
     normalizeCatalogPrice(input.priceRub),
     normalizeCatalogPrice(input.priceCny),
-    normalizeCatalogPrice(input.priceUsd),
+    null,
     normalizeCatalogPrice(input.generalDiscount),
     normalizeCatalogPrice(input.manualDiscount),
     normalizeCatalogPrice(input.manualDiscountRop),
@@ -486,7 +483,6 @@ function normalizeInput(input: CatalogProductInput): NormalizedCatalogProductInp
     priceEur: normalizeCatalogPrice(input.priceEur),
     priceRub: normalizeCatalogPrice(input.priceRub),
     priceCny: normalizeCatalogPrice(input.priceCny),
-    priceUsd: normalizeCatalogPrice(input.priceUsd),
     generalDiscount: normalizeCatalogPrice(input.generalDiscount),
     manualDiscount: normalizeCatalogPrice(input.manualDiscount),
     manualDiscountRop: normalizeCatalogPrice(input.manualDiscountRop),
@@ -583,7 +579,7 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
       input.priceEur,
       input.priceRub,
       input.priceCny,
-      input.priceUsd,
+      null,
       input.generalDiscount,
       input.manualDiscount,
       input.manualDiscountRop,
@@ -653,7 +649,7 @@ async function updateCatalogProductFromImport(
       input.priceEur,
       input.priceRub,
       input.priceCny,
-      input.priceUsd,
+      null,
       input.generalDiscount,
       input.manualDiscount,
       input.manualDiscountRop,
@@ -842,7 +838,6 @@ function mapAdminProduct(row: {
   price_eur: string | null;
   price_rub: string | null;
   price_cny: string | null;
-  price_usd: string | null;
   general_discount: string | null;
   manual_discount: string | null;
   manual_discount_rop: string | null;
@@ -865,7 +860,6 @@ function mapAdminProduct(row: {
     priceEur: row.price_eur ?? '',
     priceRub: row.price_rub ?? '',
     priceCny: row.price_cny ?? '',
-    priceUsd: row.price_usd ?? '',
     generalDiscount: row.general_discount ?? '',
     manualDiscount: row.manual_discount ?? '',
     manualDiscountRop: row.manual_discount_rop ?? '',
@@ -898,7 +892,6 @@ export async function getCatalogAdminProducts(filters: CatalogAdminProductFilter
             p.price_eur::text,
             p.price_rub::text,
             p.price_cny::text,
-            p.price_usd::text,
             p.general_discount::text,
             p.manual_discount::text,
             p.manual_discount_rop::text,
@@ -945,7 +938,6 @@ export async function getCatalogAdminProductById(id: number) {
             p.price_eur::text,
             p.price_rub::text,
             p.price_cny::text,
-            p.price_usd::text,
             p.general_discount::text,
             p.manual_discount::text,
             p.manual_discount_rop::text,
@@ -1043,7 +1035,7 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
         normalized.priceEur,
         normalized.priceRub,
         normalized.priceCny,
-        normalized.priceUsd,
+        null,
         normalized.generalDiscount,
         normalized.manualDiscount,
         normalized.manualDiscountRop,

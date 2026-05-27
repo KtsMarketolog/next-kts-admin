@@ -24,7 +24,6 @@ function productInputFromBody(body: Record<string, unknown>): CatalogProductInpu
     priceEur: typeof body.priceEur === 'string' || typeof body.priceEur === 'number' ? body.priceEur : null,
     priceRub: typeof body.priceRub === 'string' || typeof body.priceRub === 'number' ? body.priceRub : null,
     priceCny: typeof body.priceCny === 'string' || typeof body.priceCny === 'number' ? body.priceCny : null,
-    priceUsd: typeof body.priceUsd === 'string' || typeof body.priceUsd === 'number' ? body.priceUsd : null,
     generalDiscount: typeof body.generalDiscount === 'string' || typeof body.generalDiscount === 'number' ? body.generalDiscount : null,
     manualDiscount: typeof body.manualDiscount === 'string' || typeof body.manualDiscount === 'number' ? body.manualDiscount : null,
     manualDiscountRop: typeof body.manualDiscountRop === 'string' || typeof body.manualDiscountRop === 'number' ? body.manualDiscountRop : null,

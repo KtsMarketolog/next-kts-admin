@@ -126,7 +126,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         product.sku,
         product.description,
         product.priceGroup,
-        product.priceUsd,
         product.priceEur,
         product.priceRub,
         product.priceCny,

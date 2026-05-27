@@ -390,7 +390,6 @@ export function WholesalePriceEditorScreen({
                                   </div>
                                 </div>
                                 <div className={styles.variantTable}>
-                                  <div>USD</div>
                                   <div>EUR</div>
                                   <div>RUB</div>
                                   <div>CNY</div>
@@ -402,7 +401,6 @@ export function WholesalePriceEditorScreen({
                                     const item = itemByKey.get(key);
                                     return (
                                       <div className={styles.variantRow} key={key}>
-                                        <span>{product.priceUsd || '—'}</span>
                                         <span>{product.priceEur || '—'}</span>
                                         <span>{product.priceRub || '—'}</span>
                                         <span>{product.priceCny || '—'}</span>

@@ -113,7 +113,7 @@ export function AdminCatalogView({
         <div>
           <h3>Загрузка Excel</h3>
           <p>
-            Импорт полностью заменяет публичный каталог. Обязательное поле: Артикул. Дополнительно принимаются USD,
+            Импорт полностью заменяет публичный каталог. Обязательное поле: Артикул. Дополнительно принимаются EUR, RUB, CNY,
             Общая скидка, Ручная скидка и Ручная скидка роп.
           </p>
           {importResult && <span>{importResult}</span>}
@@ -268,10 +268,6 @@ export function AdminCatalogView({
           <input value={draft.priceGroup} onChange={(event) => setDraft((current) => ({ ...current, priceGroup: event.target.value }))} />
         </label>
         <label>
-          <span>Цена USD</span>
-          <input value={draft.priceUsd} onChange={(event) => setDraft((current) => ({ ...current, priceUsd: event.target.value }))} />
-        </label>
-        <label>
           <span>Цена EUR</span>
           <input value={draft.priceEur} onChange={(event) => setDraft((current) => ({ ...current, priceEur: event.target.value }))} />
         </label>
@@ -407,10 +403,6 @@ export function AdminCatalogView({
                   <label>
                     <span>Ценовая группа</span>
                     <input value={product.priceGroup} onChange={(event) => updateProduct(product.id, { priceGroup: event.target.value })} />
-                  </label>
-                  <label>
-                    <span>USD</span>
-                    <input value={product.priceUsd} onChange={(event) => updateProduct(product.id, { priceUsd: event.target.value })} />
                   </label>
                   <label>
                     <span>EUR</span>

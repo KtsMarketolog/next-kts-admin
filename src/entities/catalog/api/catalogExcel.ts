@@ -17,7 +17,6 @@ const HEADER_PRICE_GROUP = 'Ценовая группа';
 const HEADER_PRICE_EUR = 'Цена EUR';
 const HEADER_PRICE_RUB = 'Цена RUB';
 const HEADER_PRICE_CNY = 'Цена CNY';
-const HEADER_PRICE_USD = 'USD';
 const HEADER_GENERAL_DISCOUNT = 'Общая скидка';
 const HEADER_MANUAL_DISCOUNT = 'Ручная скидка';
 const HEADER_MANUAL_DISCOUNT_ROP = 'Ручная скидка роп';
@@ -33,14 +32,6 @@ function readPrice(row: RawRow, key: string) {
   const value = row[key];
   if (value === null || value === undefined || value === '') return null;
   return typeof value === 'number' ? value : String(value).trim();
-}
-
-function readFirstPrice(row: RawRow, keys: string[]) {
-  for (const key of keys) {
-    const value = readPrice(row, key);
-    if (value !== null) return value;
-  }
-  return null;
 }
 
 function normalizeHeader(value: unknown) {
@@ -61,7 +52,7 @@ function isContinuationHeaderRow(row: RawMatrixRow | undefined) {
   if (!row) return false;
   const values = row.map(normalizeHeader).filter(Boolean);
   if (values.length === 0) return false;
-  const known = new Set(['usd', 'eur', 'rub', 'руб', 'руб.', 'cny', 'цена']);
+  const known = new Set(['eur', 'rub', 'руб', 'руб.', 'cny', 'цена']);
   return values.every((value) => known.has(value));
 }
 
@@ -101,7 +92,6 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
     subcategory: findColumn(headers, (header) => includesAny(header, ['подкатегории'])),
     brand: findColumn(headers, (header) => includesAny(header, ['бренд'])),
     priceGroup: findColumn(headers, (header) => includesAny(header, ['ценовая группа'])),
-    priceUsd: findColumn(headers, (header) => includesAny(header, ['usd', 'доллар'])),
     priceEur: findColumn(headers, (header) => includesAny(header, ['eur', 'евро'])),
     priceRub: findColumn(headers, (header) => includesAny(header, ['rub', 'руб'])),
     priceCny: findColumn(headers, (header) => includesAny(header, ['cny', 'юань'])),
@@ -127,7 +117,6 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
         priceEur: columns.priceEur === null ? null : cellAt(row, columns.priceEur),
         priceRub: columns.priceRub === null ? null : cellAt(row, columns.priceRub),
         priceCny: columns.priceCny === null ? null : cellAt(row, columns.priceCny),
-        priceUsd: columns.priceUsd === null ? null : cellAt(row, columns.priceUsd),
         generalDiscount: columns.generalDiscount === null ? null : cellAt(row, columns.generalDiscount),
         manualDiscount: columns.manualDiscount === null ? null : cellAt(row, columns.manualDiscount),
         manualDiscountRop: columns.manualDiscountRop === null ? null : cellAt(row, columns.manualDiscountRop),
@@ -170,7 +159,6 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
       priceEur: readPrice(row, HEADER_PRICE_EUR),
       priceRub: readPrice(row, HEADER_PRICE_RUB),
       priceCny: readPrice(row, HEADER_PRICE_CNY),
-      priceUsd: readFirstPrice(row, [HEADER_PRICE_USD, 'Цена USD']),
       generalDiscount: readPrice(row, HEADER_GENERAL_DISCOUNT),
       manualDiscount: readPrice(row, HEADER_MANUAL_DISCOUNT),
       manualDiscountRop: readPrice(row, HEADER_MANUAL_DISCOUNT_ROP),

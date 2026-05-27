@@ -12,7 +12,7 @@ type PriceRequestFormProps = {
   categories: PublicWholesaleCategory[];
 };
 
-const CURRENCY_CODES = ['USD', 'EUR', 'CNY'] as const;
+const CURRENCY_CODES = ['EUR', 'CNY'] as const;
 
 type CurrencyCode = (typeof CURRENCY_CODES)[number];
 type DisplayCurrencyCode = CurrencyCode | 'RUB';
@@ -55,7 +55,6 @@ type PublicPriceVariant = PublicWholesaleCategory['products'][number]['variants'
 
 function getCurrencyPriceValues(variant: PublicPriceVariant): Array<{ value: string | null; currency: DisplayCurrencyCode }> {
   return [
-    { value: variant.priceUsd, currency: 'USD' },
     { value: variant.priceEur, currency: 'EUR' },
     { value: variant.priceRub, currency: 'RUB' },
     { value: variant.priceCny, currency: 'CNY' },
@@ -483,8 +482,8 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
                   {isRubConversionActive && exchangeRateStatus === 'loading' ? <span>Загружаем курс ЦБ...</span> : null}
                   {isRubConversionActive && exchangeRateStatus === 'ready' && exchangeRates ? (
                     <span>
-                      Курс ЦБ на {exchangeRates.date || 'сегодня'}: USD {formatPrice(String(exchangeRates.rates.USD))}, EUR{' '}
-                      {formatPrice(String(exchangeRates.rates.EUR))}, CNY {formatPrice(String(exchangeRates.rates.CNY))}
+                      Курс ЦБ на {exchangeRates.date || 'сегодня'}: EUR {formatPrice(String(exchangeRates.rates.EUR))}, CNY{' '}
+                      {formatPrice(String(exchangeRates.rates.CNY))}
                     </span>
                   ) : null}
                   {isRubConversionActive && exchangeRateStatus === 'error' ? <span className={styles.conversionError}>{exchangeRateError}</span> : null}

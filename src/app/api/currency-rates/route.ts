@@ -2,8 +2,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const CBR_DAILY_XML_URL = 'https://www.cbr.ru/scripts/XML_daily.asp';
-const SBEROMETER_CBR_URL = 'https://www.sberometer.ru/cbr/?currencyTable=CNY%2CUSD%2CEUR&currency=USD';
-const RATE_CODES = ['USD', 'EUR', 'CNY'] as const;
+const SBEROMETER_CBR_URL = 'https://www.sberometer.ru/cbr/?currencyTable=CNY%2CEUR&currency=EUR';
+const RATE_CODES = ['EUR', 'CNY'] as const;
 
 type CurrencyCode = (typeof RATE_CODES)[number];
 

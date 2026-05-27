@@ -10,7 +10,6 @@ export type CatalogProduct = {
   priceEur: string;
   priceRub: string;
   priceCny: string;
-  priceUsd: string;
   generalDiscount: string;
   manualDiscount: string;
   manualDiscountRop: string;
@@ -68,7 +67,6 @@ export const EMPTY_DRAFT: CatalogDraft = {
   priceEur: '',
   priceRub: '',
   priceCny: '',
-  priceUsd: '',
   generalDiscount: '',
   manualDiscount: '',
   manualDiscountRop: '',

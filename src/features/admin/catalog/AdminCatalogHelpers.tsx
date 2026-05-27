@@ -19,7 +19,6 @@ export function productPayload(product: CatalogDraft | CatalogProduct) {
     priceEur: product.priceEur,
     priceRub: product.priceRub,
     priceCny: product.priceCny,
-    priceUsd: product.priceUsd,
     generalDiscount: product.generalDiscount,
     manualDiscount: product.manualDiscount,
     manualDiscountRop: product.manualDiscountRop,
