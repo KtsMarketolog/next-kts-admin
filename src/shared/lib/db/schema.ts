@@ -7,6 +7,16 @@ import { DEFAULT_ADDRESS, DEFAULT_EMAIL, DEFAULT_PHONE } from '../phone';
 import { query } from './client';
 
 export async function ensureSiteSchema() {
+  siteSchemaReady ??= ensureSiteSchemaInternal().catch((error) => {
+    siteSchemaReady = null;
+    throw error;
+  });
+  return siteSchemaReady;
+}
+
+let siteSchemaReady: Promise<void> | null = null;
+
+async function ensureSiteSchemaInternal() {
   await query(`
     create table if not exists site_settings (
       key text primary key,
