@@ -25,7 +25,6 @@ import {
   formatCatalogAmount,
   formatDiscountPercent,
   getDiscountBaseAmount,
-  getProductDiscountLimit,
   getTextareaRows,
   groupCatalogRowsByPriceGroup,
   makeToken,
@@ -92,17 +91,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       ),
     [catalogRows],
   );
-  const catalogDiscountLimitByGroupKey = useMemo(() => {
-    const limits = new Map<string, number>();
-    for (const { product } of catalogRows) {
-      const groupKey = (product.priceGroup || NO_PRICE_GROUP_TITLE).toLowerCase();
-      const productLimit = getProductDiscountLimit(product);
-      if (productLimit === null) continue;
-      const currentLimit = limits.get(groupKey);
-      limits.set(groupKey, currentLimit === undefined ? productLimit : Math.min(currentLimit, productLimit));
-    }
-    return limits;
-  }, [catalogRows]);
   const catalogPriceGroups = useMemo(() => {
     const groups = new Set<string>();
     for (const { product } of catalogRows) {
@@ -471,11 +459,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     const percent = normalizeDiscountPercent(value);
     if (percent === null) {
       showStatus('Введите процент скидки');
-      return;
-    }
-    const maxDiscount = catalogDiscountLimitByGroupKey.get(groupKey);
-    if (maxDiscount !== undefined && percent - maxDiscount > 0.000001) {
-      showStatus(`Максимальная скидка для группы: ${formatDiscountPercent(maxDiscount)}%`);
       return;
     }
     const changedCount = editor.items.filter((item) => {

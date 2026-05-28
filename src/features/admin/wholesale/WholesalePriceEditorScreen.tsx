@@ -338,8 +338,8 @@ export function WholesalePriceEditorScreen({
                               inputMode="decimal"
                               placeholder={
                                 groupMaxDiscount === null
-                                  ? 'Максимальная скидка не задана'
-                                  : `Максимальная скидка ${formatDiscountPercent(groupMaxDiscount)}`
+                                  ? 'рекомендованная максимальная скидка не задана'
+                                  : `рекомендованная максимальная скидка ${formatDiscountPercent(groupMaxDiscount)}`
                               }
                             />
                             <button className={styles.secondary} onClick={() => calculateDiscount(groupDiscounts[group.id] ?? '', group.id)}>
