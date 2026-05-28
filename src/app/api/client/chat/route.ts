@@ -1,5 +1,5 @@
 import { requireClientSession } from '@/shared/lib/clientAuth';
-import { createClientChatMessageForClient, getClientChatMessagesForClient } from '@/shared/lib/db';
+import { createClientChatMessageForClient, getClientChatConversationForClient } from '@/shared/lib/db';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { checkDbRateLimit, getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
@@ -11,8 +11,8 @@ export async function GET() {
   const { denied, session } = await requireClientSession();
   if (denied) return denied;
 
-  const messages = await getClientChatMessagesForClient(session);
-  return Response.json({ messages });
+  const chat = await getClientChatConversationForClient(session);
+  return Response.json(chat);
 }
 
 export async function POST(request: Request) {

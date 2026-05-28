@@ -21,6 +21,7 @@ export type ClientCompany = {
   userCount: number;
   clientLogin: string;
   clientUserId: number | null;
+  chatUnreadCount: number;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -68,6 +69,7 @@ export type ClientPortalProfile = {
     phone: string;
     managerName: string;
     supportManagerName: string;
+    chatUnreadCount: number;
   };
 };
 
@@ -88,6 +90,7 @@ type ClientCompanyRow = {
   user_count: string;
   client_login: string | null;
   client_user_id: string | null;
+  chat_unread_count: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -115,6 +118,7 @@ function mapClientCompany(row: ClientCompanyRow): ClientCompany {
     userCount: Number(row.user_count),
     clientLogin: row.client_login ?? '',
     clientUserId: row.client_user_id ? Number(row.client_user_id) : null,
+    chatUnreadCount: Number(row.chat_unread_count ?? 0),
     isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -238,6 +242,14 @@ export async function getClientCompanies(session: AdminSession): Promise<ClientC
        count(cu.id)::text as user_count,
        coalesce(primary_user.login, '') as client_login,
        primary_user.id::text as client_user_id,
+       (
+         select count(*)::text
+         from client_chat_messages ccm
+         left join client_chat_read_state crs on crs.company_id = cc.id
+         where ccm.company_id = cc.id
+           and ccm.author_type = 'client'
+           and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
+       ) as chat_unread_count,
        cc.is_active,
        cc.created_at::text,
        cc.updated_at::text
@@ -290,6 +302,7 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
          '0'::text as user_count,
          ''::text as client_login,
          null::text as client_user_id,
+         '0'::text as chat_unread_count,
          is_active,
          created_at::text,
          updated_at::text`,
@@ -361,6 +374,14 @@ export async function updateClientCompany(
          (select count(*)::text from client_users where company_id = client_companies.id) as user_count,
          coalesce((select login from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1), '') as client_login,
          (select id::text from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1) as client_user_id,
+         (
+           select count(*)::text
+           from client_chat_messages ccm
+           left join client_chat_read_state crs on crs.company_id = client_companies.id
+           where ccm.company_id = client_companies.id
+             and ccm.author_type = 'client'
+             and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
+         ) as chat_unread_count,
          is_active,
          created_at::text,
          updated_at::text`,
@@ -422,6 +443,14 @@ export async function deleteClientCompany(id: number, session: AdminSession): Pr
          count(cu.id)::text as user_count,
          coalesce(primary_user.login, '') as client_login,
          primary_user.id::text as client_user_id,
+         (
+           select count(*)::text
+           from client_chat_messages ccm
+           left join client_chat_read_state crs on crs.company_id = cc.id
+           where ccm.company_id = cc.id
+             and ccm.author_type = 'client'
+             and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
+         ) as chat_unread_count,
          cc.is_active,
          cc.created_at::text,
          cc.updated_at::text
@@ -516,6 +545,7 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
     company_phone: string;
     manager_name: string | null;
     support_manager_name: string | null;
+    chat_unread_count: string;
   }>(
     `select
        cu.id::text,
@@ -528,7 +558,15 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
        cc.email as company_email,
        cc.phone as company_phone,
        manager.name as manager_name,
-       support.name as support_manager_name
+       support.name as support_manager_name,
+       (
+         select count(*)::text
+         from client_chat_messages ccm
+         left join client_chat_read_state crs on crs.company_id = cc.id
+         where ccm.company_id = cc.id
+           and ccm.author_type = 'employee'
+           and ccm.created_at > coalesce(crs.client_read_at, 'epoch'::timestamptz)
+       ) as chat_unread_count
      from client_users cu
      join client_companies cc on cc.id = cu.company_id
      left join wholesale_managers manager on manager.id = cc.manager_id
@@ -554,6 +592,7 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
       phone: row.company_phone,
       managerName: row.manager_name ?? '',
       supportManagerName: row.support_manager_name ?? '',
+      chatUnreadCount: Number(row.chat_unread_count ?? 0),
     },
   };
 }

@@ -12,11 +12,13 @@ type ChatMessage = {
   authorName: string;
   body: string;
   createdAt: string;
+  readByOther: boolean;
 };
 
 type ClientChatPanelProps = {
   endpoint: string;
   currentAuthorType: ChatAuthorType;
+  onUnreadCountChange?: (count: number) => void;
 };
 
 function formatMessageTime(value: string) {
@@ -35,7 +37,7 @@ async function readApiError(response: Response, fallback: string) {
   return typeof data?.error === 'string' && data.error ? data.error : fallback;
 }
 
-export function ClientChatPanel({ endpoint, currentAuthorType }: ClientChatPanelProps) {
+export function ClientChatPanel({ endpoint, currentAuthorType, onUnreadCountChange }: ClientChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -57,10 +59,11 @@ export function ClientChatPanel({ endpoint, currentAuthorType }: ClientChatPanel
       if (!response.ok) throw new Error(await readApiError(response, 'Не удалось загрузить чат'));
       const data = await response.json();
       setMessages(Array.isArray(data.messages) ? data.messages : []);
+      onUnreadCountChange?.(Number(data.unreadCount ?? 0));
       if (!silent) setLoading(false);
       scrollToBottom();
     },
-    [endpoint, scrollToBottom],
+    [endpoint, onUnreadCountChange, scrollToBottom],
   );
 
   useEffect(() => {
@@ -138,7 +141,18 @@ export function ClientChatPanel({ endpoint, currentAuthorType }: ClientChatPanel
             >
               <div className={styles.messageMeta}>
                 <span>{message.authorName || (message.authorType === 'client' ? 'Клиент' : 'Менеджер')}</span>
-                <span>{formatMessageTime(message.createdAt)}</span>
+                <span className={styles.messageMetaRight}>
+                  {message.authorType === currentAuthorType ? (
+                    <span
+                      className={styles.readStatus}
+                      title={message.readByOther ? 'Прочитано' : 'Отправлено'}
+                      aria-label={message.readByOther ? 'Прочитано' : 'Отправлено'}
+                    >
+                      {message.readByOther ? '✓✓' : '✓'}
+                    </span>
+                  ) : null}
+                  <span>{formatMessageTime(message.createdAt)}</span>
+                </span>
               </div>
               <p className={styles.messageBody}>{message.body}</p>
             </article>

@@ -1,6 +1,6 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
-import { createClientChatMessageForAdmin, getClientChatMessagesForAdmin } from '@/shared/lib/db';
+import { createClientChatMessageForAdmin, getClientChatConversationForAdmin } from '@/shared/lib/db';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
@@ -22,8 +22,8 @@ export async function GET(_request: Request, context: Context) {
   if (!clientId) return Response.json({ error: 'Некорректный клиент' }, { status: 400 });
 
   try {
-    const messages = await getClientChatMessagesForAdmin(clientId, session);
-    return Response.json({ messages });
+    const chat = await getClientChatConversationForAdmin(clientId, session);
+    return Response.json(chat);
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось загрузить чат' }, { status: 400 });
   }

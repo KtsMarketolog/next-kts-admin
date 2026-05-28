@@ -21,12 +21,16 @@ export {
 } from './db/clientCompaniesRepo';
 export type { ClientCompany, ClientCompanyInput, ClientPortalProfile, ClientPortalUserAuth } from './db/clientCompaniesRepo';
 export {
+  getClientChatConversationForAdmin,
+  getClientChatConversationForClient,
   createClientChatMessageForAdmin,
   createClientChatMessageForClient,
   getClientChatMessagesForAdmin,
   getClientChatMessagesForClient,
+  getClientChatUnreadCountForAdmin,
+  getClientChatUnreadCountForClient,
 } from './db/clientChatRepo';
-export type { ClientChatAuthorType, ClientChatMessage } from './db/clientChatRepo';
+export type { ClientChatAuthorType, ClientChatConversation, ClientChatMessage } from './db/clientChatRepo';
 export { revokeClientUserSessions } from './db/clientSessionsRepo';
 export { getPhoneSetting, getSiteSettings, updatePhoneSetting, updateSiteSettings } from './db/settingsRepo';
 export { createHeroSlide, deleteHeroSlide, getHeroSlides, updateHeroSlide } from './db/slidesRepo';

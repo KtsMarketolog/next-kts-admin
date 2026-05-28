@@ -32,6 +32,7 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState<Tab>(() => resolveTab(tabParam));
+  const [chatUnreadCount, setChatUnreadCount] = useState(profile.company.chatUnreadCount || 0);
   const [currentPassword, setCurrentPassword] = useState('');
   const [nextPassword, setNextPassword] = useState('');
   const [repeatPassword, setRepeatPassword] = useState('');
@@ -112,7 +113,8 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
               aria-pressed={activeTab === tab.value}
               onClick={() => selectTab(tab.value)}
             >
-              {tab.label}
+              <span>{tab.label}</span>
+              {tab.value === 'chat' && chatUnreadCount > 0 ? <span className={styles.unreadBadge}>{chatUnreadCount}</span> : null}
             </button>
           ))}
         </nav>
@@ -159,7 +161,7 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
               <h2>Чат</h2>
               <p>Переписка с менеджером по вашей компании.</p>
             </div>
-            <ClientChatPanel endpoint="/api/client/chat" currentAuthorType="client" />
+            <ClientChatPanel endpoint="/api/client/chat" currentAuthorType="client" onUnreadCountChange={setChatUnreadCount} />
           </section>
         )}
 

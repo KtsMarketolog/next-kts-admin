@@ -64,6 +64,19 @@
   font-weight: 800;
 }
 
+.messageMetaRight {
+  display: inline-flex;
+  align-items: center;
+  gap: $apx-6;
+  white-space: nowrap;
+}
+
+.readStatus {
+  color: #260b86;
+  font-size: $apx-12;
+  letter-spacing: 0;
+}
+
 .messageBody {
   margin: 0;
   color: #111827;

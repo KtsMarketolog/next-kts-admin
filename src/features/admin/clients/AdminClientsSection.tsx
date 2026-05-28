@@ -24,6 +24,7 @@ type ClientCompany = {
   userCount: number;
   clientLogin: string;
   clientUserId: number | null;
+  chatUnreadCount: number;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -397,6 +398,9 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
                 </div>
                 <div className={styles.clientCompanyMeta}>
                   <span>Пользователей ЛК: {company.userCount}</span>
+                  {company.chatUnreadCount > 0 ? (
+                    <span className={styles.clientUnreadMeta}>Новые сообщения: {company.chatUnreadCount}</span>
+                  ) : null}
                   <span>{company.clientLogin ? `Логин: ${company.clientLogin}` : 'Логин: email клиента'}</span>
                   <span>{company.managerName ? `Менеджер: ${company.managerName}` : 'Менеджер не выбран'}</span>
                   <span>{company.supportManagerName ? `Сопровождение: ${company.supportManagerName}` : 'Сопровождение не выбрано'}</span>

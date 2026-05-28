@@ -316,6 +316,13 @@ async function ensureSiteSchemaInternal() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists client_chat_read_state (
+      company_id bigint primary key references client_companies(id) on delete cascade,
+      client_read_at timestamptz not null default 'epoch'::timestamptz,
+      employee_read_at timestamptz not null default 'epoch'::timestamptz,
+      updated_at timestamptz not null default now()
+    );
+
     create table if not exists wholesale_analytics_events (
       id bigserial primary key,
       event_type text not null,
@@ -498,6 +505,7 @@ async function ensureSiteSchemaInternal() {
     create index if not exists client_sessions_expires_idx on client_sessions(expires_at);
     create index if not exists client_sessions_revoked_idx on client_sessions(revoked_at);
     create index if not exists client_chat_messages_company_idx on client_chat_messages(company_id, created_at desc, id desc);
+    create index if not exists client_chat_read_state_updated_idx on client_chat_read_state(updated_at desc);
     create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc);
     create index if not exists wholesale_analytics_events_price_idx on wholesale_analytics_events(price_list_id, created_at desc);
     create index if not exists wholesale_analytics_events_client_idx on wholesale_analytics_events(client_id, created_at desc);

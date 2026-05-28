@@ -161,6 +161,10 @@
 }
 
 .tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: $apx-8;
   min-height: $apx-42;
   border: 0;
   border-radius: $apx-8;
@@ -173,6 +177,25 @@
 .tabActive {
   background: #260b86;
   color: #fff;
+}
+
+.unreadBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: $apx-22;
+  height: $apx-22;
+  border-radius: $apx-999;
+  background: #c42318;
+  color: #fff;
+  padding: 0 $apx-7;
+  font-size: $apx-12;
+  line-height: 1;
+}
+
+.tabActive .unreadBadge {
+  background: #fff;
+  color: #260b86;
 }
 
 .section {

@@ -19,6 +19,7 @@ type ClientCompany = {
   userCount: number;
   clientLogin: string;
   clientUserId: number | null;
+  chatUnreadCount: number;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -88,6 +89,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   const tabParam = searchParams.get('tab');
   const [client, setClient] = useState<ClientCompany | null>(null);
   const [activeTab, setActiveTab] = useState<ClientTab>(() => resolveClientTab(tabParam));
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -119,7 +121,10 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
       const companies = Array.isArray(data.companies) ? (data.companies as ClientCompany[]) : [];
       const nextClient = companies.find((company) => company.id === clientId) ?? null;
       if (!nextClient) throw new Error('Клиент не найден');
-      if (!cancelled) setClient(nextClient);
+      if (!cancelled) {
+        setClient(nextClient);
+        setChatUnreadCount(nextClient.chatUnreadCount || 0);
+      }
     };
 
     loadClient()
@@ -147,7 +152,13 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     }
 
     if (activeTab === 'chat') {
-      return <ClientChatPanel endpoint={`/api/admin/clients/${client.id}/chat`} currentAuthorType="employee" />;
+      return (
+        <ClientChatPanel
+          endpoint={`/api/admin/clients/${client.id}/chat`}
+          currentAuthorType="employee"
+          onUnreadCountChange={setChatUnreadCount}
+        />
+      );
     }
 
     return (
@@ -232,7 +243,10 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
             aria-pressed={activeTab === tab.value}
             onClick={() => selectTab(tab.value)}
           >
-            {tab.label}
+            <span>{tab.label}</span>
+            {tab.value === 'chat' && chatUnreadCount > 0 ? (
+              <span className={styles.clientChatBadge}>{chatUnreadCount}</span>
+            ) : null}
           </button>
         ))}
       </div>
