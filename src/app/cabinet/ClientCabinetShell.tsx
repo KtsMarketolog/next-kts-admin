@@ -1,19 +1,20 @@
 'use client';
 
+import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
-import type { ClientPortalProfile } from '@/shared/lib/db';
+import type { ClientCompanyPriceList, ClientPortalProfile } from '@/shared/lib/db';
 import styles from './Cabinet.module.scss';
 
 type Tab = 'prices' | 'documents' | 'chat' | 'data';
 
-const TABS: Array<{ value: Tab; label: string }> = [
-  { value: 'prices', label: 'Прайсы' },
-  { value: 'documents', label: 'Документы' },
-  { value: 'chat', label: 'Чат' },
-  { value: 'data', label: 'Данные клиента' },
+const TABS: Array<{ value: Tab; label: string; description: string }> = [
+  { value: 'prices', label: 'Прайсы', description: 'Актуальные индивидуальные прайсы' },
+  { value: 'documents', label: 'Документы', description: 'Файлы от менеджера' },
+  { value: 'chat', label: 'Чат', description: 'Переписка с менеджером' },
+  { value: 'data', label: 'Данные клиента', description: 'Контакты и пароль' },
 ];
 
 const TAB_VALUES = new Set<Tab>(TABS.map((tab) => tab.value));
@@ -21,6 +22,68 @@ const UNREAD_POLL_INTERVAL_MS = 5000;
 
 function resolveTab(value: string | null): Tab {
   return value && TAB_VALUES.has(value as Tab) ? (value as Tab) : 'prices';
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function PriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceList[] }) {
+  if (priceLists.length === 0) {
+    return (
+      <div className={styles.emptyState}>
+        <h3>Прайсы пока не привязаны</h3>
+        <p>Актуальные прайсы появятся здесь после назначения менеджером.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.priceListGrid}>
+      {priceLists.map((priceList) => (
+        <article className={styles.priceListCard} key={priceList.id}>
+          <div>
+            <span>{priceList.workflowStatusLabel}</span>
+            <h3>{priceList.title}</h3>
+          </div>
+          <dl>
+            <div>
+              <dt>Позиций</dt>
+              <dd>{priceList.itemCount}</dd>
+            </div>
+            <div>
+              <dt>Действует до</dt>
+              <dd>{priceList.validUntil || '—'}</dd>
+            </div>
+            <div>
+              <dt>Обновлен</dt>
+              <dd>{formatDate(priceList.updatedAt)}</dd>
+            </div>
+          </dl>
+          <div className={styles.priceListActions}>
+            <Link className={styles.primaryLink} href={`/price/${priceList.token}`}>
+              Открыть прайс
+            </Link>
+            <Link className={styles.secondaryLink} href={`/price/${priceList.token}/pdf`}>
+              Скачать PDF
+            </Link>
+            <Link className={styles.secondaryLink} href={`/price/${priceList.token}/excel`}>
+              Скачать Excel
+            </Link>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 type ClientCabinetShellProps = {
@@ -114,6 +177,93 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
     setPasswordSuccess('Пароль изменен');
   };
 
+  const activeTabInfo = TABS.find((tab) => tab.value === activeTab) ?? TABS[0];
+
+  const panel = (() => {
+    if (activeTab === 'prices') return <PriceListGrid priceLists={profile.priceLists} />;
+
+    if (activeTab === 'documents') {
+      return (
+        <div className={styles.emptyState}>
+          <h3>Документов пока нет</h3>
+          <p>Файлы появятся здесь после загрузки менеджером.</p>
+        </div>
+      );
+    }
+
+    if (activeTab === 'chat') {
+      return <ClientChatPanel endpoint="/api/client/chat" currentAuthorType="client" onUnreadCountChange={setChatUnreadCount} />;
+    }
+
+    return (
+      <div className={styles.dataGrid}>
+        <article className={styles.dataCard}>
+          <strong>Компания</strong>
+          <div className={styles.dataRows}>
+            <div>
+              <span>Название</span>
+              <strong>{profile.company.title}</strong>
+            </div>
+            <div>
+              <span>Email</span>
+              <strong>{profile.company.email || profile.email}</strong>
+            </div>
+            <div>
+              <span>Телефон</span>
+              <strong>{profile.company.phone || profile.phone || 'Не указан'}</strong>
+            </div>
+            <div>
+              <span>Менеджер</span>
+              <strong>{profile.company.managerName || 'Не назначен'}</strong>
+            </div>
+            <div>
+              <span>Сопровождение</span>
+              <strong>{profile.company.supportManagerName || 'Не назначено'}</strong>
+            </div>
+          </div>
+        </article>
+
+        <article className={styles.dataCard}>
+          <strong>Смена пароля</strong>
+          <form className={styles.passwordForm} onSubmit={changePassword}>
+            <label className={styles.field}>
+              <span>Текущий пароль</span>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                autoComplete="current-password"
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Новый пароль</span>
+              <input
+                type="password"
+                value={nextPassword}
+                onChange={(event) => setNextPassword(event.target.value)}
+                autoComplete="new-password"
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Повторите новый пароль</span>
+              <input
+                type="password"
+                value={repeatPassword}
+                onChange={(event) => setRepeatPassword(event.target.value)}
+                autoComplete="new-password"
+              />
+            </label>
+            <button className={styles.submit} disabled={busy}>
+              {busy ? 'Сохраняем...' : 'Изменить пароль'}
+            </button>
+            {passwordStatus ? <p className={styles.status}>{passwordStatus}</p> : null}
+            {passwordSuccess ? <p className={styles.successStatus}>{passwordSuccess}</p> : null}
+          </form>
+        </article>
+      </div>
+    );
+  })();
+
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
@@ -127,140 +277,42 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
           </button>
         </section>
 
-        <nav className={styles.tabs} aria-label="Разделы личного кабинета">
-          {TABS.map((tab) => (
-            <button
-              key={tab.value}
-              className={`${styles.tab} ${activeTab === tab.value ? styles.tabActive : ''}`}
-              type="button"
-              aria-pressed={activeTab === tab.value}
-              onClick={() => selectTab(tab.value)}
-            >
-              <span>{tab.label}</span>
-              {tab.value === 'chat' && chatUnreadCount > 0 ? <span className={styles.unreadBadge}>{chatUnreadCount}</span> : null}
-            </button>
-          ))}
-        </nav>
+        <div className={styles.dashboardLayout}>
+          <aside className={styles.sidebar} aria-label="Разделы личного кабинета">
+            <div className={styles.sidebarHeader}>
+              <span>Личный кабинет</span>
+              <strong>Разделы</strong>
+            </div>
+            <nav className={styles.sideNav}>
+              {TABS.map((tab) => (
+                <button
+                  className={activeTab === tab.value ? styles.sideNavActive : styles.sideNavItem}
+                  key={tab.value}
+                  type="button"
+                  onClick={() => selectTab(tab.value)}
+                >
+                  <span>
+                    {tab.label}
+                    {tab.value === 'chat' && chatUnreadCount > 0 ? <span className={styles.unreadBadge}>{chatUnreadCount}</span> : null}
+                  </span>
+                  <small>{tab.description}</small>
+                </button>
+              ))}
+            </nav>
+          </aside>
 
-        {activeTab === 'prices' && (
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h2>Прайсы</h2>
-              <p>Здесь будут отображаться индивидуальные прайсы, назначенные менеджером.</p>
+          <section className={styles.content}>
+            <div className={styles.contentHeader}>
+              <div>
+                <span>Раздел</span>
+                <h2>{activeTabInfo.label}</h2>
+                <p>{activeTabInfo.description}</p>
+              </div>
+              {activeTab === 'prices' ? <strong>{profile.priceLists.length} прайсов</strong> : null}
             </div>
-            <div className={styles.placeholderGrid}>
-              <article className={styles.placeholderCard}>
-                <strong>Актуальные прайсы</strong>
-                <span>Появятся после привязки прайса к компании клиента.</span>
-              </article>
-              <article className={styles.placeholderCard}>
-                <strong>История заявок</strong>
-                <span>Будет собираться из отправленных заявок по прайсам.</span>
-              </article>
-              <article className={styles.placeholderCard}>
-                <strong>Архив</strong>
-                <span>Старые прайсы можно будет оставить для истории.</span>
-              </article>
-            </div>
+            <div className={styles.contentBody}>{panel}</div>
           </section>
-        )}
-
-        {activeTab === 'documents' && (
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h2>Документы</h2>
-              <p>Раздел подготовлен под файлы, которые менеджер прикрепит для клиента.</p>
-            </div>
-            <article className={styles.placeholderCard}>
-              <strong>Документов пока нет</strong>
-              <span>Загрузка документов будет добавлена следующим этапом.</span>
-            </article>
-          </section>
-        )}
-
-        {activeTab === 'chat' && (
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h2>Чат</h2>
-              <p>Переписка с менеджером по вашей компании.</p>
-            </div>
-            <ClientChatPanel endpoint="/api/client/chat" currentAuthorType="client" onUnreadCountChange={setChatUnreadCount} />
-          </section>
-        )}
-
-        {activeTab === 'data' && (
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h2>Данные клиента</h2>
-              <p>Контакты и доступ к личному кабинету.</p>
-            </div>
-            <div className={styles.dataGrid}>
-              <article className={styles.dataCard}>
-                <strong>Компания</strong>
-                <div className={styles.dataRows}>
-                  <div>
-                    <span>Название</span>
-                    <strong>{profile.company.title}</strong>
-                  </div>
-                  <div>
-                    <span>Email</span>
-                    <strong>{profile.company.email || profile.email}</strong>
-                  </div>
-                  <div>
-                    <span>Телефон</span>
-                    <strong>{profile.company.phone || profile.phone || 'Не указан'}</strong>
-                  </div>
-                  <div>
-                    <span>Менеджер</span>
-                    <strong>{profile.company.managerName || 'Не назначен'}</strong>
-                  </div>
-                  <div>
-                    <span>Сопровождение</span>
-                    <strong>{profile.company.supportManagerName || 'Не назначено'}</strong>
-                  </div>
-                </div>
-              </article>
-
-              <article className={styles.dataCard}>
-                <strong>Смена пароля</strong>
-                <form className={styles.passwordForm} onSubmit={changePassword}>
-                  <label className={styles.field}>
-                    <span>Текущий пароль</span>
-                    <input
-                      type="password"
-                      value={currentPassword}
-                      onChange={(event) => setCurrentPassword(event.target.value)}
-                      autoComplete="current-password"
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>Новый пароль</span>
-                    <input
-                      type="password"
-                      value={nextPassword}
-                      onChange={(event) => setNextPassword(event.target.value)}
-                      autoComplete="new-password"
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>Повторите новый пароль</span>
-                    <input
-                      type="password"
-                      value={repeatPassword}
-                      onChange={(event) => setRepeatPassword(event.target.value)}
-                      autoComplete="new-password"
-                    />
-                  </label>
-                  <button className={styles.submit} disabled={busy}>
-                    {busy ? 'Сохраняем...' : 'Изменить пароль'}
-                  </button>
-                  {passwordStatus ? <p className={styles.status}>{passwordStatus}</p> : null}
-                  {passwordSuccess ? <p className={styles.successStatus}>{passwordSuccess}</p> : null}
-                </form>
-              </article>
-            </div>
-          </section>
-        )}
+        </div>
       </div>
     </main>
   );

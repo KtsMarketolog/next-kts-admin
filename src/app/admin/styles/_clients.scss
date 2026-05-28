@@ -260,6 +260,10 @@
   line-height: 1;
 }
 
+.analyticsSideNav .clientChatBadge {
+  margin-left: $apx-8;
+}
+
 .clientDetailTabActive .clientChatBadge {
   background: #fff;
   color: #260b86;
@@ -295,11 +299,116 @@
   }
 }
 
+.clientPriceListGrid {
+  display: grid;
+  gap: $apx-14;
+}
+
+.clientPriceListCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-430, auto) auto;
+  gap: $apx-16;
+  align-items: center;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
+  padding: $apx-18;
+
+  > div:first-child {
+    display: grid;
+    gap: $apx-4;
+  }
+
+  span {
+    color: #777b8d;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  h3 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-20;
+    line-height: 1.2;
+  }
+
+  dl {
+    display: grid;
+    grid-template-columns: repeat(4, minmax($apx-94, 1fr));
+    gap: $apx-10;
+    margin: 0;
+  }
+
+  dl div {
+    display: grid;
+    gap: $apx-4;
+    border: $apx-1 solid #e6e7ef;
+    border-radius: $apx-8;
+    background: #fff;
+    padding: $apx-10;
+  }
+
+  dt {
+    color: #6f7182;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  dd {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-14;
+    font-weight: 800;
+  }
+}
+
+.clientPriceListActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: $apx-8;
+}
+
+.clientPriceListLink,
+.clientPriceListSecondaryLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: $apx-40;
+  border-radius: $apx-8;
+  padding: 0 $apx-14;
+  font-size: $apx-13;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.clientPriceListLink {
+  background: #260b86;
+  color: #fff;
+}
+
+.clientPriceListSecondaryLink {
+  background: #e9eaf2;
+  color: #242633;
+}
+
 @media (max-width: 1024px) {
+  .analyticsDashboardLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsSidebar {
+    position: static;
+  }
+
   .clientCreateCard,
   .clientCompanyGrid,
   .clientDetailSummary,
-  .clientDetailInfoGrid {
+  .clientDetailInfoGrid,
+  .clientPriceListCard {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -326,7 +435,9 @@
   .clientCreateCard,
   .clientCompanyGrid,
   .clientDetailSummary,
-  .clientDetailInfoGrid {
+  .clientDetailInfoGrid,
+  .clientPriceListCard,
+  .clientPriceListCard dl {
     grid-template-columns: 1fr;
   }
 

@@ -1,10 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
+import type { ClientCompanyPriceList } from '@/shared/lib/db';
 
 type ClientCompany = {
   id: number;
@@ -32,11 +34,11 @@ type AdminClientDetailSectionProps = {
   onBack: () => void;
 };
 
-const tabs: Array<{ value: ClientTab; label: string }> = [
-  { value: 'prices', label: 'Прайсы' },
-  { value: 'documents', label: 'Документы' },
-  { value: 'chat', label: 'Чат' },
-  { value: 'data', label: 'Данные клиента' },
+const tabs: Array<{ value: ClientTab; label: string; description: string }> = [
+  { value: 'prices', label: 'Прайсы', description: 'Привязанные индивидуальные прайсы' },
+  { value: 'documents', label: 'Документы', description: 'Файлы и материалы клиента' },
+  { value: 'chat', label: 'Чат', description: 'Переписка с клиентом' },
+  { value: 'data', label: 'Данные клиента', description: 'Контакты, менеджеры и доступ' },
 ];
 
 const CLIENT_TAB_VALUES = new Set<ClientTab>(tabs.map((tab) => tab.value));
@@ -51,7 +53,7 @@ async function readApiError(response: Response, fallback: string) {
   return typeof data?.error === 'string' && data.error ? data.error : fallback;
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | null | undefined) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
@@ -83,12 +85,58 @@ function EmptyClientTab({ title, text }: { title: string; text: string }) {
   );
 }
 
+function ClientPriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceList[] }) {
+  if (priceLists.length === 0) {
+    return <EmptyClientTab title="Прайсы пока не привязаны" text="Действующие прайсы появятся здесь после выбора клиента в прайсе." />;
+  }
+
+  return (
+    <div className={styles.clientPriceListGrid}>
+      {priceLists.map((priceList) => (
+        <article className={styles.clientPriceListCard} key={priceList.id}>
+          <div>
+            <span>{priceList.isActive ? 'Активный прайс' : 'Отключенный прайс'}</span>
+            <h3>{priceList.title}</h3>
+          </div>
+          <dl>
+            <div>
+              <dt>Позиций</dt>
+              <dd>{priceList.itemCount}</dd>
+            </div>
+            <div>
+              <dt>Действует до</dt>
+              <dd>{priceList.validUntil || '—'}</dd>
+            </div>
+            <div>
+              <dt>Статус</dt>
+              <dd>{priceList.workflowStatusLabel}</dd>
+            </div>
+            <div>
+              <dt>Обновлен</dt>
+              <dd>{formatDate(priceList.updatedAt)}</dd>
+            </div>
+          </dl>
+          <div className={styles.clientPriceListActions}>
+            <Link className={styles.clientPriceListSecondaryLink} href={`/admin/wholesale/${priceList.id}/edit`}>
+              Редактировать
+            </Link>
+            <Link className={styles.clientPriceListLink} href={`/price/${priceList.token}`} target="_blank" rel="noreferrer">
+              Открыть прайс
+            </Link>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetailSectionProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
   const [client, setClient] = useState<ClientCompany | null>(null);
+  const [priceLists, setPriceLists] = useState<ClientCompanyPriceList[]>([]);
   const [activeTab, setActiveTab] = useState<ClientTab>(() => resolveClientTab(tabParam));
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -138,14 +186,21 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     const loadClient = async () => {
       setLoading(true);
       setError('');
-      const response = await fetch('/api/admin/clients', { cache: 'no-store' });
-      if (!response.ok) throw new Error(await readApiError(response, 'Не удалось загрузить клиента'));
-      const data = await response.json();
+      const [clientResponse, priceListResponse] = await Promise.all([
+        fetch('/api/admin/clients', { cache: 'no-store' }),
+        fetch(`/api/admin/clients/${clientId}/price-lists`, { cache: 'no-store' }),
+      ]);
+      if (!clientResponse.ok) throw new Error(await readApiError(clientResponse, 'Не удалось загрузить клиента'));
+      if (!priceListResponse.ok) throw new Error(await readApiError(priceListResponse, 'Не удалось загрузить прайсы клиента'));
+
+      const data = await clientResponse.json();
+      const priceListData = await priceListResponse.json().catch(() => ({}));
       const companies = Array.isArray(data.companies) ? (data.companies as ClientCompany[]) : [];
       const nextClient = companies.find((company) => company.id === clientId) ?? null;
       if (!nextClient) throw new Error('Клиент не найден');
       if (!cancelled) {
         setClient(nextClient);
+        setPriceLists(Array.isArray(priceListData.priceLists) ? priceListData.priceLists : []);
         setChatUnreadCount(nextClient.chatUnreadCount || 0);
       }
     };
@@ -166,9 +221,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   const panel = useMemo(() => {
     if (!client) return null;
 
-    if (activeTab === 'prices') {
-      return <EmptyClientTab title="Прайсы пока не привязаны" text="Действующие прайсы остаются в прежнем разделе." />;
-    }
+    if (activeTab === 'prices') return <ClientPriceListGrid priceLists={priceLists} />;
 
     if (activeTab === 'documents') {
       return <EmptyClientTab title="Документы пока не добавлены" text="Файлов по клиенту нет." />;
@@ -202,7 +255,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
         </div>
       </div>
     );
-  }, [activeTab, client]);
+  }, [activeTab, client, priceLists]);
 
   if (loading) {
     return (
@@ -238,6 +291,8 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     );
   }
 
+  const activeTabInfo = tabs.find((tab) => tab.value === activeTab) ?? tabs[0];
+
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -257,24 +312,44 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
         <DetailRow label="Сопровождение" value={client.supportManagerName} />
       </div>
 
-      <div className={styles.clientDetailTabs} role="tablist" aria-label="Разделы клиента">
-        {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            className={activeTab === tab.value ? styles.clientDetailTabActive : styles.clientDetailTab}
-            type="button"
-            aria-pressed={activeTab === tab.value}
-            onClick={() => selectTab(tab.value)}
-          >
-            <span>{tab.label}</span>
-            {tab.value === 'chat' && chatUnreadCount > 0 ? (
-              <span className={styles.clientChatBadge}>{chatUnreadCount}</span>
-            ) : null}
-          </button>
-        ))}
-      </div>
+      <div className={styles.analyticsDashboardLayout}>
+        <aside className={styles.analyticsSidebar} aria-label="Разделы клиента">
+          <div className={styles.analyticsSidebarHeader}>
+            <span>Клиент</span>
+            <strong>Разделы</strong>
+          </div>
+          <nav className={styles.analyticsSideNav}>
+            {tabs.map((tab) => (
+              <button
+                className={activeTab === tab.value ? styles.analyticsSideNavActive : styles.analyticsSideNavItem}
+                key={tab.value}
+                type="button"
+                onClick={() => selectTab(tab.value)}
+              >
+                <span>
+                  {tab.label}
+                  {tab.value === 'chat' && chatUnreadCount > 0 ? (
+                    <span className={styles.clientChatBadge}>{chatUnreadCount}</span>
+                  ) : null}
+                </span>
+                <small>{tab.description}</small>
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-      <div className={styles.clientDetailPanel}>{panel}</div>
+        <section className={styles.analyticsContent}>
+          <div className={styles.analyticsContentHeader}>
+            <div>
+              <span>Раздел</span>
+              <h4>{activeTabInfo.label}</h4>
+              <p>{activeTabInfo.description}</p>
+            </div>
+            {activeTab === 'prices' ? <strong>{priceLists.length} прайсов</strong> : null}
+          </div>
+          <div className={styles.analyticsContentBody}>{panel}</div>
+        </section>
+      </div>
     </section>
   );
 }

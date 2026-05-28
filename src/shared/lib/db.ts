@@ -11,6 +11,7 @@ export {
   assertClientCompanyVisible,
   createClientCompany,
   deleteClientCompany,
+  getClientCompanyPriceLists,
   getClientCompanies,
   getClientPortalProfile,
   getClientUserByLogin,
@@ -19,7 +20,13 @@ export {
   updateClientCompany,
   updateClientUserPassword,
 } from './db/clientCompaniesRepo';
-export type { ClientCompany, ClientCompanyInput, ClientPortalProfile, ClientPortalUserAuth } from './db/clientCompaniesRepo';
+export type {
+  ClientCompany,
+  ClientCompanyInput,
+  ClientCompanyPriceList,
+  ClientPortalProfile,
+  ClientPortalUserAuth,
+} from './db/clientCompaniesRepo';
 export {
   getClientChatConversationForAdmin,
   getClientChatConversationForClient,

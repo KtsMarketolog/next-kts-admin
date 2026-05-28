@@ -1,6 +1,11 @@
 import type { PoolClient } from 'pg';
 
 import type { AdminSession } from '../adminAuth';
+import {
+  getWholesalePriceWorkflowStatusLabel,
+  normalizeWholesalePriceWorkflowStatus,
+  type WholesalePriceWorkflowStatus,
+} from '../wholesalePriceWorkflowStatus';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 
@@ -71,6 +76,20 @@ export type ClientPortalProfile = {
     supportManagerName: string;
     chatUnreadCount: number;
   };
+  priceLists: ClientCompanyPriceList[];
+};
+
+export type ClientCompanyPriceList = {
+  id: number;
+  title: string;
+  token: string;
+  validUntil: string | null;
+  workflowStatus: WholesalePriceWorkflowStatus;
+  workflowStatusLabel: string;
+  isActive: boolean;
+  itemCount: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type ClientCompanyRow = {
@@ -92,6 +111,18 @@ type ClientCompanyRow = {
   client_user_id: string | null;
   chat_unread_count: string;
   is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type ClientCompanyPriceListRow = {
+  id: string;
+  title: string;
+  token: string;
+  valid_until: string | null;
+  workflow_status: string;
+  is_active: boolean;
+  item_count: string;
   created_at: string;
   updated_at: string;
 };
@@ -120,6 +151,22 @@ function mapClientCompany(row: ClientCompanyRow): ClientCompany {
     clientUserId: row.client_user_id ? Number(row.client_user_id) : null,
     chatUnreadCount: Number(row.chat_unread_count ?? 0),
     isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapClientCompanyPriceList(row: ClientCompanyPriceListRow): ClientCompanyPriceList {
+  const workflowStatus = normalizeWholesalePriceWorkflowStatus(row.workflow_status);
+  return {
+    id: Number(row.id),
+    title: row.title,
+    token: row.token,
+    validUntil: row.valid_until,
+    workflowStatus,
+    workflowStatusLabel: getWholesalePriceWorkflowStatusLabel(workflowStatus),
+    isActive: row.is_active,
+    itemCount: Number(row.item_count ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -220,6 +267,36 @@ export async function assertClientCompanyVisible(id: number, session: AdminSessi
     [id, managerId],
   );
   if (!result.rows[0]) throw new Error('Компания клиента не найдена');
+}
+
+export async function getClientCompanyPriceLists(
+  companyId: number,
+  options: { session?: AdminSession; activeOnly?: boolean } = {},
+): Promise<ClientCompanyPriceList[]> {
+  await ensureSiteSchema();
+  if (options.session) await assertClientCompanyVisible(companyId, options.session);
+
+  const result = await query<ClientCompanyPriceListRow>(
+    `select
+       pl.id::text,
+       pl.title,
+       pl.token,
+       pl.valid_until::text,
+       pl.workflow_status,
+       pl.is_active,
+       pl.created_at::text,
+       pl.updated_at::text,
+       count(wpli.id)::text as item_count
+     from wholesale_price_lists pl
+     left join wholesale_price_list_items wpli on wpli.price_list_id = pl.id and wpli.visible = true
+     where pl.client_company_id = $1
+       and ($2::boolean = false or pl.is_active = true)
+     group by pl.id
+     order by pl.is_active desc, pl.updated_at desc, pl.created_at desc`,
+    [companyId, options.activeOnly === true],
+  );
+
+  return result.rows.map(mapClientCompanyPriceList);
 }
 
 export async function getClientCompanies(session: AdminSession): Promise<ClientCompany[]> {
@@ -579,6 +656,8 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
   );
   const row = result.rows[0];
   if (!row) return null;
+  const companyId = Number(row.company_id);
+  const priceLists = await getClientCompanyPriceLists(companyId, { activeOnly: true });
   return {
     id: Number(row.id),
     name: row.name,
@@ -586,7 +665,7 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
     phone: row.phone,
     login: row.login,
     company: {
-      id: Number(row.company_id),
+      id: companyId,
       title: row.company_title,
       email: row.company_email,
       phone: row.company_phone,
@@ -594,6 +673,7 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
       supportManagerName: row.support_manager_name ?? '',
       chatUnreadCount: Number(row.chat_unread_count ?? 0),
     },
+    priceLists,
   };
 }
 
