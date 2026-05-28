@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import styles from '@/app/admin/admin.module.scss';
 import {
   readClientCompanyPasswords,
+  removeClientCompanyPassword,
   saveClientCompanyPassword,
 } from '@/shared/lib/adminPasswordStorage';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
@@ -255,6 +256,42 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     }, 2200);
   };
 
+  const deleteCompany = async (company: ClientCompany) => {
+    const confirmed = window.confirm(
+      `Удалить клиента "${company.title || 'Без названия'}"? Пользователь личного кабинета и его сессии тоже будут удалены.`,
+    );
+    if (!confirmed) return;
+
+    setBusy(true);
+    const response = await fetch(`/api/admin/clients/${company.id}`, { method: 'DELETE' });
+    setBusy(false);
+
+    if (!response.ok) {
+      showStatus(await readApiError(response, 'Не удалось удалить клиента'));
+      return;
+    }
+
+    removeClientCompanyPassword(company.id);
+    setClientPasswords(readClientCompanyPasswords());
+    setClientPasswordDrafts((current) => {
+      const next = { ...current };
+      delete next[company.id];
+      return next;
+    });
+    setClientPasswordEditIds((current) => {
+      const next = { ...current };
+      delete next[company.id];
+      return next;
+    });
+    setCompanyDrafts((current) => {
+      const next = { ...current };
+      delete next[company.id];
+      return next;
+    });
+    showStatus('Клиент удален');
+    await loadClients();
+  };
+
   const renderManagerSelect = (
     value: number | null,
     onChange: (value: number | null) => void,
@@ -401,6 +438,9 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
                       Скопировать
                     </button>
                   </div>
+                  {!displayPassword && !passwordIsEdited ? (
+                    <small className={styles.passwordPolicyHint}>Нажмите «Задать пароль», чтобы клиент мог войти в кабинет.</small>
+                  ) : null}
                   {passwordIsEdited && (
                     <>
                       <input
@@ -461,10 +501,13 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
                     });
                   }}
                 >
-                  {passwordIsEdited ? 'Отменить пароль' : 'Изменить пароль'}
+                  {passwordIsEdited ? 'Отменить пароль' : displayPassword ? 'Изменить пароль' : 'Задать пароль'}
                 </button>
                 <button className={savedCompanyId === company.id ? styles.savedButton : ''} disabled={busy} onClick={() => saveCompany(company.id)}>
                   {savedCompanyId === company.id ? 'Сохранено' : 'Сохранить'}
+                </button>
+                <button className={styles.danger} type="button" disabled={busy} onClick={() => deleteCompany(company)}>
+                  Удалить
                 </button>
               </div>
             </article>

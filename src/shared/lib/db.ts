@@ -9,6 +9,7 @@ export { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin
 export type { AccessUser, AccessUserRole, AdminUserAuth } from './db/adminUsersRepo';
 export {
   createClientCompany,
+  deleteClientCompany,
   getClientCompanies,
   getClientPortalProfile,
   getClientUserByLogin,

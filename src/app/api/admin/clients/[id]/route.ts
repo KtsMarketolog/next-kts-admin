@@ -1,6 +1,6 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireEmployee } from '@/shared/lib/adminAuth';
-import { updateClientCompany, type ClientCompanyInput } from '@/shared/lib/db';
+import { deleteClientCompany, revokeClientUserSessions, updateClientCompany, type ClientCompanyInput } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
@@ -65,6 +65,9 @@ export async function PUT(request: Request, context: Context) {
 
   try {
     const company = await updateClientCompany(numericId, input, session);
+    if (password && company.clientUserId) {
+      await revokeClientUserSessions(company.clientUserId);
+    }
     await recordSecurityEvent({
       eventType: 'client_company_updated',
       actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
@@ -82,6 +85,45 @@ export async function PUT(request: Request, context: Context) {
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : 'Не удалось сохранить компанию клиента' },
+      { status: 400 },
+    );
+  }
+}
+
+export async function DELETE(request: Request, context: Context) {
+  const { denied, session } = await requireEmployee();
+  if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
+
+  const { id } = await context.params;
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    return Response.json({ error: 'Некорректная компания клиента' }, { status: 400 });
+  }
+
+  const limited = await enforceAdminActionRateLimit(session, 'client_company_delete', 30);
+  if (limited) return limited;
+
+  try {
+    const company = await deleteClientCompany(numericId, session);
+    await recordSecurityEvent({
+      eventType: 'client_company_deleted',
+      actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
+      adminUserId: session.adminUserId,
+      managerId: session.managerId,
+      sessionId: session.sessionId,
+      entityType: 'client_company',
+      entityId: company.id,
+      ip: getClientIp(request),
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      metadata: { title: company.title, userCount: company.userCount },
+    });
+    return Response.json({ ok: true });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : 'Не удалось удалить компанию клиента' },
       { status: 400 },
     );
   }

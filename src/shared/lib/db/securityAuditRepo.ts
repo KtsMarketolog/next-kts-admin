@@ -27,6 +27,7 @@ export type SecurityEventType =
   | 'catalog_category_icon_updated'
   | 'client_company_created'
   | 'client_company_updated'
+  | 'client_company_deleted'
   | 'stock_import_check_email'
   | 'stock_import_check_email_failed'
   | 'price_deleted'

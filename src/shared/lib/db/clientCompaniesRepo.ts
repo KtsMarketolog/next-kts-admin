@@ -399,6 +399,56 @@ export async function updateClientCompany(
   });
 }
 
+export async function deleteClientCompany(id: number, session: AdminSession): Promise<ClientCompany> {
+  await ensureSiteSchema();
+  await assertCompanyVisible(id, session);
+
+  return withTransaction(async (client) => {
+    const result = await client.query<ClientCompanyRow>(
+      `select
+         cc.id::text,
+         cc.title,
+         cc.inn,
+         cc.kpp,
+         cc.contact_name,
+         cc.email,
+         cc.phone,
+         cc.address,
+         cc.note,
+         cc.manager_id::text,
+         coalesce(manager.name, '') as manager_name,
+         cc.support_manager_id::text,
+         coalesce(support.name, '') as support_manager_name,
+         count(cu.id)::text as user_count,
+         coalesce(primary_user.login, '') as client_login,
+         primary_user.id::text as client_user_id,
+         cc.is_active,
+         cc.created_at::text,
+         cc.updated_at::text
+       from client_companies cc
+       left join wholesale_managers manager on manager.id = cc.manager_id
+       left join wholesale_managers support on support.id = cc.support_manager_id
+       left join client_users cu on cu.company_id = cc.id
+       left join lateral (
+         select id, login
+         from client_users
+         where company_id = cc.id
+         order by created_at asc, id asc
+         limit 1
+       ) primary_user on true
+       where cc.id = $1
+       group by cc.id, manager.name, support.name, primary_user.id, primary_user.login
+       limit 1`,
+      [id],
+    );
+    if (!result.rows[0]) throw new Error('Компания клиента не найдена');
+
+    const company = mapClientCompany(result.rows[0]);
+    await client.query(`delete from client_companies where id = $1`, [id]);
+    return company;
+  });
+}
+
 export async function getClientUserByLogin(login: string): Promise<ClientPortalUserAuth | null> {
   await ensureSiteSchema();
   const normalizedLogin = normalizeClientLogin(login);
