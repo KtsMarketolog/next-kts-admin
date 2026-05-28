@@ -123,7 +123,7 @@ export function WholesalePriceEditorScreen({
                 Вернуться в аналитику
               </button>
             ) : null}
-            <button className={styles.secondary} type="button" onClick={() => router.push('/admin/wholesale/manager')}>
+            <button className={styles.secondary} type="button" onClick={() => router.push(editorBackHref)}>
               Вернуться в панель управления
             </button>
           </div>

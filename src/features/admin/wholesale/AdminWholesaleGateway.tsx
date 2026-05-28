@@ -586,7 +586,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       priceLists={priceLists}
       copiedToken={copiedToken}
       emptyText={emptyText}
-      onEdit={(item) => router.push(`/admin/wholesale/${item.id}/edit`)}
+      onEdit={(item) => {
+        const managerReturnParam = screen === 'managerDetail' && managerDetailId ? `?managerId=${managerDetailId}` : '';
+        router.push(`/admin/wholesale/${item.id}/edit${managerReturnParam}`);
+      }}
       onOpen={(item) => window.open(`/price/${item.token}`, '_blank')}
       onCopyLink={copyLink}
       onDelete={deletePriceList}
