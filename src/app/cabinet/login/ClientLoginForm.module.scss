@@ -1,0 +1,111 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.authPage {
+  min-height: calc(100vh - $apx-120);
+  background: #f4f5f7;
+  padding: $apx-150 $apx-24 $apx-70;
+}
+
+.authPanel {
+  width: min($apx-720, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: $apx-28;
+  align-items: center;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-16;
+  background: #fff;
+  box-shadow: 0 $apx-24 $apx-70 rgba(25, 28, 45, 0.1);
+  padding: $apx-28;
+}
+
+.intro {
+  display: grid;
+  gap: $apx-10;
+
+  h1 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-30;
+    line-height: 1.1;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-15;
+    line-height: 1.45;
+  }
+}
+
+.backLink {
+  width: fit-content;
+  min-height: $apx-40;
+  display: inline-flex;
+  align-items: center;
+  border: $apx-1 solid #c9bfef;
+  border-radius: $apx-8;
+  color: #260b86;
+  padding: 0 $apx-16;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.form {
+  display: grid;
+  gap: $apx-12;
+}
+
+.field {
+  display: grid;
+  gap: $apx-6;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+
+  input {
+    min-height: $apx-44;
+    border: $apx-1 solid #d8d9e4;
+    border-radius: $apx-8;
+    padding: 0 $apx-12;
+    font: inherit;
+  }
+}
+
+.submit {
+  min-height: $apx-44;
+  border: 0;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-18;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+}
+
+.status {
+  margin: 0;
+  color: #b42318;
+  font-size: $apx-13;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .authPage {
+    min-height: calc(100vh - $apx-m-100);
+    padding: $apx-m-120 $apx-m-16 $apx-m-50;
+  }
+
+  .authPanel {
+    grid-template-columns: 1fr;
+  }
+}

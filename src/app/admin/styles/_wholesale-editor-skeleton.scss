@@ -1,0 +1,125 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.editorSkeleton {
+  display: grid;
+  gap: $apx-18;
+}
+
+.skeletonEditorGrid,
+.skeletonVariantGrid {
+  display: grid;
+  gap: $apx-12;
+}
+
+.skeletonEditorGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skeletonField,
+.skeletonDiscountLine,
+.skeletonSearchBlock,
+.skeletonPriceGroup,
+.skeletonProductCard {
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+}
+
+.skeletonField {
+  display: grid;
+  gap: $apx-8;
+}
+
+.skeletonOptions,
+.skeletonDiscountLine,
+.skeletonSearchBlock,
+.skeletonGroupHeader,
+.skeletonProductCard,
+.skeletonVariantGrid {
+  display: grid;
+  gap: $apx-10;
+}
+
+.skeletonOptions {
+  grid-template-columns: repeat(3, minmax($apx-160, 1fr));
+}
+
+.skeletonDiscountLine {
+  grid-template-columns: minmax($apx-180, $apx-320) minmax($apx-120, $apx-220) minmax($apx-180, 1fr);
+}
+
+.skeletonSearchBlock {
+  grid-template-columns: minmax(0, 1fr) repeat(2, minmax($apx-220, 0.6fr));
+}
+
+.skeletonGroupHeader {
+  grid-template-columns: $apx-92 minmax($apx-220, 0.35fr) minmax(0, 1fr);
+  align-items: center;
+}
+
+.skeletonProductCard {
+  grid-template-columns: minmax(0, 1fr) minmax($apx-380, 0.65fr);
+}
+
+.skeletonVariantGrid {
+  grid-template-columns: repeat(4, minmax($apx-80, 1fr));
+}
+
+.skeletonLabelLine,
+.skeletonInputLine,
+.skeletonTextareaLine,
+.skeletonOptions span,
+.skeletonDiscountLine span,
+.skeletonSearchBlock span,
+.skeletonTitleLine,
+.skeletonWideLine,
+.skeletonShortLine,
+.skeletonImage,
+.skeletonVariantGrid span {
+  display: block;
+  overflow: hidden;
+  border-radius: $apx-8;
+  background: linear-gradient(90deg, #eef0f6 0%, #f8f9fc 45%, #eef0f6 100%);
+  background-size: 220% 100%;
+  animation: skeletonPulse 1.2s ease-in-out infinite;
+}
+
+.skeletonLabelLine,
+.skeletonShortLine {
+  width: 42%;
+  height: $apx-12;
+}
+
+.skeletonInputLine,
+.skeletonOptions span,
+.skeletonDiscountLine span,
+.skeletonSearchBlock span,
+.skeletonWideLine,
+.skeletonVariantGrid span {
+  height: $apx-40;
+}
+
+.skeletonTextareaLine {
+  height: $apx-88;
+}
+
+.skeletonImage {
+  width: $apx-92;
+  height: $apx-72;
+}
+
+.skeletonTitleLine {
+  width: 68%;
+  height: $apx-20;
+}
+
+@keyframes skeletonPulse {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -120% 0;
+  }
+}

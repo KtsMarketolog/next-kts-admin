@@ -1,0 +1,111 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.passwordForm {
+  display: grid;
+  gap: $apx-12;
+}
+
+.field {
+  display: grid;
+  gap: $apx-6;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+
+  input {
+    min-height: $apx-44;
+    border: $apx-1 solid #d8d9e4;
+    border-radius: $apx-8;
+    padding: 0 $apx-12;
+    font: inherit;
+  }
+}
+
+.submit {
+  min-height: $apx-44;
+  border: 0;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-18;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+}
+
+.status {
+  margin: 0;
+  color: #b42318;
+  font-size: $apx-13;
+  font-weight: 700;
+}
+
+.successStatus {
+  margin: 0;
+  color: #15803d;
+  font-size: $apx-13;
+  font-weight: 700;
+}
+
+.dataCard {
+  display: grid;
+  gap: $apx-8;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  background: #fbfbfe;
+  padding: $apx-16;
+
+  strong {
+    color: #111827;
+    font-size: $apx-16;
+  }
+
+  span,
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-14;
+    line-height: 1.45;
+  }
+}
+
+.dataGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: $apx-16;
+}
+
+.dataRows {
+  display: grid;
+  gap: $apx-10;
+
+  div {
+    display: grid;
+    gap: $apx-4;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #111827;
+    font-size: $apx-16;
+  }
+}
+
+@media (max-width: 900px) {
+  .dataGrid {
+    grid-template-columns: 1fr;
+  }
+}

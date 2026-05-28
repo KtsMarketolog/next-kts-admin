@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
@@ -11,85 +10,19 @@ import {
 } from '@/shared/lib/adminPasswordStorage';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 
-type ClientCompany = {
-  id: number;
-  title: string;
-  email: string;
-  phone: string;
-  note: string;
-  managerId: number | null;
-  managerName: string;
-  supportManagerId: number | null;
-  supportManagerName: string;
-  userCount: number;
-  clientLogin: string;
-  clientUserId: number | null;
-  chatUnreadCount: number;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type Manager = {
-  id: number;
-  name: string;
-  role: 'manager' | 'support_manager' | string;
-  isActive: boolean;
-};
-
-type ClientDraft = {
-  title: string;
-  email: string;
-  phone: string;
-  note: string;
-  managerId: number | null;
-  supportManagerId: number | null;
-  isActive: boolean;
-  password: string;
-};
-
-type AdminClientsSectionProps = {
-  onBack: () => void;
-};
-
-const emptyDraft: ClientDraft = {
-  title: '',
-  email: '',
-  phone: '',
-  note: '',
-  managerId: null,
-  supportManagerId: null,
-  isActive: true,
-  password: '',
-};
-
-const UNREAD_POLL_INTERVAL_MS = 5000;
-
-function readApiErrorFallback(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
-async function readApiError(response: Response, fallback: string) {
-  const data = await response.json().catch(() => null);
-  return typeof data?.error === 'string' && data.error ? data.error : fallback;
-}
-
-function managerIdValue(value: number | null) {
-  return value ? String(value) : '';
-}
-
-function toDraft(company: ClientCompany): ClientDraft {
-  return {
-    title: company.title,
-    email: company.email,
-    phone: company.phone,
-    note: company.note,
-    managerId: company.managerId,
-    supportManagerId: company.supportManagerId,
-    isActive: company.isActive,
-    password: '',
-  };
-}
+import { AdminClientCompanyCard } from './AdminClientCompanyCard';
+import { AdminClientCreateForm } from './AdminClientCreateForm';
+import {
+  UNREAD_POLL_INTERVAL_MS,
+  emptyDraft,
+  readApiError,
+  readApiErrorFallback,
+  toDraft,
+  type AdminClientsSectionProps,
+  type ClientCompany,
+  type ClientDraft,
+  type Manager,
+} from './AdminClientsModel';
 
 export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const [companies, setCompanies] = useState<ClientCompany[]>([]);
@@ -324,21 +257,14 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     await loadClients();
   };
 
-  const renderManagerSelect = (
-    value: number | null,
-    onChange: (value: number | null) => void,
-    options: Manager[],
-    placeholder: string,
-  ) => (
-    <select value={managerIdValue(value)} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)}>
-      <option value="">{placeholder}</option>
-      {options.map((manager) => (
-        <option key={manager.id} value={manager.id}>
-          {manager.name}
-        </option>
-      ))}
-    </select>
-  );
+  const toggleClientPasswordEdit = (companyId: number) => {
+    setClientPasswordEditIds((current) => ({ ...current, [companyId]: !current[companyId] }));
+    setClientPasswordDrafts((current) => {
+      const next = { ...current };
+      delete next[companyId];
+      return next;
+    });
+  };
 
   return (
     <section className={styles.section}>
@@ -359,198 +285,37 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         <span>Компании клиентов создаются отдельно и пока не привязаны к действующим прайсам.</span>
       </div>
 
-      <div className={styles.clientCreateCard}>
-        <label>
-          <span>Компания</span>
-          <input value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} />
-        </label>
-        <label>
-          <span>Email</span>
-          <input value={draft.email} onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))} />
-        </label>
-        <label>
-          <span>Телефон</span>
-          <input value={draft.phone} onChange={(event) => setDraft((current) => ({ ...current, phone: event.target.value }))} />
-        </label>
-        <label>
-          <span>Пароль</span>
-          <input
-            type="password"
-            value={draft.password}
-            onChange={(event) => setDraft((current) => ({ ...current, password: event.target.value }))}
-            autoComplete="new-password"
-          />
-          <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
-        </label>
-        <label>
-          <span>Менеджер</span>
-          {renderManagerSelect(
-            draft.managerId,
-            (managerId) => setDraft((current) => ({ ...current, managerId })),
-            developmentManagers,
-            'Не выбран',
-          )}
-        </label>
-        <label>
-          <span>Сопровождение</span>
-          {renderManagerSelect(
-            draft.supportManagerId,
-            (supportManagerId) => setDraft((current) => ({ ...current, supportManagerId })),
-            supportManagers,
-            'Не выбрано',
-          )}
-        </label>
-        <label className={styles.checkbox}>
-          <input
-            type="checkbox"
-            checked={draft.isActive}
-            onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))}
-          />
-          Активна
-        </label>
-        <button disabled={busy} onClick={createCompany}>
-          Добавить клиента
-        </button>
-      </div>
+      <AdminClientCreateForm
+        draft={draft}
+        developmentManagers={developmentManagers}
+        supportManagers={supportManagers}
+        busy={busy}
+        onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+        onCreate={createCompany}
+      />
 
       <div className={styles.clientCompanyList}>
         {companies.length === 0 ? <p className={styles.mutedText}>Клиенты пока не добавлены.</p> : null}
-        {companies.map((company) => {
-          const currentDraft = companyDrafts[company.id] ?? toDraft(company);
-          const passwordIsEdited = Boolean(clientPasswordEditIds[company.id]);
-          const displayPassword = clientPasswords[String(company.id)] || '';
-          return (
-            <article className={styles.clientCompanyCard} key={company.id}>
-              <div className={styles.clientCompanyHeader}>
-                <div>
-                  <p>{company.isActive ? 'Активный клиент' : 'Отключен'}</p>
-                  <h3>{company.title || 'Без названия'}</h3>
-                </div>
-                <div className={styles.clientCompanyMeta}>
-                  {company.chatUnreadCount > 0 ? (
-                    <span className={styles.clientUnreadMeta}>Новые сообщения: {company.chatUnreadCount}</span>
-                  ) : null}
-                  <span>Пользователей ЛК: {company.userCount}</span>
-                  <span>{company.clientLogin ? `Логин: ${company.clientLogin}` : 'Логин: email клиента'}</span>
-                  <span>{company.managerName ? `Менеджер: ${company.managerName}` : 'Менеджер не выбран'}</span>
-                  <span>{company.supportManagerName ? `Сопровождение: ${company.supportManagerName}` : 'Сопровождение не выбрано'}</span>
-                </div>
-              </div>
-
-              <div className={styles.clientCompanyGrid}>
-                <label>
-                  <span>Компания</span>
-                  <input value={currentDraft.title} onChange={(event) => updateCompanyDraft(company.id, { title: event.target.value })} />
-                </label>
-                <label>
-                  <span>Email</span>
-                  <input value={currentDraft.email} onChange={(event) => updateCompanyDraft(company.id, { email: event.target.value })} />
-                </label>
-                <label>
-                  <span>Телефон</span>
-                  <input value={currentDraft.phone} onChange={(event) => updateCompanyDraft(company.id, { phone: event.target.value })} />
-                </label>
-                <label className={styles.clientWideField}>
-                  <span>Пароль</span>
-                  <div className={styles.userPasswordCopyField}>
-                    <input
-                      className={styles.userPasswordCopyInput}
-                      type="text"
-                      autoComplete="new-password"
-                      spellCheck={false}
-                      readOnly
-                      placeholder="Пароль не сохранён"
-                      value={displayPassword}
-                      onClick={() => copyClientPassword(displayPassword)}
-                    />
-                    <button
-                      className={styles.userPasswordCopyButton}
-                      type="button"
-                      disabled={!displayPassword}
-                      title="Скопировать пароль"
-                      onClick={() => copyClientPassword(displayPassword)}
-                    >
-                      Скопировать
-                    </button>
-                  </div>
-                  {!displayPassword && !passwordIsEdited ? (
-                    <small className={styles.passwordPolicyHint}>Нажмите «Задать пароль», чтобы клиент мог войти в кабинет.</small>
-                  ) : null}
-                  {passwordIsEdited && (
-                    <>
-                      <input
-                        className={styles.userPasswordEditInput}
-                        type="password"
-                        autoComplete="new-password"
-                        placeholder="Введите новый пароль"
-                        value={clientPasswordDrafts[company.id] || ''}
-                        onChange={(event) => setClientPasswordDrafts((current) => ({ ...current, [company.id]: event.target.value }))}
-                      />
-                      <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
-                    </>
-                  )}
-                </label>
-                <label>
-                  <span>Менеджер</span>
-                  {renderManagerSelect(
-                    currentDraft.managerId,
-                    (managerId) => updateCompanyDraft(company.id, { managerId }),
-                    developmentManagers,
-                    'Не выбран',
-                  )}
-                </label>
-                <label>
-                  <span>Сопровождение</span>
-                  {renderManagerSelect(
-                    currentDraft.supportManagerId,
-                    (supportManagerId) => updateCompanyDraft(company.id, { supportManagerId }),
-                    supportManagers,
-                    'Не выбрано',
-                  )}
-                </label>
-                <label className={styles.clientWideField}>
-                  <span>Заметка</span>
-                  <textarea value={currentDraft.note} onChange={(event) => updateCompanyDraft(company.id, { note: event.target.value })} />
-                </label>
-              </div>
-
-              <div className={styles.clientCompanyActions}>
-                <label className={styles.checkbox}>
-                  <input
-                    type="checkbox"
-                    checked={currentDraft.isActive}
-                    onChange={(event) => updateCompanyDraft(company.id, { isActive: event.target.checked })}
-                  />
-                  Активна
-                </label>
-                <Link className={styles.clientOpenLink} href={`/admin/clients/${company.id}`}>
-                  Перейти
-                </Link>
-                <button
-                  className={styles.secondary}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    setClientPasswordEditIds((current) => ({ ...current, [company.id]: !current[company.id] }));
-                    setClientPasswordDrafts((current) => {
-                      const next = { ...current };
-                      delete next[company.id];
-                      return next;
-                    });
-                  }}
-                >
-                  {passwordIsEdited ? 'Отменить пароль' : displayPassword ? 'Изменить пароль' : 'Задать пароль'}
-                </button>
-                <button className={savedCompanyId === company.id ? styles.savedButton : ''} disabled={busy} onClick={() => saveCompany(company.id)}>
-                  {savedCompanyId === company.id ? 'Сохранено' : 'Сохранить'}
-                </button>
-                <button className={styles.danger} type="button" disabled={busy} onClick={() => deleteCompany(company)}>
-                  Удалить
-                </button>
-              </div>
-            </article>
-          );
-        })}
+        {companies.map((company) => (
+          <AdminClientCompanyCard
+            key={company.id}
+            company={company}
+            currentDraft={companyDrafts[company.id] ?? toDraft(company)}
+            displayPassword={clientPasswords[String(company.id)] || ''}
+            passwordIsEdited={Boolean(clientPasswordEditIds[company.id])}
+            passwordDraft={clientPasswordDrafts[company.id] || ''}
+            developmentManagers={developmentManagers}
+            supportManagers={supportManagers}
+            busy={busy}
+            isSaved={savedCompanyId === company.id}
+            onDraftChange={updateCompanyDraft}
+            onCopyPassword={copyClientPassword}
+            onTogglePasswordEdit={toggleClientPasswordEdit}
+            onPasswordDraftChange={(id, value) => setClientPasswordDrafts((current) => ({ ...current, [id]: value }))}
+            onSave={saveCompany}
+            onDelete={deleteCompany}
+          />
+        ))}
       </div>
     </section>
   );

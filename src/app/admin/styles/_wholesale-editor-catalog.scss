@@ -1,0 +1,183 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.priceCategory {
+  display: grid;
+  gap: $apx-12;
+  margin: $apx-12 0;
+  border-bottom: $apx-1 solid #e6e7ef;
+  padding-bottom: $apx-12;
+}
+
+.priceCategoryHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: $apx-12;
+  align-items: center;
+}
+
+.priceCategoryTitle {
+  display: flex;
+  align-items: center;
+  gap: $apx-14;
+
+  h3 {
+    margin: 0;
+    font-size: $apx-22;
+    text-transform: uppercase;
+  }
+}
+
+.priceCategoryMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $apx-8 $apx-24;
+  margin-top: $apx-4;
+  color: #6f7182;
+  font-size: $apx-12;
+  font-weight: 700;
+}
+
+.priceCategoryAdded {
+  color: inherit;
+}
+
+.priceCategoryAddedActive {
+  color: #178a45;
+}
+
+.priceCategoryDiscount {
+  color: #c51f1a;
+}
+
+.priceCategoryToggle {
+  white-space: nowrap;
+}
+
+.priceGroupImageBox {
+  width: $apx-86;
+  height: $apx-64;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: $apx-10;
+  background: #eef0f5;
+  overflow: hidden;
+  color: #77798a;
+  font-size: $apx-11;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+}
+
+.priceGroupTools {
+  display: grid;
+  grid-template-columns: minmax($apx-300, 1fr) minmax($apx-220, max-content) max-content;
+  gap: $apx-10;
+  align-items: end;
+}
+
+.priceGroupDiscount {
+  display: grid;
+  grid-template-columns: minmax($apx-120, 1fr) minmax($apx-140, auto);
+  gap: $apx-8;
+  align-items: end;
+
+  span {
+    grid-column: 1 / -1;
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  input {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.priceGroupStockOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8 $apx-12;
+  align-items: center;
+
+  > span {
+    flex: 0 0 100%;
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+}
+
+.priceGroupVisibility {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: $apx-8;
+  align-items: end;
+}
+
+.priceGroupProducts {
+  display: grid;
+  gap: $apx-12;
+}
+
+.priceProduct {
+  display: grid;
+  grid-template-columns: minmax($apx-280, $apx-420) minmax($apx-520, 1fr);
+  gap: $apx-18;
+  align-items: start;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-10;
+  padding: $apx-14;
+}
+
+.priceProductInfo {
+  display: grid;
+  gap: $apx-12;
+  align-content: start;
+
+  p {
+    margin: $apx-4 0 0;
+    color: #6f7182;
+    font-size: $apx-12;
+  }
+}
+
+.variantTable {
+  display: grid;
+  grid-template-columns:
+    minmax($apx-80, 0.55fr)
+    minmax($apx-80, 0.55fr)
+    minmax($apx-90, 0.65fr)
+    minmax($apx-80, 0.55fr)
+    minmax($apx-130, 0.85fr)
+    minmax($apx-180, 1fr);
+  gap: $apx-8 $apx-12;
+  align-items: center;
+
+  > div:nth-child(-n + 6) {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  input {
+    width: 100%;
+  }
+
+  .checkbox {
+    justify-content: flex-start;
+  }
+}
+
+.variantRow {
+  display: contents;
+}

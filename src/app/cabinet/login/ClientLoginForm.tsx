@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import styles from '../Cabinet.module.scss';
+import styles from './ClientLoginForm.module.scss';
 
 export function ClientLoginForm() {
   const router = useRouter();

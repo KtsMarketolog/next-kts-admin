@@ -1,0 +1,158 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.catalogProductForm {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+  gap: $apx-10;
+  align-items: end;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  padding: $apx-14;
+  margin-bottom: $apx-18;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  input,
+  select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  label:first-child {
+    grid-column: span 2;
+  }
+}
+
+.catalogToolbar {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $apx-10;
+  margin-bottom: $apx-10;
+}
+
+.catalogFilters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax($apx-170, 1fr));
+  gap: $apx-10;
+}
+
+.catalogSearch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: $apx-10;
+  align-items: center;
+}
+
+.catalogProductList {
+  display: grid;
+  gap: $apx-12;
+  min-width: 0;
+}
+
+.catalogSkeletonList {
+  display: grid;
+  gap: $apx-12;
+  min-width: 0;
+
+  .catalogProductMeta {
+    align-items: stretch;
+  }
+
+  .skeletonInputLine {
+    width: 100%;
+  }
+}
+
+.catalogProductCard {
+  display: grid;
+  gap: $apx-12;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+  box-sizing: border-box;
+}
+
+.catalogProductFields {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: $apx-10;
+  min-width: 0;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+    min-width: 0;
+  }
+
+  input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  label:nth-child(1) {
+    grid-column: span 6;
+  }
+
+  label:nth-child(2),
+  label:nth-child(3) {
+    grid-column: span 3;
+  }
+
+  label:nth-child(4),
+  label:nth-child(5),
+  label:nth-child(6),
+  label:nth-child(7),
+  label:nth-child(8),
+  label:nth-child(9),
+  label:nth-child(10),
+  label:nth-child(11),
+  label:nth-child(12),
+  label:nth-child(13) {
+    grid-column: span 3;
+  }
+}
+
+.catalogProductMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-12;
+  align-items: center;
+  padding-top: $apx-10;
+  border-top: $apx-1 solid #edf0f6;
+  min-width: 0;
+
+  .userAccessBadges {
+    flex: 1 1 $apx-420;
+    min-width: 0;
+  }
+
+  .userAccessActions {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+}

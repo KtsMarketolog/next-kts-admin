@@ -6,7 +6,11 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
 import type { ClientCompanyPriceList, ClientPortalProfile } from '@/shared/lib/db';
-import styles from './Cabinet.module.scss';
+import dataStyles from './ClientCabinetData.module.scss';
+import priceStyles from './ClientCabinetPrices.module.scss';
+import shellStyles from './ClientCabinetShell.module.scss';
+
+const styles = { ...shellStyles, ...priceStyles, ...dataStyles };
 
 type Tab = 'prices' | 'documents' | 'chat' | 'data';
 
