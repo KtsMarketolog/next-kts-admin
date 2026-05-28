@@ -1,27 +1,5 @@
 @use "@/shared/styles/adaptive-px.scss" as *;
 
-.clientIntro {
-  display: flex;
-  align-items: center;
-  gap: $apx-12;
-  margin-bottom: $apx-18;
-  border: $apx-1 solid #d9d4ff;
-  border-radius: $apx-8;
-  background: #fbfaff;
-  padding: $apx-12 $apx-14;
-  color: #4b4e61;
-
-  strong {
-    color: #260b86;
-    font-size: $apx-14;
-  }
-
-  span {
-    font-size: $apx-14;
-    font-weight: 600;
-  }
-}
-
 .clientCreateCard {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

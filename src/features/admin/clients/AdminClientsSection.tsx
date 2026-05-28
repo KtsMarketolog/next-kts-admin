@@ -290,11 +290,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
 
       {status ? <p className={styles.status}>{status}</p> : null}
 
-      <div className={styles.clientIntro}>
-        <strong>Первый безопасный этап</strong>
-        <span>Компании клиентов создаются отдельно и пока не привязаны к действующим прайсам.</span>
-      </div>
-
       <AdminClientCreateForm
         draft={draft}
         developmentManagers={developmentManagers}
