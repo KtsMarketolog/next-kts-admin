@@ -8,6 +8,7 @@ export { revokeAdminUserSessions, revokeManagerSessions } from './db/adminSessio
 export { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin, updateAccessUser } from './db/adminUsersRepo';
 export type { AccessUser, AccessUserRole, AdminUserAuth } from './db/adminUsersRepo';
 export {
+  assertClientCompanyVisible,
   createClientCompany,
   deleteClientCompany,
   getClientCompanies,
@@ -19,6 +20,13 @@ export {
   updateClientUserPassword,
 } from './db/clientCompaniesRepo';
 export type { ClientCompany, ClientCompanyInput, ClientPortalProfile, ClientPortalUserAuth } from './db/clientCompaniesRepo';
+export {
+  createClientChatMessageForAdmin,
+  createClientChatMessageForClient,
+  getClientChatMessagesForAdmin,
+  getClientChatMessagesForClient,
+} from './db/clientChatRepo';
+export type { ClientChatAuthorType, ClientChatMessage } from './db/clientChatRepo';
 export { revokeClientUserSessions } from './db/clientSessionsRepo';
 export { getPhoneSetting, getSiteSettings, updatePhoneSetting, updateSiteSettings } from './db/settingsRepo';
 export { createHeroSlide, deleteHeroSlide, getHeroSlides, updateHeroSlide } from './db/slidesRepo';

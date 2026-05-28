@@ -204,7 +204,7 @@ async function assertManagerRole(id: number | null, role: 'manager' | 'support_m
   }
 }
 
-async function assertCompanyVisible(id: number, session: AdminSession) {
+export async function assertClientCompanyVisible(id: number, session: AdminSession) {
   if (canSeeAllClients(session)) return;
   const managerId = session.managerId ?? 0;
   const result = await query<{ id: string }>(
@@ -323,7 +323,7 @@ export async function updateClientCompany(
   session: AdminSession,
 ): Promise<ClientCompany> {
   await ensureSiteSchema();
-  await assertCompanyVisible(id, session);
+  await assertClientCompanyVisible(id, session);
   const assignments = await normalizeManagerAssignments(input, session);
   await assertManagerRole(assignments.managerId, 'manager');
   await assertManagerRole(assignments.supportManagerId, 'support_manager');
@@ -401,7 +401,7 @@ export async function updateClientCompany(
 
 export async function deleteClientCompany(id: number, session: AdminSession): Promise<ClientCompany> {
   await ensureSiteSchema();
-  await assertCompanyVisible(id, session);
+  await assertClientCompanyVisible(id, session);
 
   return withTransaction(async (client) => {
     const result = await client.query<ClientCompanyRow>(

@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
 import type { ClientPortalProfile } from '@/shared/lib/db';
 import styles from './Cabinet.module.scss';
 
@@ -131,12 +132,9 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
           <section className={styles.section}>
             <div className={styles.sectionHeader}>
               <h2>Чат</h2>
-              <p>Здесь будет переписка клиента с менеджером.</p>
+              <p>Переписка с менеджером по вашей компании.</p>
             </div>
-            <article className={styles.placeholderCard}>
-              <strong>Чат еще не запущен</strong>
-              <span>Сообщения и уведомления добавим отдельным шагом, чтобы не смешивать с авторизацией.</span>
-            </article>
+            <ClientChatPanel endpoint="/api/client/chat" currentAuthorType="client" />
           </section>
         )}
 

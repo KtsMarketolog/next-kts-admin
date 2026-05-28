@@ -1,0 +1,128 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.chat {
+  display: grid;
+  gap: $apx-14;
+}
+
+.messages {
+  display: grid;
+  align-content: start;
+  gap: $apx-10;
+  min-height: $apx-320;
+  max-height: $apx-520;
+  overflow-y: auto;
+  border: $apx-1 solid #e0e2ee;
+  border-radius: $apx-8;
+  background: #fbfbfe;
+  padding: $apx-14;
+}
+
+.empty {
+  display: grid;
+  min-height: $apx-220;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+  color: #6f7182;
+
+  strong {
+    color: #111827;
+    font-size: $apx-18;
+  }
+
+  span {
+    margin-top: $apx-6;
+    font-size: $apx-14;
+    font-weight: 600;
+  }
+}
+
+.message {
+  display: grid;
+  gap: $apx-6;
+  justify-self: start;
+  width: min($apx-720, 86%);
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: $apx-12 $apx-14;
+}
+
+.messageOwn {
+  justify-self: end;
+  border-color: #d9d4ff;
+  background: #f4f0ff;
+}
+
+.messageMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: $apx-10;
+  color: #6f7182;
+  font-size: $apx-12;
+  font-weight: 800;
+}
+
+.messageBody {
+  margin: 0;
+  color: #111827;
+  font-size: $apx-14;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: $apx-10;
+  align-items: end;
+
+  textarea {
+    min-height: $apx-92;
+    border: $apx-1 solid #d8d9e4;
+    border-radius: $apx-8;
+    padding: $apx-12;
+    font: inherit;
+    resize: vertical;
+  }
+
+  button {
+    min-height: $apx-44;
+    border: 0;
+    border-radius: $apx-8;
+    background: #260b86;
+    color: #fff;
+    padding: 0 $apx-18;
+    font-weight: 800;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+  }
+}
+
+.status {
+  margin: 0;
+  color: #b42318;
+  font-size: $apx-13;
+  font-weight: 700;
+}
+
+@media (max-width: 800px) {
+  .messages {
+    min-height: $apx-m-280;
+    max-height: $apx-m-460;
+  }
+
+  .message {
+    width: 100%;
+  }
+
+  .composer {
+    grid-template-columns: 1fr;
+  }
+}

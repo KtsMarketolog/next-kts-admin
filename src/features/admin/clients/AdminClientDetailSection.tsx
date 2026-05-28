@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
+import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
 
 type ClientCompany = {
   id: number;
@@ -119,7 +120,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     }
 
     if (activeTab === 'chat') {
-      return <EmptyClientTab title="Сообщений пока нет" text="Переписки по клиенту нет." />;
+      return <ClientChatPanel endpoint={`/api/admin/clients/${client.id}/chat`} currentAuthorType="employee" />;
     }
 
     return (
