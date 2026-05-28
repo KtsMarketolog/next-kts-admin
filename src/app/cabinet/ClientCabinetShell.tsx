@@ -17,6 +17,7 @@ const TABS: Array<{ value: Tab; label: string }> = [
 ];
 
 const TAB_VALUES = new Set<Tab>(TABS.map((tab) => tab.value));
+const UNREAD_POLL_INTERVAL_MS = 5000;
 
 function resolveTab(value: string | null): Tab {
   return value && TAB_VALUES.has(value as Tab) ? (value as Tab) : 'prices';
@@ -43,6 +44,28 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
   useEffect(() => {
     setActiveTab(resolveTab(tabParam));
   }, [tabParam]);
+
+  useEffect(() => {
+    if (activeTab === 'chat') return undefined;
+    let cancelled = false;
+
+    const loadUnreadCount = async () => {
+      const response = await fetch('/api/client/chat/unread', { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json().catch(() => ({}));
+      if (!cancelled) setChatUnreadCount(Number(data.unreadCount ?? 0));
+    };
+
+    void loadUnreadCount();
+    const intervalId = window.setInterval(() => {
+      void loadUnreadCount();
+    }, UNREAD_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeTab]);
 
   const selectTab = (tab: Tab) => {
     setActiveTab(tab);

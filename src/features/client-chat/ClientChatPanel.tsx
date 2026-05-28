@@ -21,6 +21,8 @@ type ClientChatPanelProps = {
   onUnreadCountChange?: (count: number) => void;
 };
 
+const CHAT_POLL_INTERVAL_MS = 5000;
+
 function formatMessageTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -79,7 +81,7 @@ export function ClientChatPanel({ endpoint, currentAuthorType, onUnreadCountChan
 
     const intervalId = window.setInterval(() => {
       loadMessages(true).catch(() => undefined);
-    }, 10000);
+    }, CHAT_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;

@@ -21,6 +21,11 @@ export type ClientChatConversation = {
   unreadCount: number;
 };
 
+export type ClientChatUnreadCount = {
+  companyId: number;
+  unreadCount: number;
+};
+
 type ClientChatMessageRow = {
   id: string;
   company_id: string;
@@ -193,6 +198,28 @@ export async function getClientChatUnreadCountForAdmin(companyId: number, sessio
 
 export async function getClientChatUnreadCountForClient(session: ClientSession) {
   return getClientChatUnreadCount(session.companyId, 'client');
+}
+
+export async function getClientChatUnreadCountsForAdmin(session: AdminSession): Promise<ClientChatUnreadCount[]> {
+  await ensureSiteSchema();
+  const canSeeAllClients = session.role === 'admin' || session.role === 'wholesale_admin';
+  const result = await query<{ company_id: string; unread_count: string }>(
+    `select cc.id::text as company_id,
+            count(messages.id)::text as unread_count
+     from client_companies cc
+     left join client_chat_read_state reads on reads.company_id = cc.id
+     left join client_chat_messages messages
+       on messages.company_id = cc.id
+      and messages.author_type = 'client'
+      and messages.created_at > coalesce(reads.employee_read_at, 'epoch'::timestamptz)
+     where ($1::boolean = true or cc.manager_id = $2 or cc.support_manager_id = $2)
+     group by cc.id`,
+    [canSeeAllClients, session.managerId ?? 0],
+  );
+  return result.rows.map((row) => ({
+    companyId: Number(row.company_id),
+    unreadCount: Number(row.unread_count),
+  }));
 }
 
 export async function createClientChatMessageForClient(session: ClientSession, body: string) {

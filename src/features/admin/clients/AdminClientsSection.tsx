@@ -63,6 +63,8 @@ const emptyDraft: ClientDraft = {
   password: '',
 };
 
+const UNREAD_POLL_INTERVAL_MS = 5000;
+
 function readApiErrorFallback(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
@@ -133,11 +135,39 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     setManagers(Array.isArray(data.managers) ? data.managers : []);
   };
 
+  const loadUnreadCounts = async () => {
+    const response = await fetch('/api/admin/clients/chat-unread', { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    const counts = new Map<number, number>(
+      Array.isArray(data.clients)
+        ? data.clients.map((client: { companyId: number; unreadCount: number }) => [client.companyId, Number(client.unreadCount || 0)])
+        : [],
+    );
+    setCompanies((current) =>
+      current.map((company) => ({
+        ...company,
+        chatUnreadCount: counts.get(company.id) ?? 0,
+      })),
+    );
+  };
+
   useEffect(() => {
     setClientPasswords(readClientCompanyPasswords());
     void Promise.all([loadClients(), loadManagers()]).catch((error) => {
       showStatus(readApiErrorFallback(error, 'Не удалось загрузить клиентов'));
     });
+  }, []);
+
+  useEffect(() => {
+    void loadUnreadCounts();
+    const intervalId = window.setInterval(() => {
+      void loadUnreadCounts();
+    }, UNREAD_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   const validateClientPassword = (password: string) => {

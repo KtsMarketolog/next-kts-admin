@@ -40,6 +40,7 @@ const tabs: Array<{ value: ClientTab; label: string }> = [
 ];
 
 const CLIENT_TAB_VALUES = new Set<ClientTab>(tabs.map((tab) => tab.value));
+const UNREAD_POLL_INTERVAL_MS = 5000;
 
 function resolveClientTab(value: string | null): ClientTab {
   return value && CLIENT_TAB_VALUES.has(value as ClientTab) ? (value as ClientTab) : 'prices';
@@ -96,6 +97,28 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   useEffect(() => {
     setActiveTab(resolveClientTab(tabParam));
   }, [tabParam]);
+
+  useEffect(() => {
+    if (activeTab === 'chat') return undefined;
+    let cancelled = false;
+
+    const loadUnreadCount = async () => {
+      const response = await fetch(`/api/admin/clients/${clientId}/chat/unread`, { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json().catch(() => ({}));
+      if (!cancelled) setChatUnreadCount(Number(data.unreadCount ?? 0));
+    };
+
+    void loadUnreadCount();
+    const intervalId = window.setInterval(() => {
+      void loadUnreadCount();
+    }, UNREAD_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeTab, clientId]);
 
   const selectTab = (tab: ClientTab) => {
     setActiveTab(tab);
