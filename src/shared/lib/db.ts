@@ -28,6 +28,16 @@ export type {
   ClientPortalUserAuth,
 } from './db/clientCompaniesRepo';
 export {
+  createClientDocument,
+  deleteClientDocument,
+  getClientDocumentForAdminDownload,
+  getClientDocumentForClientDownload,
+  getClientDocumentsForAdmin,
+  getClientDocumentsForClient,
+  updateClientDocumentVisibility,
+} from './db/clientDocumentsRepo';
+export type { ClientDocument, ClientDocumentFile, ClientDocumentInput } from './db/clientDocumentsRepo';
+export {
   getClientChatConversationForAdmin,
   getClientChatConversationForClient,
   createClientChatMessageForAdmin,

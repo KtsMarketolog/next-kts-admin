@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
-import type { ClientCompanyPriceList } from '@/shared/lib/db';
+import type { ClientCompanyPriceList, ClientDocument } from '@/shared/lib/db';
+import { formatFileSize } from '@/shared/lib/formatFileSize';
 
 type ClientCompany = {
   id: number;
@@ -130,6 +131,109 @@ function ClientPriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceLis
   );
 }
 
+type AdminClientDocumentsPanelProps = {
+  busy: boolean;
+  clientId: number;
+  documents: ClientDocument[];
+  fileInputKey: number;
+  isVisible: boolean;
+  status: string;
+  title: string;
+  onDelete: (document: ClientDocument) => void;
+  onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onTitleChange: (value: string) => void;
+  onToggleVisibility: (document: ClientDocument, isVisible: boolean) => void;
+  onUpload: (event: FormEvent<HTMLFormElement>) => void;
+  onVisibleChange: (value: boolean) => void;
+};
+
+function AdminClientDocumentsPanel({
+  busy,
+  clientId,
+  documents,
+  fileInputKey,
+  isVisible,
+  status,
+  title,
+  onDelete,
+  onFileChange,
+  onTitleChange,
+  onToggleVisibility,
+  onUpload,
+  onVisibleChange,
+}: AdminClientDocumentsPanelProps) {
+  return (
+    <div className={styles.clientDocumentsPanel}>
+      <form className={styles.clientDocumentUploadForm} onSubmit={onUpload}>
+        <label>
+          <span>Название</span>
+          <input
+            type="text"
+            value={title}
+            onChange={(event) => onTitleChange(event.target.value)}
+            placeholder="Название документа"
+          />
+        </label>
+        <label>
+          <span>Файл</span>
+          <input
+            key={fileInputKey}
+            type="file"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp"
+            onChange={onFileChange}
+          />
+        </label>
+        <label className={styles.clientDocumentCheckbox}>
+          <input type="checkbox" checked={isVisible} onChange={(event) => onVisibleChange(event.target.checked)} />
+          <span>Показать</span>
+        </label>
+        <button type="submit" disabled={busy}>
+          {busy ? 'Прикрепляем...' : 'Прикрепить документ'}
+        </button>
+      </form>
+
+      {status ? <p className={styles.clientDocumentStatus}>{status}</p> : null}
+
+      {documents.length === 0 ? (
+        <EmptyClientTab title="Документы пока не добавлены" text="Файлов по клиенту нет." />
+      ) : (
+        <div className={styles.clientDocumentList}>
+          {documents.map((document) => (
+            <article className={styles.clientDocumentCard} key={document.id}>
+              <div className={styles.clientDocumentInfo}>
+                <span>{document.isVisible ? 'Показывается клиенту' : 'Скрыт от клиента'}</span>
+                <h3>{document.title || document.originalName}</h3>
+                <p>
+                  {document.originalName} · {formatFileSize(document.fileSize)} · {formatDate(document.createdAt)}
+                </p>
+              </div>
+              <label className={styles.clientDocumentCheckbox}>
+                <input
+                  type="checkbox"
+                  checked={document.isVisible}
+                  onChange={(event) => onToggleVisibility(document, event.target.checked)}
+                />
+                <span>Показать</span>
+              </label>
+              <a
+                className={styles.clientDocumentLink}
+                href={`/api/admin/clients/${clientId}/documents/${document.id}/download`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Скачать
+              </a>
+              <button className={styles.danger} type="button" onClick={() => onDelete(document)}>
+                Удалить
+              </button>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetailSectionProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -137,10 +241,17 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   const tabParam = searchParams.get('tab');
   const [client, setClient] = useState<ClientCompany | null>(null);
   const [priceLists, setPriceLists] = useState<ClientCompanyPriceList[]>([]);
+  const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [activeTab, setActiveTab] = useState<ClientTab>(() => resolveClientTab(tabParam));
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [documentTitle, setDocumentTitle] = useState('');
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentVisible, setDocumentVisible] = useState(true);
+  const [documentBusy, setDocumentBusy] = useState(false);
+  const [documentStatus, setDocumentStatus] = useState('');
+  const [documentFileInputKey, setDocumentFileInputKey] = useState(0);
 
   useEffect(() => {
     setActiveTab(resolveClientTab(tabParam));
@@ -186,21 +297,25 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     const loadClient = async () => {
       setLoading(true);
       setError('');
-      const [clientResponse, priceListResponse] = await Promise.all([
+      const [clientResponse, priceListResponse, documentsResponse] = await Promise.all([
         fetch('/api/admin/clients', { cache: 'no-store' }),
         fetch(`/api/admin/clients/${clientId}/price-lists`, { cache: 'no-store' }),
+        fetch(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store' }),
       ]);
       if (!clientResponse.ok) throw new Error(await readApiError(clientResponse, 'Не удалось загрузить клиента'));
       if (!priceListResponse.ok) throw new Error(await readApiError(priceListResponse, 'Не удалось загрузить прайсы клиента'));
+      if (!documentsResponse.ok) throw new Error(await readApiError(documentsResponse, 'Не удалось загрузить документы клиента'));
 
       const data = await clientResponse.json();
       const priceListData = await priceListResponse.json().catch(() => ({}));
+      const documentsData = await documentsResponse.json().catch(() => ({}));
       const companies = Array.isArray(data.companies) ? (data.companies as ClientCompany[]) : [];
       const nextClient = companies.find((company) => company.id === clientId) ?? null;
       if (!nextClient) throw new Error('Клиент не найден');
       if (!cancelled) {
         setClient(nextClient);
         setPriceLists(Array.isArray(priceListData.priceLists) ? priceListData.priceLists : []);
+        setDocuments(Array.isArray(documentsData.documents) ? documentsData.documents : []);
         setChatUnreadCount(nextClient.chatUnreadCount || 0);
       }
     };
@@ -218,13 +333,111 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     };
   }, [clientId]);
 
-  const panel = useMemo(() => {
+  const handleDocumentFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setDocumentFile(event.target.files?.[0] ?? null);
+    setDocumentStatus('');
+  };
+
+  const uploadDocument = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setDocumentStatus('');
+    if (!documentFile) {
+      setDocumentStatus('Выберите файл');
+      return;
+    }
+
+    setDocumentBusy(true);
+    const formData = new FormData();
+    formData.append('file', documentFile);
+    formData.append('title', documentTitle);
+    formData.append('isVisible', documentVisible ? 'true' : 'false');
+
+    const response = await fetch(`/api/admin/clients/${clientId}/documents`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    setDocumentBusy(false);
+
+    if (!response.ok) {
+      setDocumentStatus(typeof data.error === 'string' ? data.error : 'Не удалось прикрепить документ');
+      return;
+    }
+
+    if (data.document) {
+      setDocuments((current) => [data.document as ClientDocument, ...current]);
+    }
+    setDocumentTitle('');
+    setDocumentFile(null);
+    setDocumentVisible(true);
+    setDocumentFileInputKey((current) => current + 1);
+    setDocumentStatus('Документ прикреплен');
+  };
+
+  const toggleDocumentVisibility = async (document: ClientDocument, isVisible: boolean) => {
+    setDocumentStatus('');
+    const response = await fetch(`/api/admin/clients/${clientId}/documents/${document.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isVisible }),
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      setDocumentStatus(typeof data.error === 'string' ? data.error : 'Не удалось обновить документ');
+      return;
+    }
+
+    if (data.document) {
+      setDocuments((current) =>
+        current.map((currentDocument) =>
+          currentDocument.id === document.id ? (data.document as ClientDocument) : currentDocument,
+        ),
+      );
+    }
+  };
+
+  const deleteDocument = async (document: ClientDocument) => {
+    if (!window.confirm(`Удалить документ "${document.title || document.originalName}"?`)) return;
+
+    setDocumentStatus('');
+    const response = await fetch(`/api/admin/clients/${clientId}/documents/${document.id}`, {
+      method: 'DELETE',
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      setDocumentStatus(typeof data.error === 'string' ? data.error : 'Не удалось удалить документ');
+      return;
+    }
+
+    setDocuments((current) => current.filter((currentDocument) => currentDocument.id !== document.id));
+    setDocumentStatus('Документ удален');
+  };
+
+  const panel = (() => {
     if (!client) return null;
 
     if (activeTab === 'prices') return <ClientPriceListGrid priceLists={priceLists} />;
 
     if (activeTab === 'documents') {
-      return <EmptyClientTab title="Документы пока не добавлены" text="Файлов по клиенту нет." />;
+      return (
+        <AdminClientDocumentsPanel
+          busy={documentBusy}
+          clientId={client.id}
+          documents={documents}
+          fileInputKey={documentFileInputKey}
+          isVisible={documentVisible}
+          status={documentStatus}
+          title={documentTitle}
+          onDelete={deleteDocument}
+          onFileChange={handleDocumentFileChange}
+          onTitleChange={setDocumentTitle}
+          onToggleVisibility={toggleDocumentVisibility}
+          onUpload={uploadDocument}
+          onVisibleChange={setDocumentVisible}
+        />
+      );
     }
 
     if (activeTab === 'chat') {
@@ -255,7 +468,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
         </div>
       </div>
     );
-  }, [activeTab, client, priceLists]);
+  })();
 
   if (loading) {
     return (

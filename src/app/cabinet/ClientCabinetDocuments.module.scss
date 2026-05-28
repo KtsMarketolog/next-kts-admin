@@ -1,0 +1,96 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.documentGrid {
+  display: grid;
+  gap: $apx-14;
+}
+
+.documentCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: $apx-16;
+  align-items: center;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
+  padding: $apx-18;
+
+  > div {
+    display: grid;
+    gap: $apx-5;
+    min-width: 0;
+  }
+
+  span {
+    color: #777b8d;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  h3 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-20;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-14;
+    font-weight: 700;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+}
+
+.documentDownloadLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: $apx-40;
+  border: $apx-1 solid #260b86;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-18;
+  font-size: $apx-13;
+  font-weight: 800;
+  text-decoration: none;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &:visited {
+    color: #fff;
+  }
+
+  &:hover,
+  &:focus-visible {
+    transform: translateY(calc(#{$apx-1} * -1));
+    border-color: #3512a6;
+    background: #3512a6;
+    color: #fff;
+    box-shadow: 0 $apx-8 $apx-18 rgba(38, 11, 134, 0.2);
+  }
+
+  &:active {
+    transform: translateY(0);
+    border-color: #1d0868;
+    background: #1d0868;
+    color: #fff;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .documentCard {
+    grid-template-columns: 1fr;
+  }
+
+  .documentDownloadLink {
+    width: 100%;
+  }
+}

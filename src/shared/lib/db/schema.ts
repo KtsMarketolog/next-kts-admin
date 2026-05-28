@@ -323,6 +323,19 @@ async function ensureSiteSchemaInternal() {
       updated_at timestamptz not null default now()
     );
 
+    create table if not exists client_documents (
+      id bigserial primary key,
+      company_id bigint not null references client_companies(id) on delete cascade,
+      title text not null default '',
+      original_name text not null default '',
+      mime_type text not null default '',
+      file_path text not null default '',
+      file_size bigint not null default 0,
+      is_visible boolean not null default true,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
     create table if not exists wholesale_analytics_events (
       id bigserial primary key,
       event_type text not null,
@@ -508,6 +521,8 @@ async function ensureSiteSchemaInternal() {
     create index if not exists client_sessions_revoked_idx on client_sessions(revoked_at);
     create index if not exists client_chat_messages_company_idx on client_chat_messages(company_id, created_at desc, id desc);
     create index if not exists client_chat_read_state_updated_idx on client_chat_read_state(updated_at desc);
+    create index if not exists client_documents_company_idx on client_documents(company_id, created_at desc);
+    create index if not exists client_documents_visible_idx on client_documents(company_id, is_visible, created_at desc);
     create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc);
     create index if not exists wholesale_analytics_events_price_idx on wholesale_analytics_events(price_list_id, created_at desc);
     create index if not exists wholesale_analytics_events_client_idx on wholesale_analytics_events(client_id, created_at desc);
@@ -610,6 +625,20 @@ async function ensureSiteSchemaInternal() {
   await query(`create index if not exists wholesale_analytics_events_actor_idx on wholesale_analytics_events(actor_type, created_at desc)`);
   await query(`create index if not exists wholesale_analytics_events_session_idx on wholesale_analytics_events(session_id, created_at desc)`);
   await query(`create index if not exists wholesale_analytics_events_token_idx on wholesale_analytics_events(token, created_at desc)`);
+  await query(`create table if not exists client_documents (
+    id bigserial primary key,
+    company_id bigint not null references client_companies(id) on delete cascade,
+    title text not null default '',
+    original_name text not null default '',
+    mime_type text not null default '',
+    file_path text not null default '',
+    file_size bigint not null default 0,
+    is_visible boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`);
+  await query(`create index if not exists client_documents_company_idx on client_documents(company_id, created_at desc)`);
+  await query(`create index if not exists client_documents_visible_idx on client_documents(company_id, is_visible, created_at desc)`);
   await query(`create table if not exists admin_sessions (
     id uuid primary key,
     session_hash text not null unique,

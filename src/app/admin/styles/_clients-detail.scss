@@ -243,3 +243,148 @@
   background: #e9eaf2;
   color: #242633;
 }
+
+.clientDocumentsPanel {
+  display: grid;
+  gap: $apx-14;
+}
+
+.clientDocumentUploadForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  gap: $apx-12;
+  align-items: end;
+  border: $apx-1 solid #e0e2ee;
+  border-radius: $apx-12;
+  background: #fff;
+  padding: $apx-14;
+
+  label:not(.clientDocumentCheckbox) {
+    display: grid;
+    gap: $apx-6;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  input[type="file"] {
+    min-height: $apx-42;
+    padding: $apx-9 $apx-12;
+  }
+}
+
+.clientDocumentCheckbox {
+  display: inline-flex;
+  align-items: center;
+  gap: $apx-8;
+  min-height: $apx-42;
+  color: #242633;
+  font-size: $apx-14;
+  font-weight: 800;
+  white-space: nowrap;
+
+  input[type="checkbox"] {
+    flex: 0 0 $apx-18;
+    width: $apx-18;
+    height: $apx-18;
+    min-width: $apx-18;
+    min-height: $apx-18 !important;
+    padding: 0;
+    accent-color: #260b86;
+    cursor: pointer;
+  }
+
+  span {
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    text-transform: none;
+  }
+}
+
+.clientDocumentStatus {
+  margin: 0;
+  border: $apx-1 solid #d8d9e4;
+  border-radius: $apx-8;
+  background: #fbfcff;
+  color: #242633;
+  padding: $apx-10 $apx-12;
+  font-size: $apx-13;
+  font-weight: 700;
+}
+
+.clientDocumentList {
+  display: grid;
+  gap: $apx-10;
+}
+
+.clientDocumentCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: $apx-12;
+  align-items: center;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-12;
+  background: #fff;
+  padding: $apx-14;
+}
+
+.clientDocumentInfo {
+  display: grid;
+  gap: $apx-5;
+  min-width: 0;
+
+  span {
+    color: #777b8d;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  h3 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-17;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+}
+
+.clientDocumentLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: $apx-42;
+  border-radius: $apx-8;
+  background: #e9eaf2;
+  color: #242633;
+  padding: 0 $apx-18;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+@media (max-width: 1100px) {
+  .clientDocumentUploadForm,
+  .clientDocumentCard {
+    grid-template-columns: 1fr;
+  }
+
+  .clientDocumentUploadForm button,
+  .clientDocumentCard button,
+  .clientDocumentLink {
+    width: 100%;
+  }
+}

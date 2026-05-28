@@ -5,12 +5,14 @@ import { FormEvent, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
-import type { ClientCompanyPriceList, ClientPortalProfile } from '@/shared/lib/db';
+import type { ClientCompanyPriceList, ClientDocument, ClientPortalProfile } from '@/shared/lib/db';
+import { formatFileSize } from '@/shared/lib/formatFileSize';
 import dataStyles from './ClientCabinetData.module.scss';
+import documentStyles from './ClientCabinetDocuments.module.scss';
 import priceStyles from './ClientCabinetPrices.module.scss';
 import shellStyles from './ClientCabinetShell.module.scss';
 
-const styles = { ...shellStyles, ...priceStyles, ...dataStyles };
+const styles = { ...shellStyles, ...priceStyles, ...dataStyles, ...documentStyles };
 
 type Tab = 'prices' | 'documents' | 'chat' | 'data';
 
@@ -111,11 +113,47 @@ function PriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceList[] })
   );
 }
 
+function DocumentGrid({ documents }: { documents: ClientDocument[] }) {
+  if (documents.length === 0) {
+    return (
+      <div className={styles.emptyState}>
+        <h3>Документов пока нет</h3>
+        <p>Файлы появятся здесь после загрузки менеджером.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.documentGrid}>
+      {documents.map((document) => (
+        <article className={styles.documentCard} key={document.id}>
+          <div>
+            <span>Документ</span>
+            <h3>{document.title || document.originalName}</h3>
+            <p>
+              {document.originalName} · {formatFileSize(document.fileSize)} · {formatDate(document.createdAt)}
+            </p>
+          </div>
+          <a
+            className={styles.documentDownloadLink}
+            href={`/api/client/documents/${document.id}/download`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Скачать
+          </a>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 type ClientCabinetShellProps = {
+  documents: ClientDocument[];
   profile: ClientPortalProfile;
 };
 
-export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
+export function ClientCabinetShell({ documents, profile }: ClientCabinetShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -207,14 +245,7 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
   const panel = (() => {
     if (activeTab === 'prices') return <PriceListGrid priceLists={profile.priceLists} />;
 
-    if (activeTab === 'documents') {
-      return (
-        <div className={styles.emptyState}>
-          <h3>Документов пока нет</h3>
-          <p>Файлы появятся здесь после загрузки менеджером.</p>
-        </div>
-      );
-    }
+    if (activeTab === 'documents') return <DocumentGrid documents={documents} />;
 
     if (activeTab === 'chat') {
       return <ClientChatPanel endpoint="/api/client/chat" currentAuthorType="client" onUnreadCountChange={setChatUnreadCount} />;

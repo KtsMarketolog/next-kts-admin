@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 
 import { getClientSession } from '@/shared/lib/clientAuth';
-import { getClientPortalProfile } from '@/shared/lib/db';
+import { getClientDocumentsForClient, getClientPortalProfile } from '@/shared/lib/db';
 import { ClientCabinetShell } from './ClientCabinetShell';
 
 export const dynamic = 'force-dynamic';
@@ -12,6 +12,7 @@ export default async function ClientCabinetPage() {
 
   const profile = await getClientPortalProfile(session.clientUserId);
   if (!profile) redirect('/cabinet/login');
+  const documents = await getClientDocumentsForClient(session.companyId);
 
-  return <ClientCabinetShell profile={profile} />;
+  return <ClientCabinetShell documents={documents} profile={profile} />;
 }
