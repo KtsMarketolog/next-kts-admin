@@ -70,7 +70,7 @@ function PriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceList[] })
             </div>
           </dl>
           <div className={styles.priceListActions}>
-            <Link className={styles.primaryLink} href={`/price/${priceList.token}`}>
+            <Link className={styles.primaryLink} href={`/price/${priceList.token}`} target="_blank" rel="noopener noreferrer">
               Открыть прайс
             </Link>
             <Link className={styles.secondaryLink} href={`/price/${priceList.token}/pdf`}>
