@@ -85,7 +85,7 @@ export function WholesaleManagerManagement({
           ))}
         </div>
 
-        <div className={`${styles.userCreateCard} ${managerRoleTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
+        <div className={`${styles.userCreateCard} ${styles.managerCreateCard}`}>
           <div className={styles.autofillGuard} aria-hidden="true">
             <input tabIndex={-1} autoComplete="username" />
             <input tabIndex={-1} type="password" autoComplete="current-password" />
@@ -101,6 +101,10 @@ export function WholesaleManagerManagement({
           <label>
             <span>Email</span>
             <input value={managerDraft.email} onChange={(event) => setManagerDraft({ ...managerDraft, email: event.target.value })} autoComplete="new-password" />
+          </label>
+          <label>
+            <span>Телефон</span>
+            <input value={managerDraft.phone} onChange={(event) => setManagerDraft({ ...managerDraft, phone: event.target.value })} autoComplete="off" />
           </label>
           <label>
             <span>Роль</span>
@@ -258,7 +262,7 @@ export function WholesaleManagerManagement({
 
               return (
                 <article className={styles.userAccessCard} key={manager.id}>
-                  <div className={`${styles.userAccessFields} ${managerRoleTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
+                  <div className={`${styles.userAccessFields} ${styles.managerSupportFields}`}>
                     <label>
                       <span>Имя</span>
                       <input value={manager.name} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, name: event.target.value } : item))} />
@@ -270,6 +274,10 @@ export function WholesaleManagerManagement({
                     <label>
                       <span>Email</span>
                       <input value={manager.email} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, email: event.target.value } : item))} />
+                    </label>
+                    <label>
+                      <span>Телефон</span>
+                      <input value={manager.phone} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, phone: event.target.value } : item))} />
                     </label>
                     <label>
                       <span>Роль</span>

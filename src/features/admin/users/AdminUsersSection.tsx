@@ -42,6 +42,10 @@ function attachSavedPasswords(users: AccessUser[]) {
   return users.map((user) => ({ ...user, displayPassword: user.displayPassword || passwords[user.id] || '' }));
 }
 
+function isAdminAccessUser(user: AccessUser) {
+  return tabForRole(user.role) === 'admin';
+}
+
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -74,7 +78,8 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
         return;
       }
       const data = await response.json();
-      setUsers(attachSavedPasswords(Array.isArray(data.users) ? data.users : []));
+      const accessUsers = Array.isArray(data.users) ? data.users : [];
+      setUsers(attachSavedPasswords(accessUsers.filter(isAdminAccessUser)));
     } catch {
       showStatusRef.current('Не удалось загрузить пользователей');
     } finally {

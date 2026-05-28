@@ -25,12 +25,10 @@ const SUPPORT_MANAGER_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string
 
 export const USER_TABS: Array<{ value: UserTab; label: string }> = [
   { value: 'admin', label: 'Админ' },
-  { value: 'manager', label: 'Менеджер по развитию' },
-  { value: 'support_manager', label: 'Менеджер по сопровождению' },
 ];
 
 export function isUserTab(value: string | null): value is UserTab {
-  return value === 'admin' || value === 'manager' || value === 'support_manager';
+  return value === 'admin';
 }
 
 export function tabForRole(role: AccessUserRole): UserTab {
@@ -64,4 +62,3 @@ export function addButtonLabel(tab: UserTab) {
   if (tab === 'support_manager') return 'Добавить менеджера по сопровождению';
   return 'Добавить пользователя';
 }
-

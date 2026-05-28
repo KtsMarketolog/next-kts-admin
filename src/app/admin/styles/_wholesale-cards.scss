@@ -27,6 +27,48 @@
   }
 }
 
+.userCreateCard.managerCreateCard {
+  label:nth-of-type(1) {
+    grid-column: 1 / 4;
+    grid-row: 1;
+  }
+
+  label:nth-of-type(2) {
+    grid-column: 4 / 7;
+    grid-row: 1;
+  }
+
+  label:nth-of-type(3) {
+    grid-column: 7 / 10;
+    grid-row: 1;
+  }
+
+  label:nth-of-type(4) {
+    grid-column: 10 / 13;
+    grid-row: 1;
+  }
+
+  label:nth-of-type(5) {
+    grid-column: 1 / 4;
+    grid-row: 2;
+  }
+
+  label:nth-of-type(6) {
+    grid-column: 4 / 10;
+    grid-row: 2;
+  }
+
+  label.userActiveToggle {
+    grid-column: 10 / 13;
+    grid-row: 2;
+  }
+
+  > button {
+    grid-column: 4 / 13;
+    grid-row: 3;
+  }
+}
+
 .tableWrap {
   width: 100%;
   overflow-x: auto;
@@ -146,6 +188,49 @@
   label:nth-of-type(7) {
     grid-column: 7 / 13;
     grid-row: 2;
+  }
+}
+
+.userAccessFields.managerSupportFields {
+  label:nth-of-type(1) {
+    grid-column: 1 / 4;
+    grid-row: 1;
+  }
+
+  label:nth-of-type(2) {
+    grid-column: 4 / 7;
+    grid-row: 1;
+  }
+
+  label:nth-of-type(3) {
+    grid-column: 7 / 10;
+    grid-row: 1;
+  }
+
+  label:nth-of-type(4) {
+    grid-column: 10 / 13;
+    grid-row: 1;
+  }
+
+  label:nth-of-type(5) {
+    grid-column: 1 / 4;
+    grid-row: 2;
+  }
+
+  label.userPasswordWide {
+    grid-column: 4 / 13;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 1180px) {
+  .userCreateCard.managerCreateCard label,
+  .userCreateCard.managerCreateCard label.userActiveToggle,
+  .userCreateCard.managerCreateCard > button,
+  .userAccessFields.managerSupportFields label,
+  .userAccessFields.managerSupportFields label.userPasswordWide {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 

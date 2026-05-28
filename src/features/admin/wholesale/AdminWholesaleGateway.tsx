@@ -341,7 +341,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         name: managerDraft.name.trim(),
         login: managerDraft.login.trim(),
         email: managerDraft.email.trim(),
-        phone: managerRoleTab === 'manager' ? managerDraft.phone.trim() : '',
+        phone: managerDraft.phone.trim(),
         role: managerRoleTab,
         supportManagerId: null,
         password: managerDraft.password.trim(),
