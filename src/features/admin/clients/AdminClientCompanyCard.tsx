@@ -52,7 +52,11 @@ export function AdminClientCompanyCard({
           <h3>{company.title || 'Без названия'}</h3>
         </div>
         <div className={styles.clientCompanyMeta}>
-          {company.chatUnreadCount > 0 ? <span className={styles.clientUnreadMeta}>Новые сообщения: {company.chatUnreadCount}</span> : null}
+          {company.chatUnreadCount > 0 ? (
+            <Link className={styles.clientUnreadMeta} href={`/admin/clients/${company.id}?tab=chat`}>
+              Новые сообщения: {company.chatUnreadCount}
+            </Link>
+          ) : null}
           <span>Пользователей ЛК: {company.userCount}</span>
           <span>{company.clientLogin ? `Логин: ${company.clientLogin}` : 'Логин: email клиента'}</span>
           <span>{company.managerName ? `Менеджер: ${company.managerName}` : 'Менеджер не выбран'}</span>

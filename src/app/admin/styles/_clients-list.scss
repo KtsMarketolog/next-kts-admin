@@ -108,7 +108,8 @@
   justify-content: flex-end;
   gap: $apx-8;
 
-  span {
+  span,
+  a {
     border-radius: $apx-999;
     background: #f0eefb;
     color: #3f3d74;
@@ -116,12 +117,18 @@
     font-size: $apx-12;
     font-weight: 800;
     line-height: 1.2;
+    text-decoration: none;
   }
 }
 
 .clientCompanyMeta .clientUnreadMeta {
   background: #fff1f0;
   color: #b42318;
+
+  &:hover,
+  &:focus-visible {
+    background: #ffe4e0;
+  }
 }
 
 .clientCompanyGrid {
