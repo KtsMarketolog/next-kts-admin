@@ -32,6 +32,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const [clientPasswords, setClientPasswords] = useState<Record<string, string>>({});
   const [clientPasswordEditIds, setClientPasswordEditIds] = useState<Record<number, boolean>>({});
   const [clientPasswordDrafts, setClientPasswordDrafts] = useState<Record<number, string>>({});
+  const [expandedCompanyIds, setExpandedCompanyIds] = useState<Record<number, boolean>>({});
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [savedCompanyId, setSavedCompanyId] = useState<number | null>(null);
@@ -253,8 +254,17 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       delete next[company.id];
       return next;
     });
+    setExpandedCompanyIds((current) => {
+      const next = { ...current };
+      delete next[company.id];
+      return next;
+    });
     showStatus('Клиент удален');
     await loadClients();
+  };
+
+  const toggleCompanyExpanded = (companyId: number) => {
+    setExpandedCompanyIds((current) => ({ ...current, [companyId]: !current[companyId] }));
   };
 
   const toggleClientPasswordEdit = (companyId: number) => {
@@ -307,9 +317,11 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
             developmentManagers={developmentManagers}
             supportManagers={supportManagers}
             busy={busy}
+            isExpanded={Boolean(expandedCompanyIds[company.id])}
             isSaved={savedCompanyId === company.id}
             onDraftChange={updateCompanyDraft}
             onCopyPassword={copyClientPassword}
+            onToggleExpanded={toggleCompanyExpanded}
             onTogglePasswordEdit={toggleClientPasswordEdit}
             onPasswordDraftChange={(id, value) => setClientPasswordDrafts((current) => ({ ...current, [id]: value }))}
             onSave={saveCompany}

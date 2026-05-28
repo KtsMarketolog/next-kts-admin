@@ -104,6 +104,13 @@
   }
 }
 
+.dataContact {
+  color: #6f7182;
+  font-size: $apx-13;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 @media (max-width: 900px) {
   .dataGrid {
     grid-template-columns: 1fr;

@@ -73,7 +73,11 @@ export type ClientPortalProfile = {
     email: string;
     phone: string;
     managerName: string;
+    managerEmail: string;
+    managerPhone: string;
     supportManagerName: string;
+    supportManagerEmail: string;
+    supportManagerPhone: string;
     chatUnreadCount: number;
   };
   priceLists: ClientCompanyPriceList[];
@@ -621,7 +625,11 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
     company_email: string;
     company_phone: string;
     manager_name: string | null;
+    manager_email: string | null;
+    manager_phone: string | null;
     support_manager_name: string | null;
+    support_manager_email: string | null;
+    support_manager_phone: string | null;
     chat_unread_count: string;
   }>(
     `select
@@ -635,7 +643,11 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
        cc.email as company_email,
        cc.phone as company_phone,
        manager.name as manager_name,
+       manager.email as manager_email,
+       manager.phone as manager_phone,
        support.name as support_manager_name,
+       support.email as support_manager_email,
+       support.phone as support_manager_phone,
        (
          select count(*)::text
          from client_chat_messages ccm
@@ -670,7 +682,11 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
       email: row.company_email,
       phone: row.company_phone,
       managerName: row.manager_name ?? '',
+      managerEmail: row.manager_email ?? '',
+      managerPhone: row.manager_phone ?? '',
       supportManagerName: row.support_manager_name ?? '',
+      supportManagerEmail: row.support_manager_email ?? '',
+      supportManagerPhone: row.support_manager_phone ?? '',
       chatUnreadCount: Number(row.chat_unread_count ?? 0),
     },
     priceLists,

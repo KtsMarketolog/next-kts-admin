@@ -18,7 +18,7 @@ const TABS: Array<{ value: Tab; label: string; description: string }> = [
   { value: 'prices', label: 'Прайсы', description: 'Актуальные индивидуальные прайсы' },
   { value: 'documents', label: 'Документы', description: 'Файлы от менеджера' },
   { value: 'chat', label: 'Чат', description: 'Переписка с менеджером' },
-  { value: 'data', label: 'Данные клиента', description: 'Контакты и пароль' },
+  { value: 'data', label: 'Данные', description: 'Контакты и пароль' },
 ];
 
 const TAB_VALUES = new Set<Tab>(TABS.map((tab) => tab.value));
@@ -39,6 +39,27 @@ function formatDate(value: string | null | undefined) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function ManagerContact({
+  emptyText,
+  email,
+  name,
+  phone,
+}: {
+  emptyText: string;
+  email: string;
+  name: string;
+  phone: string;
+}) {
+  const contact = [email, phone].filter(Boolean).join(' · ');
+
+  return (
+    <>
+      <strong>{name || emptyText}</strong>
+      {contact ? <small className={styles.dataContact}>{contact}</small> : null}
+    </>
+  );
 }
 
 function PriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceList[] }) {
@@ -218,11 +239,21 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
             </div>
             <div>
               <span>Менеджер</span>
-              <strong>{profile.company.managerName || 'Не назначен'}</strong>
+              <ManagerContact
+                emptyText="Не назначен"
+                email={profile.company.managerEmail}
+                name={profile.company.managerName}
+                phone={profile.company.managerPhone}
+              />
             </div>
             <div>
               <span>Сопровождение</span>
-              <strong>{profile.company.supportManagerName || 'Не назначено'}</strong>
+              <ManagerContact
+                emptyText="Не назначено"
+                email={profile.company.supportManagerEmail}
+                name={profile.company.supportManagerName}
+                phone={profile.company.supportManagerPhone}
+              />
             </div>
           </div>
         </article>
