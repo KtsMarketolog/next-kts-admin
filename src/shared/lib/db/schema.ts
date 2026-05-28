@@ -260,6 +260,37 @@ async function ensureSiteSchemaInternal() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists client_companies (
+      id bigserial primary key,
+      title text not null default '',
+      inn text not null default '',
+      kpp text not null default '',
+      contact_name text not null default '',
+      email text not null default '',
+      phone text not null default '',
+      address text not null default '',
+      note text not null default '',
+      manager_id bigint references wholesale_managers(id) on delete set null,
+      support_manager_id bigint references wholesale_managers(id) on delete set null,
+      is_active boolean not null default true,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists client_users (
+      id bigserial primary key,
+      company_id bigint not null references client_companies(id) on delete cascade,
+      name text not null default '',
+      email text not null default '',
+      phone text not null default '',
+      login text not null default '',
+      password_hash text not null default '',
+      is_active boolean not null default true,
+      last_login_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
     create table if not exists wholesale_analytics_events (
       id bigserial primary key,
       event_type text not null,
@@ -431,6 +462,12 @@ async function ensureSiteSchemaInternal() {
     create index if not exists wholesale_price_list_events_owner_manager_idx on wholesale_price_list_events(owner_manager_id, created_at desc);
     create index if not exists wholesale_manager_login_logs_manager_idx on wholesale_manager_login_logs(manager_id, created_at desc);
     create index if not exists wholesale_price_view_logs_price_idx on wholesale_price_view_logs(price_list_id, created_at desc);
+    create index if not exists client_companies_manager_idx on client_companies(manager_id, created_at desc);
+    create index if not exists client_companies_support_manager_idx on client_companies(support_manager_id, created_at desc);
+    create index if not exists client_companies_active_idx on client_companies(is_active, title);
+    create index if not exists client_users_company_idx on client_users(company_id, created_at desc);
+    create unique index if not exists client_users_email_unique_idx on client_users(lower(email)) where email <> '';
+    create unique index if not exists client_users_login_unique_idx on client_users(lower(login)) where login <> '';
     create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc);
     create index if not exists wholesale_analytics_events_price_idx on wholesale_analytics_events(price_list_id, created_at desc);
     create index if not exists wholesale_analytics_events_client_idx on wholesale_analytics_events(client_id, created_at desc);

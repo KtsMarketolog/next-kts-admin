@@ -27,9 +27,8 @@ export const SITE_NAV_ITEMS: Array<{ value: AdminSection; label: string; descrip
   { value: 'users', label: 'Пользователи и доступы', description: 'Роли и права' },
 ];
 
-export type AdminArea = 'home' | 'site' | 'wholesale';
+export type AdminArea = 'home' | 'site' | 'wholesale' | 'clients';
 
 export function isManagerRole(role: AdminSession['role'] | string | null | undefined) {
   return role === 'manager' || role === 'support_manager';
 }
-

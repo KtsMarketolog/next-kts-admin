@@ -1,0 +1,166 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.clientIntro {
+  display: flex;
+  align-items: center;
+  gap: $apx-12;
+  margin-bottom: $apx-18;
+  border: $apx-1 solid #d9d4ff;
+  border-radius: $apx-8;
+  background: #fbfaff;
+  padding: $apx-12 $apx-14;
+  color: #4b4e61;
+
+  strong {
+    color: #260b86;
+    font-size: $apx-14;
+  }
+
+  span {
+    font-size: $apx-14;
+    font-weight: 600;
+  }
+}
+
+.clientCreateCard {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-12;
+  align-items: end;
+  margin-bottom: $apx-18;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  padding: $apx-16;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+}
+
+.clientWideField {
+  grid-column: span 2;
+}
+
+.clientCompanyList {
+  display: grid;
+  gap: $apx-14;
+}
+
+.clientCompanyCard {
+  display: grid;
+  gap: $apx-14;
+  border: $apx-1 solid #e0e2ee;
+  border-radius: $apx-8;
+  padding: $apx-16;
+  background: #fff;
+}
+
+.clientCompanyHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-320, auto);
+  gap: $apx-16;
+  align-items: start;
+
+  p {
+    margin: 0 0 $apx-4;
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  h3 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-22;
+    line-height: 1.2;
+  }
+}
+
+.clientCompanyMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: $apx-8;
+
+  span {
+    border-radius: $apx-999;
+    background: #f0eefb;
+    color: #3f3d74;
+    padding: $apx-6 $apx-10;
+    font-size: $apx-12;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+}
+
+.clientCompanyGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-10;
+
+  label {
+    display: grid;
+    gap: $apx-6;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  textarea {
+    min-height: $apx-86 !important;
+  }
+}
+
+.clientCompanyActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: $apx-12;
+  border-top: $apx-1 solid #eef0f6;
+  padding-top: $apx-12;
+}
+
+@media (max-width: 1024px) {
+  .clientCreateCard,
+  .clientCompanyGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clientCompanyHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .clientCompanyMeta {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 800px) {
+  .clientIntro,
+  .clientCompanyActions {
+    display: grid;
+    justify-items: stretch;
+  }
+
+  .clientCreateCard,
+  .clientCompanyGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .clientWideField {
+    grid-column: span 1;
+  }
+}

@@ -1,0 +1,75 @@
+import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
+import { requireEmployee } from '@/shared/lib/adminAuth';
+import { createClientCompany, getClientCompanies, type ClientCompanyInput } from '@/shared/lib/db';
+import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
+import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
+import { getClientIp } from '@/shared/lib/rateLimit';
+import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
+
+function managerIdFromBody(value: unknown) {
+  const managerId = Number(value);
+  return Number.isInteger(managerId) && managerId > 0 ? managerId : null;
+}
+
+function inputFromBody(body: Record<string, unknown>): ClientCompanyInput {
+  return {
+    title: normalizeTextField(body.title, 200),
+    inn: normalizeTextField(body.inn, 32),
+    kpp: normalizeTextField(body.kpp, 32),
+    contactName: normalizeTextField(body.contactName, 160),
+    email: normalizeTextField(body.email, 180),
+    phone: normalizeTextField(body.phone, 80),
+    address: normalizeTextField(body.address, 300),
+    note: normalizeTextField(body.note, 2000),
+    managerId: managerIdFromBody(body.managerId),
+    supportManagerId: managerIdFromBody(body.supportManagerId),
+    isActive: body.isActive !== false,
+  };
+}
+
+export async function GET() {
+  const { denied, session } = await requireEmployee();
+  if (denied) return denied;
+
+  const companies = await getClientCompanies(session);
+  return Response.json({ companies });
+}
+
+export async function POST(request: Request) {
+  const { denied, session } = await requireEmployee();
+  if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
+
+  const limited = await enforceAdminActionRateLimit(session, 'client_company_create', 60);
+  if (limited) return limited;
+
+  const body = await request.json().catch(() => ({}));
+  const input = inputFromBody(body);
+  if (!input.title) {
+    return Response.json({ error: 'Введите название компании' }, { status: 400 });
+  }
+
+  try {
+    const company = await createClientCompany(input, session);
+    await recordSecurityEvent({
+      eventType: 'client_company_created',
+      actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
+      adminUserId: session.adminUserId,
+      managerId: session.managerId,
+      sessionId: session.sessionId,
+      entityType: 'client_company',
+      entityId: company.id,
+      ip: getClientIp(request),
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      metadata: { title: company.title, inn: company.inn, managerId: company.managerId, supportManagerId: company.supportManagerId },
+    });
+    return Response.json({ company });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : 'Не удалось добавить компанию клиента' },
+      { status: 400 },
+    );
+  }
+}

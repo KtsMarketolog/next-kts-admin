@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AdminDashboard } from '@/features/admin/dashboard/AdminDashboard';
+import { AdminClientsSection } from '@/features/admin/clients/AdminClientsSection';
 import { useAdminBrandPortfolio } from '@/features/admin/model/useAdminBrandPortfolio';
 import { useAdminGroupCompanies } from '@/features/admin/model/useAdminGroupCompanies';
 import { useAdminNews } from '@/features/admin/model/useAdminNews';
@@ -84,6 +85,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   const switchArea = (area: AdminArea) => {
     if (area === 'wholesale') {
       router.replace(isManagerRole(sessionRole) ? '/admin/wholesale/manager' : '/admin/wholesale/admin', { scroll: false });
+      return;
+    }
+
+    if (area === 'clients') {
+      router.replace('/admin/clients', { scroll: false });
       return;
     }
 
@@ -214,6 +220,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       return;
     }
 
+    if (pathname.startsWith('/admin/clients')) {
+      setActiveArea('clients');
+      return;
+    }
+
     if (pathname.startsWith('/admin/site')) {
       if (sessionRole !== 'admin') {
         setActiveArea('home');
@@ -303,6 +314,8 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       ? 'Управление сайтом'
       : activeArea === 'wholesale'
         ? 'Индивидуальные прайсы'
+        : activeArea === 'clients'
+          ? 'Клиенты'
         : 'Панель управления';
 
   return (
@@ -326,12 +339,15 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
           canAccessSite={sessionRole === 'admin'}
           onOpenSiteSettings={() => switchArea('site')}
           onOpenWholesale={() => switchArea('wholesale')}
+          onOpenClients={() => switchArea('clients')}
         />
       )}
 
       {activeArea === 'wholesale' && (
         <AdminWholesaleGateway canManageWholesale={sessionRole === 'admin' || sessionRole === 'wholesale_admin'} onBack={() => switchArea('home')} />
       )}
+
+      {activeArea === 'clients' && <AdminClientsSection onBack={() => switchArea('home')} />}
 
       {activeArea === 'site' && (
         <div className={styles.adminShell}>

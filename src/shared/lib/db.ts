@@ -7,6 +7,8 @@ export type { RecordSecurityEventInput, SecurityActorType, SecurityEventType } f
 export { revokeAdminUserSessions, revokeManagerSessions } from './db/adminSessionsRepo';
 export { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin, updateAccessUser } from './db/adminUsersRepo';
 export type { AccessUser, AccessUserRole, AdminUserAuth } from './db/adminUsersRepo';
+export { createClientCompany, getClientCompanies, updateClientCompany } from './db/clientCompaniesRepo';
+export type { ClientCompany, ClientCompanyInput } from './db/clientCompaniesRepo';
 export { getPhoneSetting, getSiteSettings, updatePhoneSetting, updateSiteSettings } from './db/settingsRepo';
 export { createHeroSlide, deleteHeroSlide, getHeroSlides, updateHeroSlide } from './db/slidesRepo';
 export { createNewsItem, deleteNewsItem, getNewsItems, updateNewsItem } from './db/newsRepo';
