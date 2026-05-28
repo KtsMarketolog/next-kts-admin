@@ -1,5 +1,6 @@
 const ACCESS_USER_PASSWORDS_STORAGE_KEY = 'kts-admin-users-passwords-v1';
 const WHOLESALE_MANAGER_PASSWORDS_STORAGE_KEY = 'kts-admin-wholesale-manager-passwords-v1';
+const CLIENT_COMPANY_PASSWORDS_STORAGE_KEY = 'kts-admin-client-company-passwords-v1';
 
 function readPasswordMap(storageKey: string) {
   if (typeof window === 'undefined') return {} as Record<string, string>;
@@ -60,6 +61,10 @@ export function readWholesaleManagerPasswords() {
   return readPasswordMap(WHOLESALE_MANAGER_PASSWORDS_STORAGE_KEY);
 }
 
+export function readClientCompanyPasswords() {
+  return readPasswordMap(CLIENT_COMPANY_PASSWORDS_STORAGE_KEY);
+}
+
 export function saveAccessUserPassword(userId: string, password: string) {
   saveAccessUserPasswordOnly(userId, password);
   const managerId = managerIdFromAccessUserId(userId);
@@ -92,4 +97,16 @@ export function saveWholesaleManagerPassword(managerId: number | string, passwor
 export function removeWholesaleManagerPassword(managerId: number | string) {
   removeWholesaleManagerPasswordOnly(managerId);
   removeAccessUserPasswordOnly(managerAccessUserId(managerId));
+}
+
+export function saveClientCompanyPassword(companyId: number | string, password: string) {
+  const passwords = readClientCompanyPasswords();
+  passwords[String(companyId)] = password;
+  writePasswordMap(CLIENT_COMPANY_PASSWORDS_STORAGE_KEY, passwords);
+}
+
+export function removeClientCompanyPassword(companyId: number | string) {
+  const passwords = readClientCompanyPasswords();
+  delete passwords[String(companyId)];
+  writePasswordMap(CLIENT_COMPANY_PASSWORDS_STORAGE_KEY, passwords);
 }

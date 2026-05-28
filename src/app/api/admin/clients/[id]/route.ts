@@ -1,8 +1,9 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { requireEmployee } from '@/shared/lib/adminAuth';
+import { hashPassword, requireEmployee } from '@/shared/lib/adminAuth';
 import { updateClientCompany, type ClientCompanyInput } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
+import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
@@ -15,7 +16,7 @@ function managerIdFromBody(value: unknown) {
   return Number.isInteger(managerId) && managerId > 0 ? managerId : null;
 }
 
-function inputFromBody(body: Record<string, unknown>): ClientCompanyInput {
+function inputFromBody(body: Record<string, unknown>, passwordHash?: string): ClientCompanyInput {
   return {
     title: normalizeTextField(body.title, 200),
     inn: '',
@@ -28,6 +29,7 @@ function inputFromBody(body: Record<string, unknown>): ClientCompanyInput {
     managerId: managerIdFromBody(body.managerId),
     supportManagerId: managerIdFromBody(body.supportManagerId),
     isActive: body.isActive !== false,
+    passwordHash,
   };
 }
 
@@ -47,9 +49,18 @@ export async function PUT(request: Request, context: Context) {
   if (limited) return limited;
 
   const body = await request.json().catch(() => ({}));
-  const input = inputFromBody(body);
+  const password = typeof body.password === 'string' ? body.password.trim() : '';
+  const passwordPolicy = password ? validatePasswordPolicy(password) : { ok: true };
+  if (!passwordPolicy.ok) {
+    return Response.json({ error: passwordPolicy.error || 'Пароль не подходит' }, { status: 400 });
+  }
+
+  const input = inputFromBody(body, password ? hashPassword(password) : undefined);
   if (!input.title) {
     return Response.json({ error: 'Введите название компании' }, { status: 400 });
+  }
+  if (!input.email) {
+    return Response.json({ error: 'Введите email клиента для входа' }, { status: 400 });
   }
 
   try {

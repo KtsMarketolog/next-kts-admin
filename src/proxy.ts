@@ -32,12 +32,21 @@ function isSameOrigin(request: NextRequest) {
 }
 
 export function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname.startsWith('/api/admin/') && MUTATING_METHODS.has(request.method) && !isSameOrigin(request)) {
+  if (
+    (request.nextUrl.pathname.startsWith('/api/admin/') || request.nextUrl.pathname.startsWith('/api/client/')) &&
+    MUTATING_METHODS.has(request.method) &&
+    !isSameOrigin(request)
+  ) {
     return NextResponse.json({ error: 'Forbidden origin' }, { status: 403 });
   }
 
   const response = NextResponse.next();
-  if (request.nextUrl.pathname.startsWith('/admin') || request.nextUrl.pathname.startsWith('/api/admin/')) {
+  if (
+    request.nextUrl.pathname.startsWith('/admin') ||
+    request.nextUrl.pathname.startsWith('/cabinet') ||
+    request.nextUrl.pathname.startsWith('/api/admin/') ||
+    request.nextUrl.pathname.startsWith('/api/client/')
+  ) {
     response.headers.set('Cache-Control', 'private, no-store');
   }
   return response;

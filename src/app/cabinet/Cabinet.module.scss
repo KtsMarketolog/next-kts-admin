@@ -1,0 +1,279 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.authPage,
+.page {
+  min-height: calc(100vh - $apx-120);
+  background: #f4f5f7;
+  padding: $apx-150 $apx-24 $apx-70;
+}
+
+.authPanel {
+  width: min($apx-720, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: $apx-28;
+  align-items: center;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-16;
+  background: #fff;
+  box-shadow: 0 $apx-24 $apx-70 rgba(25, 28, 45, 0.1);
+  padding: $apx-28;
+}
+
+.intro {
+  display: grid;
+  gap: $apx-10;
+
+  h1 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-30;
+    line-height: 1.1;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-15;
+    line-height: 1.45;
+  }
+}
+
+.backLink {
+  width: fit-content;
+  min-height: $apx-40;
+  display: inline-flex;
+  align-items: center;
+  border: $apx-1 solid #c9bfef;
+  border-radius: $apx-8;
+  color: #260b86;
+  padding: 0 $apx-16;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.form,
+.passwordForm {
+  display: grid;
+  gap: $apx-12;
+}
+
+.field {
+  display: grid;
+  gap: $apx-6;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+  }
+
+  input {
+    min-height: $apx-44;
+    border: $apx-1 solid #d8d9e4;
+    border-radius: $apx-8;
+    padding: 0 $apx-12;
+    font: inherit;
+  }
+}
+
+.submit,
+.logout,
+.secondary {
+  min-height: $apx-44;
+  border: 0;
+  border-radius: $apx-8;
+  padding: 0 $apx-18;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+}
+
+.submit {
+  background: #260b86;
+  color: #fff;
+}
+
+.logout,
+.secondary {
+  background: #e9eaf2;
+  color: #242633;
+}
+
+.status {
+  margin: 0;
+  color: #b42318;
+  font-size: $apx-13;
+  font-weight: 700;
+}
+
+.successStatus {
+  margin: 0;
+  color: #15803d;
+  font-size: $apx-13;
+  font-weight: 700;
+}
+
+.shell {
+  width: min($apx-1440, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: $apx-18;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: $apx-18;
+  align-items: flex-start;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-12;
+  background: #fff;
+  padding: $apx-24;
+
+  p {
+    margin: 0 0 $apx-6;
+    color: #6f7182;
+    font-size: $apx-14;
+  }
+
+  h1 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-32;
+    line-height: 1.15;
+  }
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-8;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-12;
+  background: #fff;
+  padding: $apx-8;
+}
+
+.tab {
+  min-height: $apx-42;
+  border: 0;
+  border-radius: $apx-8;
+  background: transparent;
+  color: #4b4e61;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tabActive {
+  background: #260b86;
+  color: #fff;
+}
+
+.section {
+  display: grid;
+  gap: $apx-16;
+  min-height: $apx-360;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-12;
+  background: #fff;
+  padding: $apx-24;
+}
+
+.sectionHeader {
+  h2 {
+    margin: 0 0 $apx-6;
+    color: #111827;
+    font-size: $apx-26;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-14;
+  }
+}
+
+.placeholderGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $apx-12;
+}
+
+.placeholderCard,
+.dataCard {
+  display: grid;
+  gap: $apx-8;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  background: #fbfbfe;
+  padding: $apx-16;
+
+  strong {
+    color: #111827;
+    font-size: $apx-16;
+  }
+
+  span,
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-14;
+    line-height: 1.45;
+  }
+}
+
+.dataGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: $apx-16;
+}
+
+.dataRows {
+  display: grid;
+  gap: $apx-10;
+
+  div {
+    display: grid;
+    gap: $apx-4;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #111827;
+    font-size: $apx-16;
+  }
+}
+
+@media (max-width: 900px) {
+  .authPage,
+  .page {
+    min-height: calc(100vh - $apx-m-100);
+    padding: $apx-m-120 $apx-m-16 $apx-m-50;
+  }
+
+  .authPanel,
+  .dataGrid,
+  .placeholderGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    display: grid;
+  }
+
+  .tabs {
+    grid-template-columns: 1fr 1fr;
+  }
+}

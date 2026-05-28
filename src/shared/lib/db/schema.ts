@@ -286,9 +286,22 @@ async function ensureSiteSchemaInternal() {
       login text not null default '',
       password_hash text not null default '',
       is_active boolean not null default true,
+      password_changed_at timestamptz,
       last_login_at timestamptz,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
+    );
+
+    create table if not exists client_sessions (
+      id uuid primary key,
+      session_hash text not null unique,
+      client_user_id bigint not null references client_users(id) on delete cascade,
+      ip_hash text not null default '',
+      user_agent text not null default '',
+      created_at timestamptz not null default now(),
+      last_seen_at timestamptz not null default now(),
+      expires_at timestamptz not null,
+      revoked_at timestamptz
     );
 
     create table if not exists wholesale_analytics_events (
@@ -415,6 +428,7 @@ async function ensureSiteSchemaInternal() {
     alter table wholesale_price_list_events add column if not exists owner_manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_price_list_events add column if not exists details text not null default '';
     alter table wholesale_price_list_events alter column price_list_id drop not null;
+    alter table client_users add column if not exists password_changed_at timestamptz;
 
     do $$
     begin
@@ -468,6 +482,9 @@ async function ensureSiteSchemaInternal() {
     create index if not exists client_users_company_idx on client_users(company_id, created_at desc);
     create unique index if not exists client_users_email_unique_idx on client_users(lower(email)) where email <> '';
     create unique index if not exists client_users_login_unique_idx on client_users(lower(login)) where login <> '';
+    create index if not exists client_sessions_user_idx on client_sessions(client_user_id, created_at desc);
+    create index if not exists client_sessions_expires_idx on client_sessions(expires_at);
+    create index if not exists client_sessions_revoked_idx on client_sessions(revoked_at);
     create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc);
     create index if not exists wholesale_analytics_events_price_idx on wholesale_analytics_events(price_list_id, created_at desc);
     create index if not exists wholesale_analytics_events_client_idx on wholesale_analytics_events(client_id, created_at desc);
