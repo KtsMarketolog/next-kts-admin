@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
@@ -36,6 +37,12 @@ const tabs: Array<{ value: ClientTab; label: string }> = [
   { value: 'chat', label: 'Чат' },
   { value: 'data', label: 'Данные клиента' },
 ];
+
+const CLIENT_TAB_VALUES = new Set<ClientTab>(tabs.map((tab) => tab.value));
+
+function resolveClientTab(value: string | null): ClientTab {
+  return value && CLIENT_TAB_VALUES.has(value as ClientTab) ? (value as ClientTab) : 'prices';
+}
 
 async function readApiError(response: Response, fallback: string) {
   const data = await response.json().catch(() => null);
@@ -75,10 +82,30 @@ function EmptyClientTab({ title, text }: { title: string; text: string }) {
 }
 
 export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetailSectionProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
   const [client, setClient] = useState<ClientCompany | null>(null);
-  const [activeTab, setActiveTab] = useState<ClientTab>('prices');
+  const [activeTab, setActiveTab] = useState<ClientTab>(() => resolveClientTab(tabParam));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    setActiveTab(resolveClientTab(tabParam));
+  }, [tabParam]);
+
+  const selectTab = (tab: ClientTab) => {
+    setActiveTab(tab);
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === 'prices') {
+      params.delete('tab');
+    } else {
+      params.set('tab', tab);
+    }
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -203,7 +230,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
             className={activeTab === tab.value ? styles.clientDetailTabActive : styles.clientDetailTab}
             type="button"
             aria-pressed={activeTab === tab.value}
-            onClick={() => setActiveTab(tab.value)}
+            onClick={() => selectTab(tab.value)}
           >
             {tab.label}
           </button>

@@ -1,7 +1,7 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { FormEvent, useEffect, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
 import type { ClientPortalProfile } from '@/shared/lib/db';
@@ -16,19 +16,44 @@ const TABS: Array<{ value: Tab; label: string }> = [
   { value: 'data', label: 'Данные клиента' },
 ];
 
+const TAB_VALUES = new Set<Tab>(TABS.map((tab) => tab.value));
+
+function resolveTab(value: string | null): Tab {
+  return value && TAB_VALUES.has(value as Tab) ? (value as Tab) : 'prices';
+}
+
 type ClientCabinetShellProps = {
   profile: ClientPortalProfile;
 };
 
 export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<Tab>('prices');
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState<Tab>(() => resolveTab(tabParam));
   const [currentPassword, setCurrentPassword] = useState('');
   const [nextPassword, setNextPassword] = useState('');
   const [repeatPassword, setRepeatPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [passwordStatus, setPasswordStatus] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
+
+  useEffect(() => {
+    setActiveTab(resolveTab(tabParam));
+  }, [tabParam]);
+
+  const selectTab = (tab: Tab) => {
+    setActiveTab(tab);
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === 'prices') {
+      params.delete('tab');
+    } else {
+      params.set('tab', tab);
+    }
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  };
 
   const logout = async () => {
     await fetch('/api/client/logout', { method: 'POST' });
@@ -85,7 +110,7 @@ export function ClientCabinetShell({ profile }: ClientCabinetShellProps) {
               className={`${styles.tab} ${activeTab === tab.value ? styles.tabActive : ''}`}
               type="button"
               aria-pressed={activeTab === tab.value}
-              onClick={() => setActiveTab(tab.value)}
+              onClick={() => selectTab(tab.value)}
             >
               {tab.label}
             </button>
