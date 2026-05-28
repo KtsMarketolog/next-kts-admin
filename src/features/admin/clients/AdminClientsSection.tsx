@@ -7,12 +7,8 @@ import styles from '@/app/admin/admin.module.scss';
 type ClientCompany = {
   id: number;
   title: string;
-  inn: string;
-  kpp: string;
-  contactName: string;
   email: string;
   phone: string;
-  address: string;
   note: string;
   managerId: number | null;
   managerName: string;
@@ -33,12 +29,8 @@ type Manager = {
 
 type ClientDraft = {
   title: string;
-  inn: string;
-  kpp: string;
-  contactName: string;
   email: string;
   phone: string;
-  address: string;
   note: string;
   managerId: number | null;
   supportManagerId: number | null;
@@ -51,12 +43,8 @@ type AdminClientsSectionProps = {
 
 const emptyDraft: ClientDraft = {
   title: '',
-  inn: '',
-  kpp: '',
-  contactName: '',
   email: '',
   phone: '',
-  address: '',
   note: '',
   managerId: null,
   supportManagerId: null,
@@ -79,12 +67,8 @@ function managerIdValue(value: number | null) {
 function toDraft(company: ClientCompany): ClientDraft {
   return {
     title: company.title,
-    inn: company.inn,
-    kpp: company.kpp,
-    contactName: company.contactName,
     email: company.email,
     phone: company.phone,
-    address: company.address,
     note: company.note,
     managerId: company.managerId,
     supportManagerId: company.supportManagerId,
@@ -239,18 +223,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
           <input value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} />
         </label>
         <label>
-          <span>ИНН</span>
-          <input value={draft.inn} onChange={(event) => setDraft((current) => ({ ...current, inn: event.target.value }))} />
-        </label>
-        <label>
-          <span>КПП</span>
-          <input value={draft.kpp} onChange={(event) => setDraft((current) => ({ ...current, kpp: event.target.value }))} />
-        </label>
-        <label>
-          <span>Контакт</span>
-          <input value={draft.contactName} onChange={(event) => setDraft((current) => ({ ...current, contactName: event.target.value }))} />
-        </label>
-        <label>
           <span>Email</span>
           <input value={draft.email} onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))} />
         </label>
@@ -275,10 +247,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
             supportManagers,
             'Не выбрано',
           )}
-        </label>
-        <label className={styles.clientWideField}>
-          <span>Адрес</span>
-          <input value={draft.address} onChange={(event) => setDraft((current) => ({ ...current, address: event.target.value }))} />
         </label>
         <label className={styles.checkbox}>
           <input
@@ -317,21 +285,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
                   <input value={currentDraft.title} onChange={(event) => updateCompanyDraft(company.id, { title: event.target.value })} />
                 </label>
                 <label>
-                  <span>ИНН</span>
-                  <input value={currentDraft.inn} onChange={(event) => updateCompanyDraft(company.id, { inn: event.target.value })} />
-                </label>
-                <label>
-                  <span>КПП</span>
-                  <input value={currentDraft.kpp} onChange={(event) => updateCompanyDraft(company.id, { kpp: event.target.value })} />
-                </label>
-                <label>
-                  <span>Контакт</span>
-                  <input
-                    value={currentDraft.contactName}
-                    onChange={(event) => updateCompanyDraft(company.id, { contactName: event.target.value })}
-                  />
-                </label>
-                <label>
                   <span>Email</span>
                   <input value={currentDraft.email} onChange={(event) => updateCompanyDraft(company.id, { email: event.target.value })} />
                 </label>
@@ -356,10 +309,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
                     supportManagers,
                     'Не выбрано',
                   )}
-                </label>
-                <label className={styles.clientWideField}>
-                  <span>Адрес</span>
-                  <input value={currentDraft.address} onChange={(event) => updateCompanyDraft(company.id, { address: event.target.value })} />
                 </label>
                 <label className={styles.clientWideField}>
                   <span>Заметка</span>

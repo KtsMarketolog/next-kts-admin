@@ -14,12 +14,12 @@ function managerIdFromBody(value: unknown) {
 function inputFromBody(body: Record<string, unknown>): ClientCompanyInput {
   return {
     title: normalizeTextField(body.title, 200),
-    inn: normalizeTextField(body.inn, 32),
-    kpp: normalizeTextField(body.kpp, 32),
-    contactName: normalizeTextField(body.contactName, 160),
+    inn: '',
+    kpp: '',
+    contactName: '',
     email: normalizeTextField(body.email, 180),
     phone: normalizeTextField(body.phone, 80),
-    address: normalizeTextField(body.address, 300),
+    address: '',
     note: normalizeTextField(body.note, 2000),
     managerId: managerIdFromBody(body.managerId),
     supportManagerId: managerIdFromBody(body.supportManagerId),
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       ip: getClientIp(request),
       userAgent: request.headers.get('user-agent'),
       referer: request.headers.get('referer'),
-      metadata: { title: company.title, inn: company.inn, managerId: company.managerId, supportManagerId: company.supportManagerId },
+      metadata: { title: company.title, managerId: company.managerId, supportManagerId: company.supportManagerId },
     });
     return Response.json({ company });
   } catch (error) {
