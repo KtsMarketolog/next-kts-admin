@@ -427,10 +427,10 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
                   <h3>{company.title || 'Без названия'}</h3>
                 </div>
                 <div className={styles.clientCompanyMeta}>
-                  <span>Пользователей ЛК: {company.userCount}</span>
                   {company.chatUnreadCount > 0 ? (
                     <span className={styles.clientUnreadMeta}>Новые сообщения: {company.chatUnreadCount}</span>
                   ) : null}
+                  <span>Пользователей ЛК: {company.userCount}</span>
                   <span>{company.clientLogin ? `Логин: ${company.clientLogin}` : 'Логин: email клиента'}</span>
                   <span>{company.managerName ? `Менеджер: ${company.managerName}` : 'Менеджер не выбран'}</span>
                   <span>{company.supportManagerName ? `Сопровождение: ${company.supportManagerName}` : 'Сопровождение не выбрано'}</span>
