@@ -133,9 +133,145 @@
   padding-top: $apx-12;
 }
 
+.clientOpenLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: $apx-42;
+  border-radius: $apx-8;
+  background: #e9eaf2;
+  color: #242633;
+  padding: 0 $apx-18;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.clientDetailSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-12;
+  margin-bottom: $apx-18;
+}
+
+.clientDetailInfoGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $apx-12;
+}
+
+.clientDetailInfoItem,
+.clientDetailNote,
+.clientEmptyState {
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: $apx-14;
+}
+
+.clientDetailInfoItem {
+  display: grid;
+  gap: $apx-6;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #111827;
+    font-size: $apx-15;
+    line-height: 1.35;
+  }
+}
+
+.clientDetailNote {
+  grid-column: span 4;
+
+  span {
+    display: block;
+    margin-bottom: $apx-8;
+    color: #6f7182;
+    font-size: $apx-12;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  p {
+    margin: 0;
+    color: #242633;
+    font-size: $apx-14;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+}
+
+.clientDetailTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+  margin-bottom: $apx-14;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-8;
+  background: #f4f5fa;
+  padding: $apx-4;
+}
+
+.clientDetailTab,
+.clientDetailTabActive {
+  min-height: $apx-38 !important;
+  border-radius: $apx-6 !important;
+  padding: 0 $apx-14 !important;
+  font-size: $apx-14;
+  font-weight: 800;
+}
+
+.clientDetailTab {
+  background: transparent !important;
+  color: #4b4e61 !important;
+}
+
+.clientDetailTabActive {
+  background: #260b86 !important;
+  color: #fff !important;
+}
+
+.clientDetailPanel {
+  border: $apx-1 solid #e0e2ee;
+  border-radius: $apx-8;
+  background: #fbfcff;
+  padding: $apx-16;
+}
+
+.clientEmptyState {
+  display: grid;
+  gap: $apx-8;
+  min-height: $apx-150;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+  background: #fff;
+
+  h3 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-20;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-14;
+    font-weight: 600;
+  }
+}
+
 @media (max-width: 1024px) {
   .clientCreateCard,
-  .clientCompanyGrid {
+  .clientCompanyGrid,
+  .clientDetailSummary,
+  .clientDetailInfoGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -145,6 +281,10 @@
 
   .clientCompanyMeta {
     justify-content: flex-start;
+  }
+
+  .clientDetailNote {
+    grid-column: span 2;
   }
 }
 
@@ -156,11 +296,18 @@
   }
 
   .clientCreateCard,
-  .clientCompanyGrid {
+  .clientCompanyGrid,
+  .clientDetailSummary,
+  .clientDetailInfoGrid {
     grid-template-columns: 1fr;
   }
 
-  .clientWideField {
+  .clientWideField,
+  .clientDetailNote {
     grid-column: span 1;
+  }
+
+  .clientOpenLink {
+    width: 100%;
   }
 }

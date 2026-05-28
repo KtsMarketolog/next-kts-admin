@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
@@ -488,6 +489,9 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
                   />
                   Активна
                 </label>
+                <Link className={styles.clientOpenLink} href={`/admin/clients/${company.id}`}>
+                  Перейти
+                </Link>
                 <button
                   className={styles.secondary}
                   type="button"

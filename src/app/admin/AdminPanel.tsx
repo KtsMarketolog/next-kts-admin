@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AdminDashboard } from '@/features/admin/dashboard/AdminDashboard';
+import { AdminClientDetailSection } from '@/features/admin/clients/AdminClientDetailSection';
 import { AdminClientsSection } from '@/features/admin/clients/AdminClientsSection';
 import { useAdminBrandPortfolio } from '@/features/admin/model/useAdminBrandPortfolio';
 import { useAdminGroupCompanies } from '@/features/admin/model/useAdminGroupCompanies';
@@ -49,6 +50,8 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   const [savedSetting, setSavedSetting] = useState<SettingKey | null>(null);
   const loadAdminDataRef = useRef<() => Promise<void>>(async () => {});
   const authenticatedRef = useRef(Boolean(initialSession));
+  const clientDetailMatch = /^\/admin\/clients\/(\d+)(?:\/)?$/.exec(pathname);
+  const clientDetailId = clientDetailMatch ? Number(clientDetailMatch[1]) : null;
 
   const showStatus = (message: string) => {
     setStatus(message);
@@ -347,7 +350,12 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
         <AdminWholesaleGateway canManageWholesale={sessionRole === 'admin' || sessionRole === 'wholesale_admin'} onBack={() => switchArea('home')} />
       )}
 
-      {activeArea === 'clients' && <AdminClientsSection onBack={() => switchArea('home')} />}
+      {activeArea === 'clients' &&
+        (clientDetailId ? (
+          <AdminClientDetailSection clientId={clientDetailId} onBack={() => router.push('/admin/clients', { scroll: false })} />
+        ) : (
+          <AdminClientsSection onBack={() => switchArea('home')} />
+        ))}
 
       {activeArea === 'site' && (
         <div className={styles.adminShell}>
