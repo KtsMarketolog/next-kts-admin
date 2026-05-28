@@ -15,6 +15,7 @@ import {
   type CatalogCategory,
   type CatalogGroup,
   type CatalogRow,
+  type ClientCompanyOption,
   type Manager,
   type PriceEditor,
   type PriceItem,
@@ -34,6 +35,7 @@ type WholesalePriceEditorScreenProps = {
   setEditor: Dispatch<SetStateAction<PriceEditor>>;
   commentRows: number;
   canManageWholesale: boolean;
+  clientCompanies: ClientCompanyOption[];
   developmentManagers: Manager[];
   supportManagers: Manager[];
   catalog: CatalogCategory[];
@@ -73,6 +75,7 @@ export function WholesalePriceEditorScreen({
   setEditor,
   commentRows,
   canManageWholesale,
+  clientCompanies,
   developmentManagers,
   supportManagers,
   catalog,
@@ -101,6 +104,12 @@ export function WholesalePriceEditorScreen({
   busy,
   router,
 }: WholesalePriceEditorScreenProps) {
+  const selectedClientCompany =
+    clientCompanies.find((company) => company.id === editor.clientCompanyId) ??
+    clientCompanies.find((company) => company.title.trim().toLowerCase() === editor.clientName.trim().toLowerCase()) ??
+    null;
+  const hasLegacyClientName = Boolean(editor.clientName.trim() && !selectedClientCompany);
+
   return (
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
@@ -133,7 +142,29 @@ export function WholesalePriceEditorScreen({
           </label>
           <label>
             <span>Клиент / компания</span>
-            <input value={editor.clientName} onChange={(event) => setEditor({ ...editor, clientName: event.target.value })} />
+            <select
+              value={selectedClientCompany?.id ?? ''}
+              onChange={(event) => {
+                const companyId = Number(event.target.value);
+                const company = clientCompanies.find((item) => item.id === companyId) ?? null;
+                setEditor({
+                  ...editor,
+                  clientCompanyId: company?.id ?? null,
+                  clientName: company?.title ?? '',
+                });
+              }}
+              disabled={clientCompanies.length === 0}
+            >
+              <option value="">Выберите клиента</option>
+              {clientCompanies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.title}
+                </option>
+              ))}
+            </select>
+            {hasLegacyClientName ? (
+              <span className={styles.fieldHint}>Текущий клиент не выбран из списка: {editor.clientName}</span>
+            ) : null}
           </label>
           <label>
             <span>Token ссылки</span>

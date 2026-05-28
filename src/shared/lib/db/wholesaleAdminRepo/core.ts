@@ -7,6 +7,7 @@ import {
 
 import { trackAnalyticsEvent, type AnalyticsActorType, type AnalyticsEventType } from '../analyticsRepo';
 import { query } from '../client';
+import { assertClientCompanyVisible } from '../clientCompaniesRepo';
 import { ensureSiteSchema } from '../schema';
 
 export type WholesaleManager = {
@@ -49,6 +50,7 @@ export type WholesaleManagerProfile = {
 export type WholesalePriceListSummary = {
   id: number;
   title: string;
+  clientCompanyId: number | null;
   clientName: string;
   token: string;
   validUntil: string | null;
@@ -120,6 +122,7 @@ export type WholesalePriceGroupStockSettingInput = {
 export type WholesalePriceListEditor = {
   id: number;
   title: string;
+  clientCompanyId: number | null;
   clientName: string;
   token: string;
   validUntil: string | null;
@@ -738,6 +741,7 @@ type ManagerRow = {
 type PriceListRow = {
   id: string;
   title: string;
+  client_company_id: string | null;
   client_name: string;
   token: string;
   valid_until: string | null;
@@ -854,6 +858,25 @@ function actionEventType(action: string): AnalyticsEventType {
 function clientIdFromName(clientName?: string | null) {
   const value = clientName?.trim();
   return value ? value.toLowerCase() : null;
+}
+
+async function resolveWholesaleClientCompany(clientCompanyId: number | null | undefined, session?: AdminSession | null) {
+  const id = Number(clientCompanyId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error('Выберите клиента из списка');
+  }
+  if (session) await assertClientCompanyVisible(id, session);
+
+  const result = await query<{ id: string; title: string }>(
+    `select id::text, title
+     from client_companies
+     where id = $1 and is_active = true
+     limit 1`,
+    [id],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('Клиент не найден или отключен');
+  return { id: Number(row.id), title: row.title };
 }
 
 function actorMeta(session?: AdminSession | null) {
@@ -1510,6 +1533,7 @@ function mapPriceList(row: PriceListRow): WholesalePriceListSummary {
   return {
     id: Number(row.id),
     title: row.title,
+    clientCompanyId: row.client_company_id ? Number(row.client_company_id) : null,
     clientName: row.client_name,
     token: row.token,
     validUntil: row.valid_until,
@@ -1691,6 +1715,7 @@ async function getWholesalePriceListsByManagerId(managerId: number | null) {
     `select
        pl.id::text,
        pl.title,
+       pl.client_company_id::text,
        pl.client_name,
        pl.token,
        pl.valid_until::text,
@@ -1869,13 +1894,14 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
   await ensureSiteSchema();
   const managerId = sessionManagerId(session);
   const priceList = await query<
-    Omit<WholesalePriceListEditor, 'id' | 'items' | 'managerId' | 'supportManagerId' | 'priceGroupStockSettings'> & {
+    Omit<WholesalePriceListEditor, 'id' | 'items' | 'clientCompanyId' | 'managerId' | 'supportManagerId' | 'priceGroupStockSettings'> & {
       id: string;
+      client_company_id: string | null;
       manager_id: string | null;
       support_manager_id: string | null;
     }
   >(
-    `select id::text, title, client_name as "clientName", token, valid_until::text as "validUntil",
+    `select id::text, title, client_company_id::text, client_name as "clientName", token, valid_until::text as "validUntil",
             comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", show_stock as "showStock",
             show_stock_text as "showStockText", is_active as "isActive", manager_id::text, support_manager_id::text
      from wholesale_price_lists
@@ -1918,6 +1944,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
   return {
     id: Number(row.id),
     title: row.title,
+    clientCompanyId: row.client_company_id ? Number(row.client_company_id) : null,
     clientName: row.clientName,
     token: row.token,
     validUntil: row.validUntil,
@@ -2055,15 +2082,17 @@ export async function createWholesalePriceList(
   await ensureSiteSchema();
   const managerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : input.managerId;
   const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId);
+  const clientCompany = await resolveWholesaleClientCompany(input.clientCompanyId, session);
   const result = await query<{ id: string }>(
     `insert into wholesale_price_lists (
-       title, client_name, manager_id, support_manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, show_stock_text, is_active
+       title, client_company_id, client_name, manager_id, support_manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, show_stock_text, is_active
      )
-     values ($1, $2, $3, $4, nullif($5, '')::date, $6, $7, $8, $9, $10, $11, $12)
+     values ($1, $2, $3, $4, $5, nullif($6, '')::date, $7, $8, $9, $10, $11, $12, $13)
      returning id`,
     [
       input.title,
-      input.clientName,
+      clientCompany.id,
+      clientCompany.title,
       managerId,
       supportManagerId,
       input.validUntil ?? '',
@@ -2098,7 +2127,8 @@ export async function createWholesalePriceList(
     token: input.token,
     metadata: {
       title: input.title,
-      clientName: input.clientName,
+      clientCompanyId: clientCompany.id,
+      clientName: clientCompany.title,
     },
   });
   return id;
@@ -2128,6 +2158,8 @@ export async function updateWholesalePriceList(
   );
   const previousRow = previous.rows[0];
   if (!previousRow) return;
+  const clientCompany = await resolveWholesaleClientCompany(input.clientCompanyId, session);
+  const nextInput = { ...input, clientCompanyId: clientCompany.id, clientName: clientCompany.title };
   const previousItems = await query<{ count: string }>(
     `select count(*)::text as count
      from wholesale_price_list_items
@@ -2135,85 +2167,88 @@ export async function updateWholesalePriceList(
     [id],
   );
   const previousVisibleItems = Number(previousItems.rows[0]?.count ?? 0);
-  const nextVisibleItems = input.items.filter((item) => item.visible).length;
+  const nextVisibleItems = nextInput.items.filter((item) => item.visible).length;
 
   await query(
     `update wholesale_price_lists
      set title = $2,
-         client_name = $3,
-         manager_id = $4,
-         support_manager_id = $5,
-         valid_until = nullif($6, '')::date,
-         token = $7,
-         comment = $8,
-         workflow_status = $9,
-         show_retail_prices = $10,
-         show_stock = $11,
-         show_stock_text = $12,
-         is_active = $13,
+         client_company_id = $3,
+         client_name = $4,
+         manager_id = $5,
+         support_manager_id = $6,
+         valid_until = nullif($7, '')::date,
+         token = $8,
+         comment = $9,
+         workflow_status = $10,
+         show_retail_prices = $11,
+         show_stock = $12,
+         show_stock_text = $13,
+         is_active = $14,
          updated_at = now()
-     where id = $1 and ($14::bigint is null or manager_id = $14)`,
+     where id = $1 and ($15::bigint is null or manager_id = $15)`,
     [
       id,
-      input.title,
-      input.clientName,
+      nextInput.title,
+      clientCompany.id,
+      clientCompany.title,
       managerId,
       supportManagerId,
-      input.validUntil ?? '',
-      input.token,
-      input.comment,
-      input.workflowStatus,
-      input.showRetailPrices,
-      input.showStock,
-      input.showStockText,
-      input.isActive,
+      nextInput.validUntil ?? '',
+      nextInput.token,
+      nextInput.comment,
+      nextInput.workflowStatus,
+      nextInput.showRetailPrices,
+      nextInput.showStock,
+      nextInput.showStockText,
+      nextInput.isActive,
       sessionManagerId(session),
     ],
   );
-  await replaceWholesalePriceListItems(id, input.items);
-  await replaceWholesalePriceListGroupStockSettings(id, input.priceGroupStockSettings);
+  await replaceWholesalePriceListItems(id, nextInput.items);
+  await replaceWholesalePriceListGroupStockSettings(id, nextInput.priceGroupStockSettings);
   const actor = actorMeta(session);
   await insertPriceListEvent({
     priceListId: id,
     ownerManagerId: managerId,
     actorManagerId: actor.actorManagerId,
     actorRole: actor.actorRole,
-    title: input.title,
-    action: priceListAction(previousRow, input),
-    details: priceListDetails(previousRow, input),
+    title: nextInput.title,
+    action: priceListAction(previousRow, nextInput),
+    details: priceListDetails(previousRow, nextInput),
   });
   const baseEvent = {
     actorType: actorTypeFromRole(actor.actorRole),
     actorUserId: actor.actorManagerId,
     managerId,
     priceListId: id,
-    token: input.token,
+    token: nextInput.token,
   };
-  if ((previousRow.client_name || '') !== input.clientName) {
+  if ((previousRow.client_name || '') !== nextInput.clientName) {
     await trackAnalyticsEvent({
       ...baseEvent,
       eventType: 'price_client_changed',
-      clientId: clientIdFromName(input.clientName),
-      metadata: { from: previousRow.client_name, to: input.clientName, title: input.title },
+      clientId: clientIdFromName(nextInput.clientName),
+      metadata: { from: previousRow.client_name, to: nextInput.clientName, title: nextInput.title, clientCompanyId: clientCompany.id },
     });
   }
-  if ((previousRow.valid_until || '') !== (input.validUntil || '')) {
+  if ((previousRow.valid_until || '') !== (nextInput.validUntil || '')) {
     await trackAnalyticsEvent({
       ...baseEvent,
       eventType: 'price_expiration_changed',
-      metadata: { from: previousRow.valid_until, to: input.validUntil || null, title: input.title },
+      metadata: { from: previousRow.valid_until, to: nextInput.validUntil || null, title: nextInput.title },
     });
   }
-  if (normalizeWholesalePriceWorkflowStatus(previousRow.workflow_status) !== input.workflowStatus) {
+  if (normalizeWholesalePriceWorkflowStatus(previousRow.workflow_status) !== nextInput.workflowStatus) {
     await trackAnalyticsEvent({
       ...baseEvent,
       eventType: 'price_status_changed',
-      clientId: clientIdFromName(input.clientName),
+      clientId: clientIdFromName(nextInput.clientName),
       metadata: {
         from: getWholesalePriceWorkflowStatusLabel(previousRow.workflow_status),
-        to: getWholesalePriceWorkflowStatusLabel(input.workflowStatus),
-        title: input.title,
-        clientName: input.clientName,
+        to: getWholesalePriceWorkflowStatusLabel(nextInput.workflowStatus),
+        title: nextInput.title,
+        clientCompanyId: clientCompany.id,
+        clientName: nextInput.clientName,
       },
     });
   }
@@ -2225,7 +2260,7 @@ export async function updateWholesalePriceList(
         added: nextVisibleItems - previousVisibleItems,
         from: previousVisibleItems,
         to: nextVisibleItems,
-        title: input.title,
+        title: nextInput.title,
       },
     });
   }
@@ -2237,7 +2272,7 @@ export async function updateWholesalePriceList(
         removed: previousVisibleItems - nextVisibleItems,
         from: previousVisibleItems,
         to: nextVisibleItems,
-        title: input.title,
+        title: nextInput.title,
       },
     });
   }

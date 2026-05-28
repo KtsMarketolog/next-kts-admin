@@ -21,6 +21,12 @@ export type Manager = {
 
 export type ManagerRole = Manager['role'];
 
+export type ClientCompanyOption = {
+  id: number;
+  title: string;
+  isActive: boolean;
+};
+
 export type ManagerDraft = {
   name: string;
   login: string;
@@ -56,6 +62,7 @@ export function saveManagerRoleTab(tab: ManagerRole) {
 export type PriceList = {
   id: number;
   title: string;
+  clientCompanyId: number | null;
   clientName: string;
   token: string;
   validUntil: string | null;
@@ -127,6 +134,7 @@ export type PriceGroupStockSetting = {
 export type PriceEditor = {
   id?: number;
   title: string;
+  clientCompanyId: number | null;
   clientName: string;
   token: string;
   validUntil: string;
@@ -194,6 +202,7 @@ export function stockLabel(product: CatalogProduct) {
 export function emptyEditor(): PriceEditor {
   return {
     title: getDefaultPriceTitle(),
+    clientCompanyId: null,
     clientName: '',
     token: makeToken(),
     validUntil: '',

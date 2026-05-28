@@ -70,6 +70,11 @@ function supportManagerIdFromBody(value: unknown) {
   return Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
 }
 
+function clientCompanyIdFromBody(value: unknown) {
+  const clientCompanyId = Number(value);
+  return Number.isInteger(clientCompanyId) && clientCompanyId > 0 ? clientCompanyId : null;
+}
+
 export async function GET(_request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
@@ -109,12 +114,17 @@ export async function PUT(request: Request, context: Context) {
   if (!supportManagerId) {
     return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
   }
+  const clientCompanyId = clientCompanyIdFromBody(body.clientCompanyId);
+  if (!clientCompanyId) {
+    return Response.json({ error: 'Выберите клиента из списка' }, { status: 400 });
+  }
 
   try {
     await updateWholesalePriceList(
       numericId,
       {
         title,
+        clientCompanyId,
         clientName: normalizeTextField(body.clientName, 200),
         managerId: Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null,
         supportManagerId,

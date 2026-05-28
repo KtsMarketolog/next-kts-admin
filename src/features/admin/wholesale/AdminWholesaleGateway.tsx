@@ -35,6 +35,7 @@ import {
   readManagerRoleTab,
   type AdminWholesaleGatewayProps,
   type CatalogCategory,
+  type ClientCompanyOption,
   type CurrentManager,
   type Manager,
   type ManagerRole,
@@ -58,6 +59,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [currentManager, setCurrentManager] = useState<CurrentManager | null>(null);
   const [managerDraft, setManagerDraft] = useState(emptyManager);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  const [clientCompanies, setClientCompanies] = useState<ClientCompanyOption[]>([]);
   const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
   const [editor, setEditor] = useState<PriceEditor>(() => emptyEditor());
   const [editorLoading, setEditorLoading] = useState(startsInEditor);
@@ -202,6 +204,28 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     return nextCatalog as CatalogCategory[];
   };
 
+  const loadClientCompanies = async () => {
+    const res = await fetch('/api/admin/clients', { cache: 'no-store' });
+    if (!res.ok) {
+      setClientCompanies([]);
+      return [];
+    }
+    const data = await res.json().catch(() => ({}));
+    const nextClientCompanies = Array.isArray(data.companies)
+      ? data.companies
+          .filter((company: ClientCompanyOption) => company && company.isActive !== false)
+          .map((company: ClientCompanyOption) => ({
+            id: Number(company.id),
+            title: String(company.title ?? '').trim(),
+            isActive: company.isActive !== false,
+          }))
+          .filter((company: ClientCompanyOption) => Number.isInteger(company.id) && company.id > 0 && company.title)
+          .sort((first: ClientCompanyOption, second: ClientCompanyOption) => first.title.localeCompare(second.title, 'ru'))
+      : [];
+    setClientCompanies(nextClientCompanies);
+    return nextClientCompanies;
+  };
+
   useEffect(() => {
     if ((screen === 'create' || screen === 'edit') || (canManageWholesale && screen === 'admin')) void loadManagers();
     if (screen === 'manager') {
@@ -229,10 +253,15 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
     async function loadEditorData() {
       setEditorLoading(true);
-      const nextCatalog = await loadCatalog();
+      const [nextCatalog] = await Promise.all([loadCatalog(), loadClientCompanies()]);
       if (!isActive) return;
       if (screen === 'create') {
-        setEditor({ ...emptyEditor(), managerId: canManageWholesale ? createManagerId : null, supportManagerId: null, items: mergeEditorItems(nextCatalog, []) });
+        setEditor({
+          ...emptyEditor(),
+          managerId: canManageWholesale ? createManagerId : null,
+          supportManagerId: null,
+          items: mergeEditorItems(nextCatalog, []),
+        });
         setEditorLoading(false);
         return;
       }
@@ -254,6 +283,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       setEditor({
         id: priceList.id,
         title: priceList.title ?? '',
+        clientCompanyId: priceList.clientCompanyId ?? null,
         clientName: priceList.clientName ?? '',
         token: priceList.token ?? makeToken(),
         validUntil: priceList.validUntil ?? '',
@@ -492,6 +522,13 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       showStatus('Введите название прайса');
       return;
     }
+    const selectedClientCompany = clientCompanies.find((company) => company.id === editor.clientCompanyId)
+      ?? clientCompanies.find((company) => company.title.trim().toLowerCase() === editor.clientName.trim().toLowerCase())
+      ?? null;
+    if (!selectedClientCompany) {
+      showStatus('Выберите клиента из списка');
+      return;
+    }
     if (!editor.supportManagerId) {
       showStatus('Выберите менеджера по сопровождению');
       return;
@@ -503,7 +540,11 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(editor),
+      body: JSON.stringify({
+        ...editor,
+        clientCompanyId: selectedClientCompany.id,
+        clientName: selectedClientCompany.title,
+      }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -668,6 +709,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         setEditor={setEditor}
         commentRows={commentRows}
         canManageWholesale={canManageWholesale}
+        clientCompanies={clientCompanies}
         developmentManagers={developmentManagers}
         supportManagers={supportManagers}
         catalog={catalog}

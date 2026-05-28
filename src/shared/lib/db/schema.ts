@@ -448,6 +448,7 @@ async function ensureSiteSchemaInternal() {
     alter table wholesale_price_list_events add column if not exists details text not null default '';
     alter table wholesale_price_list_events alter column price_list_id drop not null;
     alter table client_users add column if not exists password_changed_at timestamptz;
+    alter table wholesale_price_lists add column if not exists client_company_id bigint references client_companies(id) on delete set null;
 
     do $$
     begin
@@ -490,6 +491,7 @@ async function ensureSiteSchemaInternal() {
     create index if not exists wholesale_price_list_items_product_idx on wholesale_price_list_items(wholesale_product_id);
     create index if not exists wholesale_price_group_stock_settings_price_list_idx on wholesale_price_list_group_stock_settings(price_list_id);
     create index if not exists wholesale_price_lists_manager_idx on wholesale_price_lists(manager_id);
+    create index if not exists wholesale_price_lists_client_company_idx on wholesale_price_lists(client_company_id);
     create index if not exists wholesale_price_lists_workflow_status_idx on wholesale_price_lists(workflow_status);
     create index if not exists wholesale_price_list_events_manager_idx on wholesale_price_list_events(manager_id, created_at desc);
     create index if not exists wholesale_price_list_events_owner_manager_idx on wholesale_price_list_events(owner_manager_id, created_at desc);
@@ -544,6 +546,7 @@ async function ensureSiteSchemaInternal() {
   await query(`alter table wholesale_price_lists add column if not exists workflow_status text not null default 'not_sent'`);
   await query(`alter table wholesale_price_lists add column if not exists show_stock boolean not null default true`);
   await query(`alter table wholesale_price_lists add column if not exists show_stock_text boolean not null default false`);
+  await query(`alter table wholesale_price_lists add column if not exists client_company_id bigint references client_companies(id) on delete set null`);
   await query(`
     create table if not exists wholesale_price_list_group_stock_settings (
       id bigserial primary key,
@@ -596,6 +599,7 @@ async function ensureSiteSchemaInternal() {
   await query(`create index if not exists wholesale_managers_role_idx on wholesale_managers(role)`);
   await query(`create index if not exists wholesale_managers_support_idx on wholesale_managers(support_manager_id)`);
   await query(`create index if not exists wholesale_price_lists_support_manager_idx on wholesale_price_lists(support_manager_id)`);
+  await query(`create index if not exists wholesale_price_lists_client_company_idx on wholesale_price_lists(client_company_id)`);
   await query(`create index if not exists wholesale_products_catalog_product_idx on wholesale_products(catalog_product_id)`);
   await query(`create index if not exists wholesale_price_group_stock_settings_price_list_idx on wholesale_price_list_group_stock_settings(price_list_id)`);
   await query(`create index if not exists wholesale_analytics_events_manager_idx on wholesale_analytics_events(manager_id, created_at desc)`);
