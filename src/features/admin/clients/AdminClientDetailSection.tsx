@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
@@ -43,8 +43,6 @@ const tabs: Array<{ value: ClientTab; label: string; description: string }> = [
 ];
 
 const CLIENT_TAB_VALUES = new Set<ClientTab>(tabs.map((tab) => tab.value));
-const UNREAD_POLL_INTERVAL_MS = 5000;
-
 function resolveClientTab(value: string | null): ClientTab {
   return value && CLIENT_TAB_VALUES.has(value as ClientTab) ? (value as ClientTab) : 'prices';
 }
@@ -257,27 +255,38 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     setActiveTab(resolveClientTab(tabParam));
   }, [tabParam]);
 
+  const loadUnreadCount = useCallback(async () => {
+    const response = await fetch(`/api/admin/clients/${clientId}/chat/unread`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    setChatUnreadCount(Number(data.unreadCount ?? 0));
+  }, [clientId]);
+
+  const loadDocuments = useCallback(async () => {
+    const response = await fetch(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    setDocuments(Array.isArray(data.documents) ? data.documents : []);
+  }, [clientId]);
+
   useEffect(() => {
     if (activeTab === 'chat') return undefined;
-    let cancelled = false;
-
-    const loadUnreadCount = async () => {
-      const response = await fetch(`/api/admin/clients/${clientId}/chat/unread`, { cache: 'no-store' });
-      if (!response.ok) return;
-      const data = await response.json().catch(() => ({}));
-      if (!cancelled) setChatUnreadCount(Number(data.unreadCount ?? 0));
-    };
 
     void loadUnreadCount();
-    const intervalId = window.setInterval(() => {
+    if (activeTab === 'documents') void loadDocuments();
+
+    const events = new EventSource(`/api/admin/clients/${clientId}/events`);
+    events.addEventListener('chat.updated', () => {
       void loadUnreadCount();
-    }, UNREAD_POLL_INTERVAL_MS);
+    });
+    events.addEventListener('documents.updated', () => {
+      if (activeTab === 'documents') void loadDocuments();
+    });
 
     return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
+      events.close();
     };
-  }, [activeTab, clientId]);
+  }, [activeTab, clientId, loadDocuments, loadUnreadCount]);
 
   const selectTab = (tab: ClientTab) => {
     setActiveTab(tab);
@@ -444,6 +453,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
       return (
         <ClientChatPanel
           endpoint={`/api/admin/clients/${client.id}/chat`}
+          eventsEndpoint={`/api/admin/clients/${client.id}/events`}
           currentAuthorType="employee"
           onUnreadCountChange={setChatUnreadCount}
         />

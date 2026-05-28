@@ -1,5 +1,6 @@
 import { requireClientSession } from '@/shared/lib/clientAuth';
-import { createClientChatMessageForClient, getClientChatConversationForClient } from '@/shared/lib/db';
+import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
+import { createClientChatMessageForClient, getClientChatConversationForClient, getClientChatUnreadCountForClient } from '@/shared/lib/db';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { checkDbRateLimit, getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
@@ -11,7 +12,11 @@ export async function GET() {
   const { denied, session } = await requireClientSession();
   if (denied) return denied;
 
+  const unreadBefore = await getClientChatUnreadCountForClient(session);
   const chat = await getClientChatConversationForClient(session);
+  if (unreadBefore > 0) {
+    publishClientRealtimeEvent({ type: 'chat.updated', companyId: session.companyId });
+  }
   return Response.json(chat);
 }
 
@@ -31,5 +36,6 @@ export async function POST(request: Request) {
   if (!text) return Response.json({ error: 'Введите сообщение' }, { status: 400 });
 
   const message = await createClientChatMessageForClient(session, text);
+  publishClientRealtimeEvent({ type: 'chat.updated', companyId: session.companyId });
   return Response.json({ message });
 }

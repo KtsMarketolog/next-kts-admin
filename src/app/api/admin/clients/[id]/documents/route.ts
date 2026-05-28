@@ -1,6 +1,7 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
 import { saveClientDocumentUpload, removeClientDocumentFile } from '@/shared/lib/clientDocumentStorage';
+import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { createClientDocument, getClientDocumentsForAdmin } from '@/shared/lib/db';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
@@ -71,6 +72,7 @@ export async function POST(request: Request, context: Context) {
       session,
     );
 
+    publishClientRealtimeEvent({ type: 'documents.updated', companyId: clientId });
     return Response.json({ document });
   } catch (error) {
     if (savedFile) await removeClientDocumentFile(savedFile.filePath);

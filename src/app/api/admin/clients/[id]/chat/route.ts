@@ -1,6 +1,7 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
-import { createClientChatMessageForAdmin, getClientChatConversationForAdmin } from '@/shared/lib/db';
+import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
+import { createClientChatMessageForAdmin, getClientChatConversationForAdmin, getClientChatUnreadCountForAdmin } from '@/shared/lib/db';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
@@ -22,7 +23,11 @@ export async function GET(_request: Request, context: Context) {
   if (!clientId) return Response.json({ error: 'Некорректный клиент' }, { status: 400 });
 
   try {
+    const unreadBefore = await getClientChatUnreadCountForAdmin(clientId, session);
     const chat = await getClientChatConversationForAdmin(clientId, session);
+    if (unreadBefore > 0) {
+      publishClientRealtimeEvent({ type: 'chat.updated', companyId: clientId });
+    }
     return Response.json(chat);
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось загрузить чат' }, { status: 400 });
@@ -48,6 +53,7 @@ export async function POST(request: Request, context: Context) {
 
   try {
     const message = await createClientChatMessageForAdmin(clientId, session, text);
+    publishClientRealtimeEvent({ type: 'chat.updated', companyId: clientId });
     return Response.json({ message });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось отправить сообщение' }, { status: 400 });

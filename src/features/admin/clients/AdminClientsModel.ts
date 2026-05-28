@@ -50,8 +50,6 @@ export const emptyDraft: ClientDraft = {
   password: '',
 };
 
-export const UNREAD_POLL_INTERVAL_MS = 5000;
-
 export function readApiErrorFallback(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }

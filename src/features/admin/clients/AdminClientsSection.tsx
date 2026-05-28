@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
 import {
@@ -13,7 +13,6 @@ import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { AdminClientCompanyCard } from './AdminClientCompanyCard';
 import { AdminClientCreateForm } from './AdminClientCreateForm';
 import {
-  UNREAD_POLL_INTERVAL_MS,
   emptyDraft,
   readApiError,
   readApiErrorFallback,
@@ -69,7 +68,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     setManagers(Array.isArray(data.managers) ? data.managers : []);
   };
 
-  const loadUnreadCounts = async () => {
+  const loadUnreadCounts = useCallback(async () => {
     const response = await fetch('/api/admin/clients/chat-unread', { cache: 'no-store' });
     if (!response.ok) return;
     const data = await response.json().catch(() => ({}));
@@ -84,7 +83,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         chatUnreadCount: counts.get(company.id) ?? 0,
       })),
     );
-  };
+  }, []);
 
   useEffect(() => {
     setClientPasswords(readClientCompanyPasswords());
@@ -95,14 +94,15 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
 
   useEffect(() => {
     void loadUnreadCounts();
-    const intervalId = window.setInterval(() => {
+    const events = new EventSource('/api/admin/clients/events');
+    events.addEventListener('chat.updated', () => {
       void loadUnreadCounts();
-    }, UNREAD_POLL_INTERVAL_MS);
+    });
 
     return () => {
-      window.clearInterval(intervalId);
+      events.close();
     };
-  }, []);
+  }, [loadUnreadCounts]);
 
   const validateClientPassword = (password: string) => {
     const passwordPolicy = validatePasswordPolicy(password);

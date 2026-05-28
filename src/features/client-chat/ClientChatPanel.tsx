@@ -17,11 +17,10 @@ type ChatMessage = {
 
 type ClientChatPanelProps = {
   endpoint: string;
+  eventsEndpoint: string;
   currentAuthorType: ChatAuthorType;
   onUnreadCountChange?: (count: number) => void;
 };
-
-const CHAT_POLL_INTERVAL_MS = 5000;
 
 function formatMessageTime(value: string) {
   const date = new Date(value);
@@ -39,7 +38,7 @@ async function readApiError(response: Response, fallback: string) {
   return typeof data?.error === 'string' && data.error ? data.error : fallback;
 }
 
-export function ClientChatPanel({ endpoint, currentAuthorType, onUnreadCountChange }: ClientChatPanelProps) {
+export function ClientChatPanel({ endpoint, eventsEndpoint, currentAuthorType, onUnreadCountChange }: ClientChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -79,15 +78,16 @@ export function ClientChatPanel({ endpoint, currentAuthorType, onUnreadCountChan
         }
       });
 
-    const intervalId = window.setInterval(() => {
+    const events = new EventSource(eventsEndpoint);
+    events.addEventListener('chat.updated', () => {
       loadMessages(true).catch(() => undefined);
-    }, CHAT_POLL_INTERVAL_MS);
+    });
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      events.close();
     };
-  }, [loadMessages]);
+  }, [eventsEndpoint, loadMessages]);
 
   useEffect(() => {
     scrollToBottom();

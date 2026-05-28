@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
@@ -24,7 +24,6 @@ const TABS: Array<{ value: Tab; label: string; description: string }> = [
 ];
 
 const TAB_VALUES = new Set<Tab>(TABS.map((tab) => tab.value));
-const UNREAD_POLL_INTERVAL_MS = 5000;
 
 function resolveTab(value: string | null): Tab {
   return value && TAB_VALUES.has(value as Tab) ? (value as Tab) : 'prices';
@@ -159,6 +158,7 @@ export function ClientCabinetShell({ documents, profile }: ClientCabinetShellPro
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState<Tab>(() => resolveTab(tabParam));
+  const [clientDocuments, setClientDocuments] = useState<ClientDocument[]>(documents);
   const [chatUnreadCount, setChatUnreadCount] = useState(profile.company.chatUnreadCount || 0);
   const [currentPassword, setCurrentPassword] = useState('');
   const [nextPassword, setNextPassword] = useState('');
@@ -172,26 +172,41 @@ export function ClientCabinetShell({ documents, profile }: ClientCabinetShellPro
   }, [tabParam]);
 
   useEffect(() => {
-    if (activeTab === 'chat') return undefined;
-    let cancelled = false;
+    setClientDocuments(documents);
+  }, [documents]);
 
-    const loadUnreadCount = async () => {
-      const response = await fetch('/api/client/chat/unread', { cache: 'no-store' });
-      if (!response.ok) return;
-      const data = await response.json().catch(() => ({}));
-      if (!cancelled) setChatUnreadCount(Number(data.unreadCount ?? 0));
-    };
+  const loadUnreadCount = useCallback(async () => {
+    const response = await fetch('/api/client/chat/unread', { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    setChatUnreadCount(Number(data.unreadCount ?? 0));
+  }, []);
+
+  const loadDocuments = useCallback(async () => {
+    const response = await fetch('/api/client/documents', { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    setClientDocuments(Array.isArray(data.documents) ? data.documents : []);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'chat') return undefined;
 
     void loadUnreadCount();
-    const intervalId = window.setInterval(() => {
+    if (activeTab === 'documents') void loadDocuments();
+
+    const events = new EventSource('/api/client/events');
+    events.addEventListener('chat.updated', () => {
       void loadUnreadCount();
-    }, UNREAD_POLL_INTERVAL_MS);
+    });
+    events.addEventListener('documents.updated', () => {
+      if (activeTab === 'documents') void loadDocuments();
+    });
 
     return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
+      events.close();
     };
-  }, [activeTab]);
+  }, [activeTab, loadDocuments, loadUnreadCount]);
 
   const selectTab = (tab: Tab) => {
     setActiveTab(tab);
@@ -245,10 +260,17 @@ export function ClientCabinetShell({ documents, profile }: ClientCabinetShellPro
   const panel = (() => {
     if (activeTab === 'prices') return <PriceListGrid priceLists={profile.priceLists} />;
 
-    if (activeTab === 'documents') return <DocumentGrid documents={documents} />;
+    if (activeTab === 'documents') return <DocumentGrid documents={clientDocuments} />;
 
     if (activeTab === 'chat') {
-      return <ClientChatPanel endpoint="/api/client/chat" currentAuthorType="client" onUnreadCountChange={setChatUnreadCount} />;
+      return (
+        <ClientChatPanel
+          endpoint="/api/client/chat"
+          eventsEndpoint="/api/client/events"
+          currentAuthorType="client"
+          onUnreadCountChange={setChatUnreadCount}
+        />
+      );
     }
 
     return (
