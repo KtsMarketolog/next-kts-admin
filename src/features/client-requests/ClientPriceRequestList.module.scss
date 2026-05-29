@@ -1,0 +1,226 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.requestList {
+  display: grid;
+  gap: $apx-14;
+}
+
+.requestCard {
+  display: grid;
+  gap: $apx-14;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
+  padding: $apx-18;
+}
+
+.requestHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: $apx-14;
+  align-items: start;
+
+  span {
+    color: #777b8d;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  h3 {
+    margin: $apx-4 0 0;
+    color: #111827;
+    font-size: $apx-20;
+    line-height: 1.2;
+  }
+}
+
+.requestLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: $apx-40;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-14;
+  font-size: $apx-13;
+  font-weight: 800;
+  text-decoration: none;
+
+  &:visited,
+  &:hover,
+  &:focus-visible,
+  &:active {
+    color: #fff;
+  }
+}
+
+.requestMeta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax($apx-130, 1fr));
+  gap: $apx-10;
+  margin: 0;
+
+  div {
+    display: grid;
+    gap: $apx-4;
+    border: $apx-1 solid #e6e7ef;
+    border-radius: $apx-8;
+    background: #fff;
+    padding: $apx-10;
+  }
+
+  dt {
+    color: #6f7182;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  dd {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-14;
+    font-weight: 800;
+    line-height: 1.3;
+  }
+}
+
+.requestComment {
+  display: grid;
+  gap: $apx-6;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: $apx-12;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  p {
+    margin: 0;
+    color: #242633;
+    font-size: $apx-14;
+    font-weight: 600;
+    line-height: 1.45;
+    white-space: pre-wrap;
+  }
+}
+
+.requestItems {
+  display: grid;
+  gap: $apx-8;
+}
+
+.requestItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-320, auto);
+  gap: $apx-12;
+  align-items: start;
+  border: $apx-1 solid #e6e7ef;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-12;
+}
+
+.requestItemTitle {
+  display: grid;
+  gap: $apx-4;
+  min-width: 0;
+
+  h4 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-16;
+    line-height: 1.25;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-13;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+}
+
+.requestPrices {
+  display: grid;
+  gap: $apx-6;
+}
+
+.requestPriceRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax($apx-80, 1fr));
+  gap: $apx-8;
+  border-radius: $apx-8;
+  background: #f7f8fc;
+  padding: $apx-8;
+
+  span {
+    color: #6f7182;
+    font-size: $apx-10;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  strong {
+    display: block;
+    margin-top: $apx-3;
+    color: #111827;
+    font-size: $apx-13;
+    line-height: 1.3;
+  }
+}
+
+.emptyState {
+  display: grid;
+  gap: $apx-8;
+  min-height: $apx-150;
+  align-content: center;
+  justify-items: center;
+  border: $apx-1 solid #e0e2ee;
+  border-radius: $apx-14;
+  background: #fff;
+  padding: $apx-20;
+  text-align: center;
+
+  h3 {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-20;
+  }
+
+  p {
+    margin: 0;
+    color: #6f7182;
+    font-size: $apx-14;
+    font-weight: 600;
+  }
+}
+
+@media (max-width: 1100px) {
+  .requestHeader,
+  .requestItem {
+    grid-template-columns: 1fr;
+  }
+
+  .requestMeta,
+  .requestPriceRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .requestMeta,
+  .requestPriceRow {
+    grid-template-columns: 1fr;
+  }
+}

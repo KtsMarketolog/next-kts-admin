@@ -6,7 +6,8 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
-import type { ClientCompanyPriceList, ClientDocument } from '@/shared/lib/db';
+import { ClientPriceRequestList } from '@/features/client-requests/ClientPriceRequestList';
+import type { ClientCompanyPriceList, ClientDocument, ClientPriceRequest } from '@/shared/lib/db';
 import { formatFileSize } from '@/shared/lib/formatFileSize';
 
 type ClientCompany = {
@@ -28,7 +29,7 @@ type ClientCompany = {
   updatedAt: string;
 };
 
-type ClientTab = 'prices' | 'documents' | 'chat' | 'data';
+type ClientTab = 'prices' | 'requests' | 'documents' | 'chat' | 'data';
 
 type AdminClientDetailSectionProps = {
   clientId: number;
@@ -37,6 +38,7 @@ type AdminClientDetailSectionProps = {
 
 const tabs: Array<{ value: ClientTab; label: string; description: string }> = [
   { value: 'prices', label: 'Прайсы', description: 'Привязанные индивидуальные прайсы' },
+  { value: 'requests', label: 'Заявки', description: 'Отправленные заявки клиента' },
   { value: 'documents', label: 'Документы', description: 'Файлы и материалы клиента' },
   { value: 'chat', label: 'Чат', description: 'Переписка с клиентом' },
   { value: 'data', label: 'Данные клиента', description: 'Контакты, менеджеры и доступ' },
@@ -242,6 +244,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   const tabParam = searchParams.get('tab');
   const [client, setClient] = useState<ClientCompany | null>(null);
   const [priceLists, setPriceLists] = useState<ClientCompanyPriceList[]>([]);
+  const [priceRequests, setPriceRequests] = useState<ClientPriceRequest[]>([]);
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [activeTab, setActiveTab] = useState<ClientTab>(() => resolveClientTab(tabParam));
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
@@ -326,17 +329,20 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     const loadClient = async () => {
       setLoading(true);
       setError('');
-      const [clientResponse, priceListResponse, documentsResponse] = await Promise.all([
+      const [clientResponse, priceListResponse, priceRequestResponse, documentsResponse] = await Promise.all([
         fetch('/api/admin/clients', { cache: 'no-store' }),
         fetch(`/api/admin/clients/${clientId}/price-lists`, { cache: 'no-store' }),
+        fetch(`/api/admin/clients/${clientId}/price-requests`, { cache: 'no-store' }),
         fetch(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store' }),
       ]);
       if (!clientResponse.ok) throw new Error(await readApiError(clientResponse, 'Не удалось загрузить клиента'));
       if (!priceListResponse.ok) throw new Error(await readApiError(priceListResponse, 'Не удалось загрузить прайсы клиента'));
+      if (!priceRequestResponse.ok) throw new Error(await readApiError(priceRequestResponse, 'Не удалось загрузить заявки клиента'));
       if (!documentsResponse.ok) throw new Error(await readApiError(documentsResponse, 'Не удалось загрузить документы клиента'));
 
       const data = await clientResponse.json();
       const priceListData = await priceListResponse.json().catch(() => ({}));
+      const priceRequestData = await priceRequestResponse.json().catch(() => ({}));
       const documentsData = await documentsResponse.json().catch(() => ({}));
       const companies = Array.isArray(data.companies) ? (data.companies as ClientCompany[]) : [];
       const nextClient = companies.find((company) => company.id === clientId) ?? null;
@@ -344,6 +350,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
       if (!cancelled) {
         setClient(nextClient);
         setPriceLists(Array.isArray(priceListData.priceLists) ? priceListData.priceLists : []);
+        setPriceRequests(Array.isArray(priceRequestData.requests) ? priceRequestData.requests : []);
         setDocuments(Array.isArray(documentsData.documents) ? documentsData.documents : []);
         setChatUnreadCount(nextClient.chatUnreadCount || 0);
       }
@@ -448,6 +455,16 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     if (!client) return null;
 
     if (activeTab === 'prices') return <ClientPriceListGrid clientId={clientId} priceLists={priceLists} />;
+
+    if (activeTab === 'requests') {
+      return (
+        <ClientPriceRequestList
+          emptyText="Заявки появятся здесь после отправки клиентом из прайса."
+          emptyTitle="Заявок пока нет"
+          requests={priceRequests}
+        />
+      );
+    }
 
     if (activeTab === 'documents') {
       return (
@@ -589,6 +606,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
               <p>{activeTabInfo.description}</p>
             </div>
             {activeTab === 'prices' ? <strong>{priceLists.length} прайсов</strong> : null}
+            {activeTab === 'requests' ? <strong>{priceRequests.length} заявок</strong> : null}
           </div>
           <div className={styles.analyticsContentBody}>{panel}</div>
         </section>

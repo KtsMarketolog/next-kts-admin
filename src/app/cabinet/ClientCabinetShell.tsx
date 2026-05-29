@@ -5,7 +5,8 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
-import type { ClientCompanyPriceList, ClientDocument, ClientPortalProfile } from '@/shared/lib/db';
+import { ClientPriceRequestList } from '@/features/client-requests/ClientPriceRequestList';
+import type { ClientCompanyPriceList, ClientDocument, ClientPortalProfile, ClientPriceRequest } from '@/shared/lib/db';
 import { formatFileSize } from '@/shared/lib/formatFileSize';
 import dataStyles from './ClientCabinetData.module.scss';
 import documentStyles from './ClientCabinetDocuments.module.scss';
@@ -14,10 +15,11 @@ import shellStyles from './ClientCabinetShell.module.scss';
 
 const styles = { ...shellStyles, ...priceStyles, ...dataStyles, ...documentStyles };
 
-type Tab = 'prices' | 'documents' | 'chat' | 'data';
+type Tab = 'prices' | 'requests' | 'documents' | 'chat' | 'data';
 
 const TABS: Array<{ value: Tab; label: string; description: string }> = [
   { value: 'prices', label: 'Прайсы', description: 'Актуальные индивидуальные прайсы' },
+  { value: 'requests', label: 'Заявки', description: 'Отправленные заявки' },
   { value: 'documents', label: 'Документы', description: 'Файлы от менеджера' },
   { value: 'chat', label: 'Чат', description: 'Переписка с менеджером' },
   { value: 'data', label: 'Данные', description: 'Контакты и пароль' },
@@ -149,9 +151,10 @@ function DocumentGrid({ documents }: { documents: ClientDocument[] }) {
 type ClientCabinetShellProps = {
   documents: ClientDocument[];
   profile: ClientPortalProfile;
+  requests: ClientPriceRequest[];
 };
 
-export function ClientCabinetShell({ documents, profile }: ClientCabinetShellProps) {
+export function ClientCabinetShell({ documents, profile, requests }: ClientCabinetShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -258,6 +261,16 @@ export function ClientCabinetShell({ documents, profile }: ClientCabinetShellPro
 
   const panel = (() => {
     if (activeTab === 'prices') return <PriceListGrid priceLists={profile.priceLists} />;
+
+    if (activeTab === 'requests') {
+      return (
+        <ClientPriceRequestList
+          emptyText="Заявки появятся здесь после отправки из прайса."
+          emptyTitle="Заявок пока нет"
+          requests={requests}
+        />
+      );
+    }
 
     if (activeTab === 'documents') return <DocumentGrid documents={clientDocuments} />;
 
@@ -396,6 +409,7 @@ export function ClientCabinetShell({ documents, profile }: ClientCabinetShellPro
                 <p>{activeTabInfo.description}</p>
               </div>
               {activeTab === 'prices' ? <strong>{profile.priceLists.length} прайсов</strong> : null}
+              {activeTab === 'requests' ? <strong>{requests.length} заявок</strong> : null}
             </div>
             <div className={styles.contentBody}>{panel}</div>
           </section>

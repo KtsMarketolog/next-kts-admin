@@ -37,6 +37,7 @@ export type PublicWholesaleCategory = {
 
 export type PublicWholesalePriceList = {
   id: number;
+  clientCompanyId: number | null;
   title: string;
   token: string;
   clientName: string;
@@ -58,6 +59,7 @@ export type PublicWholesalePriceList = {
 
 type PriceListRow = {
   id: string;
+  client_company_id: string | null;
   title: string;
   token: string;
   client_name: string;
@@ -121,6 +123,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
   const priceList = await query<PriceListRow>(
     `select
        pl.id::text,
+       pl.client_company_id::text,
        pl.title,
        pl.token,
        pl.client_name,
@@ -256,6 +259,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
 
   return {
     id: Number(priceListRow.id),
+    clientCompanyId: priceListRow.client_company_id ? Number(priceListRow.client_company_id) : null,
     title: priceListRow.title,
     token: priceListRow.token,
     clientName: priceListRow.client_name,

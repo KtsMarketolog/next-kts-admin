@@ -1,6 +1,11 @@
 import nodemailer from 'nodemailer';
 
-import { getPublicWholesalePriceList, getPublicWholesaleRequestItems, trackAnalyticsEvent } from '@/shared/lib/db';
+import {
+  createClientPriceRequest,
+  getPublicWholesalePriceList,
+  getPublicWholesaleRequestItems,
+  trackAnalyticsEvent,
+} from '@/shared/lib/db';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
 
@@ -404,6 +409,38 @@ export async function POST(request: Request, context: Context) {
         (hasConvertedRubValues ? `Итого в рублях по пересчету: ${formatConvertedRubAmount(totalConvertedRub)}\n` : '') +
         (convertedBreakdownLabel ? `В пересчет вошло: ${convertedBreakdownLabel}\n` : ''),
     });
+
+    if (priceList.clientCompanyId) {
+      await createClientPriceRequest({
+        companyId: priceList.clientCompanyId,
+        priceListId: priceList.id,
+        token: priceList.token,
+        priceTitle: priceList.title,
+        clientName: priceList.clientName,
+        managerId: priceList.managerId,
+        supportManagerId: priceList.supportManagerId,
+        comment,
+        totalQuantity,
+        totalPriceLabel,
+        totalConvertedRub: hasConvertedRubValues ? totalConvertedRub : null,
+        rubConversionInfo,
+        convertedBreakdownLabel,
+        items: rows.map((item) => ({
+          priceItemId: item.id,
+          productTitle: item.productTitle,
+          sku: item.sku,
+          variantTitle: item.variantTitle,
+          quantity: item.quantity,
+          prices: item.prices.map((price) => ({
+            amount: price.amount,
+            currency: price.currency,
+            lineTotal: price.lineTotal,
+            convertedRubAmount: price.convertedRubAmount,
+            convertedRubLineTotal: price.convertedRubLineTotal,
+          })),
+        })),
+      });
+    }
 
     await trackAnalyticsEvent({
       eventType: 'public_price_request_sent',

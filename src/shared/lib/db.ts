@@ -39,6 +39,17 @@ export {
 } from './db/clientDocumentsRepo';
 export type { ClientDocument, ClientDocumentFile, ClientDocumentInput } from './db/clientDocumentsRepo';
 export {
+  createClientPriceRequest,
+  getClientPriceRequestsForAdmin,
+  getClientPriceRequestsForClient,
+} from './db/clientPriceRequestsRepo';
+export type {
+  ClientPriceRequest,
+  ClientPriceRequestInput,
+  ClientPriceRequestItem,
+  ClientPriceRequestItemPrice,
+} from './db/clientPriceRequestsRepo';
+export {
   getClientChatConversationForAdmin,
   getClientChatConversationForClient,
   createClientChatMessageForAdmin,
