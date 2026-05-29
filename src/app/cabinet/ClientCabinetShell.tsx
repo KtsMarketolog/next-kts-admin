@@ -409,7 +409,7 @@ export function ClientCabinetShell({ documents, profile, requests }: ClientCabin
                 <p>{activeTabInfo.description}</p>
               </div>
               {activeTab === 'prices' ? <strong>{profile.priceLists.length} прайсов</strong> : null}
-              {activeTab === 'requests' ? <strong>{requests.length} заявок</strong> : null}
+              {activeTab === 'requests' ? <strong>заявки:{requests.length}</strong> : null}
             </div>
             <div className={styles.contentBody}>{panel}</div>
           </section>
