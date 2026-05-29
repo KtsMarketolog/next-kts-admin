@@ -266,6 +266,14 @@
   }
 }
 
+.requestPriceRowMuted {
+  grid-template-columns: repeat(3, minmax($apx-80, 1fr));
+
+  strong {
+    color: #6f7182;
+  }
+}
+
 .emptyState {
   display: grid;
   gap: $apx-8;

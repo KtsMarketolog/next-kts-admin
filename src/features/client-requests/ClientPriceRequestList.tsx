@@ -60,6 +60,25 @@ function PriceRow({ price, quantity }: { price: ClientPriceRequestItemPrice; qua
   );
 }
 
+function NoPriceRow({ quantity }: { quantity: number }) {
+  return (
+    <div className={`${styles.requestPriceRow} ${styles.requestPriceRowMuted}`}>
+      <div>
+        <span>Цена</span>
+        <strong>—</strong>
+      </div>
+      <div>
+        <span>Кол-во</span>
+        <strong>{quantity}</strong>
+      </div>
+      <div>
+        <span>Сумма</span>
+        <strong>—</strong>
+      </div>
+    </div>
+  );
+}
+
 export function ClientPriceRequestList({ emptyText, emptyTitle, requests }: ClientPriceRequestListProps) {
   if (requests.length === 0) {
     return (
@@ -149,13 +168,17 @@ export function ClientPriceRequestList({ emptyText, emptyTitle, requests }: Clie
                     <p>{item.variantTitle || 'Цена'}</p>
                   </div>
                   <div className={styles.requestPrices}>
-                    {item.prices.map((price) => (
-                      <PriceRow
-                        key={`${price.currency}:${price.amount}:${price.lineTotal}`}
-                        price={price}
-                        quantity={item.quantity}
-                      />
-                    ))}
+                    {item.prices.length > 0 ? (
+                      item.prices.map((price) => (
+                        <PriceRow
+                          key={`${price.currency}:${price.amount}:${price.lineTotal}`}
+                          price={price}
+                          quantity={item.quantity}
+                        />
+                      ))
+                    ) : (
+                      <NoPriceRow quantity={item.quantity} />
+                    )}
                   </div>
                 </div>
               ))}
