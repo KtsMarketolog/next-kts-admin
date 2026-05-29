@@ -33,7 +33,7 @@ export function AdminDashboard({ canAccessSite, onOpenSiteSettings, onOpenWholes
       <article className={styles.dashboardCard}>
         <div>
           <h2>Клиенты</h2>
-          <p>Компании клиентов для будущего личного кабинета, документов, истории заявок и чата.</p>
+          <p>Компании клиентов, личные кабинеты, документы, заявки и чат с менеджером.</p>
         </div>
         <button onClick={onOpenClients}>Открыть</button>
       </article>
