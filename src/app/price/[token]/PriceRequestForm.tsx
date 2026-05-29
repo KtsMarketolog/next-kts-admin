@@ -56,6 +56,12 @@ function formatAmountList(values: Array<{ amount: number; currency: string }>) {
     .join(' / ');
 }
 
+function formatRetryAfter(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return 'позже';
+  if (seconds < 60) return `${Math.ceil(seconds)} сек.`;
+  return `${Math.ceil(seconds / 60)} мин.`;
+}
+
 type PublicPriceVariant = PublicWholesaleCategory['products'][number]['variants'][number];
 
 function getCurrencyPriceValues(variant: PublicPriceVariant): Array<{ value: string | null; currency: DisplayCurrencyCode }> {
@@ -200,6 +206,7 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
   const openedProductsRef = useRef<Set<number>>(new Set());
   const requestStartedRef = useRef(false);
   const submittedRef = useRef(false);
+  const submittingRef = useRef(false);
   const selectionRef = useRef({ selectedItems: 0, totalQuantity: 0 });
 
   const selectedItems = useMemo(
@@ -408,47 +415,60 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (submittingRef.current) return;
     if (selectedItems.length === 0) {
       setStatus('Выберите количество хотя бы у одной позиции');
       return;
     }
 
+    submittingRef.current = true;
     setBusy(true);
     setStatus('');
-    const convertedItemIds =
-      exchangeRates && exchangeRateStatus === 'ready'
-        ? selectedItems
-            .filter((item) => {
-              const groupTitle = priceGroupByPriceItemId.get(item.id);
-              return Boolean(groupTitle && rubConversionGroups[groupTitle]);
-            })
-            .map((item) => item.id)
-        : [];
-    const rubConversion: RubConversionRequest | null =
-      convertedItemIds.length > 0 && exchangeRates
-        ? {
-            date: exchangeRates.date,
-            rates: exchangeRates.rates,
-            itemIds: convertedItemIds,
-          }
-        : null;
-    const response = await fetch(`/api/price/${encodeURIComponent(token)}/request`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: selectedItems, comment: comment.trim(), rubConversion }),
-    });
-    setBusy(false);
+    try {
+      const convertedItemIds =
+        exchangeRates && exchangeRateStatus === 'ready'
+          ? selectedItems
+              .filter((item) => {
+                const groupTitle = priceGroupByPriceItemId.get(item.id);
+                return Boolean(groupTitle && rubConversionGroups[groupTitle]);
+              })
+              .map((item) => item.id)
+          : [];
+      const rubConversion: RubConversionRequest | null =
+        convertedItemIds.length > 0 && exchangeRates
+          ? {
+              date: exchangeRates.date,
+              rates: exchangeRates.rates,
+              itemIds: convertedItemIds,
+            }
+          : null;
+      const response = await fetch(`/api/price/${encodeURIComponent(token)}/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: selectedItems, comment: comment.trim(), rubConversion }),
+      });
 
-    if (!response.ok) {
-      setStatus(response.status === 429 ? 'Слишком много заявок. Попробуйте позже.' : 'Не удалось отправить заявку');
-      return;
+      if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers.get('Retry-After'));
+          setStatus(`Слишком много заявок. Попробуйте через ${formatRetryAfter(retryAfter)}.`);
+        } else {
+          setStatus('Не удалось отправить заявку. Проверьте интернет и попробуйте еще раз.');
+        }
+        return;
+      }
+
+      setQuantities({});
+      setComment('');
+      submittedRef.current = true;
+      requestStartedRef.current = false;
+      setStatus('Заявка отправлена');
+    } catch {
+      setStatus('Не удалось отправить заявку. Проверьте интернет и попробуйте еще раз.');
+    } finally {
+      submittingRef.current = false;
+      setBusy(false);
     }
-
-    setQuantities({});
-    setComment('');
-    submittedRef.current = true;
-    requestStartedRef.current = false;
-    setStatus('Заявка отправлена');
   };
 
   return (

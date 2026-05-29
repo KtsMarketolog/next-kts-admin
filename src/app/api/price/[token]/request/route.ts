@@ -49,8 +49,8 @@ const MAX_QUANTITY = 999;
 const MAX_COMMENT_LENGTH = 1000;
 const MAX_RATE_DATE_LENGTH = 40;
 const REQUEST_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-const REQUEST_SESSION_LIMIT = 3;
-const REQUEST_GLOBAL_LIMIT = 100;
+const REQUEST_SESSION_LIMIT = 10;
+const REQUEST_GLOBAL_LIMIT = 300;
 const DEFAULT_PRICE_REQUEST_RECIPIENT = 'ktsmarketolog@yandex.ru';
 
 function getHeaderIp(headersList: Headers) {
@@ -411,74 +411,82 @@ export async function POST(request: Request, context: Context) {
     });
 
     if (priceList.clientCompanyId) {
-      await createClientPriceRequest({
-        companyId: priceList.clientCompanyId,
-        priceListId: priceList.id,
-        token: priceList.token,
-        priceTitle: priceList.title,
-        clientName: priceList.clientName,
-        managerId: priceList.managerId,
-        supportManagerId: priceList.supportManagerId,
-        comment,
-        totalQuantity,
-        totalPriceLabel,
-        totalConvertedRub: hasConvertedRubValues ? totalConvertedRub : null,
-        rubConversionInfo,
-        convertedBreakdownLabel,
-        items: rows.map((item) => ({
-          priceItemId: item.id,
-          productTitle: item.productTitle,
-          sku: item.sku,
-          variantTitle: item.variantTitle,
-          quantity: item.quantity,
-          prices: item.prices.map((price) => ({
-            amount: price.amount,
-            currency: price.currency,
-            lineTotal: price.lineTotal,
-            convertedRubAmount: price.convertedRubAmount,
-            convertedRubLineTotal: price.convertedRubLineTotal,
+      try {
+        await createClientPriceRequest({
+          companyId: priceList.clientCompanyId,
+          priceListId: priceList.id,
+          token: priceList.token,
+          priceTitle: priceList.title,
+          clientName: priceList.clientName,
+          managerId: priceList.managerId,
+          supportManagerId: priceList.supportManagerId,
+          comment,
+          totalQuantity,
+          totalPriceLabel,
+          totalConvertedRub: hasConvertedRubValues ? totalConvertedRub : null,
+          rubConversionInfo,
+          convertedBreakdownLabel,
+          items: rows.map((item) => ({
+            priceItemId: item.id,
+            productTitle: item.productTitle,
+            sku: item.sku,
+            variantTitle: item.variantTitle,
+            quantity: item.quantity,
+            prices: item.prices.map((price) => ({
+              amount: price.amount,
+              currency: price.currency,
+              lineTotal: price.lineTotal,
+              convertedRubAmount: price.convertedRubAmount,
+              convertedRubLineTotal: price.convertedRubLineTotal,
+            })),
           })),
-        })),
-      });
+        });
+      } catch (historyError) {
+        console.error('PUBLIC_PRICE_REQUEST_HISTORY_FAILED', historyError);
+      }
     }
 
-    await trackAnalyticsEvent({
-      eventType: 'public_price_request_sent',
-      actorType: 'client',
-      managerId: priceList.managerId,
-      clientId: priceList.clientName ? priceList.clientName.trim().toLowerCase() : null,
-      priceListId: priceList.id,
-      token: priceList.token,
-      sessionId: publicSession.sessionId,
-      ip: getHeaderIp(request.headers),
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer'),
-      metadata: {
-        totalQuantity,
-        totalPrice: totalPriceLabel,
-        totalByCurrency: Object.fromEntries(totalAmounts.map((item) => [item.currency || 'amount', item.amount])),
-        rubConversion: hasConvertedRubValues
-          ? {
-              totalRub: Math.round(totalConvertedRub),
-              date: rubConversion?.date ?? null,
-              rates: rubConversion?.rates ?? null,
-            }
-          : null,
-        hasComment: Boolean(comment),
-        commentLength: comment.length,
-        itemCount: rows.length,
-        items: rows.slice(0, 40).map((item) => ({
-          priceItemId: item.id,
-          productTitle: item.productTitle,
-          variantTitle: item.variantTitle,
-          quantity: item.quantity,
-          totals: item.prices.map((price) => ({ currency: price.currency, amount: price.lineTotal })),
-          convertedRubTotals: item.prices
-            .filter((price) => price.convertedRubLineTotal !== null)
-            .map((price) => ({ sourceCurrency: price.currency, amount: Math.round(price.convertedRubLineTotal ?? 0) })),
-        })),
-      },
-    });
+    try {
+      await trackAnalyticsEvent({
+        eventType: 'public_price_request_sent',
+        actorType: 'client',
+        managerId: priceList.managerId,
+        clientId: priceList.clientName ? priceList.clientName.trim().toLowerCase() : null,
+        priceListId: priceList.id,
+        token: priceList.token,
+        sessionId: publicSession.sessionId,
+        ip: getHeaderIp(request.headers),
+        userAgent: request.headers.get('user-agent'),
+        referer: request.headers.get('referer'),
+        metadata: {
+          totalQuantity,
+          totalPrice: totalPriceLabel,
+          totalByCurrency: Object.fromEntries(totalAmounts.map((item) => [item.currency || 'amount', item.amount])),
+          rubConversion: hasConvertedRubValues
+            ? {
+                totalRub: Math.round(totalConvertedRub),
+                date: rubConversion?.date ?? null,
+                rates: rubConversion?.rates ?? null,
+              }
+            : null,
+          hasComment: Boolean(comment),
+          commentLength: comment.length,
+          itemCount: rows.length,
+          items: rows.slice(0, 40).map((item) => ({
+            priceItemId: item.id,
+            productTitle: item.productTitle,
+            variantTitle: item.variantTitle,
+            quantity: item.quantity,
+            totals: item.prices.map((price) => ({ currency: price.currency, amount: price.lineTotal })),
+            convertedRubTotals: item.prices
+              .filter((price) => price.convertedRubLineTotal !== null)
+              .map((price) => ({ sourceCurrency: price.currency, amount: Math.round(price.convertedRubLineTotal ?? 0) })),
+          })),
+        },
+      });
+    } catch (analyticsError) {
+      console.error('PUBLIC_PRICE_REQUEST_ANALYTICS_FAILED', analyticsError);
+    }
 
     return jsonWithSession({ ok: true }, {}, publicSession);
   } catch (error) {
