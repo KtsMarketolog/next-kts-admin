@@ -84,7 +84,7 @@ function EmptyClientTab({ title, text }: { title: string; text: string }) {
   );
 }
 
-function ClientPriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceList[] }) {
+function ClientPriceListGrid({ clientId, priceLists }: { clientId: number; priceLists: ClientCompanyPriceList[] }) {
   if (priceLists.length === 0) {
     return <EmptyClientTab title="Прайсы пока не привязаны" text="Действующие прайсы появятся здесь после выбора клиента в прайсе." />;
   }
@@ -116,7 +116,10 @@ function ClientPriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceLis
             </div>
           </dl>
           <div className={styles.clientPriceListActions}>
-            <Link className={styles.clientPriceListSecondaryLink} href={`/admin/wholesale/${priceList.id}/edit`}>
+            <Link
+              className={styles.clientPriceListSecondaryLink}
+              href={`/admin/wholesale/${priceList.id}/edit?returnClientId=${clientId}`}
+            >
               Редактировать
             </Link>
             <Link className={styles.clientPriceListLink} href={`/price/${priceList.token}`} target="_blank" rel="noreferrer">
@@ -444,7 +447,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   const panel = (() => {
     if (!client) return null;
 
-    if (activeTab === 'prices') return <ClientPriceListGrid priceLists={priceLists} />;
+    if (activeTab === 'prices') return <ClientPriceListGrid clientId={clientId} priceLists={priceLists} />;
 
     if (activeTab === 'documents') {
       return (

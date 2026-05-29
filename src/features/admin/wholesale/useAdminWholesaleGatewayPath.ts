@@ -37,13 +37,18 @@ export function useAdminWholesaleGatewayPath(canManageWholesale: boolean) {
 
   const analyticsManagerIdParam = Number(searchParams.get('analyticsManagerId'));
   const managerIdParam = Number(searchParams.get('managerId'));
+  const returnClientIdParam = Number(searchParams.get('returnClientId'));
   const createManagerId = Number.isInteger(managerIdParam) && managerIdParam > 0 ? managerIdParam : null;
+  const returnClientId = Number.isInteger(returnClientIdParam) && returnClientIdParam > 0 ? returnClientIdParam : null;
   const analyticsBackHref =
     canManageWholesale && screen === 'edit' && Number.isInteger(analyticsManagerIdParam) && analyticsManagerIdParam > 0
       ? `/admin/wholesale/admin/managers/${analyticsManagerIdParam}/analytics`
       : null;
+  const clientBackHref =
+    returnClientId && (screen === 'create' || screen === 'edit') ? `/admin/clients/${returnClientId}` : null;
   const editorBackHref =
     analyticsBackHref ??
+    clientBackHref ??
     (canManageWholesale && createManagerId && (screen === 'create' || screen === 'edit')
       ? `/admin/wholesale/admin/managers/${createManagerId}`
       : '/admin/wholesale/manager');
