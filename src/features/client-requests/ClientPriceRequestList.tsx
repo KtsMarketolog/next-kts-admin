@@ -73,73 +73,95 @@ export function ClientPriceRequestList({ emptyText, emptyTitle, requests }: Clie
   return (
     <div className={styles.requestList}>
       {requests.map((request) => (
-        <article className={styles.requestCard} key={request.id}>
-          <div className={styles.requestHeader}>
-            <div>
+        <details className={styles.requestCard} key={request.id}>
+          <summary className={styles.requestSummary}>
+            <div className={styles.requestSummaryTitle}>
               <span>Заявка от {formatDate(request.createdAt)}</span>
               <h3>{request.priceTitle || 'Прайс без названия'}</h3>
             </div>
-            {request.token ? (
-              <Link className={styles.requestLink} href={`/price/${request.token}`} target="_blank" rel="noreferrer">
-                Открыть прайс
-              </Link>
-            ) : null}
-          </div>
-
-          <dl className={styles.requestMeta}>
-            <div>
-              <dt>Позиций</dt>
-              <dd>{request.totalQuantity}</dd>
-            </div>
-            <div>
-              <dt>Итого</dt>
-              <dd>{request.totalPriceLabel || '—'}</dd>
-            </div>
-            <div>
-              <dt>Итого RUB</dt>
-              <dd>{formatRub(request.totalConvertedRub)}</dd>
-            </div>
-            <div>
-              <dt>Пересчет</dt>
-              <dd>{request.rubConversionInfo || 'Не выбран'}</dd>
-            </div>
-          </dl>
-
-          {request.convertedBreakdownLabel ? (
-            <div className={styles.requestComment}>
-              <span>В пересчет вошло</span>
-              <p>{request.convertedBreakdownLabel}</p>
-            </div>
-          ) : null}
-
-          {request.comment ? (
-            <div className={styles.requestComment}>
-              <span>Комментарий</span>
-              <p>{request.comment}</p>
-            </div>
-          ) : null}
-
-          <div className={styles.requestItems}>
-            {request.items.map((item) => (
-              <div className={styles.requestItem} key={`${request.id}:${item.priceItemId}`}>
-                <div className={styles.requestItemTitle}>
-                  <h4>{item.productTitle}</h4>
-                  <p>Артикул: {item.sku || '—'}</p>
-                  <p>{item.variantTitle || 'Цена'}</p>
-                </div>
-                <div className={styles.requestPrices}>
-                  {item.prices.map((price) => (
-                    <PriceRow
-                      key={`${price.currency}:${price.amount}:${price.lineTotal}`}
-                      price={price}
-                      quantity={item.quantity}
-                    />
-                  ))}
-                </div>
+            <dl className={styles.requestSummaryMeta}>
+              <div>
+                <dt>Позиций</dt>
+                <dd>{request.totalQuantity}</dd>
               </div>
-            ))}
+              <div>
+                <dt>Итого</dt>
+                <dd>{request.totalPriceLabel || '—'}</dd>
+              </div>
+              <div>
+                <dt>Итого RUB</dt>
+                <dd>{formatRub(request.totalConvertedRub)}</dd>
+              </div>
+            </dl>
+            <span className={styles.summaryToggle}>
+              <span className={styles.summaryToggleClosed}>Раскрыть</span>
+              <span className={styles.summaryToggleOpen}>Скрыть</span>
+            </span>
+          </summary>
+
+          <div className={styles.requestDetails}>
+            <div className={styles.requestHeader}>
+              <dl className={styles.requestMeta}>
+                <div>
+                  <dt>Позиций</dt>
+                  <dd>{request.totalQuantity}</dd>
+                </div>
+                <div>
+                  <dt>Итого</dt>
+                  <dd>{request.totalPriceLabel || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Итого RUB</dt>
+                  <dd>{formatRub(request.totalConvertedRub)}</dd>
+                </div>
+                <div>
+                  <dt>Пересчет</dt>
+                  <dd>{request.rubConversionInfo || 'Не выбран'}</dd>
+                </div>
+              </dl>
+              {request.token ? (
+                <Link className={styles.requestLink} href={`/price/${request.token}`} target="_blank" rel="noreferrer">
+                  Открыть прайс
+                </Link>
+              ) : null}
+            </div>
+
+            {request.convertedBreakdownLabel ? (
+              <div className={styles.requestComment}>
+                <span>В пересчет вошло</span>
+                <p>{request.convertedBreakdownLabel}</p>
+              </div>
+            ) : null}
+
+            {request.comment ? (
+              <div className={styles.requestComment}>
+                <span>Комментарий</span>
+                <p>{request.comment}</p>
+              </div>
+            ) : null}
+
+            <div className={styles.requestItems}>
+              {request.items.map((item) => (
+                <div className={styles.requestItem} key={`${request.id}:${item.priceItemId}`}>
+                  <div className={styles.requestItemTitle}>
+                    <h4>{item.productTitle}</h4>
+                    <p>Артикул: {item.sku || '—'}</p>
+                    <p>{item.variantTitle || 'Цена'}</p>
+                  </div>
+                  <div className={styles.requestPrices}>
+                    {item.prices.map((price) => (
+                      <PriceRow
+                        key={`${price.currency}:${price.amount}:${price.lineTotal}`}
+                        price={price}
+                        quantity={item.quantity}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </article>
+        </details>
       ))}
     </div>
   );

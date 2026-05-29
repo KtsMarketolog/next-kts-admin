@@ -7,19 +7,43 @@
 
 .requestCard {
   display: grid;
-  gap: $apx-14;
   border: $apx-1 solid #dde2ee;
   border-radius: $apx-14;
   background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
   box-shadow: 0 $apx-8 $apx-22 rgba(30, 34, 58, 0.04);
-  padding: $apx-18;
+  overflow: hidden;
+
+  &[open] {
+    .summaryToggleClosed {
+      display: none;
+    }
+
+    .summaryToggleOpen {
+      display: inline;
+    }
+  }
 }
 
-.requestHeader {
+.requestSummary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax($apx-360, auto) auto;
   gap: $apx-14;
-  align-items: start;
+  align-items: center;
+  padding: $apx-18;
+  cursor: pointer;
+  list-style: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+
+  &:hover {
+    background: #fbfaff;
+  }
+}
+
+.requestSummaryTitle {
+  min-width: 0;
 
   span {
     color: #777b8d;
@@ -34,6 +58,68 @@
     font-size: $apx-20;
     line-height: 1.2;
   }
+}
+
+.requestSummaryMeta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax($apx-100, 1fr));
+  gap: $apx-8;
+  margin: 0;
+
+  div {
+    display: grid;
+    gap: $apx-3;
+    border: $apx-1 solid #e6e7ef;
+    border-radius: $apx-8;
+    background: #fff;
+    padding: $apx-8 $apx-10;
+  }
+
+  dt {
+    color: #6f7182;
+    font-size: $apx-10;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  dd {
+    margin: 0;
+    color: #111827;
+    font-size: $apx-13;
+    font-weight: 800;
+    line-height: 1.25;
+  }
+}
+
+.summaryToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: $apx-40;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-16;
+  font-size: $apx-13;
+  font-weight: 900;
+}
+
+.summaryToggleOpen {
+  display: none;
+}
+
+.requestDetails {
+  display: grid;
+  gap: $apx-14;
+  border-top: $apx-1 solid #eef0f7;
+  padding: $apx-18;
+}
+
+.requestHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: $apx-14;
+  align-items: center;
 }
 
 .requestLink {
@@ -207,6 +293,14 @@
 }
 
 @media (max-width: 1100px) {
+  .requestSummary {
+    grid-template-columns: 1fr;
+  }
+
+  .requestSummaryMeta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .requestHeader,
   .requestItem {
     grid-template-columns: 1fr;
@@ -219,6 +313,10 @@
 }
 
 @media (max-width: 700px) {
+  .requestSummaryMeta {
+    grid-template-columns: 1fr;
+  }
+
   .requestMeta,
   .requestPriceRow {
     grid-template-columns: 1fr;
