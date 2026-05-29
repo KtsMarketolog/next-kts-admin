@@ -49,6 +49,8 @@ export function WholesalePriceEditorDetails({
               ...editor,
               clientCompanyId: company?.id ?? null,
               clientName: company?.title ?? '',
+              managerId: company?.managerId ?? null,
+              supportManagerId: company?.supportManagerId ?? null,
             });
           }}
           disabled={clientCompanies.length === 0}

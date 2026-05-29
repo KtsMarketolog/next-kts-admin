@@ -1,6 +1,13 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireEmployee } from '@/shared/lib/adminAuth';
-import { deleteClientCompany, revokeClientUserSessions, updateClientCompany, type ClientCompanyInput } from '@/shared/lib/db';
+import {
+  deleteClientCompany,
+  revokeClientUserSessions,
+  updateClientCompany,
+  updateWholesalePriceListManagerAssignmentsForClientCompany,
+  type ClientCompanyInput,
+} from '@/shared/lib/db';
+import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
@@ -65,6 +72,12 @@ export async function PUT(request: Request, context: Context) {
 
   try {
     const company = await updateClientCompany(numericId, input, session);
+    await updateWholesalePriceListManagerAssignmentsForClientCompany(
+      company.id,
+      { managerId: company.managerId, supportManagerId: company.supportManagerId },
+      session,
+    );
+    publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id });
     if (password && company.clientUserId) {
       await revokeClientUserSessions(company.clientUserId);
     }
@@ -107,6 +120,7 @@ export async function DELETE(request: Request, context: Context) {
 
   try {
     const company = await deleteClientCompany(numericId, session);
+    publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id });
     await recordSecurityEvent({
       eventType: 'client_company_deleted',
       actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',

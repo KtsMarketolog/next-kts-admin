@@ -1,6 +1,7 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireEmployee } from '@/shared/lib/adminAuth';
 import { createClientCompany, getClientCompanies, type ClientCompanyInput } from '@/shared/lib/db';
+import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
@@ -66,6 +67,7 @@ export async function POST(request: Request) {
 
   try {
     const company = await createClientCompany(input, session);
+    publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id });
     await recordSecurityEvent({
       eventType: 'client_company_created',
       actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',

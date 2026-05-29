@@ -282,6 +282,23 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     events.addEventListener('documents.updated', () => {
       if (activeTab === 'documents') void loadDocuments();
     });
+    events.addEventListener('client.updated', (event) => {
+      let payload: { companyId?: number } = {};
+      try {
+        payload = JSON.parse((event as MessageEvent).data || '{}') as { companyId?: number };
+      } catch {
+        return;
+      }
+      if (Number(payload.companyId) !== clientId) return;
+      void fetch('/api/admin/clients', { cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          const companies = Array.isArray(data?.companies) ? (data.companies as ClientCompany[]) : [];
+          const nextClient = companies.find((company) => company.id === clientId) ?? null;
+          if (nextClient) setClient(nextClient);
+        })
+        .catch(() => {});
+    });
 
     return () => {
       events.close();

@@ -8,6 +8,6 @@ export async function GET() {
   const { denied } = await requireEmployee();
   if (denied) return denied;
 
-  const stream = createClientRealtimeStream((event) => event.type === 'chat.updated');
+  const stream = createClientRealtimeStream((event) => event.type === 'chat.updated' || event.type === 'client.updated');
   return new Response(stream, { headers: clientRealtimeHeaders });
 }

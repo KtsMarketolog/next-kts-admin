@@ -1,12 +1,14 @@
 import {
   deleteWholesalePriceList,
   getWholesalePriceListEditor,
+  updateClientCompanyManagerAssignments,
   updateWholesalePriceList,
   type WholesalePriceGroupStockSettingInput,
   type WholesalePriceListItemInput,
 } from '@/shared/lib/db';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { isManagerSessionRole, requireEmployee } from '@/shared/lib/adminAuth';
+import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
@@ -119,6 +121,8 @@ export async function PUT(request: Request, context: Context) {
     return Response.json({ error: 'Выберите клиента из списка' }, { status: 400 });
   }
 
+  const managerId = Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null;
+
   try {
     await updateWholesalePriceList(
       numericId,
@@ -126,7 +130,7 @@ export async function PUT(request: Request, context: Context) {
         title,
         clientCompanyId,
         clientName: normalizeTextField(body.clientName, 200),
-        managerId: Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null,
+        managerId,
         supportManagerId,
         validUntil,
         token: existing.token,
@@ -141,6 +145,8 @@ export async function PUT(request: Request, context: Context) {
       },
       session,
     );
+    await updateClientCompanyManagerAssignments(clientCompanyId, { managerId, supportManagerId }, session);
+    publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить прайс' }, { status: 400 });
   }

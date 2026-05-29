@@ -5,9 +5,11 @@ import { requireEmployee } from '@/shared/lib/adminAuth';
 import {
   createWholesalePriceList,
   getWholesalePriceLists,
+  updateClientCompanyManagerAssignments,
   type WholesalePriceGroupStockSettingInput,
   type WholesalePriceListItemInput,
 } from '@/shared/lib/db';
+import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import {
   isValidNewPublicPriceToken,
@@ -110,6 +112,8 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Выберите клиента из списка' }, { status: 400 });
   }
 
+  const managerId = Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null;
+
   let id: number;
   try {
     id = await createWholesalePriceList(
@@ -117,7 +121,7 @@ export async function POST(request: Request) {
         title,
         clientCompanyId,
         clientName: normalizeTextField(body.clientName, 200),
-        managerId: Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null,
+        managerId,
         supportManagerId,
         validUntil,
         token: nextToken,
@@ -132,6 +136,8 @@ export async function POST(request: Request) {
       },
       session,
     );
+    await updateClientCompanyManagerAssignments(clientCompanyId, { managerId, supportManagerId }, session);
+    publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить прайс' }, { status: 400 });
   }

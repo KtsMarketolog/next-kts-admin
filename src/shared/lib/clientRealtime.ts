@@ -1,4 +1,4 @@
-export type ClientRealtimeEventType = 'chat.updated' | 'documents.updated';
+export type ClientRealtimeEventType = 'chat.updated' | 'documents.updated' | 'client.updated';
 
 export type ClientRealtimeEvent = {
   id: number;

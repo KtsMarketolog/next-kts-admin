@@ -98,6 +98,11 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     events.addEventListener('chat.updated', () => {
       void loadUnreadCounts();
     });
+    events.addEventListener('client.updated', () => {
+      void loadClients().catch(() => {
+        showStatus('РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РєР»РёРµРЅС‚РѕРІ');
+      });
+    });
 
     return () => {
       events.close();

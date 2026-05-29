@@ -47,6 +47,11 @@ export type ClientCompanyInput = {
   passwordHash?: string;
 };
 
+export type ClientCompanyManagerAssignmentsInput = {
+  managerId: number | null;
+  supportManagerId: number | null;
+};
+
 export type ClientPortalUserAuth = {
   id: number;
   companyId: number;
@@ -230,7 +235,7 @@ function numberOrNull(value: number | null | undefined) {
   return Number.isInteger(value) && Number(value) > 0 ? Number(value) : null;
 }
 
-async function normalizeManagerAssignments(input: ClientCompanyInput, session: AdminSession) {
+async function normalizeManagerAssignments(input: Pick<ClientCompanyInput, 'managerId' | 'supportManagerId'>, session: AdminSession) {
   const managerId = numberOrNull(input.managerId);
   const supportManagerId = numberOrNull(input.supportManagerId);
 
@@ -499,6 +504,27 @@ export async function updateClientCompany(
       clientUserId: userCount.rows[0]?.id ? Number(userCount.rows[0].id) : null,
     };
   });
+}
+
+export async function updateClientCompanyManagerAssignments(
+  id: number,
+  input: ClientCompanyManagerAssignmentsInput,
+  session: AdminSession,
+) {
+  await ensureSiteSchema();
+  await assertClientCompanyVisible(id, session);
+  const assignments = await normalizeManagerAssignments(input, session);
+  await assertManagerRole(assignments.managerId, 'manager');
+  await assertManagerRole(assignments.supportManagerId, 'support_manager');
+
+  await query(
+    `update client_companies
+     set manager_id = $2,
+         support_manager_id = $3,
+         updated_at = now()
+     where id = $1`,
+    [id, assignments.managerId, assignments.supportManagerId],
+  );
 }
 
 export async function deleteClientCompany(id: number, session: AdminSession): Promise<ClientCompany> {

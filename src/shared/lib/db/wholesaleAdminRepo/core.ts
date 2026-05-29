@@ -2278,6 +2278,26 @@ export async function updateWholesalePriceList(
   }
 }
 
+export async function updateWholesalePriceListManagerAssignmentsForClientCompany(
+  clientCompanyId: number,
+  input: { managerId: number | null; supportManagerId: number | null },
+  session?: AdminSession | null,
+) {
+  await ensureSiteSchema();
+  const companyId = Number(clientCompanyId);
+  if (!Number.isInteger(companyId) || companyId <= 0) return;
+  if (session) await assertClientCompanyVisible(companyId, session);
+
+  await query(
+    `update wholesale_price_lists
+     set manager_id = $2,
+         support_manager_id = $3,
+         updated_at = now()
+     where client_company_id = $1`,
+    [companyId, input.managerId, input.supportManagerId],
+  );
+}
+
 export async function deleteWholesalePriceList(id: number, session?: AdminSession | null) {
   await ensureSiteSchema();
   const previous = await query<{

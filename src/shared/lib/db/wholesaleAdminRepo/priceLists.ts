@@ -4,6 +4,7 @@ export {
   getWholesalePriceListEditor,
   getWholesalePriceLists,
   getWholesalePriceListsForManager,
+  updateWholesalePriceListManagerAssignmentsForClientCompany,
   updateWholesalePriceList,
 } from './core';
 

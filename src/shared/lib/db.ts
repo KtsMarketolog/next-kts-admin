@@ -17,6 +17,7 @@ export {
   getClientUserByLogin,
   getClientUserPasswordHash,
   recordClientUserLogin,
+  updateClientCompanyManagerAssignments,
   updateClientCompany,
   updateClientUserPassword,
 } from './db/clientCompaniesRepo';
@@ -91,6 +92,7 @@ export {
   recordWholesaleManagerLogin,
   recordWholesalePriceView,
   updateWholesaleManager,
+  updateWholesalePriceListManagerAssignmentsForClientCompany,
   updateWholesalePriceList,
 } from './db/wholesaleAdminRepo';
 export type {

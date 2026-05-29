@@ -149,7 +149,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     return nextCatalog as CatalogCategory[];
   };
 
-  const loadClientCompanies = async () => {
+  const loadClientCompanies = useCallback(async (): Promise<ClientCompanyOption[]> => {
     const res = await fetch('/api/admin/clients', { cache: 'no-store' });
     if (!res.ok) {
       setClientCompanies([]);
@@ -162,6 +162,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           .map((company: ClientCompanyOption) => ({
             id: Number(company.id),
             title: String(company.title ?? '').trim(),
+            managerId: Number.isInteger(Number(company.managerId)) && Number(company.managerId) > 0 ? Number(company.managerId) : null,
+            supportManagerId: Number.isInteger(Number(company.supportManagerId)) && Number(company.supportManagerId) > 0 ? Number(company.supportManagerId) : null,
             isActive: company.isActive !== false,
           }))
           .filter((company: ClientCompanyOption) => Number.isInteger(company.id) && company.id > 0 && company.title)
@@ -169,7 +171,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       : [];
     setClientCompanies(nextClientCompanies);
     return nextClientCompanies;
-  };
+  }, []);
 
   useEffect(() => {
     if ((screen === 'create' || screen === 'edit') || (canManageWholesale && screen === 'admin')) void loadManagers();
@@ -198,7 +200,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
     async function loadEditorData() {
       setEditorLoading(true);
-      const [nextCatalog] = await Promise.all([loadCatalog(), loadClientCompanies()]);
+      const [nextCatalog, nextClientCompanies] = await Promise.all([loadCatalog(), loadClientCompanies()]);
       if (!isActive) return;
       if (screen === 'create') {
         setEditor({
@@ -225,6 +227,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       const data = await res.json();
       if (!isActive) return;
       const priceList = data.priceList;
+      const selectedClientCompany = nextClientCompanies.find((company) => company.id === priceList.clientCompanyId) ?? null;
       setEditor({
         id: priceList.id,
         title: priceList.title ?? '',
@@ -238,8 +241,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         showStock: priceList.showStock !== false,
         showStockText: Boolean(priceList.showStockText),
         isActive: Boolean(priceList.isActive),
-        managerId: priceList.managerId ?? null,
-        supportManagerId: priceList.supportManagerId ?? null,
+        managerId: selectedClientCompany ? selectedClientCompany.managerId : priceList.managerId ?? null,
+        supportManagerId: selectedClientCompany ? selectedClientCompany.supportManagerId : priceList.supportManagerId ?? null,
         items: mergeEditorItems(nextCatalog, Array.isArray(priceList.items) ? priceList.items : []),
         priceGroupStockSettings: normalizePriceGroupStockSettings(priceList.priceGroupStockSettings),
       });
@@ -255,7 +258,42 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     return () => {
       isActive = false;
     };
-  }, [canManageWholesale, createManagerId, editId, screen, showStatus]);
+  }, [canManageWholesale, createManagerId, editId, loadClientCompanies, screen, showStatus]);
+
+  useEffect(() => {
+    if (screen !== 'create' && screen !== 'edit') return undefined;
+
+    const events = new EventSource('/api/admin/clients/events');
+    events.addEventListener('client.updated', (event) => {
+      let payload: { companyId?: number } = {};
+      try {
+        payload = JSON.parse((event as MessageEvent).data || '{}') as { companyId?: number };
+      } catch {
+        return;
+      }
+      const companyId = Number(payload.companyId);
+      if (!Number.isInteger(companyId) || companyId <= 0) return;
+
+      void loadClientCompanies().then((nextCompanies) => {
+        const company = nextCompanies.find((item) => item.id === companyId) ?? null;
+        if (!company) return;
+        setEditor((current) => (
+          current.clientCompanyId === companyId
+            ? {
+                ...current,
+                clientName: company.title,
+                managerId: company.managerId,
+                supportManagerId: company.supportManagerId,
+              }
+            : current
+        ));
+      });
+    });
+
+    return () => {
+      events.close();
+    };
+  }, [loadClientCompanies, screen]);
 
   const savePriceList = async () => {
     if (!editor.title.trim()) {

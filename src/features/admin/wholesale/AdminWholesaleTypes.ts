@@ -20,6 +20,8 @@ export type ManagerRole = Manager['role'];
 export type ClientCompanyOption = {
   id: number;
   title: string;
+  managerId: number | null;
+  supportManagerId: number | null;
   isActive: boolean;
 };
 
