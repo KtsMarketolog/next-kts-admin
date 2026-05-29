@@ -78,7 +78,6 @@ function PriceListGrid({ priceLists }: { priceLists: ClientCompanyPriceList[] })
       {priceLists.map((priceList) => (
         <article className={styles.priceListCard} key={priceList.id}>
           <div>
-            <span>{priceList.workflowStatusLabel}</span>
             <h3>{priceList.title}</h3>
           </div>
           <dl>
