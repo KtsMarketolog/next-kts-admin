@@ -86,6 +86,10 @@ function stockLabel(product: PublicPriceProduct) {
     unit: product.unit,
     isExpected: product.isExpected,
     mode: product.stockDisplayMode,
+    stockByLocation: {
+      volzhsk: product.stockVolzhsk,
+      moscow: product.stockMoscow,
+    },
   });
 }
 

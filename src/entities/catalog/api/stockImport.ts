@@ -6,9 +6,11 @@ import { query, withTransaction } from '@/shared/lib/db/client';
 import { ensureCatalogSchema } from './catalogDb';
 
 type RawRow = Record<string, unknown>;
+type StockLocationKey = 'volzhsk' | 'moscow';
 type ParsedStockRow = {
   rowNumber: number;
   row: RawRow;
+  location: StockLocationKey | null;
 };
 
 export type StockImportError = {
@@ -155,10 +157,14 @@ async function ensureStockImportSchema() {
   await ensureSiteSchema();
   await query(`
     alter table catalog_products add column if not exists stock integer not null default 0;
+    alter table catalog_products add column if not exists stock_volzhsk integer not null default 0;
+    alter table catalog_products add column if not exists stock_moscow integer not null default 0;
     alter table catalog_products add column if not exists is_expected boolean not null default false;
     alter table catalog_products add column if not exists stock_updated_at timestamptz;
     alter table catalog_products add column if not exists unit text;
     alter table wholesale_products add column if not exists stock integer not null default 0;
+    alter table wholesale_products add column if not exists stock_volzhsk integer not null default 0;
+    alter table wholesale_products add column if not exists stock_moscow integer not null default 0;
     alter table wholesale_products add column if not exists is_expected boolean not null default false;
     alter table wholesale_products add column if not exists stock_updated_at timestamptz;
     alter table wholesale_products add column if not exists unit text;
@@ -239,7 +245,38 @@ function buildRawRow(headers: unknown[], row: unknown[]): RawRow {
   );
 }
 
-function isStockHeaderRow(row: unknown[]) {
+function stockHeaderAliases(values: string[]) {
+  return values.map(normalizeHeader);
+}
+
+function isStockHeaderValues(headers: unknown[]) {
+  const normalized = headers.map(normalizeHeader);
+  return (
+    stockHeaderAliases(HEADER_ARTICLE_ALIASES).some((header) => normalized.includes(header)) &&
+    stockHeaderAliases(HEADER_STOCK_ALIASES).some((header) => normalized.includes(header))
+  );
+}
+
+function buildStockHeaders(row: unknown[], previousRow?: unknown[]) {
+  return row.map((cell, columnIndex) => {
+    const current = normalizeStockProductName(cell);
+    const parent = normalizeStockProductName(previousRow?.[columnIndex]);
+    const currentHeader = normalizeHeader(current);
+    const parentHeader = normalizeHeader(parent);
+    if (currentHeader === 'доступно' && ['сейчас', 'ожидается'].includes(parentHeader)) return `${parent} ${current}`;
+    return current || parent;
+  });
+}
+
+function detectStockLocationMarker(row: unknown[]): StockLocationKey | null {
+  const cells = row.map(normalizeHeader).filter(Boolean);
+  if (cells.some((cell) => cell.includes('1основной') && cell.includes('волжск'))) return 'volzhsk';
+  if (cells.some((cell) => /^лдм\s*2$/.test(cell))) return 'moscow';
+  if (cells.some((cell) => cell.includes('резервы ктс'))) return 'volzhsk';
+  return null;
+}
+
+function isLegacyStockHeaderRow(row: unknown[]) {
   const normalized = row.map(normalizeHeader);
   const aliases = (values: string[]) => values.map(normalizeHeader);
   return (
@@ -256,19 +293,74 @@ function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
   if (rows.length > MAX_STOCK_WORKBOOK_ROWS) throw new Error('Excel-С„Р°Р№Р» СЃ РѕСЃС‚Р°С‚РєР°РјРё СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№');
-  const headerIndex = rows.findIndex(isStockHeaderRow);
+  const parsedRows: ParsedStockRow[] = [];
+  let headers: string[] | null = null;
+  let currentLocation: StockLocationKey | null = null;
 
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex] ?? [];
+    const locationMarker = detectStockLocationMarker(row);
+    if (locationMarker) {
+      currentLocation = locationMarker;
+      continue;
+    }
+
+    const headerCandidate = buildStockHeaders(row, rows[rowIndex - 1]);
+    if (isStockHeaderValues(headerCandidate)) {
+      headers = headerCandidate;
+      continue;
+    }
+
+    if (!headers) continue;
+    parsedRows.push({
+      rowNumber: rowIndex + 1,
+      row: buildRawRow(headers, row),
+      location: currentLocation,
+    });
+  }
+
+  if (parsedRows.length > 0) return parsedRows;
+
+  const headerIndex = rows.findIndex(isLegacyStockHeaderRow);
   if (headerIndex === -1) {
     return XLSX.utils
       .sheet_to_json<RawRow>(sheet, { defval: null, raw: true })
-      .map((row, index) => ({ rowNumber: index + 2, row }));
+      .map((row, index) => ({ rowNumber: index + 2, row, location: null }));
   }
 
-  const headers = rows[headerIndex] ?? [];
+  const legacyHeaders = rows[headerIndex] ?? [];
   return rows.slice(headerIndex + 1).map((row, index) => ({
     rowNumber: headerIndex + index + 2,
-    row: buildRawRow(headers, row),
+    row: buildRawRow(legacyHeaders, row),
+    location: null,
   }));
+}
+
+type AggregatedStock = {
+  article: string;
+  firstRowNumber: number;
+  stockByLocation: Record<StockLocationKey, number>;
+  stockWithoutLocation: number;
+  isExpected: boolean;
+  unit: string;
+};
+
+function createAggregatedStock(article: string, firstRowNumber: number): AggregatedStock {
+  return {
+    article,
+    firstRowNumber,
+    stockByLocation: {
+      volzhsk: 0,
+      moscow: 0,
+    },
+    stockWithoutLocation: 0,
+    isExpected: false,
+    unit: '',
+  };
+}
+
+function totalAggregatedStock(stock: AggregatedStock) {
+  return stock.stockByLocation.volzhsk + stock.stockByLocation.moscow + stock.stockWithoutLocation;
 }
 
 export async function importStockFromExcelBuffer(input: {
@@ -290,41 +382,56 @@ export async function importStockFromExcelBuffer(input: {
     let updatedRows = 0;
     let notFoundRows = 0;
     let failedRows = 0;
+    const stockByArticle = new Map<string, AggregatedStock>();
+
+    for (const { rowNumber, row, location } of rows) {
+      const rawArticle = readCellByAliases(row, HEADER_ARTICLE_ALIASES);
+      const article = normalizeStockProductName(rawArticle);
+      const stock = parseCurrentStock(readRawCellByAliases(row, HEADER_STOCK_ALIASES));
+      const unit = normalizeStockProductName(readCellByAliases(row, HEADER_UNIT_ALIASES)).slice(0, 80);
+      const isExpected = parseExpected(readRawCellByAliases(row, HEADER_EXPECTED_ALIASES));
+
+      if (!article) {
+        continue;
+      }
+      totalRows += 1;
+      if (stock === null) {
+        failedRows += 1;
+        pushError(errors, { row: rowNumber, name: article, error: 'Сейчас не является целым неотрицательным числом' });
+        continue;
+      }
+
+      const articleKey = article.toLowerCase();
+      const aggregated = stockByArticle.get(articleKey) ?? createAggregatedStock(article, rowNumber);
+      if (location) {
+        aggregated.stockByLocation[location] += stock;
+      } else {
+        aggregated.stockWithoutLocation += stock;
+      }
+      aggregated.isExpected ||= isExpected;
+      if (!aggregated.unit && unit) aggregated.unit = unit;
+      stockByArticle.set(articleKey, aggregated);
+    }
 
     await withTransaction(async (client) => {
-      for (const { rowNumber, row } of rows) {
-        const rawArticle = readCellByAliases(row, HEADER_ARTICLE_ALIASES);
-        const article = normalizeStockProductName(rawArticle);
-        const stock = parseCurrentStock(readRawCellByAliases(row, HEADER_STOCK_ALIASES));
-        const unit = normalizeStockProductName(readCellByAliases(row, HEADER_UNIT_ALIASES)).slice(0, 80);
-        const isExpected = parseExpected(readRawCellByAliases(row, HEADER_EXPECTED_ALIASES));
-
-        if (!article) {
-          continue;
-        }
-        totalRows += 1;
-        if (stock === null) {
-          failedRows += 1;
-          pushError(errors, { row: rowNumber, name: article, error: 'Сейчас не является целым неотрицательным числом' });
-          continue;
-        }
-
+      for (const stockRow of stockByArticle.values()) {
+        const stock = totalAggregatedStock(stockRow);
         const products = await client.query<{ id: string }>(
           `select id::text
            from catalog_products
            where lower(trim(coalesce(article, ''))) = lower($1)`,
-          [article],
+          [stockRow.article],
         );
 
         if (products.rowCount === 0) {
           notFoundRows += 1;
-          pushError(errors, { row: rowNumber, name: article, error: 'Товар с таким Номенклатура.Код не найден' });
+          pushError(errors, { row: stockRow.firstRowNumber, name: stockRow.article, error: 'Товар с таким Номенклатура.Код не найден' });
           continue;
         }
 
         if ((products.rowCount ?? 0) > 1) {
           failedRows += 1;
-          pushError(errors, { row: rowNumber, name: article, error: 'Найдено несколько товаров с таким Номенклатура.Код' });
+          pushError(errors, { row: stockRow.firstRowNumber, name: stockRow.article, error: 'Найдено несколько товаров с таким Номенклатура.Код' });
           continue;
         }
 
@@ -332,22 +439,26 @@ export async function importStockFromExcelBuffer(input: {
         await client.query(
           `update catalog_products
            set stock = $2,
-               is_expected = $3,
-               unit = coalesce(nullif($4, ''), unit),
+               stock_volzhsk = $3,
+               stock_moscow = $4,
+               is_expected = $5,
+               unit = coalesce(nullif($6, ''), unit),
                stock_updated_at = now(),
                updated_at = now()
            where id = $1`,
-          [productId, stock, isExpected, unit],
+          [productId, stock, stockRow.stockByLocation.volzhsk, stockRow.stockByLocation.moscow, stockRow.isExpected, stockRow.unit],
         );
         await client.query(
           `update wholesale_products
            set stock = $2,
-               is_expected = $3,
-               unit = coalesce(nullif($4, ''), unit),
+               stock_volzhsk = $3,
+               stock_moscow = $4,
+               is_expected = $5,
+               unit = coalesce(nullif($6, ''), unit),
                stock_updated_at = now(),
                updated_at = now()
            where catalog_product_id = $1`,
-          [productId, stock, isExpected, unit],
+          [productId, stock, stockRow.stockByLocation.volzhsk, stockRow.stockByLocation.moscow, stockRow.isExpected, stockRow.unit],
         );
         updatedRows += 1;
       }

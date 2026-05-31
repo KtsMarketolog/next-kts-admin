@@ -135,6 +135,10 @@ function stockLabel(product: PublicWholesaleCategory['products'][number]) {
     unit: product.unit,
     isExpected: product.isExpected,
     mode: product.stockDisplayMode,
+    stockByLocation: {
+      volzhsk: product.stockVolzhsk,
+      moscow: product.stockMoscow,
+    },
   });
 }
 

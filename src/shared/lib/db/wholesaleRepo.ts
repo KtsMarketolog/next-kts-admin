@@ -22,6 +22,8 @@ export type PublicWholesaleProduct = {
   priceGroupImageUrl: string | null;
   imageUrl: string | null;
   stock: number;
+  stockVolzhsk: number;
+  stockMoscow: number;
   unit: string | null;
   isExpected: boolean;
   stockDisplayMode: WholesaleStockDisplayMode;
@@ -90,6 +92,8 @@ type PriceItemRow = {
   price_group_image_url: string | null;
   image_url: string | null;
   stock: string | null;
+  stock_volzhsk: string | null;
+  stock_moscow: string | null;
   unit: string | null;
   is_expected: boolean | null;
   group_show_stock_numbers: boolean | null;
@@ -164,6 +168,8 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        pgi.image_url as price_group_image_url,
        img.image_url,
        p.stock::text,
+       p.stock_volzhsk::text,
+       p.stock_moscow::text,
        p.unit,
        p.is_expected,
        gs.show_stock_numbers as group_show_stock_numbers,
@@ -230,6 +236,8 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
         priceGroupImageUrl: row.price_group_image_url,
         imageUrl: row.image_url,
         stock: Number(row.stock ?? 0),
+        stockVolzhsk: Number(row.stock_volzhsk ?? 0),
+        stockMoscow: Number(row.stock_moscow ?? 0),
         unit: row.unit,
         isExpected: Boolean(row.is_expected),
         stockDisplayMode: resolveWholesaleStockDisplayMode({

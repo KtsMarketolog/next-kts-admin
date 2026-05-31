@@ -135,6 +135,8 @@ async function ensureSiteSchemaInternal() {
       manual_discount numeric(7, 2),
       manual_discount_rop numeric(7, 2),
       stock integer not null default 0,
+      stock_volzhsk integer not null default 0,
+      stock_moscow integer not null default 0,
       is_expected boolean not null default false,
       stock_updated_at timestamptz,
       retail_price numeric(12, 2),
@@ -465,6 +467,8 @@ async function ensureSiteSchemaInternal() {
     alter table wholesale_products add column if not exists manual_discount numeric(7, 2);
     alter table wholesale_products add column if not exists manual_discount_rop numeric(7, 2);
     alter table wholesale_products add column if not exists stock integer not null default 0;
+    alter table wholesale_products add column if not exists stock_volzhsk integer not null default 0;
+    alter table wholesale_products add column if not exists stock_moscow integer not null default 0;
     alter table wholesale_products add column if not exists is_expected boolean not null default false;
     alter table wholesale_products add column if not exists stock_updated_at timestamptz;
     alter table admin_users add column if not exists email text not null default '';
@@ -612,6 +616,8 @@ async function ensureSiteSchemaInternal() {
   await query(`alter table wholesale_products add column if not exists manual_discount numeric(7, 2)`);
   await query(`alter table wholesale_products add column if not exists manual_discount_rop numeric(7, 2)`);
   await query(`alter table wholesale_products add column if not exists stock integer not null default 0`);
+  await query(`alter table wholesale_products add column if not exists stock_volzhsk integer not null default 0`);
+  await query(`alter table wholesale_products add column if not exists stock_moscow integer not null default 0`);
   await query(`alter table wholesale_products add column if not exists is_expected boolean not null default false`);
   await query(`alter table wholesale_products add column if not exists stock_updated_at timestamptz`);
   await query(`alter table admin_users add column if not exists email text not null default ''`);

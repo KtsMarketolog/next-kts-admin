@@ -83,6 +83,8 @@ export function ensureCatalogSchema() {
       manual_discount numeric(7, 2),
       manual_discount_rop numeric(7, 2),
       stock integer not null default 0,
+      stock_volzhsk integer not null default 0,
+      stock_moscow integer not null default 0,
       is_expected boolean not null default false,
       stock_updated_at timestamptz,
       promo boolean not null default false,
@@ -104,6 +106,8 @@ export function ensureCatalogSchema() {
     alter table catalog_products add column if not exists manual_discount numeric(7, 2);
     alter table catalog_products add column if not exists manual_discount_rop numeric(7, 2);
     alter table catalog_products add column if not exists stock integer not null default 0;
+    alter table catalog_products add column if not exists stock_volzhsk integer not null default 0;
+    alter table catalog_products add column if not exists stock_moscow integer not null default 0;
     alter table catalog_products add column if not exists is_expected boolean not null default false;
     alter table catalog_products add column if not exists stock_updated_at timestamptz;
     alter table catalog_categories add column if not exists show_on_site boolean not null default true;
