@@ -1,4 +1,4 @@
-import { createAdminSession, createEmployeeSession, isManagerSessionRole, validateAdminPassword, verifyPassword } from '@/shared/lib/adminAuth';
+import { createAdminSession, createEmployeeSession, validateAdminPassword, verifyPassword } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import {
   createTwoFactorChallenge,
@@ -59,7 +59,11 @@ async function finishLogin(input: {
   const userAgent = request.headers.get('user-agent');
   const referer = request.headers.get('referer');
 
-  if (isManagerSessionRole(actor.role)) {
+  if (actor.actorType === 'client') {
+    return Response.json({ error: 'Invalid session' }, { status: 401 });
+  }
+
+  if (actor.actorType === 'manager') {
     if (!actor.managerId) return Response.json({ error: 'Invalid session' }, { status: 401 });
     await createEmployeeSession(
       { role: actor.role, managerId: actor.managerId },

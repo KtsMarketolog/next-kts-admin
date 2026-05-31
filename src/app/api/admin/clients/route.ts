@@ -25,6 +25,7 @@ function inputFromBody(body: Record<string, unknown>, passwordHash?: string, dis
     note: normalizeTextField(body.note, 2000),
     managerId: managerIdFromBody(body.managerId),
     supportManagerId: managerIdFromBody(body.supportManagerId),
+    requireTwoFactor: body.requireTwoFactor === true,
     isActive: body.isActive !== false,
     passwordHash,
     displayPassword,

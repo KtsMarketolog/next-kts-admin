@@ -8,6 +8,7 @@ export type ClientCompany = {
   managerName: string;
   supportManagerId: number | null;
   supportManagerName: string;
+  requireTwoFactor: boolean;
   userCount: number;
   clientLogin: string;
   clientUserId: number | null;
@@ -33,6 +34,7 @@ export type ClientDraft = {
   note: string;
   managerId: number | null;
   supportManagerId: number | null;
+  requireTwoFactor: boolean;
   isActive: boolean;
   password: string;
 };
@@ -48,6 +50,7 @@ export const emptyDraft: ClientDraft = {
   note: '',
   managerId: null,
   supportManagerId: null,
+  requireTwoFactor: false,
   isActive: true,
   password: '',
 };
@@ -73,6 +76,7 @@ export function toDraft(company: ClientCompany): ClientDraft {
     note: company.note,
     managerId: company.managerId,
     supportManagerId: company.supportManagerId,
+    requireTwoFactor: company.requireTwoFactor,
     isActive: company.isActive,
     password: '',
   };

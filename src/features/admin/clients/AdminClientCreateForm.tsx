@@ -56,6 +56,14 @@ export function AdminClientCreateForm({
         <input type="checkbox" checked={draft.isActive} onChange={(event) => onChange({ isActive: event.target.checked })} />
         Активна
       </label>
+      <label className={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={draft.requireTwoFactor}
+          onChange={(event) => onChange({ requireTwoFactor: event.target.checked })}
+        />
+        Требовать код на email при входе
+      </label>
       <button disabled={busy} onClick={onCreate}>
         Добавить клиента
       </button>

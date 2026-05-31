@@ -275,6 +275,7 @@ async function ensureSiteSchemaInternal() {
       note text not null default '',
       manager_id bigint references wholesale_managers(id) on delete set null,
       support_manager_id bigint references wholesale_managers(id) on delete set null,
+      require_2fa boolean not null default false,
       is_active boolean not null default true,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
@@ -398,6 +399,7 @@ async function ensureSiteSchemaInternal() {
       role text not null default 'admin',
       admin_user_id bigint references admin_users(id) on delete cascade,
       manager_id bigint references wholesale_managers(id) on delete cascade,
+      client_user_id bigint references client_users(id) on delete cascade,
       code_hash text not null,
       login_session_id text not null default '',
       attempts integer not null default 0,
@@ -488,7 +490,9 @@ async function ensureSiteSchemaInternal() {
     alter table wholesale_price_list_events alter column price_list_id drop not null;
     alter table client_users add column if not exists password_changed_at timestamptz;
     alter table client_users add column if not exists display_password text not null default '';
+    alter table client_companies add column if not exists require_2fa boolean not null default false;
     alter table wholesale_price_lists add column if not exists client_company_id bigint references client_companies(id) on delete set null;
+    alter table admin_2fa_challenges add column if not exists client_user_id bigint references client_users(id) on delete cascade;
 
     do $$
     begin
@@ -630,6 +634,7 @@ async function ensureSiteSchemaInternal() {
   await query(`alter table wholesale_managers add column if not exists password_hash text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists display_password text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists password_changed_at timestamptz`);
+  await query(`alter table client_companies add column if not exists require_2fa boolean not null default false`);
   await query(`alter table client_users add column if not exists display_password text not null default ''`);
   await query(`
     update wholesale_price_lists pl
@@ -716,6 +721,7 @@ async function ensureSiteSchemaInternal() {
     role text not null default 'admin',
     admin_user_id bigint references admin_users(id) on delete cascade,
     manager_id bigint references wholesale_managers(id) on delete cascade,
+    client_user_id bigint references client_users(id) on delete cascade,
     code_hash text not null,
     login_session_id text not null default '',
     attempts integer not null default 0,
@@ -723,6 +729,7 @@ async function ensureSiteSchemaInternal() {
     consumed_at timestamptz,
     created_at timestamptz not null default now()
   )`);
+  await query(`alter table admin_2fa_challenges add column if not exists client_user_id bigint references client_users(id) on delete cascade`);
   await query(`create index if not exists admin_2fa_challenges_login_idx on admin_2fa_challenges(login, created_at desc)`);
   await query(`create index if not exists admin_2fa_challenges_session_idx on admin_2fa_challenges(login_session_id, created_at desc)`);
   await query(`create index if not exists admin_2fa_challenges_expires_idx on admin_2fa_challenges(expires_at)`);

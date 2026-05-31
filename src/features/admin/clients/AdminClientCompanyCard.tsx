@@ -61,6 +61,7 @@ export function AdminClientCompanyCard({
           <span>{company.clientLogin ? `Логин: ${company.clientLogin}` : 'Логин: email клиента'}</span>
           <span>{company.managerName ? `Менеджер: ${company.managerName}` : 'Менеджер не выбран'}</span>
           <span>{company.supportManagerName ? `Сопровождение: ${company.supportManagerName}` : 'Сопровождение не выбрано'}</span>
+          {company.requireTwoFactor ? <span>Код на email при входе</span> : null}
         </div>
         <button className={styles.clientCompanyToggle} type="button" onClick={() => onToggleExpanded(company.id)}>
           {isExpanded ? 'Скрыть' : 'Раскрыть'}
@@ -150,6 +151,14 @@ export function AdminClientCompanyCard({
             <label className={styles.checkbox}>
               <input type="checkbox" checked={currentDraft.isActive} onChange={(event) => onDraftChange(company.id, { isActive: event.target.checked })} />
               Активна
+            </label>
+            <label className={styles.checkbox}>
+              <input
+                type="checkbox"
+                checked={currentDraft.requireTwoFactor}
+                onChange={(event) => onDraftChange(company.id, { requireTwoFactor: event.target.checked })}
+              />
+              Требовать код на email при входе
             </label>
             <Link className={styles.clientOpenLink} href={`/admin/clients/${company.id}`}>
               Перейти

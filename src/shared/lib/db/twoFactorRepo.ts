@@ -4,16 +4,30 @@ import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type TwoFactorActorType = 'admin' | 'manager';
+export type TwoFactorActorType = 'admin' | 'manager' | 'client';
 
-export type TwoFactorChallengeActor = {
-  challengeId: string;
-  actorType: TwoFactorActorType;
-  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
-  login: string;
-  adminUserId?: number;
-  managerId?: number;
-};
+export type TwoFactorChallengeActor =
+  | {
+      challengeId: string;
+      actorType: 'admin';
+      role: 'admin' | 'wholesale_admin';
+      login: string;
+      adminUserId?: number;
+    }
+  | {
+      challengeId: string;
+      actorType: 'manager';
+      role: 'manager' | 'support_manager';
+      login: string;
+      managerId?: number;
+    }
+  | {
+      challengeId: string;
+      actorType: 'client';
+      role: 'client';
+      login: string;
+      clientUserId?: number;
+    };
 
 const TWO_FACTOR_TTL_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -33,9 +47,10 @@ function hashTwoFactorCode(challengeId: string, loginSessionId: string, code: st
 export async function createTwoFactorChallenge(input: {
   login: string;
   actorType: TwoFactorActorType;
-  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'client';
   adminUserId?: number | null;
   managerId?: number | null;
+  clientUserId?: number | null;
   loginSessionId: string;
   code: string;
 }) {
@@ -51,11 +66,12 @@ export async function createTwoFactorChallenge(input: {
        role,
        admin_user_id,
        manager_id,
+       client_user_id,
        code_hash,
        login_session_id,
        expires_at
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       challengeId,
       safeHeaderValue(input.login, 160),
@@ -63,6 +79,7 @@ export async function createTwoFactorChallenge(input: {
       input.role,
       input.adminUserId ?? null,
       input.managerId ?? null,
+      input.clientUserId ?? null,
       hashTwoFactorCode(challengeId, input.loginSessionId, input.code),
       safeHeaderValue(input.loginSessionId, 160),
       expiresAt,
@@ -85,6 +102,7 @@ export async function consumeTwoFactorChallenge(input: {
     role: string;
     admin_user_id: string | null;
     manager_id: string | null;
+    client_user_id: string | null;
     code_hash: string;
     attempts: number;
   }>(
@@ -95,6 +113,7 @@ export async function consumeTwoFactorChallenge(input: {
        role,
        admin_user_id::text,
        manager_id::text,
+       client_user_id::text,
        code_hash,
        attempts
      from admin_2fa_challenges
@@ -120,6 +139,16 @@ export async function consumeTwoFactorChallenge(input: {
 
   await query(`update admin_2fa_challenges set consumed_at = now() where id = $1`, [row.id]);
 
+  if (row.actor_type === 'client') {
+    return {
+      challengeId: row.id,
+      actorType: 'client',
+      role: 'client',
+      login: row.login,
+      clientUserId: row.client_user_id ? Number(row.client_user_id) : undefined,
+    };
+  }
+
   const actorType = row.actor_type === 'manager' ? 'manager' : 'admin';
   const role =
     row.role === 'manager' || row.role === 'support_manager' || row.role === 'wholesale_admin' || row.role === 'admin'
@@ -128,12 +157,21 @@ export async function consumeTwoFactorChallenge(input: {
         ? 'manager'
         : 'admin';
 
+  if (actorType === 'manager') {
+    return {
+      challengeId: row.id,
+      actorType,
+      role: role === 'support_manager' ? 'support_manager' : 'manager',
+      login: row.login,
+      managerId: row.manager_id ? Number(row.manager_id) : undefined,
+    };
+  }
+
   return {
     challengeId: row.id,
     actorType,
-    role,
+    role: role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
     login: row.login,
     adminUserId: row.admin_user_id ? Number(row.admin_user_id) : undefined,
-    managerId: row.manager_id ? Number(row.manager_id) : undefined,
   };
 }

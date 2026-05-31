@@ -83,12 +83,27 @@ export function LoginPanel({
     const res = await fetch('/api/client/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ login, password }),
+      body: JSON.stringify(twoFactorChallengeId ? { twoFactorChallengeId, twoFactorCode } : { login, password }),
     });
+    const data = await res.json().catch(() => ({}));
     setBusy(false);
 
+    if (data.twoFactorRequired && data.challengeId) {
+      setTwoFactorChallengeId(data.challengeId);
+      setTwoFactorEmail(typeof data.email === 'string' ? data.email : '');
+      setPassword('');
+      setStatus('');
+      return;
+    }
+
     if (!res.ok) {
-      setStatus(res.status === 429 ? 'Слишком много попыток. Попробуйте позже.' : 'Неверный логин или пароль');
+      setStatus(
+        res.status === 429
+          ? 'Слишком много попыток. Попробуйте позже.'
+          : twoFactorChallengeId
+            ? 'Неверный код подтверждения'
+            : 'Неверный логин или пароль',
+      );
       return;
     }
 
@@ -149,29 +164,7 @@ export function LoginPanel({
             </button>
           </div>
 
-          {mode === 'client' ? (
-            <>
-              <label className={styles.field}>
-                <span>Email</span>
-                <input
-                  value={login}
-                  onChange={(event) => setLogin(event.target.value)}
-                  placeholder="client@example.ru"
-                  autoComplete="username"
-                />
-              </label>
-              <label className={styles.field}>
-                <span>Пароль</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Пароль"
-                  autoComplete="current-password"
-                />
-              </label>
-            </>
-          ) : twoFactorChallengeId ? (
+          {twoFactorChallengeId ? (
             <>
               <label className={styles.field}>
                 <span>Код подтверждения</span>
@@ -196,6 +189,28 @@ export function LoginPanel({
               >
                 Ввести пароль заново
               </button>
+            </>
+          ) : mode === 'client' ? (
+            <>
+              <label className={styles.field}>
+                <span>Email</span>
+                <input
+                  value={login}
+                  onChange={(event) => setLogin(event.target.value)}
+                  placeholder="client@example.ru"
+                  autoComplete="username"
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Пароль</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Пароль"
+                  autoComplete="current-password"
+                />
+              </label>
             </>
           ) : (
             <>

@@ -23,6 +23,7 @@ export type ClientCompany = {
   managerName: string;
   supportManagerId: number | null;
   supportManagerName: string;
+  requireTwoFactor: boolean;
   userCount: number;
   clientLogin: string;
   clientUserId: number | null;
@@ -45,6 +46,7 @@ export type ClientCompanyInput = {
   note: string;
   managerId: number | null;
   supportManagerId: number | null;
+  requireTwoFactor: boolean;
   isActive: boolean;
   passwordHash?: string;
   displayPassword?: string;
@@ -66,6 +68,7 @@ export type ClientPortalUserAuth = {
   passwordHash: string;
   isActive: boolean;
   companyIsActive: boolean;
+  requireTwoFactor: boolean;
   passwordChangedAt: string | null;
 };
 
@@ -118,6 +121,7 @@ type ClientCompanyRow = {
   manager_name: string | null;
   support_manager_id: string | null;
   support_manager_name: string | null;
+  require_2fa: boolean;
   user_count: string;
   client_login: string | null;
   client_user_id: string | null;
@@ -160,6 +164,7 @@ function mapClientCompany(row: ClientCompanyRow): ClientCompany {
     managerName: row.manager_name ?? '',
     supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
     supportManagerName: row.support_manager_name ?? '',
+    requireTwoFactor: row.require_2fa,
     userCount: Number(row.user_count),
     clientLogin: row.client_login ?? '',
     clientUserId: row.client_user_id ? Number(row.client_user_id) : null,
@@ -334,6 +339,7 @@ export async function getClientCompanies(session: AdminSession): Promise<ClientC
        coalesce(manager.name, '') as manager_name,
        cc.support_manager_id::text,
        coalesce(support.name, '') as support_manager_name,
+       cc.require_2fa,
        count(cu.id)::text as user_count,
        coalesce(primary_user.login, '') as client_login,
        primary_user.id::text as client_user_id,
@@ -379,9 +385,9 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
     const result = await client.query<ClientCompanyRow>(
       `insert into client_companies (
          title, inn, kpp, contact_name, email, phone, address, note,
-         manager_id, support_manager_id, is_active
+         manager_id, support_manager_id, require_2fa, is_active
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        returning
          id::text,
          title,
@@ -396,6 +402,7 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
          coalesce((select name from wholesale_managers where id = client_companies.manager_id), '') as manager_name,
          support_manager_id::text,
          coalesce((select name from wholesale_managers where id = client_companies.support_manager_id), '') as support_manager_name,
+         require_2fa,
          '0'::text as user_count,
          ''::text as client_login,
          null::text as client_user_id,
@@ -416,6 +423,7 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
         input.note,
         assignments.managerId,
         assignments.supportManagerId,
+        input.requireTwoFactor,
         input.isActive,
       ],
     );
@@ -473,7 +481,8 @@ export async function updateClientCompany(
            note = $9,
            manager_id = $10,
            support_manager_id = $11,
-           is_active = $12,
+           require_2fa = $12,
+           is_active = $13,
            updated_at = now()
        where id = $1
        returning
@@ -490,6 +499,7 @@ export async function updateClientCompany(
          coalesce((select name from wholesale_managers where id = client_companies.manager_id), '') as manager_name,
          support_manager_id::text,
          coalesce((select name from wholesale_managers where id = client_companies.support_manager_id), '') as support_manager_name,
+         require_2fa,
          (select count(*)::text from client_users where company_id = client_companies.id) as user_count,
          coalesce((select login from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1), '') as client_login,
          (select id::text from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1) as client_user_id,
@@ -518,6 +528,7 @@ export async function updateClientCompany(
         input.note,
         assignments.managerId,
         assignments.supportManagerId,
+        input.requireTwoFactor,
         input.isActive,
       ],
     );
@@ -592,6 +603,7 @@ export async function deleteClientCompany(id: number, session: AdminSession): Pr
          coalesce(manager.name, '') as manager_name,
          cc.support_manager_id::text,
          coalesce(support.name, '') as support_manager_name,
+         cc.require_2fa,
          count(cu.id)::text as user_count,
          coalesce(primary_user.login, '') as client_login,
          primary_user.id::text as client_user_id,
@@ -648,6 +660,7 @@ export async function getClientUserByLogin(login: string): Promise<ClientPortalU
     password_hash: string;
     is_active: boolean;
     company_is_active: boolean;
+    require_2fa: boolean;
     password_changed_at: string | null;
   }>(
     `select
@@ -661,6 +674,7 @@ export async function getClientUserByLogin(login: string): Promise<ClientPortalU
        cu.password_hash,
        cu.is_active,
        cc.is_active as company_is_active,
+       cc.require_2fa,
        cu.password_changed_at::text
      from client_users cu
      join client_companies cc on cc.id = cu.company_id
@@ -681,6 +695,7 @@ export async function getClientUserByLogin(login: string): Promise<ClientPortalU
     passwordHash: row.password_hash,
     isActive: row.is_active,
     companyIsActive: row.company_is_active,
+    requireTwoFactor: row.require_2fa,
     passwordChangedAt: row.password_changed_at,
   };
 }
