@@ -23,6 +23,10 @@ import {
   type Manager,
 } from './AdminClientsModel';
 
+function buildClientPasswordVersions(companies: ClientCompany[]) {
+  return Object.fromEntries(companies.map((company) => [String(company.id), company.passwordChangedAt || '']));
+}
+
 export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const [companies, setCompanies] = useState<ClientCompany[]>([]);
   const [managers, setManagers] = useState<Manager[]>([]);
@@ -59,6 +63,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     const nextCompanies = Array.isArray(data.companies) ? data.companies : [];
     setCompanies(nextCompanies);
     setCompanyDrafts(Object.fromEntries(nextCompanies.map((company: ClientCompany) => [company.id, toDraft(company)])));
+    setClientPasswords(readClientCompanyPasswords(buildClientPasswordVersions(nextCompanies)));
   };
 
   const loadManagers = async () => {
@@ -86,7 +91,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   }, []);
 
   useEffect(() => {
-    setClientPasswords(readClientCompanyPasswords());
     void Promise.all([loadClients(), loadManagers()]).catch((error) => {
       showStatus(readApiErrorFallback(error, 'Не удалось загрузить клиентов'));
     });
@@ -165,8 +169,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
 
     const data = await response.json().catch(() => ({}));
     if (data.company?.id) {
-      saveClientCompanyPassword(data.company.id, draft.password.trim());
-      setClientPasswords(readClientCompanyPasswords());
+      saveClientCompanyPassword(data.company.id, draft.password.trim(), data.company.passwordChangedAt || '');
     }
     setDraft(emptyDraft);
     showStatus('Компания клиента добавлена');
@@ -205,9 +208,10 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       return;
     }
 
+    const data = await response.json().catch(() => ({}));
+
     if (nextPassword) {
-      saveClientCompanyPassword(companyId, nextPassword);
-      setClientPasswords(readClientCompanyPasswords());
+      saveClientCompanyPassword(companyId, nextPassword, data.company?.passwordChangedAt || '');
       setClientPasswordDrafts((current) => {
         const next = { ...current };
         delete next[companyId];
@@ -243,7 +247,11 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     }
 
     removeClientCompanyPassword(company.id);
-    setClientPasswords(readClientCompanyPasswords());
+    setClientPasswords((current) => {
+      const next = { ...current };
+      delete next[String(company.id)];
+      return next;
+    });
     setClientPasswordDrafts((current) => {
       const next = { ...current };
       delete next[company.id];

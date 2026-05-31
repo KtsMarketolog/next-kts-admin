@@ -11,6 +11,7 @@ export type ClientCompany = {
   userCount: number;
   clientLogin: string;
   clientUserId: number | null;
+  passwordChangedAt: string;
   chatUnreadCount: number;
   isActive: boolean;
   createdAt: string;

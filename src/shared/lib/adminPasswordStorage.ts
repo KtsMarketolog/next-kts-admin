@@ -20,6 +20,46 @@ function writePasswordMap(storageKey: string, passwords: Record<string, string>)
   window.localStorage.setItem(storageKey, JSON.stringify(passwords));
 }
 
+type ClientCompanyPasswordEntry = {
+  password: string;
+  passwordChangedAt: string;
+};
+
+function readClientCompanyPasswordEntries() {
+  if (typeof window === 'undefined') return {} as Record<string, ClientCompanyPasswordEntry>;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(CLIENT_COMPANY_PASSWORDS_STORAGE_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object') return {} as Record<string, ClientCompanyPasswordEntry>;
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([key, value]) => {
+          if (typeof key !== 'string') return null;
+          if (typeof value === 'string') {
+            return [key, { password: value, passwordChangedAt: '' }] as const;
+          }
+          if (!value || typeof value !== 'object') return null;
+          const entry = value as Record<string, unknown>;
+          if (typeof entry.password !== 'string') return null;
+          return [
+            key,
+            {
+              password: entry.password,
+              passwordChangedAt: typeof entry.passwordChangedAt === 'string' ? entry.passwordChangedAt : '',
+            },
+          ] as const;
+        })
+        .filter((entry): entry is readonly [string, ClientCompanyPasswordEntry] => Boolean(entry)),
+    );
+  } catch {
+    return {} as Record<string, ClientCompanyPasswordEntry>;
+  }
+}
+
+function writeClientCompanyPasswordEntries(passwords: Record<string, ClientCompanyPasswordEntry>) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(CLIENT_COMPANY_PASSWORDS_STORAGE_KEY, JSON.stringify(passwords));
+}
+
 function managerAccessUserId(managerId: number | string) {
   return `manager:${managerId}`;
 }
@@ -61,8 +101,16 @@ export function readWholesaleManagerPasswords() {
   return readPasswordMap(WHOLESALE_MANAGER_PASSWORDS_STORAGE_KEY);
 }
 
-export function readClientCompanyPasswords() {
-  return readPasswordMap(CLIENT_COMPANY_PASSWORDS_STORAGE_KEY);
+export function readClientCompanyPasswords(passwordChangedAtByCompanyId: Record<string, string> = {}) {
+  const passwords = readClientCompanyPasswordEntries();
+  return Object.fromEntries(
+    Object.entries(passwords)
+      .filter(([companyId, entry]) => {
+        const expectedPasswordChangedAt = passwordChangedAtByCompanyId[companyId] || '';
+        return Boolean(entry.password && entry.passwordChangedAt && entry.passwordChangedAt === expectedPasswordChangedAt);
+      })
+      .map(([companyId, entry]) => [companyId, entry.password]),
+  );
 }
 
 export function saveAccessUserPassword(userId: string, password: string) {
@@ -99,14 +147,14 @@ export function removeWholesaleManagerPassword(managerId: number | string) {
   removeAccessUserPasswordOnly(managerAccessUserId(managerId));
 }
 
-export function saveClientCompanyPassword(companyId: number | string, password: string) {
-  const passwords = readClientCompanyPasswords();
-  passwords[String(companyId)] = password;
-  writePasswordMap(CLIENT_COMPANY_PASSWORDS_STORAGE_KEY, passwords);
+export function saveClientCompanyPassword(companyId: number | string, password: string, passwordChangedAt: string) {
+  const passwords = readClientCompanyPasswordEntries();
+  passwords[String(companyId)] = { password, passwordChangedAt };
+  writeClientCompanyPasswordEntries(passwords);
 }
 
 export function removeClientCompanyPassword(companyId: number | string) {
-  const passwords = readClientCompanyPasswords();
+  const passwords = readClientCompanyPasswordEntries();
   delete passwords[String(companyId)];
-  writePasswordMap(CLIENT_COMPANY_PASSWORDS_STORAGE_KEY, passwords);
+  writeClientCompanyPasswordEntries(passwords);
 }

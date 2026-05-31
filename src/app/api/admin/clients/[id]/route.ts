@@ -72,6 +72,7 @@ export async function PUT(request: Request, context: Context) {
 
   try {
     const company = await updateClientCompany(numericId, input, session);
+    const actorType = session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager';
     await updateWholesalePriceListManagerAssignmentsForClientCompany(
       company.id,
       { managerId: company.managerId, supportManagerId: company.supportManagerId },
@@ -80,10 +81,23 @@ export async function PUT(request: Request, context: Context) {
     publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id });
     if (password && company.clientUserId) {
       await revokeClientUserSessions(company.clientUserId);
+      await recordSecurityEvent({
+        eventType: 'password_changed',
+        actorType,
+        adminUserId: session.adminUserId,
+        managerId: session.managerId,
+        sessionId: session.sessionId,
+        entityType: 'client_user',
+        entityId: company.clientUserId,
+        ip: getClientIp(request),
+        userAgent: request.headers.get('user-agent'),
+        referer: request.headers.get('referer'),
+        metadata: { companyId: company.id, title: company.title, source: 'admin_clients' },
+      });
     }
     await recordSecurityEvent({
       eventType: 'client_company_updated',
-      actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
+      actorType,
       adminUserId: session.adminUserId,
       managerId: session.managerId,
       sessionId: session.sessionId,

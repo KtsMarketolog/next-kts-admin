@@ -26,6 +26,7 @@ export type ClientCompany = {
   userCount: number;
   clientLogin: string;
   clientUserId: number | null;
+  passwordChangedAt: string;
   chatUnreadCount: number;
   isActive: boolean;
   createdAt: string;
@@ -118,6 +119,7 @@ type ClientCompanyRow = {
   user_count: string;
   client_login: string | null;
   client_user_id: string | null;
+  password_changed_at: string | null;
   chat_unread_count: string;
   is_active: boolean;
   created_at: string;
@@ -158,6 +160,7 @@ function mapClientCompany(row: ClientCompanyRow): ClientCompany {
     userCount: Number(row.user_count),
     clientLogin: row.client_login ?? '',
     clientUserId: row.client_user_id ? Number(row.client_user_id) : null,
+    passwordChangedAt: row.password_changed_at ?? '',
     chatUnreadCount: Number(row.chat_unread_count ?? 0),
     isActive: row.is_active,
     createdAt: row.created_at,
@@ -328,6 +331,7 @@ export async function getClientCompanies(session: AdminSession): Promise<ClientC
        count(cu.id)::text as user_count,
        coalesce(primary_user.login, '') as client_login,
        primary_user.id::text as client_user_id,
+       primary_user.password_changed_at::text as password_changed_at,
        (
          select count(*)::text
          from client_chat_messages ccm
@@ -344,14 +348,14 @@ export async function getClientCompanies(session: AdminSession): Promise<ClientC
      left join wholesale_managers support on support.id = cc.support_manager_id
      left join client_users cu on cu.company_id = cc.id
      left join lateral (
-       select id, login
+       select id, login, password_changed_at
        from client_users
        where company_id = cc.id
        order by created_at asc, id asc
        limit 1
      ) primary_user on true
      where ($1::boolean = true or cc.manager_id = $2 or cc.support_manager_id = $2)
-     group by cc.id, manager.name, support.name, primary_user.id, primary_user.login
+     group by cc.id, manager.name, support.name, primary_user.id, primary_user.login, primary_user.password_changed_at
      order by cc.is_active desc, cc.title asc, cc.created_at desc`,
     [canSeeAllClients(session), session.managerId ?? 0],
   );
@@ -388,6 +392,7 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
          '0'::text as user_count,
          ''::text as client_login,
          null::text as client_user_id,
+         null::text as password_changed_at,
          '0'::text as chat_unread_count,
          is_active,
          created_at::text,
@@ -408,10 +413,22 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
     );
     const companyId = Number(result.rows[0].id);
     await upsertPrimaryClientUser(companyId, input, client);
+    const primaryUser = await client.query<{ count: string; login: string | null; id: string | null; password_changed_at: string | null }>(
+      `select
+         count(*)::text as count,
+         (select login from client_users where company_id = $1 order by created_at asc, id asc limit 1) as login,
+         (select id::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as id,
+         (select password_changed_at::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as password_changed_at
+       from client_users
+       where company_id = $1`,
+      [companyId],
+    );
     return {
       ...mapClientCompany(result.rows[0]),
-      userCount: input.passwordHash && input.email ? 1 : 0,
-      clientLogin: input.email ? normalizeClientLogin(input.email) : '',
+      userCount: Number(primaryUser.rows[0]?.count ?? 0),
+      clientLogin: primaryUser.rows[0]?.login ?? '',
+      clientUserId: primaryUser.rows[0]?.id ? Number(primaryUser.rows[0].id) : null,
+      passwordChangedAt: primaryUser.rows[0]?.password_changed_at ?? '',
     };
   });
 }
@@ -460,6 +477,7 @@ export async function updateClientCompany(
          (select count(*)::text from client_users where company_id = client_companies.id) as user_count,
          coalesce((select login from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1), '') as client_login,
          (select id::text from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1) as client_user_id,
+         (select password_changed_at::text from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1) as password_changed_at,
          (
            select count(*)::text
            from client_chat_messages ccm
@@ -488,11 +506,12 @@ export async function updateClientCompany(
     );
     if (!result.rows[0]) throw new Error('Компания клиента не найдена');
     await upsertPrimaryClientUser(id, input, client);
-    const userCount = await client.query<{ count: string; login: string | null; id: string | null }>(
+    const userCount = await client.query<{ count: string; login: string | null; id: string | null; password_changed_at: string | null }>(
       `select
          count(*)::text as count,
          (select login from client_users where company_id = $1 order by created_at asc, id asc limit 1) as login,
-         (select id::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as id
+         (select id::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as id,
+         (select password_changed_at::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as password_changed_at
        from client_users
        where company_id = $1`,
       [id],
@@ -502,6 +521,7 @@ export async function updateClientCompany(
       userCount: Number(userCount.rows[0]?.count ?? 0),
       clientLogin: userCount.rows[0]?.login ?? '',
       clientUserId: userCount.rows[0]?.id ? Number(userCount.rows[0].id) : null,
+      passwordChangedAt: userCount.rows[0]?.password_changed_at ?? '',
     };
   });
 }
@@ -550,6 +570,7 @@ export async function deleteClientCompany(id: number, session: AdminSession): Pr
          count(cu.id)::text as user_count,
          coalesce(primary_user.login, '') as client_login,
          primary_user.id::text as client_user_id,
+         primary_user.password_changed_at::text as password_changed_at,
          (
            select count(*)::text
            from client_chat_messages ccm
@@ -566,14 +587,14 @@ export async function deleteClientCompany(id: number, session: AdminSession): Pr
        left join wholesale_managers support on support.id = cc.support_manager_id
        left join client_users cu on cu.company_id = cc.id
        left join lateral (
-         select id, login
+         select id, login, password_changed_at
          from client_users
          where company_id = cc.id
          order by created_at asc, id asc
          limit 1
        ) primary_user on true
        where cc.id = $1
-       group by cc.id, manager.name, support.name, primary_user.id, primary_user.login
+       group by cc.id, manager.name, support.name, primary_user.id, primary_user.login, primary_user.password_changed_at
        limit 1`,
       [id],
     );
