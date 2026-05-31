@@ -13,7 +13,7 @@ const BurgerMenu = dynamic(() => import("../BurgerMenu/BurgerMenu"), {
   ssr: false,
 });
 
-const menuItems = ["Главная", "Каталог", "Климатика", "О нас", "Контакты", "Новости", "Акции"];
+const menuItems = ["Главная", "Каталог", "Климатика", "О нас", "Контакты", "Новости", "Кабинет"];
 
 const Header = () => {
 
@@ -39,6 +39,7 @@ const Header = () => {
     if (pathname === "/about") return "О нас";
     if (pathname === "/contacts") return "Контакты";
     if (pathname === "/klimatika") return "Климатика";
+    if (pathname?.startsWith("/login") || pathname?.startsWith("/cabinet") || pathname?.startsWith("/admin")) return "Кабинет";
     if (pathname !== "/") return null;
     return "Главная";
 
@@ -58,7 +59,6 @@ const Header = () => {
 
     Главная: "#top",
     Новости: "#news",
-    Акции: "#sales",
 
   };
 
@@ -219,7 +219,26 @@ const Header = () => {
 
                 );
 
-              // «Новости» / «Акции»
+              if (item === "Кабинет")
+
+                return (
+
+                  <Link
+
+                    key={item}
+                    href="/login"
+                    prefetch={false}
+                    className={activeItem === item ? styles.active : ""}
+
+                  >
+
+                    {item}
+
+                  </Link>
+
+                );
+
+              // «Новости»
               const hash = idMap[item];
 
               return (

@@ -14,7 +14,6 @@ import { useAdminSlides } from '@/features/admin/model/useAdminSlides';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
 import type { AdminSection, SettingKey } from '@/features/admin/types';
-import { LoginPanel } from '@/features/auth/LoginPanel';
 import type { AdminSession } from '@/shared/lib/adminAuth';
 
 import { AdminSiteContent } from './AdminSiteContent';
@@ -254,6 +253,12 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
     }
   }, [pathname, searchParams]);
 
+  useEffect(() => {
+    if (sessionReady && !authenticated) {
+      router.replace('/login?mode=employee', { scroll: false });
+    }
+  }, [authenticated, router, sessionReady]);
+
   const saveInfo = async (target: SettingKey) => {
     setBusy(true);
     const res = await fetch('/api/admin/settings', {
@@ -290,25 +295,17 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
   if (!authenticated) {
     return (
-      <LoginPanel
-        defaultMode="employee"
-        onEmployeeAuthenticated={async (role) => {
-          setSessionRole(role);
-          setAuthenticated(true);
-          setSessionReady(true);
-          if (role === 'admin') {
-            await loadAdminData().catch((error) => {
-              console.error('Failed to load admin data after login', error);
-            });
-          }
-          if (pathname.startsWith('/admin/wholesale')) {
-            setActiveArea('home');
-            router.replace('/admin', { scroll: false });
-          } else if (pathname.startsWith('/admin/site') && role !== 'admin') {
-            router.replace('/admin', { scroll: false });
-          }
-        }}
-      />
+      <main className={styles.page}>
+        <div className={styles.topbar}>
+          <div>
+            <p>Панель управления</p>
+            <h1>Переходим на вход</h1>
+          </div>
+        </div>
+        <section className={styles.section}>
+          <p className={styles.mutedText}>Откроется единая страница входа для клиентов и сотрудников.</p>
+        </section>
+      </main>
     );
   }
 

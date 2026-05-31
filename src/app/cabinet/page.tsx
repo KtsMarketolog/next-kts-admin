@@ -12,10 +12,10 @@ export default async function ClientCabinetPage() {
   if (employeeSession) redirect('/admin/clients');
 
   const session = await getClientSession();
-  if (!session) redirect('/cabinet/login');
+  if (!session) redirect('/login?mode=client');
 
   const profile = await getClientPortalProfile(session.clientUserId);
-  if (!profile) redirect('/cabinet/login');
+  if (!profile) redirect('/login?mode=client');
   const [documents, requests] = await Promise.all([
     getClientDocumentsForClient(session.companyId),
     getClientPriceRequestsForClient(session.companyId),

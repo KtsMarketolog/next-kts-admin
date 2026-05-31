@@ -224,7 +224,7 @@ export function ClientCabinetShell({ documents, profile, requests }: ClientCabin
 
   const logout = async () => {
     await fetch('/api/client/logout', { method: 'POST' });
-    router.push('/cabinet/login');
+    router.push('/login?mode=client');
     router.refresh();
   };
 

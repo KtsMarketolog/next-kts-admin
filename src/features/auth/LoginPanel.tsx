@@ -10,24 +10,17 @@ type LoginMode = 'client' | 'employee';
 
 type LoginPanelProps = {
   defaultMode?: LoginMode;
+  clientRedirect?: string;
   employeeRedirect?: string;
   onEmployeeAuthenticated?: (role: 'admin' | 'wholesale_admin') => Promise<void> | void;
 };
 
-function extractToken(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-
-  try {
-    const url = new URL(trimmed);
-    const parts = url.pathname.split('/').filter(Boolean);
-    return parts[0] === 'price' ? parts[1] ?? '' : parts.at(-1) ?? '';
-  } catch {
-    return trimmed.replace(/^\/?price\//, '').replace(/^\/+|\/+$/g, '');
-  }
-}
-
-export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admin', onEmployeeAuthenticated }: LoginPanelProps) {
+export function LoginPanel({
+  defaultMode = 'employee',
+  clientRedirect = '/cabinet',
+  employeeRedirect = '/admin',
+  onEmployeeAuthenticated,
+}: LoginPanelProps) {
   const router = useRouter();
   const [mode, setMode] = useState<LoginMode>(defaultMode);
   const [login, setLogin] = useState('');
@@ -35,7 +28,6 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
   const [twoFactorChallengeId, setTwoFactorChallengeId] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [twoFactorEmail, setTwoFactorEmail] = useState('');
-  const [priceToken, setPriceToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
 
@@ -84,14 +76,24 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
     router.push(employeeRedirect);
   };
 
-  const submitClient = () => {
-    const token = extractToken(priceToken);
-    if (!token) {
-      setStatus('Введите ссылку на прайс или токен');
+  const submitClient = async () => {
+    setBusy(true);
+    setStatus('');
+
+    const res = await fetch('/api/client/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login, password }),
+    });
+    setBusy(false);
+
+    if (!res.ok) {
+      setStatus(res.status === 429 ? 'Слишком много попыток. Попробуйте позже.' : 'Неверный логин или пароль');
       return;
     }
 
-    router.push(`/price/${encodeURIComponent(token)}`);
+    router.push(clientRedirect);
+    router.refresh();
   };
 
   const submit = async (event: FormEvent) => {
@@ -113,8 +115,7 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
           </Link>
           <h1>KTS</h1>
           <p>
-            Вход для клиентов и сотрудников. Клиент открывает индивидуальный прайс по ссылке или токену, сотрудник
-            попадает в панель управления.
+            Единый вход для клиентов и сотрудников. Клиент попадает в личный кабинет, сотрудник - в панель управления.
           </p>
         </div>
 
@@ -149,14 +150,27 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
           </div>
 
           {mode === 'client' ? (
-            <label className={styles.field}>
-              <span>Ссылка на прайс или токен</span>
-              <input
-                value={priceToken}
-                onChange={(event) => setPriceToken(event.target.value)}
-                placeholder="Например, https://kts-impex.ru/price/..."
-              />
-            </label>
+            <>
+              <label className={styles.field}>
+                <span>Email</span>
+                <input
+                  value={login}
+                  onChange={(event) => setLogin(event.target.value)}
+                  placeholder="client@example.ru"
+                  autoComplete="username"
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Пароль</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Пароль"
+                  autoComplete="current-password"
+                />
+              </label>
+            </>
           ) : twoFactorChallengeId ? (
             <>
               <label className={styles.field}>
@@ -187,7 +201,12 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
             <>
               <label className={styles.field}>
                 <span>Email или логин</span>
-                <input value={login} onChange={(event) => setLogin(event.target.value)} placeholder="Логин сотрудника" />
+                <input
+                  value={login}
+                  onChange={(event) => setLogin(event.target.value)}
+                  placeholder="Логин сотрудника"
+                  autoComplete="username"
+                />
               </label>
               <label className={styles.field}>
                 <span>Пароль</span>
@@ -196,6 +215,7 @@ export function LoginPanel({ defaultMode = 'employee', employeeRedirect = '/admi
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="Пароль"
+                  autoComplete="current-password"
                 />
               </label>
             </>

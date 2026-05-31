@@ -20,7 +20,6 @@ export default function BurgerMenu({ open, onClose, menuItems, activeIndex = -1,
 
     'Главная': '#top',
     'Новости': '#news',
-    'Акции': '#sales',
 
   };
 
@@ -79,6 +78,14 @@ export default function BurgerMenu({ open, onClose, menuItems, activeIndex = -1,
     if (item === 'Главная') {
 
       router.push('/');
+      onClose();
+      return;
+
+    }
+
+    if (item === 'Кабинет') {
+
+      router.push('/login');
       onClose();
       return;
 
