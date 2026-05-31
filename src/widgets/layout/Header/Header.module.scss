@@ -4,7 +4,7 @@
 
   position: fixed;
   width: 100%;
-  min-height: $apx-114;
+  min-height: $apx-150;
   margin-top: $apx-20;
   margin-bottom: $apx-63;
   z-index: 10;
@@ -57,19 +57,24 @@
  
   max-width: 100%;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "logo phone"
+    "menu menu";
   align-items: center;
-  min-height: $apx-114;
+  row-gap: $apx-22;
+  min-height: $apx-150;
  
 }
 
 .logo {
 
+  grid-area: logo;
   max-width: $apx-207;
   max-height: $apx-50;
   display: flex;
   align-items: center;
-  margin-right: $apx-117;
+  margin-right: 0;
 
   img{
 
@@ -82,12 +87,14 @@
 
 .menu {
 
+  grid-area: menu;
   display: flex;
   gap: $apx-45;
   position: relative;
   align-items: flex-end;
   padding-bottom: $apx-28;
-  width: max-content;
+  width: 100%;
+  justify-content: center;
 
   /* длинная светлая полоса */
   &::before {
@@ -164,6 +171,13 @@
 
 }
 
+.phonePosition {
+
+  grid-area: phone;
+  justify-self: end;
+
+}
+
 .phoneButton {
 
   font-family: 'Montserrat', sans-serif;
@@ -214,6 +228,9 @@
   .headerInner {
 
     grid-template-columns: auto 1fr auto;
+    grid-template-areas: none;
+    row-gap: 0;
+    min-height: $apx-l-114;
 
   }
 
@@ -259,6 +276,7 @@
 
   .logo {
 
+    grid-area: auto;
     max-width: $apx-l-207;
     max-height: $apx-l-64;
 
@@ -274,6 +292,12 @@
       max-height: $apx-l-64;
 
     }
+
+  }
+
+  .phonePosition {
+
+    grid-area: auto;
 
   }
 
@@ -310,6 +334,7 @@
 
     display: grid;
     grid-template-columns: minmax(0, $apx-m-140) minmax(0, $apx-m-140) minmax(0, $apx-m-50);  
+    grid-template-areas: none;
     align-items: center;
     min-height: $apx-m-74;
     gap: $apx-m-20;
@@ -342,6 +367,7 @@
 
   .logo {
 
+    grid-area: auto;
     max-width: $apx-m-140;
     max-height: $apx-m-44;
     display: flex;
@@ -362,6 +388,7 @@
 
   .phonePosition { 
 
+    grid-area: auto;
     order: 2; 
     grid-column: 2; 
     justify-self: center; 
