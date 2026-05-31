@@ -30,7 +30,7 @@ export async function PUT(request: Request) {
     return Response.json({ error: passwordPolicy.error || 'Пароль не подходит' }, { status: 400 });
   }
 
-  await updateClientUserPassword(session.clientUserId, hashPassword(nextPassword));
+  await updateClientUserPassword(session.clientUserId, hashPassword(nextPassword), nextPassword);
   await revokeClientUserSessions(session.clientUserId);
   await createClientSession(session.clientUserId, {
     ip: getClientIp(request),

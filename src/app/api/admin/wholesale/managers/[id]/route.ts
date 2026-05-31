@@ -46,6 +46,7 @@ export async function PUT(request: Request, context: Context) {
       phone,
       supportManagerId: normalizedSupportManagerId,
       passwordHash: password ? hashPassword(password) : undefined,
+      displayPassword: password || undefined,
       isActive: Boolean(body.isActive ?? true),
     });
     if (password) {

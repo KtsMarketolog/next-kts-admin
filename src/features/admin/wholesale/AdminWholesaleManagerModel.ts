@@ -1,7 +1,5 @@
 'use client';
 
-import { readWholesaleManagerPasswords as readManagerPasswords } from '@/shared/lib/adminPasswordStorage';
-
 import type { Manager, ManagerDraft, ManagerRole } from './AdminWholesaleTypes';
 
 export const MANAGER_ROLE_TABS: Array<{ value: ManagerRole; label: string }> = [
@@ -37,9 +35,8 @@ export function saveManagerRoleTab(tab: ManagerRole) {
 }
 
 export function attachManagerPasswords(managers: Manager[]) {
-  const passwords = readManagerPasswords();
   return managers.map((manager) => ({
     ...manager,
-    displayPassword: manager.displayPassword || passwords[String(manager.id)] || '',
+    displayPassword: manager.displayPassword || '',
   }));
 }

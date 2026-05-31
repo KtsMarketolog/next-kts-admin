@@ -177,6 +177,7 @@ async function ensureSiteSchemaInternal() {
       role text not null default 'manager',
       support_manager_id bigint references wholesale_managers(id) on delete set null,
       password_hash text not null default '',
+      display_password text not null default '',
       is_active boolean not null default true,
       password_changed_at timestamptz,
       created_at timestamptz not null default now(),
@@ -285,6 +286,7 @@ async function ensureSiteSchemaInternal() {
       phone text not null default '',
       login text not null default '',
       password_hash text not null default '',
+      display_password text not null default '',
       is_active boolean not null default true,
       password_changed_at timestamptz,
       last_login_at timestamptz,
@@ -473,6 +475,7 @@ async function ensureSiteSchemaInternal() {
     alter table wholesale_managers add column if not exists role text not null default 'manager';
     alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_managers add column if not exists password_hash text not null default '';
+    alter table wholesale_managers add column if not exists display_password text not null default '';
     alter table wholesale_managers add column if not exists password_changed_at timestamptz;
     alter table wholesale_price_list_events add column if not exists actor_role text not null default '';
     alter table wholesale_price_list_events add column if not exists actor_label text not null default '';
@@ -480,6 +483,7 @@ async function ensureSiteSchemaInternal() {
     alter table wholesale_price_list_events add column if not exists details text not null default '';
     alter table wholesale_price_list_events alter column price_list_id drop not null;
     alter table client_users add column if not exists password_changed_at timestamptz;
+    alter table client_users add column if not exists display_password text not null default '';
     alter table wholesale_price_lists add column if not exists client_company_id bigint references client_companies(id) on delete set null;
 
     do $$
@@ -618,7 +622,9 @@ async function ensureSiteSchemaInternal() {
   await query(`alter table wholesale_managers add column if not exists role text not null default 'manager'`);
   await query(`alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_managers add column if not exists password_hash text not null default ''`);
+  await query(`alter table wholesale_managers add column if not exists display_password text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists password_changed_at timestamptz`);
+  await query(`alter table client_users add column if not exists display_password text not null default ''`);
   await query(`
     update wholesale_price_lists pl
     set support_manager_id = m.support_manager_id

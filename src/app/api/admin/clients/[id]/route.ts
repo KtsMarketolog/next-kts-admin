@@ -23,7 +23,7 @@ function managerIdFromBody(value: unknown) {
   return Number.isInteger(managerId) && managerId > 0 ? managerId : null;
 }
 
-function inputFromBody(body: Record<string, unknown>, passwordHash?: string): ClientCompanyInput {
+function inputFromBody(body: Record<string, unknown>, passwordHash?: string, displayPassword?: string): ClientCompanyInput {
   return {
     title: normalizeTextField(body.title, 200),
     inn: '',
@@ -37,6 +37,7 @@ function inputFromBody(body: Record<string, unknown>, passwordHash?: string): Cl
     supportManagerId: managerIdFromBody(body.supportManagerId),
     isActive: body.isActive !== false,
     passwordHash,
+    displayPassword,
   };
 }
 
@@ -62,7 +63,7 @@ export async function PUT(request: Request, context: Context) {
     return Response.json({ error: passwordPolicy.error || 'Пароль не подходит' }, { status: 400 });
   }
 
-  const input = inputFromBody(body, password ? hashPassword(password) : undefined);
+  const input = inputFromBody(body, password ? hashPassword(password) : undefined, password || undefined);
   if (!input.title) {
     return Response.json({ error: 'Введите название компании' }, { status: 400 });
   }

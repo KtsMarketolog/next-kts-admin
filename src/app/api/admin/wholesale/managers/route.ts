@@ -47,6 +47,7 @@ export async function POST(request: Request) {
       role,
       supportManagerId: normalizedSupportManagerId,
       passwordHash: hashPassword(password),
+      displayPassword: password,
       isActive: Boolean(body.isActive ?? true),
     });
   } catch (error) {

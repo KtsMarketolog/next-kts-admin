@@ -2,10 +2,6 @@
 
 import { useCallback, useMemo, useState } from 'react';
 
-import {
-  removeWholesaleManagerPassword as removeManagerPassword,
-  saveWholesaleManagerPassword as saveManagerPassword,
-} from '@/shared/lib/adminPasswordStorage';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 
 import {
@@ -116,9 +112,6 @@ export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions
       return;
     }
 
-    const data = await res.json().catch(() => ({}));
-    const createdId = Number(data.id);
-    if (Number.isInteger(createdId) && createdId > 0) saveManagerPassword(createdId, managerDraft.password.trim());
     showStatus(`${managerRoleTitle} добавлен`);
     setManagerCreated(true);
     setManagerDraft(emptyManager);
@@ -156,7 +149,6 @@ export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions
         return;
       }
 
-      if (nextPassword) saveManagerPassword(manager.id, nextPassword);
       setManagerPasswordDrafts((current) => {
         const next = { ...current };
         delete next[manager.id];
@@ -185,7 +177,6 @@ export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions
       setManagerBusy(false);
       showStatus(res.ok ? 'Менеджер удалён' : 'Не удалось удалить менеджера');
       if (res.ok) {
-        removeManagerPassword(id);
         await loadManagers();
       }
     },

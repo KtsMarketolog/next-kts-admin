@@ -16,6 +16,7 @@ export type WholesaleManager = {
   login: string;
   email: string;
   phone: string;
+  displayPassword: string;
   role: WholesaleManagerRole;
   supportManagerId: number | null;
   supportManagerName: string;
@@ -729,6 +730,7 @@ type ManagerRow = {
   login: string;
   email: string;
   phone: string;
+  display_password: string | null;
   role: string | null;
   support_manager_id: string | null;
   support_manager_name: string | null;
@@ -1519,6 +1521,7 @@ function mapManager(row: ManagerRow): WholesaleManager {
     login: row.login,
     email: row.email,
     phone: row.phone,
+    displayPassword: row.display_password ?? '',
     role: normalizeManagerRole(row.role),
     supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
     supportManagerName: row.support_manager_name ?? '',
@@ -1564,6 +1567,7 @@ export async function getWholesaleManagers() {
       m.login,
       m.email,
       m.phone,
+      m.display_password,
       coalesce(nullif(m.role, ''), 'manager') as role,
       m.support_manager_id::text as support_manager_id,
       coalesce(support.name, '') as support_manager_name,
@@ -1659,23 +1663,33 @@ export async function createWholesaleManager(input: {
   role?: WholesaleManagerRole;
   supportManagerId?: number | null;
   passwordHash: string;
+  displayPassword?: string;
   isActive: boolean;
 }) {
   await ensureSiteSchema();
   const role = normalizeManagerRole(input.role);
   const supportManagerId = role === 'manager' ? await normalizeWholesaleSupportManagerId(input.supportManagerId) : null;
   const result = await query<{ id: string }>(
-    `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, is_active, password_changed_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, now())
+    `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, display_password, is_active, password_changed_at)
+     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8::text, ''), $9, now())
      returning id`,
-    [input.name, normalizeLogin(input.login), input.email, input.phone, role, supportManagerId, input.passwordHash, input.isActive],
+    [input.name, normalizeLogin(input.login), input.email, input.phone, role, supportManagerId, input.passwordHash, input.displayPassword ?? '', input.isActive],
   );
   return Number(result.rows[0].id);
 }
 
 export async function updateWholesaleManager(
   id: number,
-  input: { name: string; login: string; email: string; phone: string; supportManagerId?: number | null; passwordHash?: string; isActive: boolean },
+  input: {
+    name: string;
+    login: string;
+    email: string;
+    phone: string;
+    supportManagerId?: number | null;
+    passwordHash?: string;
+    displayPassword?: string;
+    isActive: boolean;
+  },
 ) {
   await ensureSiteSchema();
   const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId, id);
@@ -1686,12 +1700,23 @@ export async function updateWholesaleManager(
          email = $4,
          phone = $5,
          password_hash = case when $6::text is null then password_hash else $6 end,
+         display_password = case when $6::text is null then display_password else coalesce($9::text, '') end,
          password_changed_at = case when $6::text is null then password_changed_at else now() end,
          is_active = $7,
          support_manager_id = $8,
          updated_at = now()
      where id = $1`,
-    [id, input.name, normalizeLogin(input.login), input.email, input.phone, input.passwordHash ?? null, input.isActive, supportManagerId],
+    [
+      id,
+      input.name,
+      normalizeLogin(input.login),
+      input.email,
+      input.phone,
+      input.passwordHash ?? null,
+      input.isActive,
+      supportManagerId,
+      input.displayPassword ?? '',
+    ],
   );
 }
 
