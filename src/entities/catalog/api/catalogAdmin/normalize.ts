@@ -1,3 +1,3 @@
-export { normalizeCatalogPrice } from './core';
+export { normalizeCatalogPrice } from './helpers';
 
-export type { CatalogProductInput } from './core';
+export type { CatalogProductInput } from './types';

@@ -6,4 +6,4 @@ export {
 export type {
   CatalogAdminStats,
   CatalogImportResult,
-} from './core';
+} from './types';

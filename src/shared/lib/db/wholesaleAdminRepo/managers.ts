@@ -5,11 +5,11 @@ export {
   getWholesaleManagerByLogin,
   getWholesaleManagers,
   updateWholesaleManager,
-} from './core';
+} from './managerRepo';
 
 export type {
   WholesaleManager,
   WholesaleManagerAuth,
   WholesaleManagerProfile,
   WholesaleManagerRole,
-} from './core';
+} from './types';

@@ -1,3 +1,2 @@
-export { getWholesaleDiscountReportRows } from './core';
-
-export type { WholesaleDiscountReportRow } from './core';
+export { getWholesaleDiscountReportRows } from './discountReportRepo';
+export type { WholesaleDiscountReportRow } from './types';

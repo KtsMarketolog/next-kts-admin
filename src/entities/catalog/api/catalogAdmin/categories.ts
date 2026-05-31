@@ -2,6 +2,6 @@ export {
   getCatalogAdminCategories,
   updateCatalogAdminCategory,
   updateCatalogAdminCategoryIcon,
-} from './core';
+} from './categoriesRepo';
 
-export type { CatalogAdminCategory } from './core';
+export type { CatalogAdminCategory } from './types';

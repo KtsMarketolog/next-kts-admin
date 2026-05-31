@@ -13,13 +13,12 @@ import { useAdminWholesaleGatewayPath } from './useAdminWholesaleGatewayPath';
 import { useWholesaleCatalogFilters } from './useWholesaleCatalogFilters';
 import { useWholesaleEditorActions } from './useWholesaleEditorActions';
 import { useWholesaleManagers } from './useWholesaleManagers';
+import { buildPriceEditorFromPayload, normalizeClientCompanyOptions } from './AdminWholesaleGateway.helpers';
 
 import {
   emptyEditor,
   getTextareaRows,
-  makeToken,
   mergeEditorItems,
-  normalizePriceGroupStockSettings,
   readApiError,
   type AdminWholesaleGatewayProps,
   type CatalogCategory,
@@ -156,19 +155,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       return [];
     }
     const data = await res.json().catch(() => ({}));
-    const nextClientCompanies = Array.isArray(data.companies)
-      ? data.companies
-          .filter((company: ClientCompanyOption) => company && company.isActive !== false)
-          .map((company: ClientCompanyOption) => ({
-            id: Number(company.id),
-            title: String(company.title ?? '').trim(),
-            managerId: Number.isInteger(Number(company.managerId)) && Number(company.managerId) > 0 ? Number(company.managerId) : null,
-            supportManagerId: Number.isInteger(Number(company.supportManagerId)) && Number(company.supportManagerId) > 0 ? Number(company.supportManagerId) : null,
-            isActive: company.isActive !== false,
-          }))
-          .filter((company: ClientCompanyOption) => Number.isInteger(company.id) && company.id > 0 && company.title)
-          .sort((first: ClientCompanyOption, second: ClientCompanyOption) => first.title.localeCompare(second.title, 'ru'))
-      : [];
+    const nextClientCompanies = normalizeClientCompanyOptions(data);
     setClientCompanies(nextClientCompanies);
     return nextClientCompanies;
   }, []);
@@ -226,26 +213,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       }
       const data = await res.json();
       if (!isActive) return;
-      const priceList = data.priceList;
-      const selectedClientCompany = nextClientCompanies.find((company) => company.id === priceList.clientCompanyId) ?? null;
-      setEditor({
-        id: priceList.id,
-        title: priceList.title ?? '',
-        clientCompanyId: priceList.clientCompanyId ?? null,
-        clientName: priceList.clientName ?? '',
-        token: priceList.token ?? makeToken(),
-        validUntil: priceList.validUntil ?? '',
-        comment: priceList.comment ?? '',
-        workflowStatus: priceList.workflowStatus ?? 'not_sent',
-        showRetailPrices: Boolean(priceList.showRetailPrices),
-        showStock: priceList.showStock !== false,
-        showStockText: Boolean(priceList.showStockText),
-        isActive: Boolean(priceList.isActive),
-        managerId: selectedClientCompany ? selectedClientCompany.managerId : priceList.managerId ?? null,
-        supportManagerId: selectedClientCompany ? selectedClientCompany.supportManagerId : priceList.supportManagerId ?? null,
-        items: mergeEditorItems(nextCatalog, Array.isArray(priceList.items) ? priceList.items : []),
-        priceGroupStockSettings: normalizePriceGroupStockSettings(priceList.priceGroupStockSettings),
-      });
+      setEditor(buildPriceEditorFromPayload(data.priceList, nextCatalog, nextClientCompanies));
       setEditorLoading(false);
     }
 

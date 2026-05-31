@@ -2,7 +2,7 @@ export {
   getWholesaleAdminAnalytics,
   getWholesaleManagerAnalytics,
   getWholesaleManagerAnalyticsExtended,
-} from './core';
+} from './analyticsRepo';
 
 export type {
   WholesaleAdminAnalytics,
@@ -26,4 +26,4 @@ export type {
   WholesaleManagerAnalyticsPeriod,
   WholesaleManagerAnalyticsProblem,
   WholesaleManagerAnalyticsProblemPrice,
-} from './core';
+} from './types';

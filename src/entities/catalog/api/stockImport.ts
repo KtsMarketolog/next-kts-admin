@@ -1,80 +1,43 @@
-import * as XLSX from 'xlsx';
-
 import { ensureSiteSchema } from '@/shared/lib/db';
 import { query, withTransaction } from '@/shared/lib/db/client';
 
 import { ensureCatalogSchema } from './catalogDb';
+import {
+  HEADER_ARTICLE_ALIASES,
+  HEADER_EXPECTED_ALIASES,
+  HEADER_STOCK_ALIASES,
+  HEADER_UNIT_ALIASES,
+  normalizeStockProductName,
+  parseCurrentStock,
+  parseExpected,
+  parseStockWorkbook,
+  readCellByAliases,
+  readRawCellByAliases,
+} from './stockWorkbookParser';
+export { normalizeStockProductName } from './stockWorkbookParser';
 
-type RawRow = Record<string, unknown>;
-type StockLocationKey = 'volzhsk' | 'moscow';
-type ParsedStockRow = {
-  rowNumber: number;
-  row: RawRow;
-  location: StockLocationKey | null;
-};
+export type {
+  StockImportError,
+  StockImportResult,
+  StockImportLog,
+  StockEmailSkipReason,
+  StockEmailSkipSample,
+  StockEmailImportResult
+} from './stockImportTypes';
+import type {
+  StockLocationKey,
+  StockImportError,
+  StockImportResult,
+  StockImportLog,
+  StockEmailSkipSample,
+  StockEmailImportResult
+} from './stockImportTypes';
 
-export type StockImportError = {
-  row: number;
-  name: string;
-  error: string;
-};
-
-export type StockImportResult = {
-  logId: number | null;
-  fileName: string;
-  emailFrom: string;
-  emailSubject: string;
-  status: 'success' | 'partial_success' | 'failed';
-  totalRows: number;
-  updatedRows: number;
-  notFoundRows: number;
-  failedRows: number;
-  errors: StockImportError[];
-};
-
-export type StockImportLog = Omit<StockImportResult, 'errors'> & {
-  createdAt: string;
-  errors: StockImportError[];
-};
-
-export type StockEmailSkipReason = 'sender' | 'subject' | 'attachment';
-
-export type StockEmailSkipSample = {
-  reason: StockEmailSkipReason;
-  from: string;
-  subject: string;
-  attachments: string[];
-};
-
-export type StockEmailImportResult = {
-  processed: number;
-  result: StockImportResult | null;
-  checkedMessages: number;
-  skipped: {
-    sender: number;
-    subject: number;
-    attachment: number;
-    samples: StockEmailSkipSample[];
-  };
-  settings: {
-    allowedFrom: string;
-    subjectPart: string;
-    filePrefix: string;
-    scanLimit: number;
-  };
-};
-
-const HEADER_ARTICLE_ALIASES = ['Номенклатура.Код', 'Номенклатура. Код', 'Артикул'];
-const HEADER_STOCK_ALIASES = ['Сейчас', 'Сейчас Доступно', 'Остаток', 'Остатки'];
-const HEADER_UNIT_ALIASES = ['Ед. изм.', 'Ед. изм', 'Единица измерения'];
-const HEADER_EXPECTED_ALIASES = ['Ожидается', 'Ожидается Доступно'];
 const LOCK_KEY = 'email';
 const MAX_ERRORS = 200;
 const MAX_SKIP_SAMPLES = 5;
 const DEFAULT_MAIL_SCAN_LIMIT = 300;
 const DEFAULT_STOCK_ALLOWED_FROM = ['saunakva@yandex.ru'];
-const MAX_STOCK_WORKBOOK_BYTES = 15 * 1024 * 1024;
-const MAX_STOCK_WORKBOOK_ROWS = 50_000;
 
 type StockEmailCandidate = {
   uid: number | string;
@@ -85,68 +48,6 @@ type StockEmailCandidate = {
   emailFrom: string;
   emailSubject: string;
 };
-
-export function normalizeStockProductName(value: unknown) {
-  return String(value ?? '')
-    .replace(/\u00a0/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-function normalizeHeader(value: unknown) {
-  return String(value ?? '')
-    .replace(/\u00a0/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
-}
-
-function readCellByAliases(row: RawRow, aliases: string[]) {
-  const wanted = new Set(aliases.map(normalizeHeader));
-  const entry = Object.entries(row).find(([key]) => wanted.has(normalizeHeader(key)));
-  const value = entry?.[1];
-  return value === null || value === undefined ? '' : String(value).trim();
-}
-
-function readRawCellByAliases(row: RawRow, aliases: string[]) {
-  const wanted = new Set(aliases.map(normalizeHeader));
-  const entry = Object.entries(row).find(([key]) => wanted.has(normalizeHeader(key)));
-  return entry?.[1] ?? '';
-}
-
-function parseStock(value: unknown) {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number') {
-    const amount = Math.round(value);
-    return Math.abs(value - amount) < 0.000001 && Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
-  }
-
-  const text = String(value).replace(/\u00a0/g, ' ').trim().replace(/\s+/g, '');
-  let normalized = text;
-  if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(normalized)) {
-    normalized = normalized.replace(/,/g, '');
-  } else if (/^\d+,\d+$/.test(normalized)) {
-    normalized = normalized.replace(',', '.');
-  }
-  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
-  const amount = Number(normalized);
-  const rounded = Math.round(amount);
-  return Math.abs(amount - rounded) < 0.000001 && Number.isSafeInteger(rounded) && rounded >= 0 ? rounded : null;
-}
-
-function parseCurrentStock(value: unknown) {
-  if (value === null || value === undefined || value === '') return 0;
-  const text = String(value).replace(/\u00a0/g, ' ').trim();
-  if (!text) return 0;
-  return parseStock(value);
-}
-
-function parseExpected(value: unknown) {
-  const text = String(value ?? '').replace(/\u00a0/g, ' ').trim().toLowerCase();
-  if (!text) return false;
-  if (['нет', 'false', '0', '0.0', '0,0'].includes(text)) return false;
-  return true;
-}
 
 function pushError(errors: StockImportError[], error: StockImportError) {
   if (errors.length < MAX_ERRORS) errors.push(error);
@@ -234,106 +135,6 @@ async function acquireImportLock() {
 
 async function releaseImportLock() {
   await query(`delete from stock_import_locks where key = $1`, [LOCK_KEY]).catch(() => {});
-}
-
-function buildRawRow(headers: unknown[], row: unknown[]): RawRow {
-  return Object.fromEntries(
-    headers.map((header, columnIndex) => {
-      const key = normalizeStockProductName(header) || `__EMPTY_${columnIndex}`;
-      return [key, row[columnIndex] ?? ''];
-    }),
-  );
-}
-
-function stockHeaderAliases(values: string[]) {
-  return values.map(normalizeHeader);
-}
-
-function isStockHeaderValues(headers: unknown[]) {
-  const normalized = headers.map(normalizeHeader);
-  return (
-    stockHeaderAliases(HEADER_ARTICLE_ALIASES).some((header) => normalized.includes(header)) &&
-    stockHeaderAliases(HEADER_STOCK_ALIASES).some((header) => normalized.includes(header))
-  );
-}
-
-function buildStockHeaders(row: unknown[], previousRow?: unknown[]) {
-  return row.map((cell, columnIndex) => {
-    const current = normalizeStockProductName(cell);
-    const parent = normalizeStockProductName(previousRow?.[columnIndex]);
-    const currentHeader = normalizeHeader(current);
-    const parentHeader = normalizeHeader(parent);
-    if (currentHeader === 'доступно' && ['сейчас', 'ожидается'].includes(parentHeader)) return `${parent} ${current}`;
-    return current || parent;
-  });
-}
-
-function detectStockLocationMarker(row: unknown[]): StockLocationKey | null {
-  const cells = row.map(normalizeHeader).filter(Boolean);
-  if (cells.some((cell) => cell.includes('1основной') && cell.includes('волжск'))) return 'volzhsk';
-  if (cells.some((cell) => /^лдм\s*2$/.test(cell))) return 'moscow';
-  if (cells.some((cell) => cell.includes('резервы ктс'))) return 'volzhsk';
-  return null;
-}
-
-function isLegacyStockHeaderRow(row: unknown[]) {
-  const normalized = row.map(normalizeHeader);
-  const aliases = (values: string[]) => values.map(normalizeHeader);
-  return (
-    aliases(HEADER_ARTICLE_ALIASES).some((header) => normalized.includes(header)) &&
-    aliases(HEADER_STOCK_ALIASES).some((header) => normalized.includes(header))
-  );
-}
-
-function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
-  if (buffer.byteLength > MAX_STOCK_WORKBOOK_BYTES) throw new Error('Excel-С„Р°Р№Р» СЃ РѕСЃС‚Р°С‚РєР°РјРё СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№');
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, sheetRows: MAX_STOCK_WORKBOOK_ROWS + 5 });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new Error('В Excel-файле нет листов');
-  const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
-  if (rows.length > MAX_STOCK_WORKBOOK_ROWS) throw new Error('Excel-С„Р°Р№Р» СЃ РѕСЃС‚Р°С‚РєР°РјРё СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№');
-  const parsedRows: ParsedStockRow[] = [];
-  let headers: string[] | null = null;
-  let currentLocation: StockLocationKey | null = null;
-
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    const row = rows[rowIndex] ?? [];
-    const locationMarker = detectStockLocationMarker(row);
-    if (locationMarker) {
-      currentLocation = locationMarker;
-      continue;
-    }
-
-    const headerCandidate = buildStockHeaders(row, rows[rowIndex - 1]);
-    if (isStockHeaderValues(headerCandidate)) {
-      headers = headerCandidate;
-      continue;
-    }
-
-    if (!headers) continue;
-    parsedRows.push({
-      rowNumber: rowIndex + 1,
-      row: buildRawRow(headers, row),
-      location: currentLocation,
-    });
-  }
-
-  if (parsedRows.length > 0) return parsedRows;
-
-  const headerIndex = rows.findIndex(isLegacyStockHeaderRow);
-  if (headerIndex === -1) {
-    return XLSX.utils
-      .sheet_to_json<RawRow>(sheet, { defval: null, raw: true })
-      .map((row, index) => ({ rowNumber: index + 2, row, location: null }));
-  }
-
-  const legacyHeaders = rows[headerIndex] ?? [];
-  return rows.slice(headerIndex + 1).map((row, index) => ({
-    rowNumber: headerIndex + index + 2,
-    row: buildRawRow(legacyHeaders, row),
-    location: null,
-  }));
 }
 
 type AggregatedStock = {

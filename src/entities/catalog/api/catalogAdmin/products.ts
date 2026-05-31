@@ -1,15 +1,18 @@
 export {
   createCatalogAdminProduct,
   deleteCatalogAdminProduct,
+  updateCatalogAdminProduct,
+} from './core';
+
+export {
   getCatalogAdminFilterOptions,
   getCatalogAdminProductById,
   getCatalogAdminProducts,
-  updateCatalogAdminProduct,
-} from './core';
+} from './productQueries';
 
 export type {
   CatalogAdminFilterOptionFilters,
   CatalogAdminFilterOptions,
   CatalogAdminProduct,
   CatalogAdminProductFilters,
-} from './core';
+} from './types';
