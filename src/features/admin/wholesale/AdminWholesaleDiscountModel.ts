@@ -90,3 +90,13 @@ export function getSavedGroupDiscountPercent(
 
   return formatDiscountPercent(first);
 }
+
+export function groupHasManualWholesalePrices(group: CatalogGroup, itemByKey: Map<string, PriceItem>) {
+  return group.products.some((product) =>
+    product.variants.some((variant) => {
+      const key = `${product.id}:${variant.id ?? 'base'}`;
+      const item = itemByKey.get(key);
+      return Boolean(item?.visible && item.priceManuallyChanged);
+    }),
+  );
+}

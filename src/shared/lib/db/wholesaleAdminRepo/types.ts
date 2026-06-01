@@ -100,6 +100,7 @@ export type WholesalePriceListItemInput = {
   productId: number;
   variantId: number | null;
   customWholesalePrice: string | null;
+  priceManuallyChanged: boolean;
   visible: boolean;
   sortOrder: number;
 };

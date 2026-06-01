@@ -71,6 +71,7 @@ export function mergeEditorItems(categories: CatalogCategory[], items: PriceItem
       productId: product.id,
       variantId: variant.id,
       customWholesalePrice,
+      priceManuallyChanged: false,
       visible: false,
       sortOrder: index + 1,
     };

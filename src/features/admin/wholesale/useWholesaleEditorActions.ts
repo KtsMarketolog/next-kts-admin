@@ -47,7 +47,14 @@ export function useWholesaleEditorActions({
       setEditor((current) => ({
         ...current,
         items: current.items.map((item) =>
-          `${item.productId}:${item.variantId ?? 'base'}` === key ? { ...item, ...patch } : item,
+          `${item.productId}:${item.variantId ?? 'base'}` === key
+            ? {
+                ...item,
+                ...patch,
+                priceManuallyChanged:
+                  'customWholesalePrice' in patch ? true : (patch.priceManuallyChanged ?? item.priceManuallyChanged),
+              }
+            : item,
         ),
       }));
     },
@@ -106,6 +113,7 @@ export function useWholesaleEditorActions({
           return {
             ...item,
             customWholesalePrice: formatCatalogAmount(base.amount * (1 - percent / 100)),
+            priceManuallyChanged: false,
           };
         }),
       }));

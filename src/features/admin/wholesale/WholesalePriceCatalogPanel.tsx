@@ -6,6 +6,7 @@ import {
   formatDiscountPercent,
   getGroupDiscountLimit,
   getSavedGroupDiscountPercent,
+  groupHasManualWholesalePrices,
   priceGroupKey,
   stockLabel,
   type CatalogCategory,
@@ -128,8 +129,10 @@ export function WholesalePriceCatalogPanel({
               }).length,
             0,
           );
-          const groupDiscountPercent =
-            appliedGroupDiscounts[group.id] ?? getSavedGroupDiscountPercent(group, itemByKey, catalogDiscountBaseByKey);
+          const hasManualGroupPrice = groupHasManualWholesalePrices(group, itemByKey);
+          const groupDiscountPercent = hasManualGroupPrice
+            ? null
+            : (appliedGroupDiscounts[group.id] ?? getSavedGroupDiscountPercent(group, itemByKey, catalogDiscountBaseByKey));
           const groupMaxDiscount = getGroupDiscountLimit(group);
           const groupStockKey = priceGroupKey(group.title);
           const groupStockSetting = editor.priceGroupStockSettings[groupStockKey] ?? {
@@ -169,7 +172,9 @@ export function WholesalePriceCatalogPanel({
                       <span className={`${styles.priceCategoryAdded} ${groupAddedCount > 0 ? styles.priceCategoryAddedActive : ''}`}>
                         добавлено - {groupAddedCount}
                       </span>
-                      {groupDiscountPercent ? (
+                      {hasManualGroupPrice ? (
+                        <span className={styles.priceCategoryDiscount}>ручная скидка</span>
+                      ) : groupDiscountPercent ? (
                         <span className={styles.priceCategoryDiscount}>скидка - {groupDiscountPercent}%</span>
                       ) : null}
                     </span>
@@ -268,7 +273,11 @@ export function WholesalePriceCatalogPanel({
                                   <span>{product.priceRub || '—'}</span>
                                   <span>{product.priceCny || '—'}</span>
                                   <span>{stockLabel(product)}</span>
-                                  <input value={item?.customWholesalePrice ?? ''} disabled readOnly />
+                                  <input
+                                    value={item?.customWholesalePrice ?? ''}
+                                    onChange={(event) => updateItem(key, { customWholesalePrice: event.target.value })}
+                                    inputMode="decimal"
+                                  />
                                   <label className={styles.checkbox}>
                                     <input type="checkbox" checked={Boolean(item?.visible)} onChange={(event) => updateItem(key, { visible: event.target.checked })} />
                                     Показывать

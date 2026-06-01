@@ -14,6 +14,16 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
     description: 'Record the existing ensureSiteSchema runtime DDL as the migration baseline',
     apply: async () => {},
   },
+  {
+    id: '202606010002_price_item_manual_price_flag',
+    description: 'Track manually edited wholesale price list item prices',
+    apply: async (client) => {
+      await client.query(`
+        alter table wholesale_price_list_items
+        add column if not exists price_manually_changed boolean not null default false
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {
