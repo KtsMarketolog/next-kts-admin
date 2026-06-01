@@ -398,7 +398,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         copiedToken={copiedToken}
         onBack={onBack}
         onAdminBack={() => router.push('/admin/wholesale/admin')}
-        onManagersBack={() => router.push('/admin/wholesale/admin')}
+        onManagersBack={() => router.push('/admin/wholesale/admin?tab=managers')}
         onCreate={createPriceList}
         onEdit={editPriceList}
         onOpen={(item) => window.open(`/price/${item.token}`, '_blank')}
@@ -420,7 +420,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         copiedToken={copiedToken}
         onBack={onBack}
         onAdminBack={() => router.push('/admin/wholesale/admin')}
-        onManagersBack={() => router.push('/admin/wholesale/admin')}
+        onManagersBack={() => router.push('/admin/wholesale/admin?tab=managers')}
         onCreate={createPriceList}
         onEdit={editPriceList}
         onOpen={(item) => window.open(`/price/${item.token}`, '_blank')}

@@ -129,7 +129,7 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
             <p>Индивидуальные прайсы</p>
             <h2>Аналитика менеджера</h2>
           </div>
-          <button className={styles.secondary} onClick={() => router.push('/admin/wholesale/admin')}>
+          <button className={styles.secondary} onClick={() => router.push('/admin/wholesale/admin?tab=managers')}>
             Вернуться к менеджерам
           </button>
         </div>
@@ -166,7 +166,7 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
           <button className={styles.secondary} type="button" onClick={() => router.push(`/admin/wholesale/admin/managers/${managerId}`)}>
             Прайсы менеджера
           </button>
-          <button className={styles.secondary} type="button" onClick={() => router.push('/admin/wholesale/admin')}>
+          <button className={styles.secondary} type="button" onClick={() => router.push('/admin/wholesale/admin?tab=managers')}>
             Вернуться к менеджерам
           </button>
         </div>
