@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
+import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import {
   createWholesalePriceList,
   getWholesalePriceLists,
@@ -89,6 +90,9 @@ export async function GET() {
 export async function POST(request: Request) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
+
   const limited = await enforceAdminActionRateLimit(session, 'price_list_create', 80);
   if (limited) return limited;
 

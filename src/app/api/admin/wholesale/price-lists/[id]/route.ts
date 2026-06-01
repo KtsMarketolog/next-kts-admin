@@ -10,6 +10,7 @@ import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { isManagerSessionRole, requireEmployee } from '@/shared/lib/adminAuth';
 import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
+import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import {
@@ -95,6 +96,9 @@ export async function GET(_request: Request, context: Context) {
 export async function PUT(request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
+
   const limited = await enforceAdminActionRateLimit(session, 'price_list_delete', 40);
   if (limited) return limited;
 
@@ -157,6 +161,8 @@ export async function PUT(request: Request, context: Context) {
 export async function DELETE(request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
 
   const { id } = await context.params;
   const numericId = Number(id);

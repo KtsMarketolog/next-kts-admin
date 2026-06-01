@@ -1,4 +1,5 @@
 import { query } from './client';
+import { applySchemaMigrations } from './migrations';
 import { seedBrandPortfolio, seedGroupCompanies, seedHeroSlides, seedNewsItems, seedSiteSettings } from './schemaSeeds';
 
 export async function ensureSiteSchema() {
@@ -763,4 +764,5 @@ async function ensureSiteSchemaInternal() {
   await seedNewsItems();
   await seedBrandPortfolio();
   await seedGroupCompanies();
+  await applySchemaMigrations();
 }

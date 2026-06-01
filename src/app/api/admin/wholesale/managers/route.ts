@@ -2,6 +2,7 @@ import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireEmployee, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
 import { createWholesaleManager, getWholesaleManagers } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
+import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
@@ -17,6 +18,9 @@ export async function GET() {
 export async function POST(request: Request) {
   const { denied, session } = await requireWholesaleAdminSession();
   if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
+
   const limited = await enforceAdminActionRateLimit(session, 'manager_create', 40);
   if (limited) return limited;
 

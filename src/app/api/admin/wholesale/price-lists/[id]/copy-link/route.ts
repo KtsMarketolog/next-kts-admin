@@ -1,6 +1,7 @@
 import { isManagerSessionRole, requireEmployee, type AdminSessionRole } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { getWholesalePriceListEditor, trackAnalyticsEvent } from '@/shared/lib/db';
+import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -13,6 +14,9 @@ function actorType(role: AdminSessionRole) {
 export async function POST(request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
+
   const limited = await enforceAdminActionRateLimit(session, 'price_public_link_copied', 200);
   if (limited) return limited;
 

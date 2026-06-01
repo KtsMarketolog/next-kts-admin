@@ -2,6 +2,7 @@ import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
 import { deleteWholesaleManager, revokeManagerSessions, updateWholesaleManager } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
+import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
@@ -13,6 +14,9 @@ type Context = {
 export async function PUT(request: Request, context: Context) {
   const { denied, session } = await requireWholesaleAdminSession();
   if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
+
   const limited = await enforceAdminActionRateLimit(session, 'manager_update', 80);
   if (limited) return limited;
 
@@ -75,6 +79,9 @@ export async function PUT(request: Request, context: Context) {
 export async function DELETE(request: Request, context: Context) {
   const { denied, session } = await requireWholesaleAdminSession();
   if (denied) return denied;
+  const forbiddenOrigin = enforceSameOriginRequest(request);
+  if (forbiddenOrigin) return forbiddenOrigin;
+
   const limited = await enforceAdminActionRateLimit(session, 'manager_delete', 30);
   if (limited) return limited;
 
