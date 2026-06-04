@@ -179,9 +179,26 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        coalesce(i.snapshot_variant_title, v.title, '') as variant_title,
        coalesce(v.retail_price, p.retail_price)::text as retail_price,
        coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
-       p.price_eur::text as price_eur,
-       p.price_rub::text as price_rub,
-       p.price_cny::text as price_cny
+       case
+         when i.custom_wholesale_price is null then p.price_eur::text
+         when p.price_rub is null
+          and coalesce(v.retail_price, p.retail_price, v.wholesale_price, p.wholesale_price) is null
+          and p.price_eur is not null then i.custom_wholesale_price::text
+         else null
+       end as price_eur,
+       case
+         when i.custom_wholesale_price is null then p.price_rub::text
+         when p.price_rub is not null then i.custom_wholesale_price::text
+         else null
+       end as price_rub,
+       case
+         when i.custom_wholesale_price is null then p.price_cny::text
+         when p.price_rub is null
+          and coalesce(v.retail_price, p.retail_price, v.wholesale_price, p.wholesale_price) is null
+          and p.price_eur is null
+          and p.price_cny is not null then i.custom_wholesale_price::text
+         else null
+       end as price_cny
      from wholesale_price_lists pl
      join wholesale_price_list_items i on i.price_list_id = pl.id
      join wholesale_products p on p.id = i.wholesale_product_id
@@ -310,9 +327,26 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
        coalesce(i.snapshot_product_sku, p.sku) as sku,
        coalesce(i.snapshot_variant_title, v.title, '') as variant_title,
        coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
-       p.price_eur::text as price_eur,
-       p.price_rub::text as price_rub,
-       p.price_cny::text as price_cny
+       case
+         when i.custom_wholesale_price is null then p.price_eur::text
+         when p.price_rub is null
+          and coalesce(v.retail_price, p.retail_price, v.wholesale_price, p.wholesale_price) is null
+          and p.price_eur is not null then i.custom_wholesale_price::text
+         else null
+       end as price_eur,
+       case
+         when i.custom_wholesale_price is null then p.price_rub::text
+         when p.price_rub is not null then i.custom_wholesale_price::text
+         else null
+       end as price_rub,
+       case
+         when i.custom_wholesale_price is null then p.price_cny::text
+         when p.price_rub is null
+          and coalesce(v.retail_price, p.retail_price, v.wholesale_price, p.wholesale_price) is null
+          and p.price_eur is null
+          and p.price_cny is not null then i.custom_wholesale_price::text
+         else null
+       end as price_cny
      from wholesale_price_lists pl
      join wholesale_price_list_items i on i.price_list_id = pl.id
      join wholesale_products p on p.id = i.wholesale_product_id
