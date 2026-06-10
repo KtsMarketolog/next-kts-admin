@@ -39,7 +39,10 @@
   line-height: 1.1;
   text-transform: uppercase;
   color: #474464;
-  word-break: break-word
+  word-break: break-word;
+  -webkit-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 
 }
 
@@ -60,6 +63,9 @@
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  -webkit-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 
 }
 
@@ -86,6 +92,9 @@
   font-weight: 600;
   font-size: $apx-14;
   white-space: nowrap;
+  -webkit-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 
 }
 
@@ -96,6 +105,9 @@
   font-size: $apx-14;
   word-break: break-word;
   overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 
 }
 
@@ -113,6 +125,9 @@
   color: #5a5c7a;
   font-size: $apx-14;
   font-weight: 600;
+  -webkit-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 
 }
 
@@ -137,6 +152,7 @@
   position: absolute;
   inset: 0;
   border-radius: $apx-12;
+  pointer-events: none;
 
 }
 
