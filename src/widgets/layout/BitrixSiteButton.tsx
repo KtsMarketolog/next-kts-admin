@@ -2,15 +2,13 @@
 
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
+import {
+  BITRIX_SITE_BUTTON_LOADER_URL,
+  BITRIX_SITE_BUTTON_SCRIPT_ID,
+  shouldHideBitrixSiteButton,
+} from './bitrixSiteButtonConfig';
 
-const HIDDEN_ROUTE_PREFIXES = ['/admin', '/cabinet', '/login', '/price'];
 const VISIBILITY_STYLE_ID = 'bitrix-site-button-visibility-style';
-const BITRIX_SITE_BUTTON_SCRIPT_ID = 'bitrix-site-button-loader';
-const BITRIX_SITE_BUTTON_LOADER_URL = 'https://crm.kts-impex.ru/upload/crm/site_button/loader_1_1hr91m.js';
-
-function shouldHideWidget(pathname: string) {
-  return HIDDEN_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-}
 
 function ensureVisibilityStyle() {
   if (document.getElementById(VISIBILITY_STYLE_ID)) return;
@@ -35,7 +33,7 @@ html[data-bitrix-site-button="hidden"] iframe[src*="crm.kts-impex.ru"] {
 
 export function BitrixSiteButton() {
   const pathname = usePathname() || '/';
-  const hidden = shouldHideWidget(pathname);
+  const hidden = shouldHideBitrixSiteButton(pathname);
 
   useEffect(() => {
     ensureVisibilityStyle();

@@ -7,6 +7,7 @@ import Header from "@/widgets/layout/Header/Header";
 // import Loader from "@/widgets/layout/Loader";
 import { ConditionalFooter } from "@/widgets/layout/ConditionalFooter";
 import { BitrixSiteButton } from "@/widgets/layout/BitrixSiteButton";
+import { getBitrixSiteButtonInlineScript } from "@/widgets/layout/bitrixSiteButtonConfig";
 import ScrollToHashWrapper from "@/shared/lib/ScrollToHashWrapper";
 import CookieBannerLoader from '@/shared/ui/CookieBanner/CookieBannerLoader';
 
@@ -32,6 +33,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="ru" data-scroll-behavior="smooth">
 
       <body>
+
+        <script dangerouslySetInnerHTML={{ __html: getBitrixSiteButtonInlineScript() }} />
 
         {/* TEMP: Loader is disabled while measuring Lighthouse without the preload overlay.
         <div id="ssr-loader" className="loaderRoot" role="progressbar" aria-busy="true" aria-label="Загрузка">
