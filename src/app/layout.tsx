@@ -6,6 +6,7 @@ import Header from "@/widgets/layout/Header/Header";
 // TEMP: Loader is disabled while measuring Lighthouse without the preload overlay.
 // import Loader from "@/widgets/layout/Loader";
 import { ConditionalFooter } from "@/widgets/layout/ConditionalFooter";
+import { BitrixSiteButton } from "@/widgets/layout/BitrixSiteButton";
 import ScrollToHashWrapper from "@/shared/lib/ScrollToHashWrapper";
 import CookieBannerLoader from '@/shared/ui/CookieBanner/CookieBannerLoader';
 
@@ -58,6 +59,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           </ScrollToHashWrapper>
 
           <ConditionalFooter />
+
+          <BitrixSiteButton />
 
         </div>
 
