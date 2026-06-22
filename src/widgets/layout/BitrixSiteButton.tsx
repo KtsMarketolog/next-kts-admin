@@ -27,6 +27,83 @@ html[data-bitrix-site-button="hidden"] iframe[src*="crm.kts-impex.ru"] {
   visibility: hidden !important;
   pointer-events: none !important;
 }
+
+@media (min-width: 768px) and (max-width: 1180px) {
+  html[data-bitrix-site-button="visible"] .b24-widget-button-wrapper.b24-widget-button-position-bottom-right {
+    right: max(28px, env(safe-area-inset-right)) !important;
+    bottom: max(28px, env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-bitrix-site-button="visible"] .b24-widget-button-popup {
+    max-width: min(360px, calc(100vw - 56px)) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  html[data-bitrix-site-button="visible"] .b24-widget-button-wrapper.b24-widget-button-position-bottom-right {
+    right: max(14px, env(safe-area-inset-right)) !important;
+    bottom: max(14px, env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-bitrix-site-button="visible"] .b24-widget-button-block,
+  html[data-bitrix-site-button="visible"] .b24-widget-button-inner-block {
+    width: 56px !important;
+    height: 56px !important;
+  }
+
+  html[data-bitrix-site-button="visible"] .b24-widget-button-inner-mask {
+    top: -6px !important;
+    left: -6px !important;
+    width: calc(100% + 12px) !important;
+    height: 68px !important;
+  }
+
+  html[data-bitrix-site-button="visible"] .b24-widget-button-icon-container {
+    transform: scale(0.9) !important;
+  }
+
+  html[data-bitrix-site-button="visible"] .b24-widget-button-social-item {
+    width: 42px !important;
+    height: 42px !important;
+    margin-right: 6px !important;
+    margin-bottom: 8px !important;
+  }
+
+  html[data-bitrix-site-button="visible"] .b24-widget-button-social-tooltip {
+    max-width: calc(100vw - 96px) !important;
+    white-space: normal !important;
+  }
+
+  html[data-bitrix-site-button="visible"] .b24-widget-button-popup {
+    right: 0 !important;
+    left: auto !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+
+  html[data-bitrix-site-button="visible"] .bx-livechat-wrapper,
+  html[data-bitrix-site-button="visible"] [class*="bx-livechat"][class*="wrapper"],
+  html[data-bitrix-site-button="visible"] iframe[src*="crm.kts-impex.ru"][style*="position: fixed"],
+  html[data-bitrix-site-button="visible"] iframe[src*="crm.kts-impex.ru"][style*="position:fixed"] {
+    right: max(10px, env(safe-area-inset-right)) !important;
+    left: max(10px, env(safe-area-inset-left)) !important;
+    bottom: max(10px, env(safe-area-inset-bottom)) !important;
+    width: auto !important;
+    max-width: none !important;
+    height: min(620px, calc(100dvh - 20px)) !important;
+    max-height: calc(100dvh - 20px) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  html[data-bitrix-site-button="visible"] .bx-livechat-wrapper,
+  html[data-bitrix-site-button="visible"] [class*="bx-livechat"][class*="wrapper"],
+  html[data-bitrix-site-button="visible"] iframe[src*="crm.kts-impex.ru"][style*="position: fixed"],
+  html[data-bitrix-site-button="visible"] iframe[src*="crm.kts-impex.ru"][style*="position:fixed"] {
+    top: max(10px, env(safe-area-inset-top)) !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+}
 `;
   document.head.appendChild(style);
 }
