@@ -1,18 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
-import Script from 'next/script';
 import { usePathname } from 'next/navigation';
 
 const HIDDEN_ROUTE_PREFIXES = ['/admin', '/cabinet', '/login', '/price'];
 const VISIBILITY_STYLE_ID = 'bitrix-site-button-visibility-style';
-
-const BITRIX_SITE_BUTTON_SCRIPT = `
-        (function(w,d,u){
-                var s=d.createElement('script');s.async=true;s.src=u+'?'+(Date.now()/60000|0);
-                var h=d.getElementsByTagName('script')[0];h.parentNode.insertBefore(s,h);
-        })(window,document,'https://crm.kts-impex.ru/upload/crm/site_button/loader_1_1hr91m.js');
-`;
+const BITRIX_SITE_BUTTON_SCRIPT_ID = 'bitrix-site-button-loader';
+const BITRIX_SITE_BUTTON_LOADER_URL = 'https://crm.kts-impex.ru/upload/crm/site_button/loader_1_1hr91m.js';
 
 function shouldHideWidget(pathname: string) {
   return HIDDEN_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -48,11 +42,21 @@ export function BitrixSiteButton() {
     document.documentElement.dataset.bitrixSiteButton = hidden ? 'hidden' : 'visible';
   }, [hidden]);
 
-  if (hidden) return null;
+  useEffect(() => {
+    if (hidden || document.getElementById(BITRIX_SITE_BUTTON_SCRIPT_ID)) return;
 
-  return (
-    <Script id="bitrix-site-button" strategy="lazyOnload">
-      {BITRIX_SITE_BUTTON_SCRIPT}
-    </Script>
-  );
+    const script = document.createElement('script');
+    script.id = BITRIX_SITE_BUTTON_SCRIPT_ID;
+    script.async = true;
+    script.src = `${BITRIX_SITE_BUTTON_LOADER_URL}?${Math.floor(Date.now() / 60000)}`;
+
+    const firstScript = document.getElementsByTagName('script')[0];
+    if (firstScript?.parentNode) {
+      firstScript.parentNode.insertBefore(script, firstScript);
+    } else {
+      document.head.appendChild(script);
+    }
+  }, [hidden]);
+
+  return null;
 }
