@@ -19,10 +19,11 @@ const nextConfig: NextConfig = {
     ],
   },
   headers: async () => {
+    const bitrixWidgetOrigin = "https://crm.kts-impex.ru";
     const scriptSrc =
       process.env.NODE_ENV === "production"
-        ? "script-src 'self' 'unsafe-inline'"
-        : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+        ? `script-src 'self' 'unsafe-inline' ${bitrixWidgetOrigin}`
+        : `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${bitrixWidgetOrigin}`;
     const securityHeaders = [
       { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
       { key: "X-Content-Type-Options", value: "nosniff" },
@@ -36,13 +37,13 @@ const nextConfig: NextConfig = {
           "base-uri 'self'",
           "frame-ancestors 'self'",
           "object-src 'none'",
-          "img-src 'self' data: blob: https://api.kts-impex.ru http://api.kts-impex.ru",
+          `img-src 'self' data: blob: https://api.kts-impex.ru http://api.kts-impex.ru ${bitrixWidgetOrigin}`,
           "font-src 'self' data:",
           "media-src 'self' data: blob:",
-          "style-src 'self' 'unsafe-inline'",
+          `style-src 'self' 'unsafe-inline' ${bitrixWidgetOrigin}`,
           scriptSrc,
-          "connect-src 'self' https://api.kts-impex.ru http://api.kts-impex.ru",
-          "frame-src 'self'",
+          `connect-src 'self' https://api.kts-impex.ru http://api.kts-impex.ru ${bitrixWidgetOrigin}`,
+          `frame-src 'self' ${bitrixWidgetOrigin}`,
           "worker-src 'self' blob:",
           "manifest-src 'self'",
           "form-action 'self'",
