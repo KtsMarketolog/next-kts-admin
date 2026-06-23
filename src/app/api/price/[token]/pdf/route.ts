@@ -19,13 +19,13 @@ type PublicPriceVariant = PublicPriceProduct['variants'][number];
 type PdfDocument = InstanceType<typeof PDFDocument>;
 
 type PdfColumn = {
-  key: 'group' | 'product' | 'sku' | 'description' | 'price' | 'stock';
+  key: 'group' | 'product' | 'sku' | 'description' | 'price' | 'retailPrice' | 'stock';
   title: string;
   width: number;
   align?: 'left' | 'right';
 };
 
-type PdfRow = Record<PdfColumn['key'], string>;
+type PdfRow = Partial<Record<PdfColumn['key'], string>>;
 
 const NO_PRICE_GROUP_TITLE = 'Без ценовой группы';
 const TABLE_HEADER_COLOR = '#260b86';
@@ -117,6 +117,10 @@ function formatIndividualPrice(variant: PublicPriceVariant) {
   return currencyPrices.map((price) => `${formatPrice(price.value)} ${price.currency}`).join(' / ');
 }
 
+function formatRetailPrice(variant: PublicPriceVariant) {
+  return hasPriceValue(variant.retailPrice) ? `${formatPrice(variant.retailPrice)} RUB` : '—';
+}
+
 function stockLabel(product: PublicPriceProduct) {
   return formatWholesaleStockLabel({
     stock: product.stock,
@@ -155,7 +159,20 @@ function groupProductsByPriceGroup(priceList: PublicPriceList) {
   return Array.from(groups.values());
 }
 
-function getPdfColumns(showStock: boolean): PdfColumn[] {
+function getPdfColumns(showStock: boolean, showRetailPrices: boolean): PdfColumn[] {
+  if (showRetailPrices) {
+    const columns: PdfColumn[] = [
+      { key: 'group', title: 'Ценовая группа', width: showStock ? 78 : 95 },
+      { key: 'product', title: 'Товар', width: showStock ? 176 : 220 },
+      { key: 'sku', title: 'Артикул', width: showStock ? 70 : 80 },
+      { key: 'description', title: 'Описание', width: showStock ? 140 : 170 },
+      { key: 'price', title: 'Индивидуальная цена', width: showStock ? 108 : 105 },
+      { key: 'retailPrice', title: 'Розничная цена', width: showStock ? 108 : 105 },
+    ];
+    if (showStock) columns.push({ key: 'stock', title: 'Остаток', width: 88 });
+    return columns;
+  }
+
   const columns: PdfColumn[] = [
     { key: 'group', title: 'Ценовая группа', width: showStock ? 92 : 110 },
     { key: 'product', title: 'Товар', width: showStock ? 216 : 250 },
@@ -178,6 +195,7 @@ function createPdfRows(priceList: PublicPriceList): PdfRow[] {
           sku: product.sku || '—',
           description: product.description || '—',
           price: formatIndividualPrice(variant),
+          retailPrice: priceList.showRetailPrices ? formatRetailPrice(variant) : undefined,
           stock: hasVisibleWholesaleStock(product.stockDisplayMode) ? stockLabel(product) : '',
         });
       }
@@ -267,7 +285,7 @@ function drawTableHeader(doc: PdfDocument, columns: PdfColumn[], boldFont: strin
 function drawTableRow(doc: PdfDocument, columns: PdfColumn[], row: PdfRow, y: number, height: number, regularFont: string, background: string) {
   let x = doc.page.margins.left;
   for (const column of columns) {
-    drawCell(doc, row[column.key], x, y, column.width, height, {
+    drawCell(doc, row[column.key] ?? '', x, y, column.width, height, {
       fontName: regularFont,
       fontSize: 8,
       background,
@@ -329,7 +347,7 @@ function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWho
     drawPdfHeader(doc, priceList, boldFont, regularFont);
 
     const showStock = shouldShowStockColumn(priceList);
-    const columns = getPdfColumns(showStock);
+    const columns = getPdfColumns(showStock, priceList.showRetailPrices);
     const rows = createPdfRows(priceList);
     if (rows.length === 0) {
       doc.font(regularFont).fontSize(12).fillColor(TABLE_MUTED_COLOR).text('В прайс пока не добавлены товары.');
@@ -343,7 +361,7 @@ function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWho
         96,
         Math.max(
           24,
-          ...columns.map((column) => measureCellHeight(doc, row[column.key], column.width, regularFont, 8)),
+          ...columns.map((column) => measureCellHeight(doc, row[column.key] ?? '', column.width, regularFont, 8)),
         ),
       );
       if (ensureSpace(doc, rowHeight + 24)) {

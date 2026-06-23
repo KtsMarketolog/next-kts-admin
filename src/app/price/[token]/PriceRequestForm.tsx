@@ -28,38 +28,60 @@ import styles from './PricePage.module.scss';
 type PriceRequestFormProps = {
   token: string;
   categories: PublicWholesaleCategory[];
+  showRetailPrices: boolean;
 };
 
-function formatIndividualPrices(variant: PublicPriceVariant, exchangeRates: ExchangeRates | null) {
+function formatIndividualPrices(variant: PublicPriceVariant, exchangeRates: ExchangeRates | null, showLabel = false) {
   const currencyPrices = getCurrencyPriceValues(variant).filter((price) => hasPriceValue(price.value));
 
   if (currencyPrices.length === 0) {
-    return <span className={styles.priceValue}>{formatPrice(variant.wholesalePrice)}</span>;
+    return (
+      <span className={styles.priceLine}>
+        {showLabel ? <span className={styles.priceLabel}>Индивидуальная цена</span> : null}
+        <span className={styles.priceValue}>{formatPrice(variant.wholesalePrice)}</span>
+      </span>
+    );
   }
 
   return (
-    <span className={styles.currencyPrices}>
-      {currencyPrices.map((price) => {
-        const convertedRubAmount = getConvertedRubAmount(price, exchangeRates);
+    <span className={styles.priceLine}>
+      {showLabel ? <span className={styles.priceLabel}>Индивидуальная цена</span> : null}
+      <span className={styles.currencyPrices}>
+        {currencyPrices.map((price) => {
+          const convertedRubAmount = getConvertedRubAmount(price, exchangeRates);
 
-        return (
-          <span className={styles.priceValue} key={price.currency}>
-            {formatPrice(price.value)}
-            <span className={styles.priceCurrency}>{price.currency}</span>
-            {convertedRubAmount !== null ? (
-              <span className={styles.convertedPrice}>
-                ≈ {formatRubAmount(convertedRubAmount)}
-                <span className={styles.priceCurrency}>RUB</span>
-              </span>
-            ) : null}
-          </span>
-        );
-      })}
+          return (
+            <span className={styles.priceValue} key={price.currency}>
+              {formatPrice(price.value)}
+              <span className={styles.priceCurrency}>{price.currency}</span>
+              {convertedRubAmount !== null ? (
+                <span className={styles.convertedPrice}>
+                  ≈ {formatRubAmount(convertedRubAmount)}
+                  <span className={styles.priceCurrency}>RUB</span>
+                </span>
+              ) : null}
+            </span>
+          );
+        })}
+      </span>
     </span>
   );
 }
 
-export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
+function formatRetailPrice(variant: PublicPriceVariant) {
+  if (!hasPriceValue(variant.retailPrice)) {
+    return null;
+  }
+
+  return (
+    <span className={styles.priceValue}>
+      {formatPrice(variant.retailPrice)}
+      <span className={styles.priceCurrency}>RUB</span>
+    </span>
+  );
+}
+
+export function PriceRequestForm({ token, categories, showRetailPrices }: PriceRequestFormProps) {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [comment, setComment] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -427,17 +449,28 @@ export function PriceRequestForm({ token, categories }: PriceRequestFormProps) {
                     <table className={styles.prices}>
                       <thead>
                         <tr>
-                          <th>Индивидуальная цена</th>
+                          <th>{showRetailPrices ? 'Цена' : 'Индивидуальная цена'}</th>
                           <th>Количество</th>
                         </tr>
                       </thead>
                       <tbody>
                         {product.variants.map((variant, index) => {
                           const currentQuantity = quantities[variant.priceItemId] || 0;
+                          const retailPrice = showRetailPrices ? formatRetailPrice(variant) : null;
 
                           return (
                             <tr key={`${variant.id ?? 'base'}-${index}`}>
-                              <td>{formatIndividualPrices(variant, activeExchangeRates)}</td>
+                              <td>
+                                <span className={styles.priceStack}>
+                                  {formatIndividualPrices(variant, activeExchangeRates, showRetailPrices)}
+                                  {retailPrice ? (
+                                    <span className={styles.priceLine}>
+                                      <span className={styles.priceLabel}>Розничная цена</span>
+                                      {retailPrice}
+                                    </span>
+                                  ) : null}
+                                </span>
+                              </td>
                               <td className={styles.quantityCell}>
                                 <div className={styles.quantityStepper}>
                                   <button

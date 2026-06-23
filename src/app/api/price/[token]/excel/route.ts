@@ -80,6 +80,10 @@ function formatIndividualPrice(variant: PublicPriceVariant) {
   return currencyPrices.map((price) => `${formatPrice(price.value)} ${price.currency}`).join(' / ');
 }
 
+function formatRetailPrice(variant: PublicPriceVariant) {
+  return hasPriceValue(variant.retailPrice) ? `${formatPrice(variant.retailPrice)} RUB` : '—';
+}
+
 function stockLabel(product: PublicPriceProduct) {
   return formatWholesaleStockLabel({
     stock: product.stock,
@@ -120,7 +124,8 @@ function groupProductsByPriceGroup(priceList: PublicPriceList) {
 
 function createExcelXml(priceList: PublicPriceList) {
   const showStock = shouldShowStockColumn(priceList);
-  const columnCount = showStock ? 6 : 5;
+  const showRetailPrices = priceList.showRetailPrices;
+  const columnCount = 5 + (showRetailPrices ? 1 : 0) + (showStock ? 1 : 0);
   const rows: string[] = [
     row([`<Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="Title"><Data ss:Type="String">${xmlEscape(priceList.title || 'Индивидуальный прайс')}</Data></Cell>`]),
     row([`<Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="Subtitle"><Data ss:Type="String">Клиент: ${xmlEscape(priceList.clientName || 'Не указан')}</Data></Cell>`]),
@@ -136,6 +141,7 @@ function createExcelXml(priceList: PublicPriceList) {
   rows.push(row(Array.from({ length: columnCount }, () => cell('', 'Body'))));
 
   const headers = ['Ценовая группа', 'Товар', 'Артикул', 'Описание', 'Индивидуальная цена'];
+  if (showRetailPrices) headers.push('Розничная цена');
   if (showStock) headers.push('Остаток');
   rows.push(row(headers.map((title) => cell(title, 'Header'))));
 
@@ -151,6 +157,7 @@ function createExcelXml(priceList: PublicPriceList) {
           product.description || '—',
           formatIndividualPrice(variant),
         ];
+        if (showRetailPrices) values.push(formatRetailPrice(variant));
         if (showStock) values.push(hasVisibleWholesaleStock(product.stockDisplayMode) ? stockLabel(product) : '');
         rows.push(row(values.map((value) => cell(value))));
       }
@@ -184,6 +191,7 @@ function createExcelXml(priceList: PublicPriceList) {
    <Column ss:Width="110"/>
    <Column ss:Width="220"/>
    <Column ss:Width="170"/>
+   ${showRetailPrices ? '<Column ss:Width="170"/>' : ''}
    ${showStock ? '<Column ss:Width="130"/>' : ''}
    ${rows.join('\n   ')}
   </Table>

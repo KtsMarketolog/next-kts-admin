@@ -367,6 +367,25 @@
   gap: $apx-4;
 }
 
+.priceStack {
+  display: grid;
+  gap: $apx-8;
+}
+
+.priceLine {
+  display: grid;
+  gap: $apx-3;
+}
+
+.priceLabel {
+  display: block;
+  color: #6f7182;
+  font-size: $apx-11;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .priceValue {
   display: block;
   font-weight: 800;
