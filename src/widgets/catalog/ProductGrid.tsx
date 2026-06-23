@@ -8,6 +8,7 @@ type ProductUI = {
   title: string;
   brand?: string;              // slug
   brandTitle?: string | null;
+  model?: string | null;
   article?: string | null;     // артикул
   category?: string | null;    // имя категории
   subcategory?: string | null; // имя подкатегории
@@ -71,6 +72,7 @@ export default function ProductGrid({ items }: { items: ProductUI[] }) {
       {items.map((p) => {
 
         const badgeText = prettyBrandName(p.brandTitle, p.brand);
+        const model = (p.model ?? '').trim();
         const article = (p.article ?? '').trim() || '-';
         const cat = (p.category ?? '').trim();
         const sub = (p.subcategory ?? '').trim();
@@ -88,6 +90,15 @@ export default function ProductGrid({ items }: { items: ProductUI[] }) {
             </div>
 
             <div className={styles.meta}>
+
+              {model && (
+                <div className={styles.row}>
+
+                  <span className={styles.metaLabel}>model</span>
+                  <span className={styles.metaValue}>{model}</span>
+
+                </div>
+              )}
 
               <div className={styles.row}>
 

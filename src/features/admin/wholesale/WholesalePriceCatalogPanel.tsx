@@ -85,7 +85,7 @@ export function WholesalePriceCatalogPanel({
           <input
             value={catalogQuery}
             onChange={(event) => setCatalogQuery(event.target.value)}
-            placeholder="Название, бренд, категория или артикул"
+            placeholder="Название, модель, бренд, категория или артикул"
           />
         </label>
         <label>
@@ -247,6 +247,7 @@ export function WholesalePriceCatalogPanel({
                           <div className={styles.priceProductInfo}>
                             <div>
                               <strong>{product.title}</strong>
+                              {product.model ? <p>Модель: {product.model}</p> : null}
                               {product.sku ? <p>Арт.: {product.sku}</p> : null}
                               {product.description ? <p>{product.description}</p> : null}
                               {hasSeveralPositions ? (

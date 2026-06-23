@@ -118,6 +118,7 @@ async function ensureSiteSchemaInternal() {
       category_id bigint references wholesale_categories(id) on delete set null,
       title text not null default '',
       sku text not null default '',
+      model text not null default '',
       series_description text not null default '',
       brand_title text not null default '',
       subcategory_title text not null default '',
@@ -455,6 +456,7 @@ async function ensureSiteSchemaInternal() {
     alter table wholesale_price_lists add column if not exists show_stock boolean not null default true;
     alter table wholesale_products add column if not exists catalog_product_id bigint;
     alter table wholesale_products add column if not exists brand_title text not null default '';
+    alter table wholesale_products add column if not exists model text not null default '';
     alter table wholesale_products add column if not exists subcategory_title text not null default '';
     alter table wholesale_products add column if not exists price_group text not null default '';
     alter table wholesale_products add column if not exists unit text;
@@ -607,6 +609,7 @@ async function ensureSiteSchemaInternal() {
   `);
   await query(`alter table wholesale_products add column if not exists catalog_product_id bigint`);
   await query(`alter table wholesale_products add column if not exists brand_title text not null default ''`);
+  await query(`alter table wholesale_products add column if not exists model text not null default ''`);
   await query(`alter table wholesale_products add column if not exists subcategory_title text not null default ''`);
   await query(`alter table wholesale_products add column if not exists price_group text not null default ''`);
   await query(`alter table wholesale_products add column if not exists unit text`);

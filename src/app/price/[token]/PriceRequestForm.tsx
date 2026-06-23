@@ -190,6 +190,7 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
         return [
           categoryTitle,
           product.title,
+          product.model,
           product.sku,
           product.description,
           product.priceGroup,
@@ -398,7 +399,7 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
             type="search"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Название, артикул, категория или ценовая группа"
+            placeholder="Название, модель, артикул, категория или ценовая группа"
           />
         </label>
         <p>
@@ -470,6 +471,7 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
                   >
                     <div className={styles.productInfo}>
                       <h3>{product.title}</h3>
+                      {product.model ? <p>Модель: {product.model}</p> : null}
                       {product.sku ? <p>Артикул: {product.sku}</p> : null}
                       {product.description ? <p>{product.description}</p> : null}
                       {hasVisibleWholesaleStock(product.stockDisplayMode) ? <p className={styles.stockStatus}>{stockLabel(product)}</p> : null}

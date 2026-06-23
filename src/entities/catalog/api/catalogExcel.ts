@@ -21,6 +21,7 @@ const HEADER_GENERAL_DISCOUNT = 'Общая скидка';
 const HEADER_MANUAL_DISCOUNT = 'Ручная скидка';
 const HEADER_MANUAL_DISCOUNT_ROP = 'Ручная скидка роп';
 const HEADER_ARTICLE = 'Артикул';
+const HEADER_MODEL = 'Модель';
 
 function readCell(row: RawRow, key: string) {
   const value = row[key];
@@ -87,6 +88,7 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
 
   const columns = {
     article: findColumn(headers, (header) => includesAny(header, ['артикул'])),
+    model: findColumn(headers, (header) => includesAny(header, ['модель'])),
     title: findColumn(headers, (header) => includesAny(header, ['наименование'])),
     category: findColumn(headers, (header) => includesAny(header, ['категории']) && !includesAny(header, ['подкатегории'])),
     subcategory: findColumn(headers, (header) => includesAny(header, ['подкатегории'])),
@@ -113,6 +115,7 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
         subcategory: columns.subcategory === null ? 'Без подкатегории' : cellAt(row, columns.subcategory) || 'Без подкатегории',
         title,
         article,
+        model: columns.model === null ? '' : cellAt(row, columns.model),
         priceGroup: columns.priceGroup === null ? '' : cellAt(row, columns.priceGroup),
         priceEur: columns.priceEur === null ? null : cellAt(row, columns.priceEur),
         priceRub: columns.priceRub === null ? null : cellAt(row, columns.priceRub),
@@ -155,6 +158,7 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
       subcategory: readCell(row, HEADER_SUBCATEGORY) || 'Без подкатегории',
       title: readCell(row, HEADER_TITLE) || readCell(row, HEADER_ARTICLE),
       article: readCell(row, HEADER_ARTICLE),
+      model: readCell(row, HEADER_MODEL),
       priceGroup: readCell(row, HEADER_PRICE_GROUP),
       priceEur: readPrice(row, HEADER_PRICE_EUR),
       priceRub: readPrice(row, HEADER_PRICE_RUB),

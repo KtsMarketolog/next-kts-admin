@@ -14,6 +14,7 @@ export type ClientPriceRequestItemPrice = {
 export type ClientPriceRequestItem = {
   priceItemId: number;
   productTitle: string;
+  model?: string;
   sku: string;
   variantTitle: string;
   quantity: number;

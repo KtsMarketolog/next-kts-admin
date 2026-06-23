@@ -243,6 +243,7 @@ export async function getWholesaleCatalog() {
     product_id: string;
     product_title: string;
     sku: string;
+    model: string | null;
     series_description: string;
     image_url: string | null;
     price_group: string | null;
@@ -268,6 +269,7 @@ export async function getWholesaleCatalog() {
       p.id::text as product_id,
       p.title as product_title,
       p.sku,
+      p.model,
       p.series_description,
       img.image_url,
       p.price_group,
@@ -321,6 +323,7 @@ export async function getWholesaleCatalog() {
         id: productId,
         title: row.product_title,
         sku: row.sku,
+        model: row.model ?? '',
         description: row.series_description,
         imageUrl: row.image_url,
         priceGroup: row.price_group ?? '',

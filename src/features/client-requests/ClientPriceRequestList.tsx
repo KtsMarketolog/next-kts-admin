@@ -164,6 +164,7 @@ export function ClientPriceRequestList({ emptyText, emptyTitle, requests }: Clie
                 <div className={styles.requestItem} key={`${request.id}:${item.priceItemId}`}>
                   <div className={styles.requestItemTitle}>
                     <h4>{item.productTitle}</h4>
+                    {item.model ? <p>Модель: {item.model}</p> : null}
                     <p>Артикул: {item.sku || '—'}</p>
                     <p>{item.variantTitle || 'Цена'}</p>
                   </div>

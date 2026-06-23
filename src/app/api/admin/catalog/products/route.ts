@@ -16,6 +16,7 @@ function productInputFromBody(body: Record<string, unknown>): CatalogProductInpu
   return {
     title: typeof body.title === 'string' ? body.title : '',
     article: typeof body.article === 'string' ? body.article : '',
+    model: typeof body.model === 'string' ? body.model : '',
     brand: typeof body.brand === 'string' ? body.brand : '',
     category: typeof body.category === 'string' ? body.category : '',
     subcategory: typeof body.subcategory === 'string' ? body.subcategory : '',

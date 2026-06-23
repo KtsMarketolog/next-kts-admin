@@ -20,6 +20,7 @@ export type PublicWholesaleProduct = {
   id: number;
   title: string;
   sku: string;
+  model: string;
   description: string;
   priceGroup: string;
   priceGroupImageUrl: string | null;
@@ -90,6 +91,7 @@ type PriceItemRow = {
   product_id: string;
   product_title: string;
   sku: string;
+  model: string | null;
   series_description: string;
   price_group: string | null;
   price_group_image_url: string | null;
@@ -118,6 +120,7 @@ export type PublicWholesaleRequestItem = {
   id: number;
   productTitle: string;
   sku: string;
+  model: string;
   variantTitle: string;
   wholesalePrice: string | null;
   priceEur: string | null;
@@ -169,6 +172,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        p.id::text as product_id,
        coalesce(i.snapshot_product_title, p.title) as product_title,
        coalesce(i.snapshot_product_sku, p.sku) as sku,
+       p.model,
        coalesce(i.snapshot_product_description, p.series_description) as series_description,
        p.price_group,
        pgi.image_url as price_group_image_url,
@@ -257,6 +261,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
         id: productId,
         title: row.product_title,
         sku: row.sku,
+        model: row.model ?? '',
         description: row.series_description,
         priceGroup: row.price_group ?? '',
         priceGroupImageUrl: row.price_group_image_url,
@@ -327,6 +332,7 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
     id: string;
     product_title: string;
     sku: string;
+    model: string | null;
     variant_title: string | null;
     wholesale_price: string | null;
     price_eur: string | null;
@@ -337,6 +343,7 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
        i.id::text,
        coalesce(i.snapshot_product_title, p.title) as product_title,
        coalesce(i.snapshot_product_sku, p.sku) as sku,
+       p.model,
        coalesce(i.snapshot_variant_title, v.title, '') as variant_title,
        coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
        case
@@ -377,6 +384,7 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
     id: Number(row.id),
     productTitle: row.product_title,
     sku: row.sku,
+    model: row.model ?? '',
     variantTitle: row.variant_title || 'Цена',
     wholesalePrice: row.wholesale_price,
     priceEur: row.price_eur,

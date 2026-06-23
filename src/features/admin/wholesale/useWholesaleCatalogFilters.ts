@@ -52,6 +52,7 @@ export function useWholesaleCatalogFilters({
       return [
         category.title,
         product.title,
+        product.model,
         product.sku,
         product.description,
         product.priceGroup,

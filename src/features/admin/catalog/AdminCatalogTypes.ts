@@ -2,6 +2,7 @@ export type CatalogProduct = {
   id: number;
   title: string;
   article: string;
+  model: string;
   brand: string;
   category: string;
   subcategory: string;
@@ -59,6 +60,7 @@ export type CatalogFilters = {
 export const EMPTY_DRAFT: CatalogDraft = {
   title: '',
   article: '',
+  model: '',
   brand: '',
   category: '',
   subcategory: '',

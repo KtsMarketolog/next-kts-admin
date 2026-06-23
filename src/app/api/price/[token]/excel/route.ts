@@ -153,7 +153,7 @@ function groupProductsByPriceGroup(priceList: PublicPriceList) {
 function createExcelXml(priceList: PublicPriceList) {
   const showStock = shouldShowStockColumn(priceList);
   const showRetailPrices = priceList.showRetailPrices;
-  const columnCount = 5 + (showRetailPrices ? 1 : 0) + (showStock ? 1 : 0);
+  const columnCount = 6 + (showRetailPrices ? 1 : 0) + (showStock ? 1 : 0);
   const rows: string[] = [
     row([`<Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="Title"><Data ss:Type="String">${xmlEscape(priceList.title || 'Индивидуальный прайс')}</Data></Cell>`]),
     row([`<Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="Subtitle"><Data ss:Type="String">Клиент: ${xmlEscape(priceList.clientName || 'Не указан')}</Data></Cell>`]),
@@ -168,7 +168,7 @@ function createExcelXml(priceList: PublicPriceList) {
 
   rows.push(row(Array.from({ length: columnCount }, () => cell('', 'Body'))));
 
-  const headers = ['Ценовая группа', 'Товар', 'Артикул', 'Описание', 'Индивидуальная цена'];
+  const headers = ['Ценовая группа', 'Товар', 'Модель', 'Артикул', 'Описание', 'Индивидуальная цена'];
   if (showRetailPrices) headers.push('Розничная цена');
   if (showStock) headers.push('Остаток');
   rows.push(row(headers.map((title) => cell(title, 'Header'))));
@@ -181,6 +181,7 @@ function createExcelXml(priceList: PublicPriceList) {
         const values = [
           group.title,
           product.title,
+          product.model || '—',
           product.sku || '—',
           product.description || '—',
           formatIndividualPrice(variant),
@@ -216,6 +217,7 @@ function createExcelXml(priceList: PublicPriceList) {
   <Table ss:DefaultRowHeight="22">
    <Column ss:Width="150"/>
    <Column ss:Width="260"/>
+   <Column ss:Width="120"/>
    <Column ss:Width="110"/>
    <Column ss:Width="220"/>
    <Column ss:Width="170"/>

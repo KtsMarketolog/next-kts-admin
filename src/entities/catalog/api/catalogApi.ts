@@ -21,6 +21,7 @@ export type Product = {
   brandTitle?: string | null;
   promo?: boolean;
   article?: string | null;
+  model?: string | null;
   category?: string | null;
   subcategory?: string | null;
   stock: number;
@@ -57,6 +58,7 @@ type ProductRow = {
   slug: string;
   title: string;
   article: string | null;
+  model: string | null;
   promo: boolean;
   brand_slug: string | null;
   brand_title: string | null;
@@ -104,6 +106,7 @@ function mapProduct(row: ProductRow): Product {
     brandTitle: row.brand_title,
     promo: row.promo,
     article: row.article,
+    model: row.model,
     category: row.category_title,
     subcategory: row.subcategory_title,
     stock: Number(row.stock ?? 0),
@@ -119,6 +122,7 @@ async function fetchProductsWhere(whereSql: string, params: unknown[]): Promise<
             p.slug,
             p.title,
             p.article,
+            p.model,
             p.promo,
             b.slug as brand_slug,
             b.title as brand_title,
@@ -303,6 +307,7 @@ export async function searchProducts(queryText: string): Promise<Array<{ title: 
        and (
          p.title ilike '%' || $1 || '%'
          or p.article ilike '%' || $1 || '%'
+         or p.model ilike '%' || $1 || '%'
        )
      order by p.title asc, p.id asc
      limit 8`,

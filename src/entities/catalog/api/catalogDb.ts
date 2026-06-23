@@ -73,6 +73,7 @@ export function ensureCatalogSchema() {
       slug text not null unique,
       title text not null,
       article text,
+      model text not null default '',
       price_group text not null default '',
       unit text,
       price_eur numeric(14, 2),
@@ -96,6 +97,7 @@ export function ensureCatalogSchema() {
       updated_at timestamptz not null default now()
     );
 
+    alter table catalog_products add column if not exists model text not null default '';
     alter table catalog_products add column if not exists price_group text not null default '';
     alter table catalog_products add column if not exists unit text;
     alter table catalog_products add column if not exists price_eur numeric(14, 2);
@@ -129,7 +131,7 @@ export function ensureCatalogSchema() {
     create index if not exists catalog_products_promo_idx
       on catalog_products (promo, is_active, title);
     create index if not exists catalog_products_search_idx
-      on catalog_products using gin (to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(article, '')));
+      on catalog_products using gin (to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(article, '') || ' ' || coalesce(model, '')));
     create index if not exists catalog_products_stock_title_norm_idx
       on catalog_products (lower(trim(regexp_replace(replace(title, chr(160), ' '), $$\s+$$, ' ', 'g'))));
   `).then(() => undefined);

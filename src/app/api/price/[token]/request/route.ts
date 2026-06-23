@@ -351,6 +351,7 @@ export async function POST(request: Request, context: Context) {
         return `
           <tr>
             <td>${escapeHtml(item.productTitle)}</td>
+            <td>${escapeHtml(item.model || '')}</td>
             <td>${escapeHtml(item.sku)}</td>
             <td>${escapeHtml(item.variantTitle)}</td>
             <td>${item.quantity}</td>
@@ -375,7 +376,7 @@ export async function POST(request: Request, context: Context) {
         ${rubConversionInfo ? `<p><b>Пересчет в рубли:</b> ${escapeHtml(rubConversionInfo)}</p>` : ''}
         <table border="1" cellpadding="6" cellspacing="0">
           <thead>
-            <tr><th>Товар</th><th>Артикул</th><th>Размер</th><th>Кол-во</th><th>Цена</th><th>Сумма</th>${rubHeaders}</tr>
+            <tr><th>Товар</th><th>Модель</th><th>Артикул</th><th>Размер</th><th>Кол-во</th><th>Цена</th><th>Сумма</th>${rubHeaders}</tr>
           </thead>
           <tbody>${itemRows}</tbody>
         </table>
@@ -400,7 +401,7 @@ export async function POST(request: Request, context: Context) {
             const rubText = itemRubPriceText || itemRubTotalText
               ? `; цена RUB ${itemRubPriceText}; сумма RUB ${itemRubTotalText}`
               : '';
-            return `${item.productTitle}; ${item.sku}; ${item.variantTitle}; ${item.quantity} шт.; цена ${formatAmountList(
+            return `${item.productTitle}; модель ${item.model || '—'}; ${item.sku}; ${item.variantTitle}; ${item.quantity} шт.; цена ${formatAmountList(
               item.prices,
             )}; сумма ${formatAmountList(lineTotals)}${rubText}`;
           })
@@ -429,6 +430,7 @@ export async function POST(request: Request, context: Context) {
           items: rows.map((item) => ({
             priceItemId: item.id,
             productTitle: item.productTitle,
+            model: item.model,
             sku: item.sku,
             variantTitle: item.variantTitle,
             quantity: item.quantity,
@@ -475,6 +477,7 @@ export async function POST(request: Request, context: Context) {
           items: rows.slice(0, 40).map((item) => ({
             priceItemId: item.id,
             productTitle: item.productTitle,
+            model: item.model,
             variantTitle: item.variantTitle,
             quantity: item.quantity,
             totals: item.prices.map((price) => ({ currency: price.currency, amount: price.lineTotal })),

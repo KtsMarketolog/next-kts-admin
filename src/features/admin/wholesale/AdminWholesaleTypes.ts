@@ -70,6 +70,7 @@ export type CatalogProduct = {
   id: number;
   title: string;
   sku: string;
+  model: string;
   description: string;
   imageUrl: string | null;
   priceGroup: string;

@@ -93,6 +93,10 @@ export function AdminCatalogProductsPanel({
           <input value={draft.article} onChange={(event) => setDraft((current) => ({ ...current, article: event.target.value }))} />
         </label>
         <label>
+          <span>Модель</span>
+          <input value={draft.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} />
+        </label>
+        <label>
           <span>Ценовая группа</span>
           <input value={draft.priceGroup} onChange={(event) => setDraft((current) => ({ ...current, priceGroup: event.target.value }))} />
         </label>
@@ -185,7 +189,7 @@ export function AdminCatalogProductsPanel({
         </div>
         <div className={styles.catalogSearch}>
           <input
-            placeholder="Поиск по названию, бренду, категории или артикулу"
+            placeholder="Поиск по названию, модели, бренду, категории или артикулу"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             onKeyDown={(event) => {
@@ -228,6 +232,10 @@ export function AdminCatalogProductsPanel({
                   <label>
                     <span>Артикул</span>
                     <input value={product.article} onChange={(event) => updateProduct(product.id, { article: event.target.value })} />
+                  </label>
+                  <label>
+                    <span>Модель</span>
+                    <input value={product.model} onChange={(event) => updateProduct(product.id, { model: event.target.value })} />
                   </label>
                   <label>
                     <span>Ценовая группа</span>
@@ -289,6 +297,7 @@ export function AdminCatalogProductsPanel({
                     <span>{product.brand || 'Без бренда'}</span>
                     <span>{product.category || 'Без категории'}</span>
                     <span>{product.subcategory || 'Без подкатегории'}</span>
+                    {product.model ? <span>Модель: {product.model}</span> : null}
                     <span>Арт.: {product.article || '-'}</span>
                     <span>
                       {product.stock > 0

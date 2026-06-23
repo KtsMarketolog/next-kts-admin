@@ -22,6 +22,7 @@ import type {
 type NormalizedCatalogProductInput = {
   title: string;
   article: string;
+  model: string;
   brand: string;
   category: string;
   subcategory: string;
@@ -228,6 +229,7 @@ async function syncWholesaleProduct(
     categoryId,
     input.title,
     input.article,
+    input.model,
     input.subcategory,
     input.brand,
     input.subcategory,
@@ -252,27 +254,28 @@ async function syncWholesaleProduct(
        set category_id = $2,
            title = $3,
            sku = $4,
-           series_description = $5,
-           brand_title = $6,
-           subcategory_title = $7,
-           price_group = $8,
-           unit = coalesce($9, unit),
-           price_eur = $10,
-           price_rub = $11,
-           price_cny = $12,
-           price_usd = $13,
-           general_discount = $14,
-           manual_discount = $15,
-           manual_discount_rop = $16,
-           stock = coalesce($17, stock),
-           is_expected = coalesce($18, is_expected),
+           model = $5,
+           series_description = $6,
+           brand_title = $7,
+           subcategory_title = $8,
+           price_group = $9,
+           unit = coalesce($10, unit),
+           price_eur = $11,
+           price_rub = $12,
+           price_cny = $13,
+           price_usd = $14,
+           general_discount = $15,
+           manual_discount = $16,
+           manual_discount_rop = $17,
+           stock = coalesce($18, stock),
+           is_expected = coalesce($19, is_expected),
            stock_updated_at = case
-             when $17::integer is not null and wholesale_products.stock is distinct from $17 then now()
-             when $18::boolean is not null and wholesale_products.is_expected is distinct from $18 then now()
+             when $18::integer is not null and wholesale_products.stock is distinct from $18 then now()
+             when $19::boolean is not null and wholesale_products.is_expected is distinct from $19 then now()
              else wholesale_products.stock_updated_at
            end,
-           sort_order = $19,
-           is_active = $20,
+           sort_order = $20,
+           is_active = $21,
            updated_at = now()
        where catalog_product_id = $1`,
       values,
@@ -286,6 +289,7 @@ async function syncWholesaleProduct(
        category_id,
        title,
        sku,
+       model,
        series_description,
        brand_title,
        subcategory_title,
@@ -304,7 +308,7 @@ async function syncWholesaleProduct(
        sort_order,
        is_active
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, coalesce($17, 0), coalesce($18, false), null, $19, $20)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, coalesce($18, 0), coalesce($19, false), null, $20, $21)`,
     values,
   );
 }
@@ -315,6 +319,7 @@ function normalizeInput(input: CatalogProductInput): NormalizedCatalogProductInp
   return {
     title: normalizeText(input.title, 500) || article,
     article,
+    model: normalizeText(input.model, 180),
     brand: normalizeText(input.brand, 180),
     category: normalizeText(input.category, 180),
     subcategory: normalizeText(input.subcategory, 180),
@@ -389,6 +394,7 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
        slug,
        title,
        article,
+       model,
        price_group,
        unit,
        price_eur,
@@ -407,13 +413,14 @@ async function insertCatalogProduct(client: PoolClient, cache: EntityCache, inpu
        subcategory_id,
        is_active
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, case when $16 = true then now() else null end, false, $17, $18, $19, $20)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, case when $17 = true then now() else null end, false, $18, $19, $20, $21)
      returning id::text`,
     [
       `excel:${sortOrder + 1}`,
       slug,
       input.title,
       input.article,
+      input.model,
       input.priceGroup,
       input.unit,
       input.priceEur,
@@ -456,26 +463,27 @@ async function updateCatalogProductFromImport(
          slug = $3,
          title = $4,
          article = $5,
-         price_group = $6,
-         unit = coalesce($7, unit),
-         price_eur = $8,
-         price_rub = $9,
-         price_cny = $10,
-         price_usd = $11,
-         general_discount = $12,
-         manual_discount = $13,
-         manual_discount_rop = $14,
-         brand_id = $15,
-         category_id = $16,
-         subcategory_id = $17,
-         stock = coalesce($18, stock),
-         is_expected = coalesce($19, is_expected),
+         model = $6,
+         price_group = $7,
+         unit = coalesce($8, unit),
+         price_eur = $9,
+         price_rub = $10,
+         price_cny = $11,
+         price_usd = $12,
+         general_discount = $13,
+         manual_discount = $14,
+         manual_discount_rop = $15,
+         brand_id = $16,
+         category_id = $17,
+         subcategory_id = $18,
+         stock = coalesce($19, stock),
+         is_expected = coalesce($20, is_expected),
          stock_updated_at = case
-           when $18::integer is not null and stock is distinct from $18 then now()
-           when $19::boolean is not null and is_expected is distinct from $19 then now()
+           when $19::integer is not null and stock is distinct from $19 then now()
+           when $20::boolean is not null and is_expected is distinct from $20 then now()
            else stock_updated_at
          end,
-         is_active = $20,
+         is_active = $21,
          updated_at = now()
      where id = $1`,
     [
@@ -484,6 +492,7 @@ async function updateCatalogProductFromImport(
       slug,
       input.title,
       input.article,
+      input.model,
       input.priceGroup,
       input.unit,
       input.priceEur,
@@ -575,26 +584,27 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
        set slug = $2,
            title = $3,
            article = $4,
-           price_group = $5,
-           unit = coalesce($6, unit),
-           price_eur = $7,
-           price_rub = $8,
-           price_cny = $9,
-           price_usd = $10,
-           general_discount = $11,
-           manual_discount = $12,
-           manual_discount_rop = $13,
-           brand_id = $14,
-           category_id = $15,
-           subcategory_id = $16,
-           stock = coalesce($17, stock),
-           is_expected = coalesce($18, is_expected),
+           model = $5,
+           price_group = $6,
+           unit = coalesce($7, unit),
+           price_eur = $8,
+           price_rub = $9,
+           price_cny = $10,
+           price_usd = $11,
+           general_discount = $12,
+           manual_discount = $13,
+           manual_discount_rop = $14,
+           brand_id = $15,
+           category_id = $16,
+           subcategory_id = $17,
+           stock = coalesce($18, stock),
+           is_expected = coalesce($19, is_expected),
            stock_updated_at = case
-             when $17::integer is not null and stock is distinct from $17 then now()
-             when $18::boolean is not null and is_expected is distinct from $18 then now()
+             when $18::integer is not null and stock is distinct from $18 then now()
+             when $19::boolean is not null and is_expected is distinct from $19 then now()
              else stock_updated_at
            end,
-           is_active = $19,
+           is_active = $20,
            updated_at = now()
        where id = $1`,
       [
@@ -602,6 +612,7 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
         slug,
         normalized.title,
         normalized.article,
+        normalized.model,
         normalized.priceGroup,
         normalized.unit,
         normalized.priceEur,

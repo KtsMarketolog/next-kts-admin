@@ -19,7 +19,7 @@ type PublicPriceVariant = PublicPriceProduct['variants'][number];
 type PdfDocument = InstanceType<typeof PDFDocument>;
 
 type PdfColumn = {
-  key: 'group' | 'product' | 'sku' | 'description' | 'price' | 'retailPrice' | 'stock';
+  key: 'group' | 'product' | 'model' | 'sku' | 'description' | 'price' | 'retailPrice' | 'stock';
   title: string;
   width: number;
   align?: 'left' | 'right';
@@ -190,25 +190,27 @@ function groupProductsByPriceGroup(priceList: PublicPriceList) {
 function getPdfColumns(showStock: boolean, showRetailPrices: boolean): PdfColumn[] {
   if (showRetailPrices) {
     const columns: PdfColumn[] = [
-      { key: 'group', title: 'Ценовая группа', width: showStock ? 78 : 95 },
-      { key: 'product', title: 'Товар', width: showStock ? 176 : 220 },
-      { key: 'sku', title: 'Артикул', width: showStock ? 70 : 80 },
-      { key: 'description', title: 'Описание', width: showStock ? 140 : 170 },
-      { key: 'price', title: 'Индивидуальная цена', width: showStock ? 108 : 105 },
-      { key: 'retailPrice', title: 'Розничная цена', width: showStock ? 108 : 105 },
+      { key: 'group', title: 'Ценовая группа', width: showStock ? 78 : 90 },
+      { key: 'product', title: 'Товар', width: showStock ? 150 : 185 },
+      { key: 'model', title: 'Модель', width: showStock ? 70 : 80 },
+      { key: 'sku', title: 'Артикул', width: showStock ? 66 : 80 },
+      { key: 'description', title: 'Описание', width: showStock ? 116 : 145 },
+      { key: 'price', title: 'Индивидуальная цена', width: showStock ? 100 : 99 },
+      { key: 'retailPrice', title: 'Розничная цена', width: showStock ? 100 : 99 },
     ];
-    if (showStock) columns.push({ key: 'stock', title: 'Остаток', width: 88 });
+    if (showStock) columns.push({ key: 'stock', title: 'Остаток', width: 80 });
     return columns;
   }
 
   const columns: PdfColumn[] = [
-    { key: 'group', title: 'Ценовая группа', width: showStock ? 92 : 110 },
-    { key: 'product', title: 'Товар', width: showStock ? 216 : 250 },
-    { key: 'sku', title: 'Артикул', width: showStock ? 76 : 90 },
-    { key: 'description', title: 'Описание', width: showStock ? 168 : 190 },
-    { key: 'price', title: 'Индивидуальная цена', width: showStock ? 132 : 138 },
+    { key: 'group', title: 'Ценовая группа', width: showStock ? 88 : 108 },
+    { key: 'product', title: 'Товар', width: showStock ? 186 : 220 },
+    { key: 'model', title: 'Модель', width: showStock ? 80 : 90 },
+    { key: 'sku', title: 'Артикул', width: showStock ? 74 : 86 },
+    { key: 'description', title: 'Описание', width: showStock ? 142 : 164 },
+    { key: 'price', title: 'Индивидуальная цена', width: showStock ? 116 : 110 },
   ];
-  if (showStock) columns.push({ key: 'stock', title: 'Остаток', width: 94 });
+  if (showStock) columns.push({ key: 'stock', title: 'Остаток', width: 92 });
   return columns;
 }
 
@@ -220,6 +222,7 @@ function createPdfRows(priceList: PublicPriceList): PdfRow[] {
         rows.push({
           group: group.title,
           product: product.title,
+          model: product.model || '—',
           sku: product.sku || '—',
           description: product.description || '—',
           price: formatIndividualPrice(variant),

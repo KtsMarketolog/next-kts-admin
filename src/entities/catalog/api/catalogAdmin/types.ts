@@ -1,6 +1,7 @@
 export type CatalogProductInput = {
   title: string;
   article?: string | null;
+  model?: string | null;
   brand?: string | null;
   category?: string | null;
   subcategory?: string | null;
@@ -21,6 +22,7 @@ export type CatalogAdminProduct = {
   id: number;
   title: string;
   article: string;
+  model: string;
   brand: string;
   category: string;
   subcategory: string;

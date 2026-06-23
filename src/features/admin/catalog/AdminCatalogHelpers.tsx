@@ -11,6 +11,7 @@ export function productPayload(product: CatalogDraft | CatalogProduct) {
   return {
     title: product.title,
     article: product.article,
+    model: product.model,
     brand: product.brand,
     category: product.category,
     subcategory: product.subcategory,

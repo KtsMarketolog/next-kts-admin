@@ -66,6 +66,7 @@ function mapAdminProduct(row: {
   id: string;
   title: string;
   article: string | null;
+  model: string | null;
   brand: string | null;
   category: string | null;
   subcategory: string | null;
@@ -88,6 +89,7 @@ function mapAdminProduct(row: {
     id: Number(row.id),
     title: row.title,
     article: row.article ?? '',
+    model: row.model ?? '',
     brand: row.brand ?? '',
     category: row.category ?? '',
     subcategory: row.subcategory ?? '',
@@ -120,6 +122,7 @@ export async function getCatalogAdminProducts(filters: CatalogAdminProductFilter
     `select p.id::text,
             p.title,
             p.article,
+            p.model,
             b.title as brand,
             c.title as category,
             s.title as subcategory,
@@ -145,6 +148,7 @@ export async function getCatalogAdminProducts(filters: CatalogAdminProductFilter
           $1 = ''
           or p.title ilike '%' || $1 || '%'
           or coalesce(p.article, '') ilike '%' || $1 || '%'
+          or coalesce(p.model, '') ilike '%' || $1 || '%'
           or coalesce(b.title, '') ilike '%' || $1 || '%'
           or coalesce(c.title, '') ilike '%' || $1 || '%'
           or coalesce(s.title, '') ilike '%' || $1 || '%'
@@ -166,6 +170,7 @@ export async function getCatalogAdminProductById(id: number) {
     `select p.id::text,
             p.title,
             p.article,
+            p.model,
             b.title as brand,
             c.title as category,
             s.title as subcategory,

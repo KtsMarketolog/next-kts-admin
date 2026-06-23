@@ -73,6 +73,7 @@ export type WholesaleCatalogProduct = {
   id: number;
   title: string;
   sku: string;
+  model: string;
   description: string;
   imageUrl: string | null;
   priceGroup: string;
