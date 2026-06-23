@@ -7,6 +7,9 @@ export type PublicWholesaleVariant = {
   id: number | null;
   title: string;
   retailPrice: string | null;
+  retailPriceEur: string | null;
+  retailPriceRub: string | null;
+  retailPriceCny: string | null;
   wholesalePrice: string | null;
   priceEur: string | null;
   priceRub: string | null;
@@ -102,6 +105,9 @@ type PriceItemRow = {
   variant_id: string | null;
   variant_title: string | null;
   retail_price: string | null;
+  retail_price_eur: string | null;
+  retail_price_rub: string | null;
+  retail_price_cny: string | null;
   wholesale_price: string | null;
   price_eur: string | null;
   price_rub: string | null;
@@ -178,6 +184,9 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        v.id::text as variant_id,
        coalesce(i.snapshot_variant_title, v.title, '') as variant_title,
        coalesce(v.retail_price, p.retail_price)::text as retail_price,
+       p.price_eur::text as retail_price_eur,
+       p.price_rub::text as retail_price_rub,
+       p.price_cny::text as retail_price_cny,
        coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
        case
          when i.custom_wholesale_price is null then p.price_eur::text
@@ -275,6 +284,9 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
       id: row.variant_id ? Number(row.variant_id) : null,
       title: row.variant_title || 'Цена',
       retailPrice: row.retail_price,
+      retailPriceEur: row.retail_price_eur,
+      retailPriceRub: row.retail_price_rub,
+      retailPriceCny: row.retail_price_cny,
       wholesalePrice: row.wholesale_price,
       priceEur: row.price_eur,
       priceRub: row.price_rub,

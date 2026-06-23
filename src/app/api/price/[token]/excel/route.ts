@@ -80,8 +80,36 @@ function formatIndividualPrice(variant: PublicPriceVariant) {
   return currencyPrices.map((price) => `${formatPrice(price.value)} ${price.currency}`).join(' / ');
 }
 
+type RetailPriceValue = { value: string; currency: 'EUR' | 'RUB' | 'CNY' };
+
+function isRetailPriceValue(price: { value: string | null; currency: 'EUR' | 'RUB' | 'CNY' }): price is RetailPriceValue {
+  return hasPriceValue(price.value);
+}
+
+function getRetailPriceValues(variant: PublicPriceVariant): RetailPriceValue[] {
+  const catalogPrices = [
+    { value: variant.retailPriceEur, currency: 'EUR' },
+    { value: variant.retailPriceRub, currency: 'RUB' },
+    { value: variant.retailPriceCny, currency: 'CNY' },
+  ] satisfies Array<{ value: string | null; currency: RetailPriceValue['currency'] }>;
+  const visibleCatalogPrices = catalogPrices.filter(isRetailPriceValue);
+
+  if (visibleCatalogPrices.length > 0) {
+    return visibleCatalogPrices;
+  }
+
+  if (variant.retailPrice && hasPriceValue(variant.retailPrice)) {
+    return [{ value: variant.retailPrice, currency: 'RUB' }];
+  }
+
+  return [];
+}
+
 function formatRetailPrice(variant: PublicPriceVariant) {
-  return hasPriceValue(variant.retailPrice) ? `${formatPrice(variant.retailPrice)} RUB` : '—';
+  const retailPrices = getRetailPriceValues(variant);
+  if (retailPrices.length === 0) return '—';
+
+  return retailPrices.map((price) => `${formatPrice(price.value)} ${price.currency}`).join(' / ');
 }
 
 function stockLabel(product: PublicPriceProduct) {
