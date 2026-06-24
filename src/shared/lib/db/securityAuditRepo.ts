@@ -25,6 +25,7 @@ export type SecurityEventType =
   | 'catalog_product_deleted'
   | 'catalog_category_updated'
   | 'catalog_category_icon_updated'
+  | 'firmware_file_updated'
   | 'client_company_created'
   | 'client_company_updated'
   | 'client_company_deleted'

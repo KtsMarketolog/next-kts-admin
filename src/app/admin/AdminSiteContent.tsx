@@ -1,6 +1,7 @@
 import { AdminBrandPortfolioSection } from '@/features/admin/brand-portfolio/AdminBrandPortfolioSection';
 import { AdminCategoriesSection } from '@/features/admin/categories/AdminCategoriesSection';
 import { AdminCatalogSection } from '@/features/admin/catalog/AdminCatalogSection';
+import { AdminFirmwareSection } from '@/features/admin/firmware/AdminFirmwareSection';
 import { AdminGroupCompaniesSection } from '@/features/admin/group-companies/AdminGroupCompaniesSection';
 import { AdminInfoSection } from '@/features/admin/info/AdminInfoSection';
 import type { useAdminBrandPortfolio } from '@/features/admin/model/useAdminBrandPortfolio';
@@ -160,6 +161,8 @@ export function AdminSiteContent({
       )}
 
       {activeSection === 'catalog' && <AdminCatalogSection showStatus={showStatus} />}
+
+      {activeSection === 'firmware' && <AdminFirmwareSection showStatus={showStatus} />}
 
       {activeSection === 'categories' && (
         <AdminCategoriesSection showStatus={showStatus} uploadImage={(file) => uploadImage(file, 'categoryIcon')} />

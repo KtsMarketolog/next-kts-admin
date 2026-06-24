@@ -109,11 +109,17 @@ jobs:
             exit 1
           fi
 
-          mkdir -p "$RELEASES" "$SHARED/public/uploads"
+          FIRMWARE_PUBLIC_PATH="klimatika/prog/firmware/update"
+
+          mkdir -p "$RELEASES" "$SHARED/public/uploads" "$SHARED/public/$FIRMWARE_PUBLIC_PATH"
 
           if [ -d "$BASE/public/uploads" ] && [ ! -e "$SHARED/public/uploads/.migrated-from-legacy" ]; then
             cp -a "$BASE/public/uploads/." "$SHARED/public/uploads/" 2>/dev/null || true
             touch "$SHARED/public/uploads/.migrated-from-legacy"
+          fi
+
+          if [ -d "$BASE/public/$FIRMWARE_PUBLIC_PATH" ]; then
+            cp -an "$BASE/public/$FIRMWARE_PUBLIC_PATH/." "$SHARED/public/$FIRMWARE_PUBLIC_PATH/" 2>/dev/null || true
           fi
 
           rm -rf "$RELEASE"
@@ -126,8 +132,14 @@ jobs:
           fi
 
           mkdir -p "$RELEASE/public"
+          if [ -d "$RELEASE/public/$FIRMWARE_PUBLIC_PATH" ]; then
+            cp -an "$RELEASE/public/$FIRMWARE_PUBLIC_PATH/." "$SHARED/public/$FIRMWARE_PUBLIC_PATH/" 2>/dev/null || true
+          fi
           rm -rf "$RELEASE/public/uploads"
           ln -sfn "$SHARED/public/uploads" "$RELEASE/public/uploads"
+          mkdir -p "$(dirname "$RELEASE/public/$FIRMWARE_PUBLIC_PATH")"
+          rm -rf "$RELEASE/public/$FIRMWARE_PUBLIC_PATH"
+          ln -sfn "$SHARED/public/$FIRMWARE_PUBLIC_PATH" "$RELEASE/public/$FIRMWARE_PUBLIC_PATH"
 
           if [ -L "$CURRENT" ] || [ -e "$CURRENT" ]; then
             CURRENT_TARGET="$(readlink -f "$CURRENT" || true)"

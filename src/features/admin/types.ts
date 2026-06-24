@@ -63,6 +63,7 @@ export type AdminSection =
   | 'groupCompanies'
   | 'brands'
   | 'catalog'
+  | 'firmware'
   | 'categories'
   | 'priceGroups'
   | 'users';
