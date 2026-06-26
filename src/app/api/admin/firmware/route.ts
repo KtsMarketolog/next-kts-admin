@@ -8,6 +8,7 @@ import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 
 const MAX_FIRMWARE_BYTES = 25 * 1024 * 1024;
+const FIRMWARE_PUBLIC_ORIGIN = 'http://kts-impex.ru';
 const FIRMWARE_PUBLIC_BASE = '/klimatika/prog/firmware/update';
 
 const FIRMWARE_FILES = [
@@ -34,7 +35,7 @@ function firmwareRoot() {
 }
 
 function publicUrl(file: (typeof FIRMWARE_FILES)[number]) {
-  return `${FIRMWARE_PUBLIC_BASE}/${file.relativeDir}/${file.fileName}`;
+  return `${FIRMWARE_PUBLIC_ORIGIN}${FIRMWARE_PUBLIC_BASE}/${file.relativeDir}/${file.fileName}`;
 }
 
 function targetPath(file: (typeof FIRMWARE_FILES)[number]) {
