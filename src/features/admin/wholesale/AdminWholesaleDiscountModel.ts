@@ -33,19 +33,15 @@ export function formatDiscountPercent(value: number) {
 
 export function getProductDiscountLimit(product: CatalogProduct) {
   const generalDiscount = parseDiscountLimit(product.generalDiscount);
-  const manualDiscountRop = parseDiscountLimit(product.manualDiscountRop);
   const manualDiscount = parseDiscountLimit(product.manualDiscount);
 
-  if (manualDiscountRop !== null) return Math.min(100, (generalDiscount ?? 0) + manualDiscountRop);
-  if (manualDiscount !== null) return Math.min(100, (generalDiscount ?? 0) + manualDiscount);
-  return generalDiscount;
+  return Math.min(100, (generalDiscount ?? 0) + (manualDiscount ?? 0));
 }
 
 export function getGroupDiscountLimit(group: CatalogGroup) {
   let limit: number | null = null;
   for (const product of group.products) {
     const productLimit = getProductDiscountLimit(product);
-    if (productLimit === null) continue;
     limit = limit === null ? productLimit : Math.min(limit, productLimit);
   }
   return limit;
