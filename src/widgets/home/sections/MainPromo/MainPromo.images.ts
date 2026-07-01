@@ -27,6 +27,70 @@ export type HeroImagePropsSet = {
   mobile: HeroImageProps;
 };
 
+function isUploadedImage(src: string) {
+  return src.startsWith("/uploads/");
+}
+
+function getRawImageProps({
+  src,
+  loading,
+  decoding,
+  fetchPriority,
+  width,
+  height,
+}: {
+  src: string;
+  loading: "eager" | "lazy";
+  decoding: "auto" | "async" | "sync";
+  fetchPriority?: "high" | "low" | "auto";
+  width: number;
+  height: number;
+}): HeroImageProps {
+  return {
+    src,
+    srcSet: src,
+    sizes: heroImageSizes,
+    alt: "",
+    loading,
+    decoding,
+    width,
+    height,
+    ...(fetchPriority ? { fetchPriority } : {}),
+  } as HeroImageProps;
+}
+
+function getHeroImageProps({
+  src,
+  loading,
+  decoding,
+  fetchPriority,
+  width,
+  height,
+}: {
+  src: string;
+  loading: "eager" | "lazy";
+  decoding: "auto" | "async" | "sync";
+  fetchPriority?: "high" | "low" | "auto";
+  width: number;
+  height: number;
+}) {
+  if (isUploadedImage(src)) {
+    return getRawImageProps({ src, loading, decoding, fetchPriority, width, height });
+  }
+
+  return getImageProps({
+    src,
+    alt: "",
+    sizes: heroImageSizes,
+    quality: heroImageQuality,
+    loading,
+    decoding,
+    width,
+    height,
+    ...(fetchPriority ? { fetchPriority } : {}),
+  }).props;
+}
+
 export function getHeroImagePropsSet({
   desktop,
   tablet,
@@ -35,43 +99,32 @@ export function getHeroImagePropsSet({
   decoding = "async",
   fetchPriority,
 }: HeroImageSourceInput): HeroImagePropsSet {
-  const priorityProps = fetchPriority ? { fetchPriority } : {};
-
-  const desktopImage = getImageProps({
+  const desktopImage = getHeroImageProps({
     src: desktop,
-    alt: "",
-    sizes: heroImageSizes,
-    quality: heroImageQuality,
     loading,
     decoding,
     width: heroImageDimensions.desktop.width,
     height: heroImageDimensions.desktop.height,
-    ...priorityProps,
-  }).props;
+    fetchPriority,
+  });
 
-  const tabletImage = getImageProps({
+  const tabletImage = getHeroImageProps({
     src: tablet || desktop,
-    alt: "",
-    sizes: heroImageSizes,
-    quality: heroImageQuality,
     loading,
     decoding,
     width: heroImageDimensions.tablet.width,
     height: heroImageDimensions.tablet.height,
-    ...priorityProps,
-  }).props;
+    fetchPriority,
+  });
 
-  const mobileImage = getImageProps({
+  const mobileImage = getHeroImageProps({
     src: mobile || tablet || desktop,
-    alt: "",
-    sizes: heroImageSizes,
-    quality: heroImageQuality,
     loading,
     decoding,
     width: heroImageDimensions.mobile.width,
     height: heroImageDimensions.mobile.height,
-    ...priorityProps,
-  }).props;
+    fetchPriority,
+  });
 
   return {
     desktop: desktopImage,
