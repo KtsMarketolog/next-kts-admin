@@ -41,3 +41,14 @@ export function normalizeWholesalePrice(value: unknown) {
   if (!Number.isFinite(amount) || amount < 0 || amount > 999999999) return null;
   return normalized;
 }
+
+export function normalizeWholesaleDiscountPercent(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const normalized = String(value).trim().replace(',', '.');
+  if (!normalized) return null;
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null;
+  const percent = Number(normalized);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) return null;
+  return normalized;
+}

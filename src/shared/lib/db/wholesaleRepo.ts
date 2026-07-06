@@ -191,26 +191,33 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        p.price_eur::text as retail_price_eur,
        p.price_rub::text as retail_price_rub,
        p.price_cny::text as retail_price_cny,
-       coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
        case
-         when i.custom_wholesale_price is null then p.price_eur::text
-         when p.price_rub is null
-          and coalesce(v.retail_price, p.retail_price, v.wholesale_price, p.wholesale_price) is null
-          and p.price_eur is not null then i.custom_wholesale_price::text
-         else null
+         when p.price_rub is not null or p.price_eur is not null or p.price_cny is not null then null
+         when i.price_manually_changed = true and i.custom_wholesale_price is not null then i.custom_wholesale_price::text
+         when i.price_manually_changed = false
+          and i.discount_percent is not null
+          and coalesce(v.wholesale_price, p.wholesale_price) is not null then round(coalesce(v.wholesale_price, p.wholesale_price) * (1 - i.discount_percent / 100), 2)::text
+         else coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text
+       end as wholesale_price,
+       case
+         when p.price_eur is null then null
+         when i.price_manually_changed = true and i.custom_wholesale_price is not null then
+           case when p.price_rub is null then i.custom_wholesale_price::text else null end
+         when i.price_manually_changed = false and i.discount_percent is not null then round(p.price_eur * (1 - i.discount_percent / 100), 2)::text
+         else p.price_eur::text
        end as price_eur,
        case
-         when i.custom_wholesale_price is null then p.price_rub::text
-         when p.price_rub is not null then i.custom_wholesale_price::text
-         else null
+         when p.price_rub is null then null
+         when i.price_manually_changed = true and i.custom_wholesale_price is not null then i.custom_wholesale_price::text
+         when i.price_manually_changed = false and i.discount_percent is not null then round(p.price_rub * (1 - i.discount_percent / 100), 2)::text
+         else p.price_rub::text
        end as price_rub,
        case
-         when i.custom_wholesale_price is null then p.price_cny::text
-         when p.price_rub is null
-          and coalesce(v.retail_price, p.retail_price, v.wholesale_price, p.wholesale_price) is null
-          and p.price_eur is null
-          and p.price_cny is not null then i.custom_wholesale_price::text
-         else null
+         when p.price_cny is null then null
+         when i.price_manually_changed = true and i.custom_wholesale_price is not null then
+           case when p.price_rub is null and p.price_eur is null then i.custom_wholesale_price::text else null end
+         when i.price_manually_changed = false and i.discount_percent is not null then round(p.price_cny * (1 - i.discount_percent / 100), 2)::text
+         else p.price_cny::text
        end as price_cny
      from wholesale_price_lists pl
      join wholesale_price_list_items i on i.price_list_id = pl.id
@@ -345,26 +352,33 @@ export async function getPublicWholesaleRequestItems(token: string, itemIds: num
        coalesce(i.snapshot_product_sku, p.sku) as sku,
        p.model,
        coalesce(i.snapshot_variant_title, v.title, '') as variant_title,
-       coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as wholesale_price,
        case
-         when i.custom_wholesale_price is null then p.price_eur::text
-         when p.price_rub is null
-          and coalesce(v.retail_price, p.retail_price, v.wholesale_price, p.wholesale_price) is null
-          and p.price_eur is not null then i.custom_wholesale_price::text
-         else null
+         when p.price_rub is not null or p.price_eur is not null or p.price_cny is not null then null
+         when i.price_manually_changed = true and i.custom_wholesale_price is not null then i.custom_wholesale_price::text
+         when i.price_manually_changed = false
+          and i.discount_percent is not null
+          and coalesce(v.wholesale_price, p.wholesale_price) is not null then round(coalesce(v.wholesale_price, p.wholesale_price) * (1 - i.discount_percent / 100), 2)::text
+         else coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text
+       end as wholesale_price,
+       case
+         when p.price_eur is null then null
+         when i.price_manually_changed = true and i.custom_wholesale_price is not null then
+           case when p.price_rub is null then i.custom_wholesale_price::text else null end
+         when i.price_manually_changed = false and i.discount_percent is not null then round(p.price_eur * (1 - i.discount_percent / 100), 2)::text
+         else p.price_eur::text
        end as price_eur,
        case
-         when i.custom_wholesale_price is null then p.price_rub::text
-         when p.price_rub is not null then i.custom_wholesale_price::text
-         else null
+         when p.price_rub is null then null
+         when i.price_manually_changed = true and i.custom_wholesale_price is not null then i.custom_wholesale_price::text
+         when i.price_manually_changed = false and i.discount_percent is not null then round(p.price_rub * (1 - i.discount_percent / 100), 2)::text
+         else p.price_rub::text
        end as price_rub,
        case
-         when i.custom_wholesale_price is null then p.price_cny::text
-         when p.price_rub is null
-          and coalesce(v.retail_price, p.retail_price, v.wholesale_price, p.wholesale_price) is null
-          and p.price_eur is null
-          and p.price_cny is not null then i.custom_wholesale_price::text
-         else null
+         when p.price_cny is null then null
+         when i.price_manually_changed = true and i.custom_wholesale_price is not null then
+           case when p.price_rub is null and p.price_eur is null then i.custom_wholesale_price::text else null end
+         when i.price_manually_changed = false and i.discount_percent is not null then round(p.price_cny * (1 - i.discount_percent / 100), 2)::text
+         else p.price_cny::text
        end as price_cny
      from wholesale_price_lists pl
      join wholesale_price_list_items i on i.price_list_id = pl.id

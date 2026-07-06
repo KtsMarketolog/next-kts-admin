@@ -24,6 +24,16 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202607060001_price_item_discount_percent',
+    description: 'Store calculated wholesale price list discounts as percentages',
+    apply: async (client) => {
+      await client.query(`
+        alter table wholesale_price_list_items
+        add column if not exists discount_percent numeric(7, 2)
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

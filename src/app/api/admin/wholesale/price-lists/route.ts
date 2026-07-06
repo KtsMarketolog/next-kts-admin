@@ -17,6 +17,7 @@ import {
   normalizeOptionalDate,
   normalizePublicPriceToken,
   normalizeTextField,
+  normalizeWholesaleDiscountPercent,
   normalizeWholesalePrice,
 } from '@/shared/lib/wholesaleSecurity';
 
@@ -40,6 +41,7 @@ function itemsFromBody(items: unknown): WholesalePriceListItemInput[] {
         productId,
         variantId: parsedVariantId !== null && Number.isInteger(parsedVariantId) && parsedVariantId > 0 ? parsedVariantId : null,
         customWholesalePrice: normalizeWholesalePrice(source.customWholesalePrice),
+        discountPercent: normalizeWholesaleDiscountPercent(source.discountPercent),
         priceManuallyChanged: Boolean(source.priceManuallyChanged),
         visible: Boolean(source.visible),
         sortOrder: Number.isInteger(Number(source.sortOrder)) ? Math.max(0, Number(source.sortOrder)) : index + 1,

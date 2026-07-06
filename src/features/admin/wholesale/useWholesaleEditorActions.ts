@@ -51,6 +51,7 @@ export function useWholesaleEditorActions({
             ? {
                 ...item,
                 ...patch,
+                discountPercent: 'customWholesalePrice' in patch ? null : (patch.discountPercent ?? item.discountPercent),
                 priceManuallyChanged:
                   'customWholesalePrice' in patch ? true : (patch.priceManuallyChanged ?? item.priceManuallyChanged),
               }
@@ -113,6 +114,7 @@ export function useWholesaleEditorActions({
           return {
             ...item,
             customWholesalePrice: formatCatalogAmount(base.amount * (1 - percent / 100)),
+            discountPercent: formatDiscountPercent(percent),
             priceManuallyChanged: false,
           };
         }),

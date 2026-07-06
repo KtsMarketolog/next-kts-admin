@@ -218,6 +218,7 @@ async function ensureSiteSchemaInternal() {
       wholesale_product_id bigint not null references wholesale_products(id) on delete cascade,
       wholesale_variant_id bigint references wholesale_product_variants(id) on delete cascade,
       custom_wholesale_price numeric(12, 2),
+      discount_percent numeric(7, 2),
       price_manually_changed boolean not null default false,
       visible boolean not null default true,
       sort_order integer not null default 0,
@@ -595,6 +596,7 @@ async function ensureSiteSchemaInternal() {
   await query(`alter table wholesale_price_lists add column if not exists show_stock_text boolean not null default false`);
   await query(`alter table wholesale_price_lists add column if not exists client_company_id bigint references client_companies(id) on delete set null`);
   await query(`alter table wholesale_price_list_items add column if not exists price_manually_changed boolean not null default false`);
+  await query(`alter table wholesale_price_list_items add column if not exists discount_percent numeric(7, 2)`);
   await query(`
     create table if not exists wholesale_price_list_group_stock_settings (
       id bigserial primary key,

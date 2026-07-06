@@ -9,6 +9,8 @@ type WholesaleDiscountReportSourceRow = {
   company: string | null;
   manager: string | null;
   custom_wholesale_price: string | null;
+  discount_percent: string | null;
+  price_manually_changed: boolean;
   effective_wholesale_price: string | null;
   price_rub: string | null;
   retail_price: string | null;
@@ -29,19 +31,30 @@ function formatDiscountReportPercent(value: number) {
   return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace('.', ',');
 }
 
+function parseDiscountReportPercent(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = String(value).replace(/\s+/g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null;
+}
+
 function resolveDiscountReportValue(rows: WholesaleDiscountReportSourceRow[]) {
   const discounts: number[] = [];
 
   for (const row of rows) {
     const basePrice =
       parseDiscountReportAmount(row.price_rub) ??
-      parseDiscountReportAmount(row.retail_price) ??
-      parseDiscountReportAmount(row.wholesale_price) ??
       parseDiscountReportAmount(row.price_eur) ??
-      parseDiscountReportAmount(row.price_cny);
-    const actualPrice =
-      parseDiscountReportAmount(row.custom_wholesale_price) ??
-      parseDiscountReportAmount(row.effective_wholesale_price);
+      parseDiscountReportAmount(row.price_cny) ??
+      parseDiscountReportAmount(row.retail_price) ??
+      parseDiscountReportAmount(row.wholesale_price);
+
+    const discountPercent = row.price_manually_changed ? null : parseDiscountReportPercent(row.discount_percent);
+    const actualPrice = discountPercent !== null && basePrice
+      ? basePrice * (1 - discountPercent / 100)
+      : row.price_manually_changed
+        ? parseDiscountReportAmount(row.custom_wholesale_price) ?? parseDiscountReportAmount(row.effective_wholesale_price)
+        : basePrice;
 
     if (!basePrice || !actualPrice) continue;
     const discount = (1 - actualPrice / basePrice) * 100;
@@ -65,6 +78,8 @@ export async function getWholesaleDiscountReportRows(): Promise<WholesaleDiscoun
             nullif(trim(pl.client_name), '') as company,
             nullif(trim(m.name), '') as manager,
             i.custom_wholesale_price::text as custom_wholesale_price,
+            i.discount_percent::text as discount_percent,
+            i.price_manually_changed,
             coalesce(i.custom_wholesale_price, v.wholesale_price, p.wholesale_price)::text as effective_wholesale_price,
             p.price_rub::text as price_rub,
             coalesce(v.retail_price, p.retail_price)::text as retail_price,

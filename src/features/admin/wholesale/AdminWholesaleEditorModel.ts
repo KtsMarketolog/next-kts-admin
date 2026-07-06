@@ -1,6 +1,6 @@
 import type { CatalogCategory, PriceEditor, PriceGroupStockSetting, PriceItem } from './AdminWholesaleTypes';
 import { flatCatalogItems, priceGroupKey } from './AdminWholesaleCatalogModel';
-import { formatCatalogAmount, getDiscountBaseAmount } from './AdminWholesaleDiscountModel';
+import { formatCatalogAmount, getDiscountBaseAmount, parseDiscountLimit } from './AdminWholesaleDiscountModel';
 
 export function makeToken() {
   const bytes = new Uint8Array(12);
@@ -53,8 +53,14 @@ export function getTextareaRows(value: string) {
 }
 
 export function getInitialCustomWholesalePrice(row: ReturnType<typeof flatCatalogItems>[number], item?: PriceItem) {
-  if (item?.customWholesalePrice?.trim()) return item.customWholesalePrice;
   const base = getDiscountBaseAmount(row);
+  if (item?.priceManuallyChanged && item.customWholesalePrice?.trim()) return item.customWholesalePrice;
+
+  const discountPercent = parseDiscountLimit(item?.discountPercent);
+  if (discountPercent !== null && base !== null) {
+    return formatCatalogAmount(base * (1 - discountPercent / 100));
+  }
+
   return base === null ? '' : formatCatalogAmount(base);
 }
 
@@ -65,12 +71,13 @@ export function mergeEditorItems(categories: CatalogCategory[], items: PriceItem
     const key = `${product.id}:${variant.id ?? 'base'}`;
     const currentItem = current.get(key);
     const customWholesalePrice = getInitialCustomWholesalePrice(row, currentItem);
-    if (currentItem) return { ...currentItem, customWholesalePrice };
+    if (currentItem) return { ...currentItem, customWholesalePrice, discountPercent: currentItem.discountPercent ?? null };
 
     return {
       productId: product.id,
       variantId: variant.id,
       customWholesalePrice,
+      discountPercent: null,
       priceManuallyChanged: false,
       visible: false,
       sortOrder: index + 1,

@@ -381,6 +381,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
     product_id: string;
     variant_id: string | null;
     custom_wholesale_price: string | null;
+    discount_percent: string | null;
     price_manually_changed: boolean;
     visible: boolean;
     sort_order: number;
@@ -388,6 +389,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
     `select wholesale_product_id::text as product_id,
             wholesale_variant_id::text as variant_id,
             custom_wholesale_price::text,
+            discount_percent::text,
             price_manually_changed,
             visible,
             sort_order
@@ -427,6 +429,7 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
       productId: Number(item.product_id),
       variantId: item.variant_id ? Number(item.variant_id) : null,
       customWholesalePrice: item.custom_wholesale_price,
+      discountPercent: item.discount_percent,
       priceManuallyChanged: item.price_manually_changed === true,
       visible: item.visible,
       sortOrder: item.sort_order,
@@ -758,11 +761,12 @@ async function replaceWholesalePriceListItems(id: number, items: WholesalePriceL
   await query(`delete from wholesale_price_list_items where price_list_id = $1`, [id]);
 
   for (const item of items) {
+    const customWholesalePrice = item.priceManuallyChanged || item.discountPercent ? item.customWholesalePrice : null;
     await query(
       `insert into wholesale_price_list_items (
-         price_list_id, wholesale_product_id, wholesale_variant_id, custom_wholesale_price, price_manually_changed, visible, sort_order
+         price_list_id, wholesale_product_id, wholesale_variant_id, custom_wholesale_price, discount_percent, price_manually_changed, visible, sort_order
        )
-       select $1, p.id, v.id, nullif($4, '')::numeric, $5, $6, $7
+       select $1, p.id, v.id, nullif($4, '')::numeric, nullif($5, '')::numeric, $6, $7, $8
        from wholesale_products p
        left join wholesale_product_variants v on v.id = $3 and v.product_id = p.id
        where p.id = $2
@@ -771,7 +775,8 @@ async function replaceWholesalePriceListItems(id: number, items: WholesalePriceL
         id,
         item.productId,
         item.variantId,
-        item.customWholesalePrice ?? '',
+        customWholesalePrice ?? '',
+        item.discountPercent ?? '',
         item.priceManuallyChanged,
         item.visible,
         item.sortOrder,

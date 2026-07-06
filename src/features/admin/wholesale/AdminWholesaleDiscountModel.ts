@@ -50,10 +50,10 @@ export function getGroupDiscountLimit(group: CatalogGroup) {
 export function getDiscountBaseAmount(row: CatalogRow) {
   return (
     parseCatalogAmount(row.product.priceRub) ??
-    parseCatalogAmount(row.variant.retailPrice) ??
-    parseCatalogAmount(row.variant.wholesalePrice) ??
     parseCatalogAmount(row.product.priceEur) ??
-    parseCatalogAmount(row.product.priceCny)
+    parseCatalogAmount(row.product.priceCny) ??
+    parseCatalogAmount(row.variant.retailPrice) ??
+    parseCatalogAmount(row.variant.wholesalePrice)
   );
 }
 
@@ -69,14 +69,11 @@ export function getSavedGroupDiscountPercent(
       const key = `${product.id}:${variant.id ?? 'base'}`;
       const priceItem = itemByKey.get(key);
       if (!priceItem?.visible) continue;
+      if (!catalogDiscountBaseByKey.has(key)) continue;
 
-      const base = catalogDiscountBaseByKey.get(key)?.amount;
-      const custom = parseCatalogAmount(priceItem.customWholesalePrice);
-      if (!base || custom === null) continue;
-
-      const discount = (1 - custom / base) * 100;
-      if (discount < -0.05 || discount > 100) return null;
-      discounts.push(discount <= 0.05 ? 0 : discount);
+      const discount = parseDiscountLimit(priceItem.discountPercent);
+      if (discount === null) continue;
+      discounts.push(discount);
     }
   }
 
