@@ -21,6 +21,7 @@ const nextConfig: NextConfig = {
   headers: async () => {
     const bitrixWidgetOrigin = "https://crm.kts-impex.ru";
     const bitrixWidgetSocketOrigin = "wss://crm.kts-impex.ru";
+    const yandexMapOrigin = "https://yandex.ru";
     const scriptSrc = `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${bitrixWidgetOrigin}`;
     const securityHeaders = [
       { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
@@ -41,8 +42,8 @@ const nextConfig: NextConfig = {
           `style-src 'self' 'unsafe-inline' ${bitrixWidgetOrigin}`,
           scriptSrc,
           `connect-src 'self' https://api.kts-impex.ru http://api.kts-impex.ru ${bitrixWidgetOrigin} ${bitrixWidgetSocketOrigin}`,
-          `child-src 'self' ${bitrixWidgetOrigin}`,
-          `frame-src 'self' ${bitrixWidgetOrigin}`,
+          `child-src 'self' ${bitrixWidgetOrigin} ${yandexMapOrigin}`,
+          `frame-src 'self' ${bitrixWidgetOrigin} ${yandexMapOrigin}`,
           "worker-src 'self' blob:",
           "manifest-src 'self'",
           "form-action 'self'",
