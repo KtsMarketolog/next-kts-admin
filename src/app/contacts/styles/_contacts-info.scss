@@ -88,25 +88,5 @@
     }
   }
 
-  .contactTg{
-    display: block;
-    font-size: $apx-22;
-    font-weight: 600;
-    line-height: 1;
-    letter-spacing: 0;
-    margin-bottom: $apx-32;
-
-    text-decoration: none;
-
-    &:hover,
-    &:focus,
-    &:active {
-      text-decoration: none;
-    }
-
-    &:hover{
-      color: #8D81C4;
-    }
-  }
 }
 

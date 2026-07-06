@@ -26,12 +26,11 @@
     max-width: $apx-1274;
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto;
     grid-template-areas:
       "logo      contacts   contacts   contacts  contacts"
       "desc      menu       extra      button    button"
-      "socials   menu       extra      button    button"
-      "socials   bottom     bottom     bottom     bottom"
+      "bottom    bottom     bottom     bottom     bottom"
     ;
 
   }
@@ -218,51 +217,6 @@
 
   }
 
-  .socialsWrap{
-
-    grid-area: socials;
-    border-right: $apx-1 solid #fff;
-
-  }
-
-  .socialsTitle{
-
-    font-size: $apx-14;
-    font-weight: 500;
-    line-height: 1.3;
-    letter-spacing: 0;
-      
-  }
-
-  .socials {
-
-    display: flex;
-    gap: $apx-10;
-    padding-top: $apx-20;
-    padding-bottom: $apx-57;
-    padding-left: $apx-62;
-    border-bottom: $apx-1 solid #fff;
-
-    img {
-
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-        
-    }
-
-     a {
-
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: $apx-52;
-      height: $apx-51;
-      
-    }
-
-  }
-
   .bottom {
 
     grid-area: bottom;
@@ -329,12 +283,10 @@
       max-width: 100%;
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      grid-template-rows: auto auto auto auto auto;
+      grid-template-rows: auto auto auto;
       grid-template-areas:
         "logo      button "
         "desc      menu "
-        "socials   menu "
-        "socials   contacts "
         "bottom    contacts "
       ;
 
@@ -485,43 +437,6 @@
       
     }
 
-    .socialsWrap{
-
-      grid-area: socials;
-      border: none;
-
-    }
-
-    .socialsTitle{
-
-        font-size: $apx-l-17;
-        font-weight: 500;
-        line-height: 1.3;
-        letter-spacing: 0;
-        
-    }
-
-    .socials {
-
-      display: flex;
-      gap: $apx-l-22;
-      padding-top: $apx-l-20;
-      padding-left: $apx-l-92;
-      padding-left: $apx-l-92;
-      padding-bottom: 0;
-      border: none;
-
-      img {
-
-        width: $apx-l-58;
-        height: $apx-l-57;
-        margin-top: $apx-l-20;
-
-        
-      }
-
-    }
-
     .bottom {
 
       grid-area: bottom;
@@ -601,8 +516,8 @@
         "logo      desc "
         "button    button "
         "menu      menu "
-        "socials   contacts "
-        "socials   bottom "
+        "contacts  contacts "
+        "bottom    bottom "
       ;
 
     }
@@ -767,38 +682,6 @@
         letter-spacing: 0;
         text-transform: uppercase;
 
-      }
-
-    }
-
-    .socialsWrap{
-
-      grid-area: socials;
-      border: none;
-
-    }
-
-    .socialsTitle{
-
-      display: none;
-        
-    }
-
-    .socials {
-
-      display: flex;
-      flex-direction: column;
-      gap: $apx-m-22;
-      padding-top: $apx-m-80;
-      padding-bottom: $apx-m-57;
-      padding-left: $apx-m-40;
-      border: none;
-
-      img {
-
-        width: $apx-m-58;
-        height: $apx-m-57;
-        
       }
 
     }

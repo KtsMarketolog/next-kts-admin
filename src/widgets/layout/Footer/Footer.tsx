@@ -14,12 +14,6 @@ const footerMenu = {
 
 };
 
-const socialIcons = [
-
-  { src: '/img/social/tg.svg', alt: 'Telegram' },
-
-];
-
 const footerHrefMap: Record<string, string> = {
 
   'Главная': '/#top',
@@ -198,33 +192,6 @@ export const Footer = () => {
                 <Button variant = "purple">Написать нам ↗</Button>
 
               </Link>
-
-            </div>
-
-            <div className = { styles.socialsWrap }>
-
-              <span className = { styles.socialsTitle }>Мы в социальных сетях</span>
-
-              <div className = { styles.socials }>
-
-                {  socialIcons.map(icon => (
-
-                  <a
-
-                    key = { icon.alt }
-                    href = "https://t.me/ktc_kazan"
-                    target = "_blank"
-                    rel = "noopener noreferrer"
-
-                  >
-
-                    <img src = { icon.src } alt = { icon.alt } />
-
-                  </a>
-
-                )) }
-
-              </div>
 
             </div>
 

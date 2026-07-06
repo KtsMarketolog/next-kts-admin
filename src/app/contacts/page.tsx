@@ -413,18 +413,6 @@ export default function ContactsPage() {
 
               </div>
 
-              <a
-
-                href="https://t.me/ktc_kazan"
-                target="_blank"
-                rel="noopener noreferrer"
-                className={styles.contactTg}
-
-              >
-
-                Telegram
-
-              </a>
 
               <div className={styles.mapWrap}>
                 

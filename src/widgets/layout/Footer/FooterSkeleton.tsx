@@ -39,10 +39,6 @@ export function FooterSkeleton() {
               </div>
             </div>
             <div className={styles.button} />
-            <div className={styles.socials}>
-              <span />
-              <i />
-            </div>
             <div className={styles.bottom}>
               <span />
             </div>
