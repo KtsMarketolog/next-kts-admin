@@ -1,14 +1,5 @@
 import styles from './TeamSection.module.scss';
 
-const topLeader = {
-
-  img: '/img/people/sergey-smirnov.png',
-  name: 'Сергей Смирнов',
-  description: 'Российский предприниматель, Генеральный директор КТС',
-  tags: ['Основатель компании', 'В отрасли 18 лет', 'Эксперт'],
-
-};
-
 const subLeaders = [
 
   {

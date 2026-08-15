@@ -76,7 +76,6 @@ export default function Loader({ children }: { children: React.ReactNode }) {
       {/* CSS: 1) прячем app-content до hydrated (убирает мерцание),
               2) добавляем класс для скрытия SSR-лоадера */}
       <style
-        // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{
           __html: `
           /* КЛЮЧ: пока нет hydrated — контент невидим. Поэтому "сайт" никогда не успеет мелькнуть */

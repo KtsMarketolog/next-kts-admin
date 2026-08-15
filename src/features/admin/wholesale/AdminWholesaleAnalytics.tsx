@@ -60,6 +60,15 @@ const tabs: Array<{ value: Tab; label: string; description: string }> = [
   { value: 'events', label: 'Журнал событий', description: 'Действия и фильтры' },
 ];
 
+function downloadFile(url: string) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 function resolveTab(value: string | null): Tab {
   if (value === 'public' || value === 'pdf' || value === 'excel') return 'publicActivity';
   return tabs.some((item) => item.value === value) ? (value as Tab) : 'overview';
@@ -306,11 +315,11 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
     setExportStatus('');
     setExportDownloadDone(true);
     window.setTimeout(() => setExportDownloadDone(false), 1800);
-    window.location.href = `/api/admin/wholesale/analytics/export?${exportParams().toString()}`;
+    downloadFile(`/api/admin/wholesale/analytics/export?${exportParams().toString()}`);
   };
 
   const downloadDiscountReport = () => {
-    window.location.href = '/api/admin/wholesale/discount-report';
+    downloadFile('/api/admin/wholesale/discount-report');
   };
 
   const sendAnalyticsEmail = async () => {

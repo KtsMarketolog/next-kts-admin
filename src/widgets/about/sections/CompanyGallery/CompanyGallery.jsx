@@ -21,7 +21,7 @@ export const CompanyGallery = () => {
   const [ isMobile, setIsMobile ] = useState(false);
 
   const [ isAtStart, setIsAtStart ] = useState( true );
-  const [ isAtEnd, setIsAtEnd ] = useState( false );
+  const isAtEnd = false;
 
   useEffect(() => {
 
