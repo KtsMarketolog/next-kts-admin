@@ -93,7 +93,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     });
     events.addEventListener('client.updated', () => {
       void loadClients().catch(() => {
-        showStatus('РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РєР»РёРµРЅС‚РѕРІ');
+        showStatus('Не удалось обновить клиентов');
       });
     });
 

@@ -68,7 +68,7 @@ function findColumn(headers: string[], match: (header: string) => boolean) {
 
 function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null {
   const matrix = XLSX.utils.sheet_to_json<RawMatrixRow>(sheet, { header: 1, defval: null, raw: true, blankrows: false });
-  if (matrix.length > MAX_CATALOG_EXCEL_ROWS) throw new Error('Excel-С„Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№');
+  if (matrix.length > MAX_CATALOG_EXCEL_ROWS) throw new Error('Excel-файл слишком большой');
   const headerRowIndex = matrix.findIndex((row) => row.some((cell) => normalizeHeader(cell) === normalizeHeader(HEADER_ARTICLE)));
   if (headerRowIndex < 0) return null;
 
@@ -132,9 +132,9 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
 }
 
 export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
-  if (buffer.byteLength > MAX_CATALOG_EXCEL_BYTES) throw new Error('Excel-С„Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№');
+  if (buffer.byteLength > MAX_CATALOG_EXCEL_BYTES) throw new Error('Excel-файл слишком большой');
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, sheetRows: MAX_CATALOG_EXCEL_ROWS + 5 });
-  if (workbook.SheetNames.length > MAX_CATALOG_EXCEL_SHEETS) throw new Error('Excel-С„Р°Р№Р» СЃРѕРґРµСЂР¶РёС‚ СЃР»РёС€РєРѕРј РјРЅРѕРіРѕ Р»РёСЃС‚РѕРІ');
+  if (workbook.SheetNames.length > MAX_CATALOG_EXCEL_SHEETS) throw new Error('Excel-файл содержит слишком много листов');
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('В Excel-файле нет листов');
 
@@ -148,7 +148,7 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
   }
 
   const rows = XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: null, raw: true });
-  if (rows.length > MAX_CATALOG_EXCEL_ROWS) throw new Error('Excel-С„Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№');
+  if (rows.length > MAX_CATALOG_EXCEL_ROWS) throw new Error('Excel-файл слишком большой');
   if (rows.length === 0) throw new Error('В Excel-файле нет строк');
 
   const products = rows

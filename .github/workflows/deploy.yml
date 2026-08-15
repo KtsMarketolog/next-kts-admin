@@ -52,10 +52,22 @@ jobs:
             "echo Connected to VPS as \$(whoami)" || \
             (echo "::error title=SSH connection failed::Check VPS_HOST, VPS_USER, VPS_SSH_KEY and authorized_keys on the server" && exit 1)
 
-      - name: Build application
+      - name: Install dependencies
         run: |
           set -euo pipefail
           npm ci
+
+      - name: Verify project
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm test
+          npx tsc --noEmit --incremental false
+          npm audit --omit=dev --audit-level=high
+
+      - name: Build application
+        run: |
+          set -euo pipefail
           npm run build
 
       - name: Prepare release artifact
