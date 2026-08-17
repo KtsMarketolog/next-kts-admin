@@ -4,8 +4,7 @@ import type { ReactNode } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { AnalogFinder } from '@/features/analogs/AnalogFinder';
-
-import styles from './WholesaleManagerDashboard.module.scss';
+import { CabinetDashboard } from '@/shared/ui/CabinetDashboard/CabinetDashboard';
 
 type ManagerSection = 'prices' | 'analogs';
 
@@ -16,9 +15,10 @@ const SECTIONS: Array<{ value: ManagerSection; label: string; description: strin
 
 type WholesaleManagerDashboardProps = {
   priceContent: ReactNode;
+  priceCount: number;
 };
 
-export function WholesaleManagerDashboard({ priceContent }: WholesaleManagerDashboardProps) {
+export function WholesaleManagerDashboard({ priceContent, priceCount }: WholesaleManagerDashboardProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,41 +36,15 @@ export function WholesaleManagerDashboard({ priceContent }: WholesaleManagerDash
   };
 
   return (
-    <div className={styles.dashboardLayout}>
-      <aside className={styles.sidebar} aria-label="Разделы кабинета менеджера">
-        <div className={styles.sidebarHeader}>
-          <span>Кабинет менеджера</span>
-          <strong>Разделы</strong>
-        </div>
-        <nav className={styles.sideNav}>
-          {SECTIONS.map((section) => (
-            <button
-              className={activeSection === section.value ? styles.sideNavActive : styles.sideNavItem}
-              key={section.value}
-              type="button"
-              onClick={() => selectSection(section.value)}
-            >
-              <span>{section.label}</span>
-              <small>{section.description}</small>
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      <section className={styles.content}>
-        {activeSection === 'prices' ? (
-          priceContent
-        ) : (
-          <>
-            <div className={styles.contentHeader}>
-              <span>Раздел</span>
-              <h2>Аналоги</h2>
-              <p>Подбор замены оборудования</p>
-            </div>
-            <AnalogFinder />
-          </>
-        )}
-      </section>
-    </div>
+    <CabinetDashboard
+      activeValue={activeSection}
+      ariaLabel="Разделы кабинета менеджера"
+      headerAside={activeSection === 'prices' ? <strong>{priceCount} прайсов</strong> : null}
+      items={SECTIONS}
+      onSelect={(value) => selectSection(value as ManagerSection)}
+      sidebarLabel="Кабинет менеджера"
+    >
+      {activeSection === 'prices' ? priceContent : <AnalogFinder />}
+    </CabinetDashboard>
   );
 }

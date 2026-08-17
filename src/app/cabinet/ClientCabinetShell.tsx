@@ -8,6 +8,7 @@ import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
 import { ClientPriceRequestList } from '@/features/client-requests/ClientPriceRequestList';
 import type { ClientCompanyPriceList, ClientDocument, ClientPortalProfile, ClientPriceRequest } from '@/shared/lib/db';
 import { formatFileSize } from '@/shared/lib/formatFileSize';
+import { CabinetDashboard, type CabinetDashboardItem } from '@/shared/ui/CabinetDashboard/CabinetDashboard';
 import dataStyles from './ClientCabinetData.module.scss';
 import documentStyles from './ClientCabinetDocuments.module.scss';
 import priceStyles from './ClientCabinetPrices.module.scss';
@@ -257,8 +258,6 @@ export function ClientCabinetShell({ documents, profile, requests }: ClientCabin
     setPasswordSuccess('Пароль изменен');
   };
 
-  const activeTabInfo = TABS.find((tab) => tab.value === activeTab) ?? TABS[0];
-
   const panel = (() => {
     if (activeTab === 'prices') return <PriceListGrid priceLists={profile.priceLists} />;
 
@@ -364,6 +363,18 @@ export function ClientCabinetShell({ documents, profile, requests }: ClientCabin
     );
   })();
 
+  const dashboardItems: CabinetDashboardItem[] = TABS.map((tab) => ({
+    ...tab,
+    badge: tab.value === 'chat' && chatUnreadCount > 0
+      ? <span className={styles.unreadBadge}>{chatUnreadCount}</span>
+      : null,
+  }));
+  const dashboardHeaderAside = activeTab === 'prices'
+    ? <strong>{profile.priceLists.length} прайсов</strong>
+    : activeTab === 'requests'
+      ? <strong>заявки:{requests.length}</strong>
+      : null;
+
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
@@ -377,43 +388,16 @@ export function ClientCabinetShell({ documents, profile, requests }: ClientCabin
           </button>
         </section>
 
-        <div className={styles.dashboardLayout}>
-          <aside className={styles.sidebar} aria-label="Разделы личного кабинета">
-            <div className={styles.sidebarHeader}>
-              <span>Личный кабинет</span>
-              <strong>Разделы</strong>
-            </div>
-            <nav className={styles.sideNav}>
-              {TABS.map((tab) => (
-                <button
-                  className={activeTab === tab.value ? styles.sideNavActive : styles.sideNavItem}
-                  key={tab.value}
-                  type="button"
-                  onClick={() => selectTab(tab.value)}
-                >
-                  <span>
-                    {tab.label}
-                    {tab.value === 'chat' && chatUnreadCount > 0 ? <span className={styles.unreadBadge}>{chatUnreadCount}</span> : null}
-                  </span>
-                  <small>{tab.description}</small>
-                </button>
-              ))}
-            </nav>
-          </aside>
-
-          <section className={styles.content}>
-            <div className={styles.contentHeader}>
-              <div>
-                <span>Раздел</span>
-                <h2>{activeTabInfo.label}</h2>
-                <p>{activeTabInfo.description}</p>
-              </div>
-              {activeTab === 'prices' ? <strong>{profile.priceLists.length} прайсов</strong> : null}
-              {activeTab === 'requests' ? <strong>заявки:{requests.length}</strong> : null}
-            </div>
-            <div className={styles.contentBody}>{panel}</div>
-          </section>
-        </div>
+        <CabinetDashboard
+          activeValue={activeTab}
+          ariaLabel="Разделы личного кабинета"
+          headerAside={dashboardHeaderAside}
+          items={dashboardItems}
+          onSelect={(value) => selectTab(value as Tab)}
+          sidebarLabel="Личный кабинет"
+        >
+          {panel}
+        </CabinetDashboard>
       </div>
     </main>
   );

@@ -390,6 +390,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   if (screen === 'manager') {
     return (
       <WholesaleManagerDashboard
+        priceCount={priceLists.length}
         priceContent={(
           <WholesalePriceListScreen
             mode="manager"
@@ -407,6 +408,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             onOpen={(item) => window.open(`/price/${item.token}`, '_blank')}
             onCopyLink={copyLink}
             onDelete={deletePriceList}
+            embedded
           />
         )}
       />

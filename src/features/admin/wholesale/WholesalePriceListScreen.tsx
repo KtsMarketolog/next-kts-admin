@@ -19,6 +19,7 @@ type WholesalePriceListScreenProps = {
   onOpen: (item: PriceList) => void;
   onCopyLink: (item: PriceList) => void;
   onDelete: (id: number) => void;
+  embedded?: boolean;
 };
 
 export function WholesalePriceListScreen({
@@ -37,13 +38,14 @@ export function WholesalePriceListScreen({
   onOpen,
   onCopyLink,
   onDelete,
+  embedded = false,
 }: WholesalePriceListScreenProps) {
   const isManagerDetail = mode === 'managerDetail';
   const backLabel = isManagerDetail ? 'Вернуться к менеджерам' : 'Вернуться в панель управления';
   const emptyText = 'У менеджера пока нет прайсов.';
 
   return (
-    <section className={styles.section}>
+    <section className={`${styles.section} ${embedded ? styles.sectionEmbedded : ''}`}>
       <div className={styles.sectionHeader}>
         <div>
           <p>Индивидуальные прайсы</p>

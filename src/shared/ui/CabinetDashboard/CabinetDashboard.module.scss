@@ -5,8 +5,6 @@
   grid-template-columns: minmax($apx-250, $apx-286) minmax(0, 1fr);
   gap: $apx-22;
   align-items: start;
-  width: min($apx-1680, 100%);
-  margin: 0 auto;
 }
 
 .sidebar {
@@ -50,8 +48,8 @@
   gap: $apx-6;
 }
 
-.sideNavItem,
-.sideNavActive {
+.sideNav button.sideNavItem,
+.sideNav button.sideNavActive {
   position: relative;
   display: grid;
   gap: $apx-4;
@@ -79,6 +77,9 @@
   }
 
   span {
+    display: inline-flex;
+    align-items: center;
+    gap: $apx-8;
     color: inherit;
     font-size: $apx-13;
     font-weight: 700;
@@ -93,7 +94,7 @@
   }
 }
 
-.sideNavItem {
+.sideNav button.sideNavItem {
   border-color: #edf0f7;
   background: #f8f9fc;
   color: #242633;
@@ -116,7 +117,7 @@
   }
 }
 
-.sideNavActive {
+.sideNav button.sideNavActive {
   border-color: #260b86;
   background: #f4f1ff;
   color: #260b86;
@@ -143,14 +144,18 @@
 
 .contentHeader {
   display: grid;
-  gap: $apx-2;
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-content: space-between;
+  align-items: center;
+  gap: $apx-12;
   border: $apx-1 solid #dde2ee;
   border-radius: $apx-16;
-  background: linear-gradient(135deg, #fff 0%, #faf9ff 100%);
+  background: linear-gradient(135deg, #ffffff 0%, #faf9ff 100%);
   box-shadow: 0 $apx-10 $apx-28 rgba(30, 34, 58, 0.05);
   padding: $apx-16 $apx-18;
 
-  > span {
+  > div > span {
+    display: block;
     color: #777b8d;
     font-size: $apx-11;
     font-weight: 900;
@@ -158,7 +163,7 @@
   }
 
   h2 {
-    margin: 0;
+    margin: 0 0 $apx-2;
     color: #242633;
     font-size: $apx-24;
     line-height: 1.15;
@@ -170,87 +175,31 @@
     font-size: $apx-12;
     font-weight: 700;
   }
+
+  > strong {
+    border-radius: $apx-999;
+    background: #260b86;
+    color: #fff;
+    box-shadow: 0 $apx-8 $apx-18 rgba(38, 11, 134, 0.18);
+    padding: $apx-8 $apx-12;
+    font-size: $apx-12;
+    white-space: nowrap;
+  }
+}
+
+.contentBody {
+  display: grid;
+  gap: $apx-18;
+  min-width: 0;
+  padding: $apx-2;
 }
 
 @media (max-width: 900px) {
   .dashboardLayout {
     grid-template-columns: 1fr;
-    gap: 16px;
   }
 
   .sidebar {
     position: static;
-    gap: 14px;
-    border-width: 1px;
-    border-radius: 14px;
-    box-shadow: 0 10px 30px rgba(30, 34, 58, 0.06);
-    padding: 16px;
-  }
-
-  .sidebarHeader {
-    gap: 2px;
-    margin-bottom: 2px;
-    border-bottom-width: 1px;
-    padding: 8px 10px 12px;
-
-    span {
-      font-size: 11px;
-    }
-
-    strong {
-      font-size: 14px;
-    }
-  }
-
-  .sideNav {
-    gap: 6px;
-  }
-
-  .sideNavItem,
-  .sideNavActive {
-    gap: 4px;
-    min-height: 54px;
-    border-width: 1px;
-    border-radius: 10px;
-    padding: 10px 12px 10px 16px;
-
-    &::before {
-      top: 12px;
-      bottom: 12px;
-      left: 8px;
-      width: 4px;
-    }
-
-    span {
-      font-size: 13px;
-    }
-
-    small {
-      font-size: 10px;
-    }
-  }
-
-  .content {
-    gap: 14px;
-  }
-
-  .contentHeader {
-    gap: 2px;
-    border-width: 1px;
-    border-radius: 16px;
-    box-shadow: 0 10px 28px rgba(30, 34, 58, 0.05);
-    padding: 16px 18px;
-
-    > span {
-      font-size: 11px;
-    }
-
-    h2 {
-      font-size: 24px;
-    }
-
-    p {
-      font-size: 12px;
-    }
   }
 }
