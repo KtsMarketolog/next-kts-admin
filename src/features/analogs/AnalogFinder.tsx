@@ -59,8 +59,8 @@ export function AnalogFinder() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const runSearch = async (nextRefrigerant = refrigerant) => {
-    const cleanQuery = query.trim();
+  const runSearch = async (nextRefrigerant = refrigerant, nextQuery = query) => {
+    const cleanQuery = nextQuery.trim();
     if (cleanQuery.length < 2) {
       setError('Введите модель или артикул — минимум 2 символа');
       return;
@@ -96,6 +96,12 @@ export function AnalogFinder() {
     void runSearch(value);
   };
 
+  const chooseModel = (value: string) => {
+    setQuery(value);
+    setRefrigerant('');
+    void runSearch('', value);
+  };
+
   return (
     <section className={styles.finder}>
       <div className={styles.searchHero}>
@@ -120,14 +126,36 @@ export function AnalogFinder() {
         {error ? <p className={styles.error}>{error}</p> : null}
       </div>
 
-      {payload?.matches.length ? (
+      {payload?.matches.length && !payload.requiresModelSelection ? (
         <div className={styles.matchSummary}>
           <span>Найдена исходная позиция</span>
           <strong>{payload.matches.map((match) => `${match.brand} ${match.model}`).join(' · ')}</strong>
         </div>
       ) : null}
 
-      {payload?.requiresRefrigerant ? (
+      {payload?.requiresModelSelection ? (
+        <section className={styles.refrigerantPrompt} aria-labelledby="analog-model-title">
+          <div>
+            <span>Нужно уточнение</span>
+            <h4 id="analog-model-title">Выберите модификацию</h4>
+            <p>Запрос подходит к нескольким исходным моделям. Их аналоги не смешиваются — выберите нужную модификацию.</p>
+          </div>
+          <div className={styles.refrigerantButtons}>
+            {payload.matches.map((match) => (
+              <button
+                key={`${match.brand}:${match.model}:${match.refrigerant ?? ''}:${match.application ?? ''}`}
+                type="button"
+                onClick={() => chooseModel(match.model)}
+                disabled={loading}
+              >
+                {match.brand} {match.model}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {payload?.requiresRefrigerant && !payload.requiresModelSelection ? (
         <section className={styles.refrigerantPrompt} aria-labelledby="analog-refrigerant-title">
           <div>
             <span>Нужно уточнение</span>
@@ -144,14 +172,14 @@ export function AnalogFinder() {
         </section>
       ) : null}
 
-      {payload?.notices.map((notice) => (
+      {!payload?.requiresModelSelection && payload?.notices.map((notice) => (
         <div className={styles.sourceNotice} key={notice}>
           <strong>Важно по источнику</strong>
           <p>{notice}</p>
         </div>
       ))}
 
-      {payload && !payload.requiresRefrigerant ? (
+      {payload && !payload.requiresModelSelection && !payload.requiresRefrigerant ? (
         <section className={styles.results} aria-live="polite">
           <div className={styles.resultsHeader}>
             <div>

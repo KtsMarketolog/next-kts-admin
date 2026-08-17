@@ -54,6 +54,29 @@ test('catalog product prevents a shortened model from merging S and B variants',
   assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L35P4-570N-500S']);
 });
 
+test('ambiguous direct model asks for a modification instead of merging analog groups', () => {
+  const response = searchAnalogs('YDWF102L35P4-570N-500');
+
+  assert.equal(response.requiresModelSelection, true);
+  assert.deepEqual(
+    response.matches.map((match) => match.model).sort(),
+    ['YDWF102L35P4-570N-500B', 'YDWF102L35P4-570N-500S'].sort(),
+  );
+  assert.equal(response.total, 0);
+  assert.deepEqual(response.results, []);
+});
+
+test('selected full modification returns only its own analog group', () => {
+  const response = searchAnalogs('YDWF102L35P4-570N-500S');
+
+  assert.equal(response.requiresModelSelection, false);
+  assert.equal(response.total, 2);
+  assert.deepEqual(
+    response.results.map((result) => result.model).sort(),
+    ['YWF.A4S-500S-5DIA00', 'YWF4E-500S-137/35-G'].sort(),
+  );
+});
+
 test('fan cross-reference always returns the mandatory source notice', () => {
   const response = searchAnalogs('S4E350AN1943');
   assert.ok(response.results.some((result) => result.model === 'YWF.A4S-350S-5DIA00'));

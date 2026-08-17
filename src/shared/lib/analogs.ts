@@ -103,6 +103,7 @@ export type AnalogSearchResponse = {
   query: string;
   normalizedQuery: string;
   refrigerant: string | null;
+  requiresModelSelection: boolean;
   requiresRefrigerant: boolean;
   availableRefrigerants: string[];
   matches: AnalogMatch[];
@@ -320,6 +321,7 @@ export function searchAnalogs(query: string, refrigerant?: string | null): Analo
       query: cleanQuery,
       normalizedQuery,
       refrigerant: requestedRefrigerant,
+      requiresModelSelection: false,
       requiresRefrigerant: false,
       availableRefrigerants: [],
       matches: [],
@@ -345,17 +347,21 @@ export function searchAnalogs(query: string, refrigerant?: string | null): Analo
   const matches = uniqueBy([...direct.matches, ...capacity.matches], (match) =>
     [match.brand, normalizeAnalogTerm(match.model), match.refrigerant, match.application].join(':'),
   );
+  const matchedModels = uniqueBy(matches, (match) => normalizeAnalogTerm(match.model));
+  const requiresModelSelection = matchedModels.length > 1;
+  const visibleResults = requiresModelSelection ? [] : results;
 
   return {
     query: cleanQuery,
     normalizedQuery,
     refrigerant: requestedRefrigerant,
+    requiresModelSelection,
     requiresRefrigerant: capacity.requiresRefrigerant,
     availableRefrigerants: capacity.availableRefrigerants.sort(),
     matches,
-    results,
-    notices,
-    total: results.length,
+    results: visibleResults,
+    notices: requiresModelSelection ? [] : notices,
+    total: visibleResults.length,
   };
 }
 
