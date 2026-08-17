@@ -6,7 +6,6 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
 import { ClientPriceRequestList } from '@/features/client-requests/ClientPriceRequestList';
-import { AnalogFinder } from '@/features/analogs/AnalogFinder';
 import type { ClientCompanyPriceList, ClientDocument, ClientPortalProfile, ClientPriceRequest } from '@/shared/lib/db';
 import { formatFileSize } from '@/shared/lib/formatFileSize';
 import dataStyles from './ClientCabinetData.module.scss';
@@ -16,11 +15,10 @@ import shellStyles from './ClientCabinetShell.module.scss';
 
 const styles = { ...shellStyles, ...priceStyles, ...dataStyles, ...documentStyles };
 
-type Tab = 'prices' | 'analogs' | 'requests' | 'documents' | 'chat' | 'data';
+type Tab = 'prices' | 'requests' | 'documents' | 'chat' | 'data';
 
 const TABS: Array<{ value: Tab; label: string; description: string }> = [
   { value: 'prices', label: 'Прайсы', description: 'Актуальные индивидуальные прайсы' },
-  { value: 'analogs', label: 'Аналоги', description: 'Подбор замены оборудования' },
   { value: 'requests', label: 'Заявки', description: 'Отправленные заявки' },
   { value: 'documents', label: 'Документы', description: 'Файлы от менеджера' },
   { value: 'chat', label: 'Чат', description: 'Переписка с менеджером' },
@@ -263,8 +261,6 @@ export function ClientCabinetShell({ documents, profile, requests }: ClientCabin
 
   const panel = (() => {
     if (activeTab === 'prices') return <PriceListGrid priceLists={profile.priceLists} />;
-
-    if (activeTab === 'analogs') return <AnalogFinder />;
 
     if (activeTab === 'requests') {
       return (

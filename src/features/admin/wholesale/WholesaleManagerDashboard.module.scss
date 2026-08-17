@@ -1,0 +1,256 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.dashboardLayout {
+  display: grid;
+  grid-template-columns: minmax($apx-250, $apx-286) minmax(0, 1fr);
+  gap: $apx-22;
+  align-items: start;
+  width: min($apx-1680, 100%);
+  margin: 0 auto;
+}
+
+.sidebar {
+  position: sticky;
+  top: $apx-16;
+  align-self: start;
+  display: grid;
+  gap: $apx-14;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-14;
+  background: #fff;
+  box-shadow: 0 $apx-10 $apx-30 rgba(30, 34, 58, 0.06);
+  padding: $apx-16;
+}
+
+.sidebarHeader {
+  display: grid;
+  gap: $apx-2;
+  margin-bottom: $apx-2;
+  border-bottom: $apx-1 solid #eceef5;
+  padding: $apx-8 $apx-10 $apx-12;
+
+  span {
+    color: #777b8d;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-14;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+}
+
+.sideNav {
+  display: grid;
+  align-content: start;
+  gap: $apx-6;
+}
+
+.sideNavItem,
+.sideNavActive {
+  position: relative;
+  display: grid;
+  gap: $apx-4;
+  width: 100%;
+  min-height: $apx-54;
+  border: $apx-1 solid transparent;
+  border-radius: $apx-10;
+  padding: $apx-10 $apx-12 $apx-10 $apx-16;
+  font-family: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &::before {
+    position: absolute;
+    top: $apx-12;
+    bottom: $apx-12;
+    left: $apx-8;
+    width: $apx-4;
+    border-radius: $apx-999;
+    background: transparent;
+    content: "";
+  }
+
+  span {
+    color: inherit;
+    font-size: $apx-13;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  small {
+    color: inherit;
+    font-size: $apx-10;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+}
+
+.sideNavItem {
+  border-color: #edf0f7;
+  background: #f8f9fc;
+  color: #242633;
+  box-shadow: 0 $apx-4 $apx-14 rgba(30, 34, 58, 0.03);
+
+  small {
+    color: #73778a;
+  }
+
+  &:hover {
+    transform: translateY(calc(#{$apx-1} * -1));
+    border-color: #cbcfe0;
+    background: #f1f3f8;
+    color: #260b86;
+    box-shadow: 0 $apx-8 $apx-18 rgba(30, 34, 58, 0.07);
+
+    small {
+      color: #5d6174;
+    }
+  }
+}
+
+.sideNavActive {
+  border-color: #260b86;
+  background: #f4f1ff;
+  color: #260b86;
+  box-shadow: 0 $apx-8 $apx-20 rgba(38, 11, 134, 0.16), inset $apx-4 0 0 #260b86;
+
+  &::before {
+    background: #260b86;
+  }
+
+  span {
+    font-weight: 800;
+  }
+
+  small {
+    color: #5d4ca0;
+  }
+}
+
+.content {
+  display: grid;
+  gap: $apx-14;
+  min-width: 0;
+}
+
+.contentHeader {
+  display: grid;
+  gap: $apx-2;
+  border: $apx-1 solid #dde2ee;
+  border-radius: $apx-16;
+  background: linear-gradient(135deg, #fff 0%, #faf9ff 100%);
+  box-shadow: 0 $apx-10 $apx-28 rgba(30, 34, 58, 0.05);
+  padding: $apx-16 $apx-18;
+
+  > span {
+    color: #777b8d;
+    font-size: $apx-11;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  h2 {
+    margin: 0;
+    color: #242633;
+    font-size: $apx-24;
+    line-height: 1.15;
+  }
+
+  p {
+    margin: 0;
+    color: #73778a;
+    font-size: $apx-12;
+    font-weight: 700;
+  }
+}
+
+@media (max-width: 900px) {
+  .dashboardLayout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .sidebar {
+    position: static;
+    gap: 14px;
+    border-width: 1px;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(30, 34, 58, 0.06);
+    padding: 16px;
+  }
+
+  .sidebarHeader {
+    gap: 2px;
+    margin-bottom: 2px;
+    border-bottom-width: 1px;
+    padding: 8px 10px 12px;
+
+    span {
+      font-size: 11px;
+    }
+
+    strong {
+      font-size: 14px;
+    }
+  }
+
+  .sideNav {
+    gap: 6px;
+  }
+
+  .sideNavItem,
+  .sideNavActive {
+    gap: 4px;
+    min-height: 54px;
+    border-width: 1px;
+    border-radius: 10px;
+    padding: 10px 12px 10px 16px;
+
+    &::before {
+      top: 12px;
+      bottom: 12px;
+      left: 8px;
+      width: 4px;
+    }
+
+    span {
+      font-size: 13px;
+    }
+
+    small {
+      font-size: 10px;
+    }
+  }
+
+  .content {
+    gap: 14px;
+  }
+
+  .contentHeader {
+    gap: 2px;
+    border-width: 1px;
+    border-radius: 16px;
+    box-shadow: 0 10px 28px rgba(30, 34, 58, 0.05);
+    padding: 16px 18px;
+
+    > span {
+      font-size: 11px;
+    }
+
+    h2 {
+      font-size: 24px;
+    }
+
+    p {
+      font-size: 12px;
+    }
+  }
+}

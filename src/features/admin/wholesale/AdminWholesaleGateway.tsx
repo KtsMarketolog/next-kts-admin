@@ -7,6 +7,7 @@ import styles from '@/app/admin/admin.module.scss';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
 import { AdminWholesaleAnalytics } from './AdminWholesaleAnalytics';
 import { WholesaleManagerManagement } from './WholesaleManagerManagement';
+import { WholesaleManagerDashboard } from './WholesaleManagerDashboard';
 import { WholesalePriceEditorScreen } from './WholesalePriceEditorScreen';
 import { WholesalePriceListScreen } from './WholesalePriceListScreen';
 import { useAdminWholesaleGatewayPath } from './useAdminWholesaleGatewayPath';
@@ -388,22 +389,26 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
   if (screen === 'manager') {
     return (
-      <WholesalePriceListScreen
-        mode="manager"
-        currentManager={currentManager}
-        canManageWholesale={canManageWholesale}
-        managerDetailId={managerDetailId}
-        status={status}
-        priceLists={priceLists}
-        copiedToken={copiedToken}
-        onBack={onBack}
-        onAdminBack={() => router.push('/admin/wholesale/admin')}
-        onManagersBack={() => router.push('/admin/wholesale/admin?tab=managers')}
-        onCreate={createPriceList}
-        onEdit={editPriceList}
-        onOpen={(item) => window.open(`/price/${item.token}`, '_blank')}
-        onCopyLink={copyLink}
-        onDelete={deletePriceList}
+      <WholesaleManagerDashboard
+        priceContent={(
+          <WholesalePriceListScreen
+            mode="manager"
+            currentManager={currentManager}
+            canManageWholesale={canManageWholesale}
+            managerDetailId={managerDetailId}
+            status={status}
+            priceLists={priceLists}
+            copiedToken={copiedToken}
+            onBack={onBack}
+            onAdminBack={() => router.push('/admin/wholesale/admin')}
+            onManagersBack={() => router.push('/admin/wholesale/admin?tab=managers')}
+            onCreate={createPriceList}
+            onEdit={editPriceList}
+            onOpen={(item) => window.open(`/price/${item.token}`, '_blank')}
+            onCopyLink={copyLink}
+            onDelete={deletePriceList}
+          />
+        )}
       />
     );
   }

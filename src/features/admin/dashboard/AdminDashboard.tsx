@@ -7,10 +7,9 @@ type AdminDashboardProps = {
   onOpenSiteSettings: () => void;
   onOpenWholesale: () => void;
   onOpenClients: () => void;
-  onOpenAnalogs: () => void;
 };
 
-export function AdminDashboard({ canAccessSite, onOpenSiteSettings, onOpenWholesale, onOpenClients, onOpenAnalogs }: AdminDashboardProps) {
+export function AdminDashboard({ canAccessSite, onOpenSiteSettings, onOpenWholesale, onOpenClients }: AdminDashboardProps) {
   return (
     <section className={styles.dashboardGrid} aria-label="Разделы панели управления">
       {canAccessSite ? (
@@ -29,14 +28,6 @@ export function AdminDashboard({ canAccessSite, onOpenSiteSettings, onOpenWholes
           <p>Отдельная база товаров для прайсов, индивидуальные цены, публичные ссылки и PDF.</p>
         </div>
         <button onClick={onOpenWholesale}>Открыть</button>
-      </article>
-
-      <article className={styles.dashboardCard}>
-        <div>
-          <h2>Подобрать аналоги</h2>
-          <p>Поиск замен по моделям оборудования, хладагенту и холодопроизводительности.</p>
-        </div>
-        <button onClick={onOpenAnalogs}>Открыть</button>
       </article>
 
       <article className={styles.dashboardCard}>

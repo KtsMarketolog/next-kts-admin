@@ -1,13 +1,12 @@
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { searchAnalogs, normalizeAnalogTerm, ANALOG_KNOWLEDGE_GENERATED_AT, ANALOG_KNOWLEDGE_STATS } from '@/shared/lib/analogs';
-import { getClientSession } from '@/shared/lib/clientAuth';
 import { getAnalogStockMatches } from '@/shared/lib/db/analogStockRepo';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const [employeeSession, clientSession] = await Promise.all([getAdminSession(), getClientSession()]);
-  if (!employeeSession && !clientSession) {
+  const employeeSession = await getAdminSession();
+  if (!employeeSession) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
