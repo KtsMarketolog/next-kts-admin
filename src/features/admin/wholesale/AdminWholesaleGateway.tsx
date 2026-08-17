@@ -276,6 +276,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       showStatus('Выберите клиента из списка');
       return;
     }
+    if (canManageWholesale && !editor.managerId) {
+      showStatus('Выберите менеджера по развитию');
+      return;
+    }
     if (!editor.supportManagerId) {
       showStatus('Выберите менеджера по сопровождению');
       return;

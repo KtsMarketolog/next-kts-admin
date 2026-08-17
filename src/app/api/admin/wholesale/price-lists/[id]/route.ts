@@ -14,7 +14,9 @@ import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import {
+  getWholesalePriceSaveError,
   normalizeOptionalDate,
+  normalizePositiveIntegerId,
   normalizeTextField,
   normalizeWholesaleDiscountPercent,
   normalizeWholesalePrice,
@@ -71,16 +73,6 @@ function priceGroupStockSettingsFromBody(settings: unknown): WholesalePriceGroup
     .filter((item): item is WholesalePriceGroupStockSettingInput => Boolean(item && (item.showStock || item.showStockText)));
 }
 
-function supportManagerIdFromBody(value: unknown) {
-  const supportManagerId = Number(value);
-  return Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
-}
-
-function clientCompanyIdFromBody(value: unknown) {
-  const clientCompanyId = Number(value);
-  return Number.isInteger(clientCompanyId) && clientCompanyId > 0 ? clientCompanyId : null;
-}
-
 export async function GET(_request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
@@ -119,16 +111,20 @@ export async function PUT(request: Request, context: Context) {
   if (typeof body.validUntil === 'string' && body.validUntil.trim() && !validUntil) {
     return Response.json({ error: 'Invalid expiration date' }, { status: 400 });
   }
-  const supportManagerId = supportManagerIdFromBody(body.supportManagerId);
-  if (!supportManagerId) {
-    return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
-  }
-  const clientCompanyId = clientCompanyIdFromBody(body.clientCompanyId);
+  const clientCompanyId = normalizePositiveIntegerId(body.clientCompanyId);
   if (!clientCompanyId) {
     return Response.json({ error: 'Выберите клиента из списка' }, { status: 400 });
   }
-
-  const managerId = Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null;
+  const managerId = isManagerSessionRole(session.role)
+    ? normalizePositiveIntegerId(session.managerId)
+    : normalizePositiveIntegerId(body.managerId);
+  if (!managerId) {
+    return Response.json({ error: 'Выберите менеджера по развитию' }, { status: 400 });
+  }
+  const supportManagerId = normalizePositiveIntegerId(body.supportManagerId);
+  if (!supportManagerId) {
+    return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
+  }
 
   try {
     await updateWholesalePriceList(
@@ -155,7 +151,7 @@ export async function PUT(request: Request, context: Context) {
     await updateClientCompanyManagerAssignments(clientCompanyId, { managerId, supportManagerId }, session);
     publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить прайс' }, { status: 400 });
+    return Response.json({ error: getWholesalePriceSaveError(error) }, { status: 400 });
   }
 
   return Response.json({ ok: true });

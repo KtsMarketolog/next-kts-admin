@@ -4,6 +4,31 @@ export function normalizeTextField(value: unknown, maxLength: number) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
+export function normalizePositiveIntegerId(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  if (typeof value === 'string' && !value.trim()) return null;
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+export function getWholesalePriceSaveError(error: unknown) {
+  const fallback = 'Не удалось сохранить прайс';
+  if (!(error instanceof Error)) return fallback;
+
+  const constraint = (error as Error & { constraint?: unknown }).constraint;
+  if (constraint === 'wholesale_price_lists_manager_id_fkey'
+    || error.message.includes('wholesale_price_lists_manager_id_fkey')) {
+    return 'Выберите менеджера по развитию';
+  }
+  if (constraint === 'wholesale_price_lists_support_manager_id_fkey'
+    || error.message.includes('wholesale_price_lists_support_manager_id_fkey')) {
+    return 'Выберите менеджера по сопровождению';
+  }
+
+  return error.message || fallback;
+}
+
 export function normalizeOptionalDate(value: unknown) {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();

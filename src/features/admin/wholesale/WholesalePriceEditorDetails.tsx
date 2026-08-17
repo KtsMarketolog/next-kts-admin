@@ -93,9 +93,9 @@ export function WholesalePriceEditorDetails({
       </label>
       {canManageWholesale && (
         <label>
-          <span>Менеджер</span>
-          <select value={editor.managerId ?? ''} onChange={(event) => setEditor({ ...editor, managerId: event.target.value ? Number(event.target.value) : null })}>
-            <option value="">Не назначен</option>
+          <span>Менеджер по развитию</span>
+          <select required value={editor.managerId ?? ''} onChange={(event) => setEditor({ ...editor, managerId: event.target.value ? Number(event.target.value) : null })}>
+            <option value="">Не выбран</option>
             {developmentManagers.map((manager) => (
               <option key={manager.id} value={manager.id}>{manager.name}</option>
             ))}

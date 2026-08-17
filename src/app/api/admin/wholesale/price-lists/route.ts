@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { requireEmployee } from '@/shared/lib/adminAuth';
+import { isManagerSessionRole, requireEmployee } from '@/shared/lib/adminAuth';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import {
   createWholesalePriceList,
@@ -14,7 +14,9 @@ import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import {
   isValidNewPublicPriceToken,
+  getWholesalePriceSaveError,
   normalizeOptionalDate,
+  normalizePositiveIntegerId,
   normalizePublicPriceToken,
   normalizeTextField,
   normalizeWholesaleDiscountPercent,
@@ -72,16 +74,6 @@ function priceGroupStockSettingsFromBody(settings: unknown): WholesalePriceGroup
     .filter((item): item is WholesalePriceGroupStockSettingInput => Boolean(item && (item.showStock || item.showStockText)));
 }
 
-function supportManagerIdFromBody(value: unknown) {
-  const supportManagerId = Number(value);
-  return Number.isInteger(supportManagerId) && supportManagerId > 0 ? supportManagerId : null;
-}
-
-function clientCompanyIdFromBody(value: unknown) {
-  const clientCompanyId = Number(value);
-  return Number.isInteger(clientCompanyId) && clientCompanyId > 0 ? clientCompanyId : null;
-}
-
 export async function GET() {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
@@ -110,16 +102,20 @@ export async function POST(request: Request) {
   if (typeof body.validUntil === 'string' && body.validUntil.trim() && !validUntil) {
     return Response.json({ error: 'Invalid expiration date' }, { status: 400 });
   }
-  const supportManagerId = supportManagerIdFromBody(body.supportManagerId);
-  if (!supportManagerId) {
-    return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
-  }
-  const clientCompanyId = clientCompanyIdFromBody(body.clientCompanyId);
+  const clientCompanyId = normalizePositiveIntegerId(body.clientCompanyId);
   if (!clientCompanyId) {
     return Response.json({ error: 'Выберите клиента из списка' }, { status: 400 });
   }
-
-  const managerId = Number.isFinite(Number(body.managerId)) ? Number(body.managerId) : null;
+  const managerId = isManagerSessionRole(session.role)
+    ? normalizePositiveIntegerId(session.managerId)
+    : normalizePositiveIntegerId(body.managerId);
+  if (!managerId) {
+    return Response.json({ error: 'Выберите менеджера по развитию' }, { status: 400 });
+  }
+  const supportManagerId = normalizePositiveIntegerId(body.supportManagerId);
+  if (!supportManagerId) {
+    return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
+  }
 
   let id: number;
   try {
@@ -146,7 +142,7 @@ export async function POST(request: Request) {
     await updateClientCompanyManagerAssignments(clientCompanyId, { managerId, supportManagerId }, session);
     publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить прайс' }, { status: 400 });
+    return Response.json({ error: getWholesalePriceSaveError(error) }, { status: 400 });
   }
 
   return Response.json({ id });
