@@ -280,6 +280,16 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
     }));
   };
 
+  const openAnalogProduct = (productId: number, groupTitle: string) => {
+    const resolvedGroupTitle = groupTitle || NO_PRICE_GROUP_TITLE;
+    setExpandedPriceGroups((current) => ({ ...current, [resolvedGroupTitle]: true }));
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`product-${productId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+  };
+
   const loadExchangeRates = async () => {
     if (exchangeRates || exchangeRateStatus === 'loading') return;
 
@@ -465,6 +475,7 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
                 {group.products.map(({ categoryTitle, product }) => (
                   <article
                     className={styles.product}
+                    id={`product-${product.id}`}
                     key={`${group.title}-${categoryTitle}-${product.id}`}
                     onFocusCapture={() => trackProductOpen(product)}
                     onMouseEnter={() => trackProductOpen(product)}
@@ -475,6 +486,23 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
                       {product.sku ? <p>Артикул: {product.sku}</p> : null}
                       {product.description ? <p>{product.description}</p> : null}
                       {hasVisibleWholesaleStock(product.stockDisplayMode) ? <p className={styles.stockStatus}>{stockLabel(product)}</p> : null}
+                      {product.analogs.length > 0 ? (
+                        <div className={styles.productAnalogs}>
+                          <span>Аналоги в этом прайсе</span>
+                          <div>
+                            {product.analogs.map((analog) => (
+                              <button
+                                key={analog.productId}
+                                type="button"
+                                title={`Источник: ${analog.sourceLabel}`}
+                                onClick={() => openAnalogProduct(analog.productId, analog.groupTitle)}
+                              >
+                                {analog.model}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                     <table className={styles.prices}>
                       <thead>

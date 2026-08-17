@@ -13,6 +13,7 @@ import { useAdminPriceGroups } from '@/features/admin/model/useAdminPriceGroups'
 import { useAdminSlides } from '@/features/admin/model/useAdminSlides';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
+import { AnalogFinder } from '@/features/analogs/AnalogFinder';
 import type { AdminSection, SettingKey } from '@/features/admin/types';
 import type { AdminSession } from '@/shared/lib/adminAuth';
 
@@ -92,6 +93,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
     if (area === 'clients') {
       router.replace('/admin/clients', { scroll: false });
+      return;
+    }
+
+    if (area === 'analogs') {
+      router.replace('/admin/analogs', { scroll: false });
       return;
     }
 
@@ -227,6 +233,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       return;
     }
 
+    if (pathname.startsWith('/admin/analogs')) {
+      setActiveArea('analogs');
+      return;
+    }
+
     if (pathname.startsWith('/admin/site')) {
       if (sessionRole !== 'admin') {
         setActiveArea('home');
@@ -316,7 +327,9 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
         ? 'Индивидуальные прайсы'
         : activeArea === 'clients'
           ? 'Клиенты'
-        : 'Панель управления';
+          : activeArea === 'analogs'
+            ? 'Подобрать аналоги'
+            : 'Панель управления';
 
   return (
     <main className={styles.page}>
@@ -340,6 +353,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
           onOpenSiteSettings={() => switchArea('site')}
           onOpenWholesale={() => switchArea('wholesale')}
           onOpenClients={() => switchArea('clients')}
+          onOpenAnalogs={() => switchArea('analogs')}
         />
       )}
 
@@ -353,6 +367,8 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
         ) : (
           <AdminClientsSection onBack={() => switchArea('home')} />
         ))}
+
+      {activeArea === 'analogs' ? <AnalogFinder /> : null}
 
       {activeArea === 'site' && (
         <div className={styles.adminShell}>

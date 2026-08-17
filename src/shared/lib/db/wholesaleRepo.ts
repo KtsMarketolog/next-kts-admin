@@ -1,5 +1,6 @@
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
+import { buildPriceListAnalogLinks, type PriceListAnalogLink } from '../analogs';
 import { resolveWholesaleStockDisplayMode, type WholesaleStockDisplayMode } from '../wholesaleStockDisplay';
 
 export type PublicWholesaleVariant = {
@@ -32,6 +33,7 @@ export type PublicWholesaleProduct = {
   isExpected: boolean;
   stockDisplayMode: WholesaleStockDisplayMode;
   stockUpdatedAt: string | null;
+  analogs: PriceListAnalogLink[];
   variants: PublicWholesaleVariant[];
 };
 
@@ -285,6 +287,7 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
           groupShowText: row.group_show_stock_text,
         }),
         stockUpdatedAt: row.stock_updated_at,
+        analogs: [],
         variants: [],
       };
       category.products.push(product);
@@ -304,6 +307,12 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
       priceRub: row.price_rub,
       priceCny: row.price_cny,
     });
+  }
+
+  const allProducts = Array.from(categoriesById.values()).flatMap((category) => category.products);
+  const analogLinks = buildPriceListAnalogLinks(allProducts);
+  for (const product of allProducts) {
+    product.analogs = analogLinks.get(product.id) ?? [];
   }
 
   return {
