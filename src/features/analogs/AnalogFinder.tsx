@@ -107,7 +107,7 @@ export function AnalogFinder() {
       <div className={styles.searchHero}>
         <span className={styles.eyebrow}>База знаний КТС</span>
         <h3>Подобрать аналог</h3>
-        <p>Введите модель, артикул или название оборудования. Поиск учитывает прямые кроссы, хладагент и допустимое отличие холодопроизводительности.</p>
+        <p>Введите модель, артикул или название оборудования.</p>
         <form className={styles.searchForm} onSubmit={submit}>
           <label>
             <span className={styles.visuallyHidden}>Модель, артикул или название оборудования</span>
