@@ -54,6 +54,31 @@ test('catalog product prevents a shortened model from merging S and B variants',
   assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L35P4-570N-500S']);
 });
 
+test('catalog article prefers a full title modification over its shortened knowledge-base model', () => {
+  const product = {
+    title: 'Вентилятор осевой YDWF102L45P4-522N-450B',
+    model: '',
+    sku: 'ЦБ-Ц0051592',
+  };
+  const response = searchAnalogsForCatalogProduct(product.sku, product);
+
+  assert.equal(response.query, product.sku);
+  assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L45P4-522N-450B']);
+  assert.deepEqual(response.results.map((result) => result.model), ['YWF4E-450В-137/35-G']);
+});
+
+test('full title modification also wins when the catalog model field is shortened', () => {
+  const product = {
+    title: 'Вентилятор осевой YDWF102L45P4-522N-450B',
+    model: 'YDWF102L45P4-522N-450',
+    sku: 'ЦБ-Ц0051592',
+  };
+  const response = searchAnalogsForCatalogProduct(product.sku, product);
+
+  assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L45P4-522N-450B']);
+  assert.equal(response.total, 1);
+});
+
 test('ambiguous direct model asks for a modification instead of merging analog groups', () => {
   const response = searchAnalogs('YDWF102L35P4-570N-500');
 

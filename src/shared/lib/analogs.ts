@@ -380,8 +380,22 @@ export function searchAnalogsForCatalogProduct(
     [directSearch, ...productTerms.map((term) => searchAnalogs(term, refrigerant))].flatMap((search) => search.matches),
     (match) => [normalizeAnalogTerm(match.brand), normalizeAnalogTerm(match.model)].join(':'),
   );
+  const specificCandidateMatches = candidateMatches.filter((candidate) => {
+    const candidateBrand = normalizeAnalogTerm(candidate.brand);
+    const candidateModel = normalizeAnalogTerm(candidate.model);
 
-  const rankedMatches = candidateMatches
+    return !candidateMatches.some((other) => {
+      const otherModel = normalizeAnalogTerm(other.model);
+      return (
+        normalizeAnalogTerm(other.brand) === candidateBrand &&
+        otherModel.length > candidateModel.length &&
+        otherModel.startsWith(candidateModel) &&
+        productTerms.some((term) => term.includes(otherModel))
+      );
+    });
+  });
+
+  const rankedMatches = specificCandidateMatches
     .map((match) => {
       const modelTerm = normalizeAnalogTerm(match.model);
       const score = productTerms.reduce((best, productTerm) => {
