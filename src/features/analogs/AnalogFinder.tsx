@@ -62,7 +62,7 @@ export function AnalogFinder() {
   const runSearch = async (nextRefrigerant = refrigerant, nextQuery = query) => {
     const cleanQuery = nextQuery.trim();
     if (cleanQuery.length < 2) {
-      setError('Введите модель или артикул — минимум 2 символа');
+      setError('Введите модель, артикул или название — минимум 2 символа');
       return;
     }
 
@@ -107,10 +107,10 @@ export function AnalogFinder() {
       <div className={styles.searchHero}>
         <span className={styles.eyebrow}>База знаний КТС</span>
         <h3>Подобрать аналог</h3>
-        <p>Введите модель или артикул оборудования. Поиск учитывает прямые кроссы, хладагент и допустимое отличие холодопроизводительности.</p>
+        <p>Введите модель, артикул или название оборудования. Поиск учитывает прямые кроссы, хладагент и допустимое отличие холодопроизводительности.</p>
         <form className={styles.searchForm} onSubmit={submit}>
           <label>
-            <span className={styles.visuallyHidden}>Модель или артикул</span>
+            <span className={styles.visuallyHidden}>Модель, артикул или название оборудования</span>
             <input
               type="search"
               value={query}
