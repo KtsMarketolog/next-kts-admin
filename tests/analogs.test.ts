@@ -6,6 +6,7 @@ import {
   buildPriceListAnalogLinks,
   normalizeAnalogTerm,
   searchAnalogs,
+  searchAnalogsForCatalogProduct,
 } from '../src/shared/lib/analogs';
 
 test('knowledge base contains all five imported source families', () => {
@@ -23,6 +24,34 @@ test('direct axial fan lookup returns models from the same group and its source'
   const response = searchAnalogs('YWF.A2S-200S-5DIA00');
   assert.ok(response.results.some((result) => result.model === 'YWF2E-200S-92/15-G'));
   assert.ok(response.results.every((result) => result.sourceId === 'axial'));
+});
+
+test('catalog article resolves to the canonical full model before analog lookup', () => {
+  const product = {
+    title: 'ВЕНТИЛЯТОР ОСЕВОЙ YDWF102L35P4-570N-500S',
+    model: 'YDWF102L35P4-570N-500',
+    sku: 'ЦБ-Ц0052206',
+  };
+  const response = searchAnalogsForCatalogProduct(product.sku, product);
+
+  assert.equal(response.query, product.sku);
+  assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L35P4-570N-500S']);
+  assert.deepEqual(
+    response.results.map((result) => result.model).sort(),
+    ['YWF.A4S-500S-5DIA00', 'YWF4E-500S-137/35-G'].sort(),
+  );
+});
+
+test('catalog product prevents a shortened model from merging S and B variants', () => {
+  const product = {
+    title: 'ВЕНТИЛЯТОР ОСЕВОЙ YDWF102L35P4-570N-500S',
+    model: 'YDWF102L35P4-570N-500',
+    sku: 'ЦБ-Ц0052206',
+  };
+  const response = searchAnalogsForCatalogProduct(product.model, product);
+
+  assert.equal(response.total, 2);
+  assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L35P4-570N-500S']);
 });
 
 test('fan cross-reference always returns the mandatory source notice', () => {

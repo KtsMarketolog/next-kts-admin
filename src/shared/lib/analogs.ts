@@ -127,6 +127,12 @@ type PriceListProductInput = {
   priceGroup: string;
 };
 
+export type AnalogCatalogProductInput = {
+  title: string;
+  sku: string;
+  model: string;
+};
+
 const knowledgeBase = rawKnowledgeBase as unknown as KnowledgeBase;
 const sourcesById = new Map(knowledgeBase.sources.map((source) => [source.id, source]));
 
@@ -350,6 +356,48 @@ export function searchAnalogs(query: string, refrigerant?: string | null): Analo
     results,
     notices,
     total: results.length,
+  };
+}
+
+export function searchAnalogsForCatalogProduct(
+  query: string,
+  product: AnalogCatalogProductInput,
+  refrigerant?: string | null,
+): AnalogSearchResponse {
+  const cleanQuery = query.trim().slice(0, 180);
+  const normalizedQuery = normalizeAnalogTerm(cleanQuery);
+  const productTerms = Array.from(
+    new Set([product.title, product.model, product.sku].map(normalizeAnalogTerm).filter((term) => term.length >= 2)),
+  );
+  const directSearch = searchAnalogs(cleanQuery, refrigerant);
+  const candidateMatches = uniqueBy(
+    [directSearch, ...productTerms.map((term) => searchAnalogs(term, refrigerant))].flatMap((search) => search.matches),
+    (match) => [normalizeAnalogTerm(match.brand), normalizeAnalogTerm(match.model)].join(':'),
+  );
+
+  const rankedMatches = candidateMatches
+    .map((match) => {
+      const modelTerm = normalizeAnalogTerm(match.model);
+      const score = productTerms.reduce((best, productTerm) => {
+        if (productTerm === modelTerm) return Math.max(best, 3);
+        if (productTerm.includes(modelTerm)) return Math.max(best, 2);
+        if (productTerm.length >= 4 && modelTerm.includes(productTerm)) return Math.max(best, 1);
+        return best;
+      }, 0);
+      return { match, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((first, second) => second.score - first.score);
+  const bestScore = rankedMatches[0]?.score ?? 0;
+  const bestMatches = rankedMatches.filter(({ score }) => score === bestScore);
+
+  if (bestScore < 2 || bestMatches.length !== 1) return directSearch;
+
+  const resolvedSearch = searchAnalogs(bestMatches[0].match.model, refrigerant);
+  return {
+    ...resolvedSearch,
+    query: cleanQuery,
+    normalizedQuery,
   };
 }
 
