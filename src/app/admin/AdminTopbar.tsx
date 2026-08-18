@@ -16,7 +16,7 @@ export function AdminTopbar({ activeArea, pageTitle, onBackToHome, onLogout }: A
         <h1>{pageTitle}</h1>
       </div>
       <div className={styles.topbarActions}>
-        {activeArea === 'site' && (
+        {(activeArea === 'site' || activeArea === 'analogs') && (
           <button className={styles.secondary} onClick={onBackToHome}>
             Вернуться в панель управления
           </button>

@@ -7,9 +7,16 @@ type AdminDashboardProps = {
   onOpenSiteSettings: () => void;
   onOpenWholesale: () => void;
   onOpenClients: () => void;
+  onOpenAnalogs: () => void;
 };
 
-export function AdminDashboard({ canAccessSite, onOpenSiteSettings, onOpenWholesale, onOpenClients }: AdminDashboardProps) {
+export function AdminDashboard({
+  canAccessSite,
+  onOpenSiteSettings,
+  onOpenWholesale,
+  onOpenClients,
+  onOpenAnalogs,
+}: AdminDashboardProps) {
   return (
     <section className={styles.dashboardGrid} aria-label="Разделы панели управления">
       {canAccessSite ? (
@@ -36,6 +43,14 @@ export function AdminDashboard({ canAccessSite, onOpenSiteSettings, onOpenWholes
           <p>Компании клиентов, личные кабинеты, документы, заявки и чат с менеджером.</p>
         </div>
         <button onClick={onOpenClients}>Открыть</button>
+      </article>
+
+      <article className={styles.dashboardCard}>
+        <div>
+          <h2>Аналоги</h2>
+          <p>Подбор замены оборудования по модели, артикулу или названию.</p>
+        </div>
+        <button onClick={onOpenAnalogs}>Открыть</button>
       </article>
     </section>
   );

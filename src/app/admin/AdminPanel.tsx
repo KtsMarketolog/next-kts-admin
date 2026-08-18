@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AdminDashboard } from '@/features/admin/dashboard/AdminDashboard';
+import { AnalogFinder } from '@/features/analogs/AnalogFinder';
 import { AdminClientDetailSection } from '@/features/admin/clients/AdminClientDetailSection';
 import { AdminClientsSection } from '@/features/admin/clients/AdminClientsSection';
 import { useAdminBrandPortfolio } from '@/features/admin/model/useAdminBrandPortfolio';
@@ -92,6 +93,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
     if (area === 'clients') {
       router.replace('/admin/clients', { scroll: false });
+      return;
+    }
+
+    if (area === 'analogs') {
+      router.replace('/admin/analogs', { scroll: false });
       return;
     }
 
@@ -227,6 +233,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       return;
     }
 
+    if (pathname.startsWith('/admin/analogs')) {
+      setActiveArea('analogs');
+      return;
+    }
+
     if (pathname.startsWith('/admin/site')) {
       if (sessionRole !== 'admin') {
         setActiveArea('home');
@@ -318,6 +329,8 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
           : 'Индивидуальные прайсы'
         : activeArea === 'clients'
           ? 'Клиенты'
+          : activeArea === 'analogs'
+            ? 'Аналоги'
           : 'Панель управления';
 
   return (
@@ -342,8 +355,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
           onOpenSiteSettings={() => switchArea('site')}
           onOpenWholesale={() => switchArea('wholesale')}
           onOpenClients={() => switchArea('clients')}
+          onOpenAnalogs={() => switchArea('analogs')}
         />
       )}
+
+      {activeArea === 'analogs' && <AnalogFinder />}
 
       {activeArea === 'wholesale' && (
         <AdminWholesaleGateway canManageWholesale={sessionRole === 'admin' || sessionRole === 'wholesale_admin'} onBack={() => switchArea('home')} />

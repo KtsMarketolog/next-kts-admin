@@ -1,16 +1,13 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-import { AnalogFinder } from '@/features/analogs/AnalogFinder';
 import { CabinetDashboard } from '@/shared/ui/CabinetDashboard/CabinetDashboard';
 
-type ManagerSection = 'prices' | 'analogs';
-
-const SECTIONS: Array<{ value: ManagerSection; label: string; description: string }> = [
+const SECTIONS = [
   { value: 'prices', label: 'Прайсы', description: 'Индивидуальные прайсы' },
-  { value: 'analogs', label: 'Аналоги', description: 'Подбор замены оборудования' },
 ];
 
 type WholesaleManagerDashboardProps = {
@@ -19,32 +16,25 @@ type WholesaleManagerDashboardProps = {
 };
 
 export function WholesaleManagerDashboard({ priceContent, priceCount }: WholesaleManagerDashboardProps) {
-  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeSection: ManagerSection = searchParams.get('view') === 'analogs' ? 'analogs' : 'prices';
 
-  const selectSection = (section: ManagerSection) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (section === 'prices') {
-      params.delete('view');
-    } else {
-      params.set('view', section);
+  useEffect(() => {
+    if (searchParams.get('view') === 'analogs') {
+      router.replace('/admin/analogs', { scroll: false });
     }
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  };
+  }, [router, searchParams]);
 
   return (
     <CabinetDashboard
-      activeValue={activeSection}
+      activeValue="prices"
       ariaLabel="Разделы кабинета менеджера"
-      headerAside={activeSection === 'prices' ? <strong>{priceCount} прайсов</strong> : null}
+      headerAside={<strong>{priceCount} прайсов</strong>}
       items={SECTIONS}
-      onSelect={(value) => selectSection(value as ManagerSection)}
+      onSelect={() => {}}
       sidebarLabel="Кабинет менеджера"
     >
-      {activeSection === 'prices' ? priceContent : <AnalogFinder />}
+      {priceContent}
     </CabinetDashboard>
   );
 }
