@@ -20,6 +20,7 @@ type WholesalePriceListScreenProps = {
   onCopyLink: (item: PriceList) => void;
   onDelete: (id: number) => void;
   embedded?: boolean;
+  showBackButton?: boolean;
 };
 
 export function WholesalePriceListScreen({
@@ -39,6 +40,7 @@ export function WholesalePriceListScreen({
   onCopyLink,
   onDelete,
   embedded = false,
+  showBackButton = true,
 }: WholesalePriceListScreenProps) {
   const isManagerDetail = mode === 'managerDetail';
   const backLabel = isManagerDetail ? 'Вернуться к менеджерам' : 'Вернуться в панель управления';
@@ -55,9 +57,14 @@ export function WholesalePriceListScreen({
           </h2>
         </div>
         <div className={styles.topbarActions}>
-          <button className={styles.secondary} onClick={isManagerDetail ? onManagersBack : canManageWholesale ? onAdminBack : onBack}>
-            {backLabel}
-          </button>
+          {showBackButton ? (
+            <button
+              className={styles.secondary}
+              onClick={isManagerDetail ? onManagersBack : canManageWholesale ? onAdminBack : onBack}
+            >
+              {backLabel}
+            </button>
+          ) : null}
           <button onClick={() => onCreate(isManagerDetail ? managerDetailId : null)}>Создать прайс</button>
         </div>
       </div>

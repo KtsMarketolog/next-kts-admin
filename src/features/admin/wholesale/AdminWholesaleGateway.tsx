@@ -394,6 +394,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   if (screen === 'manager') {
     return (
       <WholesaleManagerDashboard
+        onBack={onBack}
         priceCount={priceLists.length}
         priceContent={(
           <WholesalePriceListScreen
@@ -413,6 +414,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             onCopyLink={copyLink}
             onDelete={deletePriceList}
             embedded
+            showBackButton={false}
           />
         )}
       />

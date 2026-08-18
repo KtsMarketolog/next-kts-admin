@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import styles from '@/app/admin/admin.module.scss';
 import { CabinetDashboard } from '@/shared/ui/CabinetDashboard/CabinetDashboard';
 
 const SECTIONS = [
@@ -11,11 +12,12 @@ const SECTIONS = [
 ];
 
 type WholesaleManagerDashboardProps = {
+  onBack: () => void;
   priceContent: ReactNode;
   priceCount: number;
 };
 
-export function WholesaleManagerDashboard({ priceContent, priceCount }: WholesaleManagerDashboardProps) {
+export function WholesaleManagerDashboard({ onBack, priceContent, priceCount }: WholesaleManagerDashboardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -29,7 +31,14 @@ export function WholesaleManagerDashboard({ priceContent, priceCount }: Wholesal
     <CabinetDashboard
       activeValue="prices"
       ariaLabel="Разделы кабинета менеджера"
-      headerAside={<strong>{priceCount} прайсов</strong>}
+      headerAside={(
+        <div className={styles.topbarActions}>
+          <button className={styles.secondary} type="button" onClick={onBack}>
+            Вернуться в панель управления
+          </button>
+          <strong className={styles.dashboardHeaderCount}>{priceCount} прайсов</strong>
+        </div>
+      )}
       items={SECTIONS}
       onSelect={() => {}}
       sidebarLabel="Кабинет менеджера"

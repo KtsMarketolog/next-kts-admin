@@ -45,6 +45,16 @@
   align-items: center;
 }
 
+.dashboardHeaderCount {
+  border-radius: $apx-999;
+  background: #260b86;
+  color: #fff;
+  box-shadow: 0 $apx-8 $apx-18 rgba(38, 11, 134, 0.18);
+  padding: $apx-8 $apx-12;
+  font-size: $apx-12;
+  white-space: nowrap;
+}
+
 .section {
   max-width: 100%;
   margin: 0 auto $apx-24;
