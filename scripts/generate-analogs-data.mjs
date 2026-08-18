@@ -10,6 +10,7 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const DEFAULT_OUTPUT = path.join(PROJECT_ROOT, 'src/shared/data/analogs.generated.json');
 
 const SOURCE_FILES = {
+  ankangTecumseh: 'Анканг_20Текумсе_2018.08.2026_20исправлено.xlsx',
   axial: 'Осевые Аналоги 16.07.26.xlsx',
   fans: 'Таблица аналогов вентиляторов (4).xlsx',
   piston: 'Аналоги сводная таблица с ссылками (1).xlsx',
@@ -66,10 +67,12 @@ function normalizeBrand(value) {
   const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
   const key = normalized.toLocaleLowerCase('ru-RU').replace(/[^a-zа-яё0-9]+/g, '');
   const names = {
+    ankang: 'Ankang',
     maer: 'MaEr',
     dunli: 'Dunli',
     weiguang: 'Weiguang',
     fanstech: 'Fans-Tech',
+    tecumseh: 'Tecumseh',
     ebm: 'EBM',
   };
   return names[key] ?? normalized;
@@ -157,6 +160,47 @@ function parseAxialGroups() {
     block.push({ brand, value, row, flagged: isSourceFlagged(sheet, row, 2) });
   }
   flush();
+  return groups;
+}
+
+function parseAnkangTecumsehGroups() {
+  const workbook = readWorkbook(SOURCE_FILES.ankangTecumseh);
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const maxRow = XLSX.utils.decode_range(sheet['!ref']).e.r + 1;
+  const groups = [];
+
+  for (let row = 2; row <= maxRow; row += 1) {
+    const ankangModel = cellText(sheet, row, 1);
+    const tecumsehModel = cellText(sheet, row, 3);
+    const ankangCapacityW = parseNumber(cellRaw(sheet, row, 2) ?? cellText(sheet, row, 2));
+    const tecumsehCapacityW = parseNumber(cellRaw(sheet, row, 4) ?? cellText(sheet, row, 4));
+    const items = uniqueItems([
+      makeDirectItem({
+        brand: 'Ankang',
+        value: ankangModel,
+        row,
+        flagged: isSourceFlagged(sheet, row, 1),
+        metadata: { coolingCapacityW: ankangCapacityW },
+      }),
+      makeDirectItem({
+        brand: 'Tecumseh',
+        value: tecumsehModel,
+        row,
+        flagged: isSourceFlagged(sheet, row, 3),
+        metadata: { coolingCapacityW: tecumsehCapacityW },
+      }),
+    ]);
+    if (items.length < 2) continue;
+
+    groups.push({
+      id: `ankang-tecumseh-${row}`,
+      kind: 'ankang_tecumseh',
+      sourceId: 'ankang_tecumseh',
+      category: 'Поршневые компрессоры',
+      items,
+    });
+  }
+
   return groups;
 }
 
@@ -402,9 +446,20 @@ function parseScrollSeries() {
   });
 }
 
-const directGroups = [...parseAxialGroups(), ...parseFanCrossGroups(), ...parseSanhuaGroups()];
+const directGroups = [
+  ...parseAnkangTecumsehGroups(),
+  ...parseAxialGroups(),
+  ...parseFanCrossGroups(),
+  ...parseSanhuaGroups(),
+];
 const compressorSeries = [...parsePistonSeries(), ...parseScrollSeries()];
 const sources = [
+  {
+    id: 'ankang_tecumseh',
+    fileName: SOURCE_FILES.ankangTecumseh,
+    label: 'Анканг / Tecumseh',
+    kind: 'direct',
+  },
   { id: 'axial', fileName: SOURCE_FILES.axial, label: 'Осевые аналоги', kind: 'direct' },
   {
     id: 'fans',

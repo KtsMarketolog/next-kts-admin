@@ -9,11 +9,19 @@ import {
   searchAnalogsForCatalogProduct,
 } from '../src/shared/lib/analogs';
 
-test('knowledge base contains all five imported source families', () => {
-  assert.ok(ANALOG_KNOWLEDGE_STATS.directGroups > 300);
-  assert.ok(ANALOG_KNOWLEDGE_STATS.directItems > 1_000);
+test('knowledge base contains all six imported source families', () => {
+  assert.ok(ANALOG_KNOWLEDGE_STATS.directGroups > 400);
+  assert.ok(ANALOG_KNOWLEDGE_STATS.directItems > 1_300);
   assert.equal(ANALOG_KNOWLEDGE_STATS.compressorSeries, 13);
   assert.ok(ANALOG_KNOWLEDGE_STATS.compressorItems > 1_000);
+});
+
+test('Ankang and Tecumseh cross-reference works in both directions', () => {
+  const fromAnkang = searchAnalogs('QR3-90A');
+  assert.ok(fromAnkang.results.some((result) => result.brand === 'Tecumseh' && result.model === 'TAG4546Z-TU'));
+
+  const fromTecumseh = searchAnalogs('TAG4546Z-TU');
+  assert.ok(fromTecumseh.results.some((result) => result.brand === 'Ankang' && result.model === 'QR3-90A'));
 });
 
 test('normalization ignores punctuation, case and visually equivalent separators', () => {

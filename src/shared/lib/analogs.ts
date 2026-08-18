@@ -1,6 +1,6 @@
 import rawKnowledgeBase from '@/shared/data/analogs.generated.json';
 
-type SourceId = 'axial' | 'fans' | 'piston' | 'sanhua' | 'scroll';
+type SourceId = 'ankang_tecumseh' | 'axial' | 'fans' | 'piston' | 'sanhua' | 'scroll';
 
 type KnowledgeSource = {
   id: SourceId;
@@ -23,7 +23,7 @@ type DirectItem = {
 
 type DirectGroup = {
   id: string;
-  kind: 'axial_fans' | 'fan_cross' | 'sanhua';
+  kind: 'ankang_tecumseh' | 'axial_fans' | 'fan_cross' | 'sanhua';
   sourceId: SourceId;
   category: string;
   note?: string;
