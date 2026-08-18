@@ -20,6 +20,6 @@ export async function GET(_request: Request, context: Context) {
     return Response.json({ error: 'Manager not found' }, { status: 404 });
   }
 
-  const priceLists = await getWholesalePriceListsForManager(managerId);
+  const priceLists = await getWholesalePriceListsForManager(managerId, manager.role);
   return Response.json({ manager, priceLists });
 }

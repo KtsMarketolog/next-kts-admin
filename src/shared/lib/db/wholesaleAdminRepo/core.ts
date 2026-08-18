@@ -1,4 +1,10 @@
-import { isManagerSessionRole, type AdminSession } from '@/shared/lib/adminAuth';
+import type { AdminSession } from '@/shared/lib/adminAuth';
+import {
+  getWholesalePriceListAccessScope,
+  resolveWholesalePriceListManagerAssignment,
+  type WholesalePriceListAccessScope,
+  type WholesalePriceListManagerRole,
+} from '@/shared/lib/wholesalePriceListAccess';
 import {
   getWholesalePriceWorkflowStatusLabel,
   normalizeWholesalePriceWorkflowStatus,
@@ -16,7 +22,6 @@ import {
   priceListAction,
   priceListDetails,
   resolveWholesaleClientCompany,
-  sessionManagerId,
 } from './analyticsHelpers';
 import { normalizeWholesaleSupportManagerId } from './managerHelpers';
 
@@ -164,15 +169,18 @@ function mapPriceList(row: PriceListRow): WholesalePriceListSummary {
 
 export async function getWholesalePriceLists(session?: AdminSession | null) {
   await ensureSiteSchema();
-  return getWholesalePriceListsByManagerId(sessionManagerId(session));
+  return getWholesalePriceListsByManager(getWholesalePriceListAccessScope(session));
 }
 
-export async function getWholesalePriceListsForManager(managerId: number) {
+export async function getWholesalePriceListsForManager(
+  managerId: number,
+  role: WholesalePriceListManagerRole,
+) {
   await ensureSiteSchema();
-  return getWholesalePriceListsByManagerId(managerId);
+  return getWholesalePriceListsByManager({ managerId, role });
 }
 
-async function getWholesalePriceListsByManagerId(managerId: number | null) {
+async function getWholesalePriceListsByManager(scope: WholesalePriceListAccessScope) {
   const result = await query<PriceListRow>(
     `select
        pl.id::text,
@@ -227,10 +235,14 @@ async function getWholesalePriceListsByManagerId(managerId: number | null) {
        order by e.created_at desc, e.id desc
        limit 1
      ) last_event on true
-     where ($1::bigint is null or pl.manager_id = $1)
+     where (
+       $1::bigint is null
+       or ($2::text = 'manager' and pl.manager_id = $1)
+       or ($2::text = 'support_manager' and (pl.support_manager_id = $1 or pl.manager_id = $1))
+     )
      group by pl.id, m.name, last_event.created_at, last_event.title_snapshot, last_event.actor_name
      order by pl.updated_at desc, pl.id desc`,
-    [managerId],
+    [scope.managerId, scope.role],
   );
   return result.rows.map(mapPriceList);
 }
@@ -357,7 +369,7 @@ export async function getWholesaleCatalog() {
 
 export async function getWholesalePriceListEditor(id: number, session?: AdminSession | null) {
   await ensureSiteSchema();
-  const managerId = sessionManagerId(session);
+  const scope = getWholesalePriceListAccessScope(session);
   const priceList = await query<
     Omit<WholesalePriceListEditor, 'id' | 'items' | 'clientCompanyId' | 'managerId' | 'supportManagerId' | 'priceGroupStockSettings'> & {
       id: string;
@@ -370,9 +382,14 @@ export async function getWholesalePriceListEditor(id: number, session?: AdminSes
             comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", show_stock as "showStock",
             show_stock_text as "showStockText", is_active as "isActive", manager_id::text, support_manager_id::text
      from wholesale_price_lists
-     where id = $1 and ($2::bigint is null or manager_id = $2)
+     where id = $1
+       and (
+         $2::bigint is null
+         or ($3::text = 'manager' and manager_id = $2)
+         or ($3::text = 'support_manager' and (support_manager_id = $2 or manager_id = $2))
+       )
      limit 1`,
-    [id, managerId],
+    [id, scope.managerId, scope.role],
   );
   const row = priceList.rows[0];
   if (!row) return null;
@@ -447,8 +464,9 @@ export async function createWholesalePriceList(
   session?: AdminSession | null,
 ) {
   await ensureSiteSchema();
-  const managerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : input.managerId;
-  const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId);
+  const assignment = resolveWholesalePriceListManagerAssignment(input, session);
+  const managerId = assignment.managerId;
+  const supportManagerId = await normalizeWholesaleSupportManagerId(assignment.supportManagerId);
   const clientCompany = await resolveWholesaleClientCompany(input.clientCompanyId, session);
   const result = await query<{ id: string }>(
     `insert into wholesale_price_lists (
@@ -507,8 +525,10 @@ export async function updateWholesalePriceList(
   session?: AdminSession | null,
 ) {
   await ensureSiteSchema();
-  const managerId = isManagerSessionRole(session?.role) ? session?.managerId ?? null : input.managerId;
-  const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId);
+  const scope = getWholesalePriceListAccessScope(session);
+  const assignment = resolveWholesalePriceListManagerAssignment(input, session);
+  const managerId = assignment.managerId;
+  const supportManagerId = await normalizeWholesaleSupportManagerId(assignment.supportManagerId);
   const previous = await query<{
     title: string;
     client_name: string;
@@ -519,9 +539,14 @@ export async function updateWholesalePriceList(
   }>(
     `select title, client_name, manager_id::text, valid_until::text, workflow_status, is_active
      from wholesale_price_lists
-     where id = $1 and ($2::bigint is null or manager_id = $2)
+     where id = $1
+       and (
+         $2::bigint is null
+         or ($3::text = 'manager' and manager_id = $2)
+         or ($3::text = 'support_manager' and (support_manager_id = $2 or manager_id = $2))
+       )
      limit 1`,
-    [id, sessionManagerId(session)],
+    [id, scope.managerId, scope.role],
   );
   const previousRow = previous.rows[0];
   if (!previousRow) return;
@@ -552,7 +577,12 @@ export async function updateWholesalePriceList(
          show_stock_text = $13,
          is_active = $14,
          updated_at = now()
-     where id = $1 and ($15::bigint is null or manager_id = $15)`,
+     where id = $1
+       and (
+         $15::bigint is null
+         or ($16::text = 'manager' and manager_id = $15)
+         or ($16::text = 'support_manager' and (support_manager_id = $15 or manager_id = $15))
+       )`,
     [
       id,
       nextInput.title,
@@ -568,7 +598,8 @@ export async function updateWholesalePriceList(
       nextInput.showStock,
       nextInput.showStockText,
       nextInput.isActive,
-      sessionManagerId(session),
+      scope.managerId,
+      scope.role,
     ],
   );
   await replaceWholesalePriceListItems(id, nextInput.items);
@@ -667,15 +698,21 @@ export async function updateWholesalePriceListManagerAssignmentsForClientCompany
 
 export async function deleteWholesalePriceList(id: number, session?: AdminSession | null) {
   await ensureSiteSchema();
+  const scope = getWholesalePriceListAccessScope(session);
   const previous = await query<{
     title: string;
     manager_id: string | null;
   }>(
     `select title, manager_id::text
      from wholesale_price_lists
-     where id = $1 and ($2::bigint is null or manager_id = $2)
+     where id = $1
+       and (
+         $2::bigint is null
+         or ($3::text = 'manager' and manager_id = $2)
+         or ($3::text = 'support_manager' and (support_manager_id = $2 or manager_id = $2))
+       )
      limit 1`,
-    [id, sessionManagerId(session)],
+    [id, scope.managerId, scope.role],
   );
   const previousRow = previous.rows[0];
   if (!previousRow) return;
@@ -691,10 +728,16 @@ export async function deleteWholesalePriceList(id: number, session?: AdminSessio
     details: 'Прайс удалён',
   });
 
-  await query(`delete from wholesale_price_lists where id = $1 and ($2::bigint is null or manager_id = $2)`, [
-    id,
-    sessionManagerId(session),
-  ]);
+  await query(
+    `delete from wholesale_price_lists
+     where id = $1
+       and (
+         $2::bigint is null
+         or ($3::text = 'manager' and manager_id = $2)
+         or ($3::text = 'support_manager' and (support_manager_id = $2 or manager_id = $2))
+       )`,
+    [id, scope.managerId, scope.role],
+  );
 }
 
 export async function recordWholesaleManagerLogin(

@@ -65,7 +65,8 @@ export async function getWholesaleManagers() {
       last_event.title_snapshot as last_changed_price_title
     from wholesale_managers m
     left join wholesale_price_lists pl on (
-      (coalesce(nullif(m.role, ''), 'manager') = 'support_manager' and pl.support_manager_id = m.id)
+      (coalesce(nullif(m.role, ''), 'manager') = 'support_manager'
+        and (pl.support_manager_id = m.id or pl.manager_id = m.id))
       or (coalesce(nullif(m.role, ''), 'manager') <> 'support_manager' and pl.manager_id = m.id)
     )
     left join wholesale_managers support on support.id = m.support_manager_id

@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { isManagerSessionRole, requireEmployee } from '@/shared/lib/adminAuth';
+import { requireEmployee } from '@/shared/lib/adminAuth';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import {
   createWholesalePriceList,
@@ -12,6 +12,7 @@ import {
 } from '@/shared/lib/db';
 import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
+import { resolveWholesalePriceListManagerAssignment } from '@/shared/lib/wholesalePriceListAccess';
 import {
   isValidNewPublicPriceToken,
   getWholesalePriceSaveError,
@@ -106,13 +107,16 @@ export async function POST(request: Request) {
   if (!clientCompanyId) {
     return Response.json({ error: 'Выберите клиента из списка' }, { status: 400 });
   }
-  const managerId = isManagerSessionRole(session.role)
-    ? normalizePositiveIntegerId(session.managerId)
-    : normalizePositiveIntegerId(body.managerId);
+  const { managerId, supportManagerId } = resolveWholesalePriceListManagerAssignment(
+    {
+      managerId: body.managerId,
+      supportManagerId: body.supportManagerId,
+    },
+    session,
+  );
   if (!managerId) {
     return Response.json({ error: 'Выберите менеджера по развитию' }, { status: 400 });
   }
-  const supportManagerId = normalizePositiveIntegerId(body.supportManagerId);
   if (!supportManagerId) {
     return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
   }

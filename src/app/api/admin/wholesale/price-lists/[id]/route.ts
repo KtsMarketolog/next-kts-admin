@@ -13,6 +13,7 @@ import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
+import { resolveWholesalePriceListManagerAssignment } from '@/shared/lib/wholesalePriceListAccess';
 import {
   getWholesalePriceSaveError,
   normalizeOptionalDate,
@@ -115,13 +116,16 @@ export async function PUT(request: Request, context: Context) {
   if (!clientCompanyId) {
     return Response.json({ error: 'Выберите клиента из списка' }, { status: 400 });
   }
-  const managerId = isManagerSessionRole(session.role)
-    ? normalizePositiveIntegerId(session.managerId)
-    : normalizePositiveIntegerId(body.managerId);
+  const { managerId, supportManagerId } = resolveWholesalePriceListManagerAssignment(
+    {
+      managerId: body.managerId,
+      supportManagerId: body.supportManagerId,
+    },
+    session,
+  );
   if (!managerId) {
     return Response.json({ error: 'Выберите менеджера по развитию' }, { status: 400 });
   }
-  const supportManagerId = normalizePositiveIntegerId(body.supportManagerId);
   if (!supportManagerId) {
     return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
   }
