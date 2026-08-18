@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { EMPLOYEE_HOME_PATH } from '@/shared/lib/adminNavigation';
+
 import styles from './LoginPanel.module.scss';
 
 type LoginMode = 'client' | 'employee';
@@ -18,7 +20,7 @@ type LoginPanelProps = {
 export function LoginPanel({
   defaultMode = 'employee',
   clientRedirect = '/cabinet',
-  employeeRedirect = '/admin',
+  employeeRedirect = EMPLOYEE_HOME_PATH,
   onEmployeeAuthenticated,
 }: LoginPanelProps) {
   const router = useRouter();
@@ -64,7 +66,7 @@ export function LoginPanel({
     }
 
     if (data.role === 'manager' || data.role === 'support_manager') {
-      router.push('/admin/wholesale/manager');
+      router.push(employeeRedirect);
       return;
     }
 

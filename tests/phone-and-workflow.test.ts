@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { EMPLOYEE_HOME_PATH } from '../src/shared/lib/adminNavigation';
 import { phoneHref } from '../src/shared/lib/phone';
 import {
   getWholesalePriceWorkflowStatusLabel,
@@ -10,6 +11,10 @@ import {
 test('phoneHref keeps only phone digits', () => {
   assert.equal(phoneHref('+7 (964) 860-90-10'), 'tel:+79648609010');
   assert.equal(phoneHref('нет номера'), '#');
+});
+
+test('employees land on the common admin dashboard after login', () => {
+  assert.equal(EMPLOYEE_HOME_PATH, '/admin');
 });
 
 test('wholesale workflow status falls back safely', () => {

@@ -1,5 +1,6 @@
 import { LoginPanel } from '@/features/auth/LoginPanel';
 import { getAdminSession } from '@/shared/lib/adminAuth';
+import { EMPLOYEE_HOME_PATH } from '@/shared/lib/adminNavigation';
 import { getClientSession } from '@/shared/lib/clientAuth';
 import { redirect } from 'next/navigation';
 
@@ -18,7 +19,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     searchParams ?? Promise.resolve({} as { mode?: string | string[] }),
   ]);
 
-  if (employeeSession) redirect('/admin/clients');
+  if (employeeSession) redirect(EMPLOYEE_HOME_PATH);
   if (clientSession) redirect('/cabinet');
 
   const modeParam = Array.isArray(params.mode) ? params.mode[0] : params.mode;
