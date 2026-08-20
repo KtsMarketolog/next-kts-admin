@@ -121,6 +121,19 @@ test('dashboard content is accepted only from its same-origin frame shell', () =
   });
   assert.equal(isTopDashboardFrameRequest(request, versionId), true);
 
+  const reverseProxyRequest = new Request(
+    `http://127.0.0.1:3000/api/admin/top-dashboard/versions/${versionId}/content`,
+    {
+      headers: {
+        'sec-fetch-dest': 'iframe',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'same-origin',
+        referer: `https://kts-impex.ru/api/admin/top-dashboard/versions/${versionId}/frame?revision=1`,
+      },
+    },
+  );
+  assert.equal(isTopDashboardFrameRequest(reverseProxyRequest, versionId), true);
+
   const directNavigation = new Request(request.url, {
     headers: {
       'sec-fetch-dest': 'document',
@@ -139,4 +152,23 @@ test('dashboard content is accepted only from its same-origin frame shell', () =
     },
   });
   assert.equal(isTopDashboardFrameRequest(wrongParent, versionId), false);
+
+  const missingParent = new Request(request.url, {
+    headers: {
+      'sec-fetch-dest': 'iframe',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-site': 'same-origin',
+    },
+  });
+  assert.equal(isTopDashboardFrameRequest(missingParent, versionId), false);
+
+  const crossSiteFrame = new Request(request.url, {
+    headers: {
+      'sec-fetch-dest': 'iframe',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-site': 'cross-site',
+      referer: `https://example.com/api/admin/top-dashboard/versions/${versionId}/frame`,
+    },
+  });
+  assert.equal(isTopDashboardFrameRequest(crossSiteFrame, versionId), false);
 });

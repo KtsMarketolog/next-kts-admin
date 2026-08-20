@@ -49,12 +49,12 @@ export function isTopDashboardFrameRequest(request: Request, versionId: number) 
   if (!referer) return false;
 
   try {
-    const requestUrl = new URL(request.url);
     const refererUrl = new URL(referer);
-    return (
-      refererUrl.origin === requestUrl.origin
-      && refererUrl.pathname === `/api/admin/top-dashboard/versions/${versionId}/frame`
-    );
+    // In production Next.js receives an internal 127.0.0.1 request URL from the
+    // reverse proxy, while the browser Referer contains the public origin. The
+    // forbidden Sec-Fetch-* headers above prove a same-origin iframe navigation;
+    // only the exact trusted shell path needs to be matched here.
+    return refererUrl.pathname === `/api/admin/top-dashboard/versions/${versionId}/frame`;
   } catch {
     return false;
   }

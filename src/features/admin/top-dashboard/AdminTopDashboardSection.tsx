@@ -114,6 +114,19 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
     void loadOverview();
   }, [loadOverview]);
 
+  useEffect(() => {
+    const refreshVisibleOverview = () => {
+      if (document.visibilityState === 'visible') void loadOverview();
+    };
+
+    window.addEventListener('focus', refreshVisibleOverview);
+    document.addEventListener('visibilitychange', refreshVisibleOverview);
+    return () => {
+      window.removeEventListener('focus', refreshVisibleOverview);
+      document.removeEventListener('visibilitychange', refreshVisibleOverview);
+    };
+  }, [loadOverview]);
+
   const activeVersion = useMemo(
     () => overview?.versions.find((version) => version.id === overview.activeVersionId) ?? null,
     [overview],
@@ -276,7 +289,14 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
               <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${selectedVersion.status}`]}`}>
                 {statusLabel(selectedVersion.status)}
               </span>
-              <button className={styles.secondary} type="button" onClick={() => setPreviewRevision((current) => current + 1)}>
+              <button
+                className={styles.secondary}
+                type="button"
+                onClick={() => {
+                  void loadOverview(selectedVersion.id);
+                  setPreviewRevision((current) => current + 1);
+                }}
+              >
                 Обновить просмотр
               </button>
               {selectedVersion.status !== 'active' ? (
