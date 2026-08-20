@@ -104,6 +104,36 @@
   background: #fff;
 }
 
+.topDashboardPreviewCard.topDashboardPreviewFullscreen {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+
+  .topDashboardPreviewHeader {
+    flex: 0 0 auto;
+  }
+
+  .topDashboardFrameShell {
+    min-height: 0;
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+  }
+
+  .topDashboardFrame {
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    flex: 1 1 0;
+    border-radius: 0;
+  }
+}
+
 .topDashboardPreviewHeader {
   display: flex;
   justify-content: space-between;

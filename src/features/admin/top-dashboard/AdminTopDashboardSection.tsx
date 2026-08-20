@@ -31,6 +31,50 @@ type AdminTopDashboardSectionProps = {
 
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
 
+type WebkitFullscreenDocument = Document & {
+  webkitExitFullscreen?: () => Promise<void> | void;
+  webkitFullscreenElement?: Element | null;
+};
+
+type WebkitFullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+function currentFullscreenElement() {
+  const fullscreenDocument = document as WebkitFullscreenDocument;
+  return document.fullscreenElement ?? fullscreenDocument.webkitFullscreenElement ?? null;
+}
+
+async function requestElementFullscreen(element: HTMLElement) {
+  if (element.requestFullscreen) {
+    await element.requestFullscreen();
+    return;
+  }
+
+  const webkitRequestFullscreen = (element as WebkitFullscreenElement).webkitRequestFullscreen;
+  if (webkitRequestFullscreen) {
+    await webkitRequestFullscreen.call(element);
+    return;
+  }
+
+  throw new Error('Fullscreen API is unavailable');
+}
+
+async function exitDocumentFullscreen() {
+  if (document.exitFullscreen) {
+    await document.exitFullscreen();
+    return;
+  }
+
+  const webkitExitFullscreen = (document as WebkitFullscreenDocument).webkitExitFullscreen;
+  if (webkitExitFullscreen) {
+    await webkitExitFullscreen.call(document);
+    return;
+  }
+
+  throw new Error('Fullscreen API is unavailable');
+}
+
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(bytes / 1024)} КБ`;
@@ -65,7 +109,9 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [previewRevision, setPreviewRevision] = useState(0);
+  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewCardRef = useRef<HTMLElement>(null);
   const showStatusRef = useRef(showStatus);
 
   useEffect(() => {
@@ -126,6 +172,24 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
       document.removeEventListener('visibilitychange', refreshVisibleOverview);
     };
   }, [loadOverview]);
+
+  useEffect(() => {
+    const previewCard = previewCardRef.current;
+    const syncFullscreenState = () => {
+      setIsPreviewFullscreen(currentFullscreenElement() === previewCardRef.current);
+    };
+
+    syncFullscreenState();
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    document.addEventListener('webkitfullscreenchange', syncFullscreenState);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreenState);
+      document.removeEventListener('webkitfullscreenchange', syncFullscreenState);
+      if (previewCard && currentFullscreenElement() === previewCard) {
+        void exitDocumentFullscreen().catch(() => undefined);
+      }
+    };
+  }, []);
 
   const activeVersion = useMemo(
     () => overview?.versions.find((version) => version.id === overview.activeVersionId) ?? null,
@@ -226,6 +290,21 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
     }
   };
 
+  const togglePreviewFullscreen = async () => {
+    const previewCard = previewCardRef.current;
+    if (!previewCard) return;
+
+    try {
+      if (currentFullscreenElement() === previewCard) {
+        await exitDocumentFullscreen();
+      } else {
+        await requestElementFullscreen(previewCard);
+      }
+    } catch {
+      showStatusRef.current('Браузер не разрешил открыть полноэкранный режим');
+    }
+  };
+
   return (
     <div className={styles.topDashboardLayout}>
       <section className={styles.section}>
@@ -270,7 +349,11 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
         </div>
       </section>
 
-      <section className={styles.topDashboardPreviewCard} aria-busy={loading}>
+      <section
+        ref={previewCardRef}
+        className={`${styles.topDashboardPreviewCard}${isPreviewFullscreen ? ` ${styles.topDashboardPreviewFullscreen}` : ''}`}
+        aria-busy={loading}
+      >
         <div className={styles.topDashboardPreviewHeader}>
           <div>
             <span className={styles.topDashboardEyebrow}>Предпросмотр в изолированном режиме</span>
@@ -298,6 +381,14 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
                 }}
               >
                 Обновить просмотр
+              </button>
+              <button
+                className={styles.secondary}
+                type="button"
+                aria-pressed={isPreviewFullscreen}
+                onClick={() => void togglePreviewFullscreen()}
+              >
+                {isPreviewFullscreen ? 'Выйти из полноэкранного режима' : 'На весь экран'}
               </button>
               {selectedVersion.status !== 'active' ? (
                 <button
@@ -327,7 +418,7 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
               title={`Предпросмотр ${selectedVersion.originalName}`}
               sandbox="allow-scripts allow-same-origin"
               referrerPolicy="no-referrer"
-              allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'"
+              allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen 'none'"
             />
           </div>
         ) : (
