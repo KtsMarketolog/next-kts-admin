@@ -19,6 +19,7 @@ export type SecurityEventType =
   | 'top_dashboard_version_uploaded'
   | 'top_dashboard_version_published'
   | 'top_dashboard_version_rolled_back'
+  | 'top_dashboard_version_deleted'
   | 'manager_created'
   | 'manager_updated'
   | 'manager_deleted'

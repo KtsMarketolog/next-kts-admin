@@ -10,14 +10,17 @@ export type { AccessUser, AccessUserRole, AdminUserAuth } from './db/adminUsersR
 export {
   activateTopDashboardVersion,
   createTopDashboardVersion,
+  deleteTopDashboardVersion,
   getTopDashboardOverview,
   getTopDashboardVersionContent,
+  TopDashboardActiveVersionDeleteError,
   TopDashboardStateConflictError,
   TopDashboardVersionNotFoundError,
 } from './db/topDashboardRepo';
 export type {
   ActivateTopDashboardVersionResult,
   CreateTopDashboardVersionInput,
+  DeleteTopDashboardVersionResult,
   TopDashboardOverview,
   TopDashboardVersion,
   TopDashboardVersionContent,

@@ -50,6 +50,20 @@ export type ActivateTopDashboardVersionResult = {
   change: 'published' | 'rolled_back' | 'unchanged';
 };
 
+export type DeleteTopDashboardVersionResult = {
+  deletedVersion: {
+    id: number;
+    originalName: string;
+    fileSize: number;
+    sha256: string;
+    firstPublishedAt: string | null;
+  };
+  activeVersionId: number | null;
+  previousVersionId: number | null;
+  updatedAt: string;
+  replacedPreviousVersion: boolean;
+};
+
 type TopDashboardStateRow = {
   active_version_id: string | null;
   previous_version_id: string | null;
@@ -138,6 +152,15 @@ export async function createTopDashboardVersion(
   await ensureSiteSchema();
 
   return withTransaction(async (client) => {
+    // Serialize retention cleanup with publication and manual deletion so it
+    // cannot prune a version while that version becomes a rollback pointer.
+    await client.query(
+      `select id
+       from top_dashboard_state
+       where id = 1
+       for update`,
+    );
+
     const result = await client.query<TopDashboardVersionRow>(
       `insert into top_dashboard_versions (
          original_name,
@@ -251,6 +274,114 @@ export class TopDashboardStateConflictError extends Error {
     this.name = 'TopDashboardStateConflictError';
     this.currentActiveVersionId = currentActiveVersionId;
   }
+}
+
+export class TopDashboardActiveVersionDeleteError extends Error {
+  activeVersionId: number;
+
+  constructor(activeVersionId: number) {
+    super('Активную версию нельзя удалить');
+    this.name = 'TopDashboardActiveVersionDeleteError';
+    this.activeVersionId = activeVersionId;
+  }
+}
+
+export async function deleteTopDashboardVersion(input: {
+  versionId: number;
+  adminUserId: number | null;
+}): Promise<DeleteTopDashboardVersionResult> {
+  await ensureSiteSchema();
+
+  return withTransaction(async (client) => {
+    // Serialize deletion with publication/rollback so an active version can never
+    // become deletable between the state check and the row removal.
+    const stateResult = await client.query<TopDashboardStateRow>(
+      `select active_version_id::text, previous_version_id::text, updated_at::text
+       from top_dashboard_state
+       where id = 1
+       for update`,
+    );
+    const state = stateResult.rows[0];
+    const activeVersionId = numericId(state?.active_version_id);
+    const currentPreviousVersionId = numericId(state?.previous_version_id);
+
+    const versionResult = await client.query<{
+      id: string;
+      original_name: string;
+      file_size: string;
+      sha256: string;
+      first_published_at: string | null;
+    }>(
+      `select
+         id::text,
+         original_name,
+         file_size::text,
+         sha256,
+         first_published_at::text
+       from top_dashboard_versions
+       where id = $1
+       limit 1
+       for update`,
+      [input.versionId],
+    );
+    const version = versionResult.rows[0];
+    if (!version) throw new TopDashboardVersionNotFoundError();
+    if (activeVersionId === input.versionId) {
+      throw new TopDashboardActiveVersionDeleteError(input.versionId);
+    }
+
+    let previousVersionId = currentPreviousVersionId;
+    let updatedAt = state?.updated_at ?? new Date().toISOString();
+    const replacedPreviousVersion = currentPreviousVersionId === input.versionId;
+
+    if (replacedPreviousVersion) {
+      const replacementResult = await client.query<{ id: string }>(
+        `select id::text
+         from top_dashboard_versions
+         where id <> $1
+           and id <> coalesce($2, 0)
+           and first_published_at is not null
+         order by first_published_at desc, created_at desc, id desc
+         limit 1
+         for update`,
+        [input.versionId, activeVersionId],
+      );
+      previousVersionId = numericId(replacementResult.rows[0]?.id);
+
+      const updatedStateResult = await client.query<TopDashboardStateRow>(
+        `update top_dashboard_state
+         set previous_version_id = $1,
+             updated_by_admin_user_id = $2,
+             updated_at = now()
+         where id = 1
+         returning active_version_id::text, previous_version_id::text, updated_at::text`,
+        [previousVersionId, input.adminUserId],
+      );
+      const updatedState = updatedStateResult.rows[0];
+      previousVersionId = numericId(updatedState?.previous_version_id);
+      updatedAt = updatedState?.updated_at ?? updatedAt;
+    }
+
+    await client.query(
+      `delete from top_dashboard_versions
+       where id = $1`,
+      [input.versionId],
+    );
+
+    return {
+      deletedVersion: {
+        id: Number(version.id),
+        originalName: version.original_name,
+        fileSize: Number(version.file_size),
+        sha256: version.sha256,
+        firstPublishedAt: version.first_published_at,
+      },
+      activeVersionId,
+      previousVersionId,
+      updatedAt,
+      replacedPreviousVersion,
+    };
+  });
 }
 
 export async function activateTopDashboardVersion(input: {

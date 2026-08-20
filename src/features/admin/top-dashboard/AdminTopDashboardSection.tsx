@@ -290,6 +290,48 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
     }
   };
 
+  const deleteVersion = async (version: TopDashboardVersion) => {
+    if (!overview || version.status === 'active') return;
+    if (
+      !window.confirm(
+        `Удалить файл «${version.originalName}», версия #${version.id}?\n\nЭто действие необратимо: восстановить удалённую версию будет нельзя.`,
+      )
+    ) {
+      return;
+    }
+
+    const remainingVersions = overview.versions.filter((item) => item.id !== version.id);
+    const preferredVersionId = selectedVersionId === version.id
+      ? remainingVersions.find((item) => item.id === overview.activeVersionId)?.id
+        ?? remainingVersions[0]?.id
+        ?? null
+      : selectedVersionId;
+
+    setBusyAction(`delete:${version.id}`);
+    try {
+      const response = await fetch(`/api/admin/top-dashboard/versions/${version.id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        const message = await readError(response, 'Не удалось удалить версию HTML');
+        if (response.status === 404 || response.status === 409) {
+          await loadOverview(preferredVersionId);
+        }
+        showStatusRef.current(message);
+        return;
+      }
+
+      await loadOverview(preferredVersionId);
+      setPreviewRevision((current) => current + 1);
+      showStatusRef.current(`Версия #${version.id} удалена`);
+    } catch {
+      showStatusRef.current('Не удалось удалить версию HTML');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const togglePreviewFullscreen = async () => {
     const previewCard = previewCardRef.current;
     if (!previewCard) return;
@@ -472,13 +514,23 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
                     Предпросмотр
                   </button>
                   {version.status !== 'active' ? (
-                    <button type="button" disabled={busyAction !== null} onClick={() => activateVersion(version)}>
-                      {busyAction === `activate:${version.id}`
-                        ? 'Публикуем…'
-                        : version.status === 'archived'
-                          ? 'Откатить'
-                          : 'Опубликовать'}
-                    </button>
+                    <>
+                      <button type="button" disabled={busyAction !== null} onClick={() => activateVersion(version)}>
+                        {busyAction === `activate:${version.id}`
+                          ? 'Публикуем…'
+                          : version.status === 'archived'
+                            ? 'Откатить'
+                            : 'Опубликовать'}
+                      </button>
+                      <button
+                        className={styles.danger}
+                        type="button"
+                        disabled={busyAction !== null}
+                        onClick={() => deleteVersion(version)}
+                      >
+                        {busyAction === `delete:${version.id}` ? 'Удаляем…' : 'Удалить'}
+                      </button>
+                    </>
                   ) : null}
                 </div>
               </article>

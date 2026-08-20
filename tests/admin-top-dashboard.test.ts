@@ -18,7 +18,9 @@ import {
 import type {
   activateTopDashboardVersion,
   CreateTopDashboardVersionInput,
+  deleteTopDashboardVersion,
 } from '../src/shared/lib/db/topDashboardRepo';
+import { TopDashboardActiveVersionDeleteError } from '../src/shared/lib/db/topDashboardRepo';
 import {
   buildTopDashboardContentSecurityPolicy,
   isTopDashboardFrameRequest,
@@ -80,9 +82,23 @@ test('break-glass admin actions support nullable database attribution', () => {
     expectedActiveVersionId: null,
     adminUserId: null,
   } satisfies ActivateInput;
+  type DeleteInput = Parameters<typeof deleteTopDashboardVersion>[0];
+  const deleteInput = {
+    versionId: 2,
+    adminUserId: null,
+  } satisfies DeleteInput;
 
   assert.equal(uploadInput.uploadedByAdminUserId, null);
   assert.equal(activateInput.adminUserId, null);
+  assert.equal(deleteInput.adminUserId, null);
+});
+
+test('active TOP dashboard versions have a dedicated deletion conflict', () => {
+  const error = new TopDashboardActiveVersionDeleteError(42);
+
+  assert.equal(error.name, 'TopDashboardActiveVersionDeleteError');
+  assert.equal(error.activeVersionId, 42);
+  assert.match(error.message, /Активную версию нельзя удалить/);
 });
 
 test('admin users screen exposes a separate single-role TOP tab', () => {
