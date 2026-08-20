@@ -26,16 +26,14 @@ function normalizeSupportManagerId(role: AccessUserRole, value: unknown) {
 export async function GET() {
   const { denied, session } = await requireAdminSession();
   if (denied) return denied;
-  if (!session.adminUserId) return badRequest('Требуется вход под учетной записью администратора', 403);
 
-  const users = await getAccessUsers(session.adminUserId);
+  const users = await getAccessUsers(session.adminUserId ?? null);
   return Response.json({ users });
 }
 
 export async function POST(request: Request) {
   const { denied, session } = await requireAdminSession();
   if (denied) return denied;
-  if (!session.adminUserId) return badRequest('Требуется вход под учетной записью администратора', 403);
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
 

@@ -37,7 +37,7 @@ export type CreateTopDashboardVersionInput = {
   htmlContent: string;
   fileSize: number;
   sha256: string;
-  uploadedByAdminUserId: number;
+  uploadedByAdminUserId: number | null;
 };
 
 const TOP_DASHBOARD_VERSION_LIMIT = 50;
@@ -256,7 +256,7 @@ export class TopDashboardStateConflictError extends Error {
 export async function activateTopDashboardVersion(input: {
   versionId: number;
   expectedActiveVersionId: number | null;
-  adminUserId: number;
+  adminUserId: number | null;
 }): Promise<ActivateTopDashboardVersionResult> {
   await ensureSiteSchema();
 

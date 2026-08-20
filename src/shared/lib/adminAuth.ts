@@ -33,6 +33,21 @@ export function isOperationalEmployeeSessionRole(role: AdminSessionRole | null |
   return role === 'admin' || role === 'wholesale_admin' || isManagerSessionRole(role);
 }
 
+export function isAdminManagementSession(
+  session: AdminSession | null | undefined,
+): session is AdminSession & { role: 'admin' } {
+  return session?.role === 'admin';
+}
+
+export function isTopDashboardSession(
+  session: AdminSession | null | undefined,
+): session is (AdminSession & { role: 'admin' }) | (AdminSession & { role: 'top'; adminUserId: number }) {
+  if (session?.role === 'admin') return true;
+  return session?.role === 'top'
+    && Number.isInteger(session.adminUserId)
+    && Number(session.adminUserId) > 0;
+}
+
 function sign(value: string) {
   return createHmac('sha256', getAdminSessionSecret()).update(value).digest('hex');
 }
@@ -159,7 +174,7 @@ export async function requireWholesaleAdminSession() {
 
 export async function requireAdminSession() {
   const session = await getAdminSession();
-  if (session?.role !== 'admin') {
+  if (!isAdminManagementSession(session)) {
     return { denied: Response.json({ error: 'Unauthorized' }, { status: 401 }), session: null };
   }
   return { denied: null, session };
@@ -175,11 +190,7 @@ export async function requireEmployee() {
 
 export async function requireTopDashboardSession() {
   const session = await getAdminSession();
-  if (
-    !session
-    || (session.role !== 'admin' && session.role !== 'top')
-    || (session.role === 'top' && !session.adminUserId)
-  ) {
+  if (!isTopDashboardSession(session)) {
     return { denied: Response.json({ error: 'Unauthorized' }, { status: 401 }), session: null };
   }
   return { denied: null, session };

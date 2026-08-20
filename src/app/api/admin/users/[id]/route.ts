@@ -44,7 +44,6 @@ async function revokePreviousSessions(source: 'admin' | 'manager', numericId: nu
 export async function PUT(request: Request, context: Context) {
   const { denied, session } = await requireAdminSession();
   if (denied) return denied;
-  if (!session.adminUserId) return badRequest('Требуется вход под учетной записью администратора', 403);
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
 
@@ -83,7 +82,7 @@ export async function PUT(request: Request, context: Context) {
         supportManagerId,
         passwordHash: password ? hashPassword(password) : undefined,
       },
-      session.adminUserId,
+      session.adminUserId ?? null,
     );
 
     if (result.roleChanged || result.passwordChanged || result.previous.isActive !== result.user.isActive) {
@@ -138,7 +137,6 @@ export async function PUT(request: Request, context: Context) {
 export async function DELETE(request: Request, context: Context) {
   const { denied, session } = await requireAdminSession();
   if (denied) return denied;
-  if (!session.adminUserId) return badRequest('Требуется вход под учетной записью администратора', 403);
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
 
@@ -148,7 +146,7 @@ export async function DELETE(request: Request, context: Context) {
   const { id } = await context.params;
 
   try {
-    const user = await deleteAccessUser(id, session.adminUserId);
+    const user = await deleteAccessUser(id, session.adminUserId ?? null);
     await revokePreviousSessions(user.source, user.numericId);
 
     await recordSecurityEvent({

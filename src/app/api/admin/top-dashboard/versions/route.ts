@@ -35,9 +35,6 @@ function contentLengthTooLarge(request: Request) {
 export async function POST(request: Request) {
   const { denied, session } = await requireTopDashboardSession();
   if (denied) return denied;
-  if (!session.adminUserId) {
-    return errorResponse('Для загрузки требуется учетная запись сотрудника', 403);
-  }
 
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
@@ -86,7 +83,7 @@ export async function POST(request: Request) {
       htmlContent,
       fileSize: bytes.length,
       sha256: createHash('sha256').update(bytes).digest('hex'),
-      uploadedByAdminUserId: session.adminUserId,
+      uploadedByAdminUserId: session.adminUserId ?? null,
     });
 
     await recordSecurityEvent({

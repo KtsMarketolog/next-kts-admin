@@ -9,7 +9,16 @@ import {
   roleOptionsForTab,
   tabForRole,
 } from '../src/features/admin/users/AdminUsersConfig';
-import { isOperationalEmployeeSessionRole } from '../src/shared/lib/adminAuth';
+import {
+  createAdminSession,
+  isAdminManagementSession,
+  isOperationalEmployeeSessionRole,
+  isTopDashboardSession,
+} from '../src/shared/lib/adminAuth';
+import type {
+  activateTopDashboardVersion,
+  CreateTopDashboardVersionInput,
+} from '../src/shared/lib/db/topDashboardRepo';
 import {
   buildTopDashboardContentSecurityPolicy,
   isTopDashboardFrameRequest,
@@ -33,6 +42,47 @@ test('top is excluded from operational employee permissions', () => {
   assert.equal(isOperationalEmployeeSessionRole('support_manager'), true);
   assert.equal(isOperationalEmployeeSessionRole('top'), false);
   assert.equal(isOperationalEmployeeSessionRole(null), false);
+});
+
+test('break-glass admin can bootstrap users and manage TOP dashboard without a database user id', () => {
+  const breakGlassAdmin = { role: 'admin' } as const;
+
+  assert.equal(isAdminManagementSession(breakGlassAdmin), true);
+  assert.equal(isTopDashboardSession(breakGlassAdmin), true);
+});
+
+test('TOP requires a persisted positive user id and never receives admin-management access', () => {
+  assert.equal(isAdminManagementSession({ role: 'top', adminUserId: 1 }), false);
+  assert.equal(isTopDashboardSession({ role: 'top' }), false);
+  assert.equal(isTopDashboardSession({ role: 'top', adminUserId: -1 }), false);
+  assert.equal(isTopDashboardSession({ role: 'top', adminUserId: 1 }), true);
+});
+
+test('TOP sessions without a positive user id are rejected before persistence', async () => {
+  await assert.rejects(createAdminSession('top'), /requires an admin user id/i);
+  await assert.rejects(
+    createAdminSession('top', { adminUserId: -1 }),
+    /requires an admin user/i,
+  );
+});
+
+test('break-glass admin actions support nullable database attribution', () => {
+  const uploadInput = {
+    originalName: 'dashboard.html',
+    htmlContent: '<!doctype html><html></html>',
+    fileSize: 35,
+    sha256: '0'.repeat(64),
+    uploadedByAdminUserId: null,
+  } satisfies CreateTopDashboardVersionInput;
+  type ActivateInput = Parameters<typeof activateTopDashboardVersion>[0];
+  const activateInput = {
+    versionId: 1,
+    expectedActiveVersionId: null,
+    adminUserId: null,
+  } satisfies ActivateInput;
+
+  assert.equal(uploadInput.uploadedByAdminUserId, null);
+  assert.equal(activateInput.adminUserId, null);
 });
 
 test('admin users screen exposes a separate single-role TOP tab', () => {

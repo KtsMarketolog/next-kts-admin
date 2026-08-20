@@ -24,9 +24,6 @@ function expectedVersionId(value: unknown) {
 export async function PUT(request: Request) {
   const { denied, session } = await requireTopDashboardSession();
   if (denied) return denied;
-  if (!session.adminUserId) {
-    return Response.json({ error: 'Для публикации требуется учетная запись сотрудника' }, { status: 403 });
-  }
 
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
@@ -50,7 +47,7 @@ export async function PUT(request: Request) {
     const state = await activateTopDashboardVersion({
       versionId,
       expectedActiveVersionId,
-      adminUserId: session.adminUserId,
+      adminUserId: session.adminUserId ?? null,
     });
 
     if (state.change !== 'unchanged') {
