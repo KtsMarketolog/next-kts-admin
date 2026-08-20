@@ -10,7 +10,7 @@ export type TwoFactorChallengeActor =
   | {
       challengeId: string;
       actorType: 'admin';
-      role: 'admin' | 'wholesale_admin';
+      role: 'admin' | 'wholesale_admin' | 'top';
       login: string;
       adminUserId?: number;
     }
@@ -47,7 +47,7 @@ function hashTwoFactorCode(challengeId: string, loginSessionId: string, code: st
 export async function createTwoFactorChallenge(input: {
   login: string;
   actorType: TwoFactorActorType;
-  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'client';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'client';
   adminUserId?: number | null;
   managerId?: number | null;
   clientUserId?: number | null;
@@ -140,6 +140,7 @@ export async function consumeTwoFactorChallenge(input: {
   await query(`update admin_2fa_challenges set consumed_at = now() where id = $1`, [row.id]);
 
   if (row.actor_type === 'client') {
+    if (row.role !== 'client') return null;
     return {
       challengeId: row.id,
       actorType: 'client',
@@ -149,28 +150,24 @@ export async function consumeTwoFactorChallenge(input: {
     };
   }
 
-  const actorType = row.actor_type === 'manager' ? 'manager' : 'admin';
-  const role =
-    row.role === 'manager' || row.role === 'support_manager' || row.role === 'wholesale_admin' || row.role === 'admin'
-      ? row.role
-      : actorType === 'manager'
-        ? 'manager'
-        : 'admin';
-
-  if (actorType === 'manager') {
+  if (row.actor_type === 'manager') {
+    if (row.role !== 'manager' && row.role !== 'support_manager') return null;
     return {
       challengeId: row.id,
-      actorType,
-      role: role === 'support_manager' ? 'support_manager' : 'manager',
+      actorType: 'manager',
+      role: row.role,
       login: row.login,
       managerId: row.manager_id ? Number(row.manager_id) : undefined,
     };
   }
 
+  if (row.actor_type !== 'admin') return null;
+  if (row.role !== 'admin' && row.role !== 'wholesale_admin' && row.role !== 'top') return null;
+
   return {
     challengeId: row.id,
-    actorType,
-    role: role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+    actorType: 'admin',
+    role: row.role,
     login: row.login,
     adminUserId: row.admin_user_id ? Number(row.admin_user_id) : undefined,
   };

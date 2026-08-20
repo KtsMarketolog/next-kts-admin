@@ -4,7 +4,10 @@ import styles from '@/app/admin/admin.module.scss';
 
 type AdminDashboardProps = {
   canAccessSite: boolean;
+  canAccessTopDashboard: boolean;
+  isTopUser: boolean;
   onOpenSiteSettings: () => void;
+  onOpenTopDashboard: () => void;
   onOpenWholesale: () => void;
   onOpenClients: () => void;
   onOpenAnalogs: () => void;
@@ -12,11 +15,31 @@ type AdminDashboardProps = {
 
 export function AdminDashboard({
   canAccessSite,
+  canAccessTopDashboard,
+  isTopUser,
   onOpenSiteSettings,
+  onOpenTopDashboard,
   onOpenWholesale,
   onOpenClients,
   onOpenAnalogs,
 }: AdminDashboardProps) {
+  if (isTopUser) {
+    return (
+      <section
+        className={`${styles.dashboardGrid} ${styles.dashboardGridSingle}`}
+        aria-label="Разделы панели управления"
+      >
+        <article className={styles.dashboardCard}>
+          <div>
+            <h2>Стратегический обзор</h2>
+            <p>Загрузка, предпросмотр, публикация, история версий и откат HTML-дашборда.</p>
+          </div>
+          <button onClick={onOpenTopDashboard}>Открыть</button>
+        </article>
+      </section>
+    );
+  }
+
   return (
     <section className={styles.dashboardGrid} aria-label="Разделы панели управления">
       {canAccessSite ? (
@@ -26,6 +49,16 @@ export function AdminDashboard({
             <p>Контент главной страницы, контакты, слайдер, новости, бренды и группа компаний.</p>
           </div>
           <button onClick={onOpenSiteSettings}>Открыть</button>
+        </article>
+      ) : null}
+
+      {canAccessTopDashboard ? (
+        <article className={styles.dashboardCard}>
+          <div>
+            <h2>Стратегический обзор</h2>
+            <p>Загрузка, предпросмотр, публикация, история версий и откат HTML-дашборда.</p>
+          </div>
+          <button onClick={onOpenTopDashboard}>Открыть</button>
         </article>
       ) : null}
 

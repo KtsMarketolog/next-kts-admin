@@ -1,5 +1,5 @@
-export type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
-export type UserTab = 'admin' | 'manager' | 'support_manager';
+export type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top';
+export type UserTab = 'admin' | 'manager' | 'support_manager' | 'top';
 
 export type AccessUser = {
   id: string;
@@ -37,4 +37,3 @@ export const EMPTY_DRAFT: Draft = {
   password: '',
   isActive: true,
 };
-

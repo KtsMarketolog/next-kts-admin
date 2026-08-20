@@ -8,6 +8,22 @@ export { revokeAdminUserSessions, revokeManagerSessions } from './db/adminSessio
 export { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin, updateAccessUser } from './db/adminUsersRepo';
 export type { AccessUser, AccessUserRole, AdminUserAuth } from './db/adminUsersRepo';
 export {
+  activateTopDashboardVersion,
+  createTopDashboardVersion,
+  getTopDashboardOverview,
+  getTopDashboardVersionContent,
+  TopDashboardStateConflictError,
+  TopDashboardVersionNotFoundError,
+} from './db/topDashboardRepo';
+export type {
+  ActivateTopDashboardVersionResult,
+  CreateTopDashboardVersionInput,
+  TopDashboardOverview,
+  TopDashboardVersion,
+  TopDashboardVersionContent,
+  TopDashboardVersionStatus,
+} from './db/topDashboardRepo';
+export {
   assertClientCompanyVisible,
   createClientCompany,
   deleteClientCompany,

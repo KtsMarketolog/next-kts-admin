@@ -7,7 +7,13 @@ export async function POST(request: Request) {
   await clearAdminSession();
   await recordSecurityEvent({
     eventType: 'logout',
-    actorType: isManagerSessionRole(session?.role) ? 'manager' : session?.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+    actorType: isManagerSessionRole(session?.role)
+      ? 'manager'
+      : session?.role === 'wholesale_admin'
+        ? 'wholesale_admin'
+        : session?.role === 'top'
+          ? 'top'
+          : 'admin',
     adminUserId: session?.adminUserId,
     managerId: session?.managerId,
     sessionId: session?.sessionId,

@@ -2,7 +2,7 @@ import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type SecurityActorType = 'admin' | 'wholesale_admin' | 'manager' | 'client' | 'system';
+export type SecurityActorType = 'admin' | 'wholesale_admin' | 'manager' | 'top' | 'client' | 'system';
 
 export type SecurityEventType =
   | 'login_success'
@@ -16,6 +16,9 @@ export type SecurityEventType =
   | 'admin_user_created'
   | 'admin_user_updated'
   | 'admin_user_deleted'
+  | 'top_dashboard_version_uploaded'
+  | 'top_dashboard_version_published'
+  | 'top_dashboard_version_rolled_back'
   | 'manager_created'
   | 'manager_updated'
   | 'manager_deleted'

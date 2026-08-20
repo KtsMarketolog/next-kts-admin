@@ -1,4 +1,4 @@
-import { getAdminSession } from '@/shared/lib/adminAuth';
+import { requireEmployee } from '@/shared/lib/adminAuth';
 import {
   searchAnalogs,
   searchAnalogsForCatalogProduct,
@@ -12,10 +12,8 @@ import { getAnalogStockMatches } from '@/shared/lib/db/analogStockRepo';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const employeeSession = await getAdminSession();
-  if (!employeeSession) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const { denied } = await requireEmployee();
+  if (denied) return denied;
 
   const url = new URL(request.url);
   const query = url.searchParams.get('q') ?? '';

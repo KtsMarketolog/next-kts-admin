@@ -76,6 +76,45 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202608200001_top_dashboard_versions',
+    description: 'Store private versioned TOP dashboard HTML and active publication state',
+    apply: async (client) => {
+      await client.query(`
+        create table if not exists top_dashboard_versions (
+          id bigserial primary key,
+          original_name text not null,
+          html_content text not null,
+          file_size bigint not null check (file_size between 1 and 5242880),
+          sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+          uploaded_by_admin_user_id bigint references admin_users(id) on delete set null,
+          first_published_at timestamptz,
+          first_published_by_admin_user_id bigint references admin_users(id) on delete set null,
+          created_at timestamptz not null default now()
+        );
+
+        create table if not exists top_dashboard_state (
+          id smallint primary key check (id = 1),
+          active_version_id bigint references top_dashboard_versions(id) on delete restrict,
+          previous_version_id bigint references top_dashboard_versions(id) on delete restrict,
+          updated_by_admin_user_id bigint references admin_users(id) on delete set null,
+          updated_at timestamptz not null default now(),
+          check (
+            active_version_id is null
+            or previous_version_id is null
+            or active_version_id <> previous_version_id
+          )
+        );
+
+        insert into top_dashboard_state (id)
+        values (1)
+        on conflict (id) do nothing;
+
+        create index if not exists top_dashboard_versions_created_idx
+          on top_dashboard_versions(created_at desc, id desc);
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

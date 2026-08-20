@@ -43,5 +43,7 @@ export async function fetchAdminSessionWithRetry(attempts = 4) {
 }
 
 export function normalizeSessionRole(role: AdminSessionResponse['role']) {
-  return isManagerRole(role) ? (role as AdminSession['role']) : role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
+  if (isManagerRole(role)) return role as AdminSession['role'];
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'top') return role;
+  return null;
 }

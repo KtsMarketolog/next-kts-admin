@@ -7,7 +7,7 @@ import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
-const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager']);
+const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager', 'top']);
 
 function normalizeRole(value: unknown): AccessUserRole | null {
   return typeof value === 'string' && ACCESS_ROLES.has(value as AccessUserRole) ? (value as AccessUserRole) : null;
@@ -47,13 +47,15 @@ export async function POST(request: Request) {
   const login = normalizeTextField(body.login, 80).toLowerCase();
   const email = normalizeTextField(body.email, 160);
   const password = typeof body.password === 'string' ? body.password : '';
-  const role = normalizeRole(body.role) ?? 'manager';
+  const role = normalizeRole(body.role);
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
-  const supportManagerId = normalizeSupportManagerId(role, body.supportManagerId);
 
-  if (!name || !login || !password) {
+  if (!name || !login || !password || !role) {
+    if (!role) return badRequest('Некорректная роль пользователя');
     return badRequest('Имя, логин и пароль обязательны');
   }
+
+  const supportManagerId = normalizeSupportManagerId(role, body.supportManagerId);
 
   const passwordPolicy = validatePasswordPolicy(password);
   if (!passwordPolicy.ok) {

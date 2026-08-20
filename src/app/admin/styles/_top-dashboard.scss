@@ -1,0 +1,262 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.topDashboardLayout {
+  display: grid;
+  gap: $apx-20;
+  max-width: $apx-1680;
+  margin: 0 auto;
+}
+
+.topDashboardUploadCard {
+  display: grid;
+  grid-template-columns: minmax($apx-260, 0.8fr) minmax(0, 1.6fr);
+  gap: $apx-24;
+  align-items: center;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-10;
+  background: #f8f9fc;
+  padding: $apx-18;
+
+  h3 {
+    margin: 0 0 $apx-8;
+    font-size: $apx-18;
+  }
+
+  p {
+    margin: 0;
+    color: #626577;
+    font-size: $apx-13;
+    line-height: 1.55;
+  }
+}
+
+.topDashboardUploadControls {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: $apx-10;
+  align-items: stretch;
+}
+
+.topDashboardFilePicker {
+  position: relative;
+  min-height: $apx-44;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border: $apx-1 solid #260b86;
+  border-radius: $apx-8;
+  background: #fff;
+  color: #260b86;
+  padding: 0 $apx-16;
+  font-size: $apx-13;
+  font-weight: 800;
+  cursor: pointer;
+
+  input {
+    position: absolute;
+    width: $apx-1;
+    height: $apx-1;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  &:focus-within {
+    outline: $apx-3 solid rgba(38, 11, 134, 0.22);
+    outline-offset: $apx-2;
+  }
+}
+
+.topDashboardSelectedFile {
+  min-width: 0;
+  min-height: $apx-44;
+  display: grid;
+  align-content: center;
+  gap: $apx-2;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-8;
+  background: #fff;
+  padding: $apx-6 $apx-12;
+
+  strong,
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #242633;
+    font-size: $apx-13;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: $apx-12;
+  }
+}
+
+.topDashboardPreviewCard {
+  min-width: 0;
+  overflow: hidden;
+  border: $apx-1 solid #dedfeb;
+  border-radius: $apx-12;
+  background: #fff;
+}
+
+.topDashboardPreviewHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: $apx-20;
+  align-items: flex-start;
+  padding: $apx-20;
+
+  h2 {
+    margin: $apx-4 0 $apx-10;
+    font-size: $apx-22;
+  }
+}
+
+.topDashboardEyebrow {
+  color: #6f7182;
+  font-size: $apx-12;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.topDashboardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-6 $apx-12;
+  color: #6f7182;
+  font-size: $apx-12;
+  line-height: 1.4;
+}
+
+.topDashboardPreviewActions,
+.topDashboardVersionActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: $apx-8;
+  align-items: center;
+}
+
+.topDashboardFrameShell {
+  min-width: 0;
+  border-top: $apx-1 solid #dedfeb;
+  background: #e8e9ef;
+  padding: $apx-10;
+}
+
+.topDashboardFrame {
+  width: 100%;
+  min-height: clamp($apx-620, calc(100vh - $apx-230), $apx-980);
+  display: block;
+  border: 0;
+  border-radius: $apx-8;
+  background: #fff;
+}
+
+.topDashboardEmpty {
+  min-height: $apx-360;
+  display: grid;
+  place-content: center;
+  gap: $apx-8;
+  border-top: $apx-1 solid #dedfeb;
+  color: #6f7182;
+  padding: $apx-24;
+  text-align: center;
+
+  strong {
+    color: #242633;
+    font-size: $apx-20;
+  }
+}
+
+.topDashboardVersionList {
+  display: grid;
+  gap: $apx-10;
+}
+
+.topDashboardVersionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: $apx-16;
+  align-items: center;
+  border: $apx-1 solid #e1e3ee;
+  border-radius: $apx-10;
+  background: #fff;
+  padding: $apx-14;
+}
+
+.topDashboardVersionSelected {
+  border-color: #6a4bd9;
+  box-shadow: 0 0 0 $apx-2 rgba(38, 11, 134, 0.08);
+}
+
+.topDashboardVersionTitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+  align-items: center;
+  margin-bottom: $apx-7;
+
+  strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: $apx-15;
+  }
+}
+
+.topDashboardStatus {
+  display: inline-flex;
+  align-items: center;
+  min-height: $apx-28;
+  border-radius: $apx-999;
+  padding: 0 $apx-10;
+  font-size: $apx-11;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.topDashboardStatusactive {
+  background: #e5f7ec;
+  color: #14743a;
+}
+
+.topDashboardStatusdraft {
+  background: #eee9ff;
+  color: #4521aa;
+}
+
+.topDashboardStatusarchived {
+  background: #eef0f5;
+  color: #5d6070;
+}
+
+@media (max-width: 900px) {
+  .topDashboardUploadCard,
+  .topDashboardUploadControls,
+  .topDashboardVersionRow {
+    grid-template-columns: 1fr;
+  }
+
+  .topDashboardPreviewHeader {
+    display: grid;
+  }
+
+  .topDashboardPreviewActions,
+  .topDashboardVersionActions {
+    justify-content: stretch;
+
+    button {
+      flex: 1 1 $apx-180;
+    }
+  }
+
+  .topDashboardFrame {
+    min-height: $apx-620;
+  }
+}

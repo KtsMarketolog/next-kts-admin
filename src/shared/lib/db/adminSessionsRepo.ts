@@ -4,7 +4,7 @@ import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
+export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top';
 
 export type StoredAdminSession = {
   sessionId: string;
@@ -31,7 +31,9 @@ function hashSessionToken(token: string) {
 }
 
 function normalizeRole(role: string): StoredAdminSessionRole | null {
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager' || role === 'support_manager') return role;
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager' || role === 'support_manager' || role === 'top') {
+    return role;
+  }
   return null;
 }
 
@@ -115,6 +117,11 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
   }
 
   if (row.admin_user_id && row.admin_is_active === false) {
+    await revokeStoredAdminSession(token);
+    return null;
+  }
+
+  if (role === 'top' && !row.admin_user_id) {
     await revokeStoredAdminSession(token);
     return null;
   }

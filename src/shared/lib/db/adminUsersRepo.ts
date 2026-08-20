@@ -3,7 +3,7 @@ import type { PoolClient } from 'pg';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type AdminUserRole = 'admin' | 'wholesale_admin';
+export type AdminUserRole = 'admin' | 'wholesale_admin' | 'top';
 export type ManagerAccessRole = 'manager' | 'support_manager';
 export type AccessUserRole = AdminUserRole | ManagerAccessRole;
 export type AccessUserSource = 'admin' | 'manager';
@@ -72,11 +72,14 @@ function normalizeLogin(login: string) {
 }
 
 function normalizeAdminRole(role: string): AdminUserRole {
-  return role === 'wholesale_admin' ? 'wholesale_admin' : 'admin';
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'top') return role;
+  throw new Error('Некорректная роль пользователя');
 }
 
 function normalizeAccessRole(role: string): AccessUserRole | null {
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager' || role === 'support_manager') return role;
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager' || role === 'support_manager' || role === 'top') {
+    return role;
+  }
   return null;
 }
 
@@ -87,12 +90,14 @@ function isManagerAccessRole(role: AccessUserRole): role is ManagerAccessRole {
 function accessLabels(role: AccessUserRole) {
   if (role === 'admin') return ['Сайт', 'Прайсы', 'Пользователи'];
   if (role === 'wholesale_admin') return ['Индивидуальные прайсы'];
+  if (role === 'top') return ['Стратегический обзор'];
   if (role === 'support_manager') return ['Прайсы менеджера'];
   return ['Свои прайсы'];
 }
 
 function mapAccessUser(row: AccessUserRow, currentAdminUserId?: number | null): AccessUser {
-  const role = normalizeAccessRole(row.role) ?? (row.source === 'manager' ? 'manager' : 'admin');
+  const role = normalizeAccessRole(row.role);
+  if (!role) throw new Error('Некорректная роль пользователя');
   const numericId = Number(row.id);
   return {
     id: `${row.source}:${numericId}`,
@@ -267,7 +272,7 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
       group by wm.id, support.name
     ) users
     order by
-      case role when 'admin' then 1 when 'wholesale_admin' then 2 when 'manager' then 3 when 'support_manager' then 4 else 5 end,
+      case role when 'admin' then 1 when 'wholesale_admin' then 2 when 'top' then 3 when 'manager' then 4 when 'support_manager' then 5 else 6 end,
       is_active desc,
       name asc,
       login asc

@@ -90,7 +90,11 @@ async function finishLogin(input: {
     return Response.json({ ok: true, role: actor.role });
   }
 
-  await createAdminSession(actor.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin', {
+  if (actor.role === 'top' && !actor.adminUserId) {
+    return Response.json({ error: 'Invalid session' }, { status: 401 });
+  }
+
+  await createAdminSession(actor.role, {
     adminUserId: actor.adminUserId,
     ip,
     userAgent,
@@ -106,7 +110,7 @@ async function finishLogin(input: {
   });
   await recordSecurityEvent({
     eventType: 'login_success',
-    actorType: actor.role === 'wholesale_admin' ? 'wholesale_admin' : 'admin',
+    actorType: actor.role,
     adminUserId: actor.adminUserId,
     login: actor.login,
     ip,
@@ -120,7 +124,7 @@ async function finishLogin(input: {
 async function startTwoFactor(input: {
   login: string;
   actorType: 'admin' | 'manager';
-  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top';
   email: string;
   loginSessionId: string;
   adminUserId?: number | null;

@@ -8,8 +8,9 @@ const COOKIE_NAME = 'kts_admin_session';
 const PASSWORD_KEYLEN = 64;
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 100;
 
-export type AdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager';
+export type AdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top';
 export type AdminManagerSessionRole = 'manager' | 'support_manager';
+export type AdminUserSessionRole = 'admin' | 'wholesale_admin' | 'top';
 
 export type AdminSession = {
   role: AdminSessionRole;
@@ -28,21 +29,33 @@ export function isManagerSessionRole(role: AdminSessionRole | null | undefined):
   return role === 'manager' || role === 'support_manager';
 }
 
+export function isOperationalEmployeeSessionRole(role: AdminSessionRole | null | undefined) {
+  return role === 'admin' || role === 'wholesale_admin' || isManagerSessionRole(role);
+}
+
 function sign(value: string) {
   return createHmac('sha256', getAdminSessionSecret()).update(value).digest('hex');
 }
 
 export async function createAdminSession(
-  role: 'admin' | 'wholesale_admin' = 'admin',
+  role: AdminUserSessionRole = 'admin',
   options: CreateSessionOptions = {},
 ) {
+  if (role === 'top' && !options.adminUserId) {
+    throw new Error('TOP session requires an admin user id');
+  }
   return createEmployeeSession({ role, adminUserId: options.adminUserId ?? undefined }, options);
 }
 
 export async function createEmployeeSession(session: AdminSession, options: CreateSessionOptions = {}) {
+  const adminUserId = session.adminUserId ?? options.adminUserId ?? null;
+  if (session.role === 'top' && (!Number.isInteger(adminUserId) || Number(adminUserId) <= 0)) {
+    throw new Error('Top session requires an admin user');
+  }
+
   const storedSession = await createStoredAdminSession({
     role: session.role,
-    adminUserId: session.adminUserId ?? options.adminUserId ?? null,
+    adminUserId,
     managerId: session.managerId ?? null,
     ip: options.ip,
     userAgent: options.userAgent,
@@ -154,7 +167,19 @@ export async function requireAdminSession() {
 
 export async function requireEmployee() {
   const session = await getAdminSession();
-  if (!session) {
+  if (!session || !isOperationalEmployeeSessionRole(session.role)) {
+    return { denied: Response.json({ error: 'Unauthorized' }, { status: 401 }), session: null };
+  }
+  return { denied: null, session };
+}
+
+export async function requireTopDashboardSession() {
+  const session = await getAdminSession();
+  if (
+    !session
+    || (session.role !== 'admin' && session.role !== 'top')
+    || (session.role === 'top' && !session.adminUserId)
+  ) {
     return { denied: Response.json({ error: 'Unauthorized' }, { status: 401 }), session: null };
   }
   return { denied: null, session };

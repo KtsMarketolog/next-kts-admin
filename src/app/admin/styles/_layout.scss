@@ -151,6 +151,10 @@
   margin: 0 auto $apx-24;
 }
 
+.dashboardGridSingle {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .dashboardCard {
   min-height: $apx-210;
   display: grid;

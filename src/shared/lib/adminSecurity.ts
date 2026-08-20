@@ -5,6 +5,7 @@ const ADMIN_ACTION_WINDOW_MS = 10 * 60 * 1000;
 
 function actorKey(session: AdminSession) {
   if (isManagerSessionRole(session.role)) return `manager:${session.managerId ?? 'unknown'}`;
+  if (session.adminUserId) return `admin:${session.adminUserId}`;
   return `role:${session.role}`;
 }
 

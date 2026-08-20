@@ -13,6 +13,7 @@ import { useAdminNews } from '@/features/admin/model/useAdminNews';
 import { useAdminPriceGroups } from '@/features/admin/model/useAdminPriceGroups';
 import { useAdminSlides } from '@/features/admin/model/useAdminSlides';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
+import { AdminTopDashboardSection } from '@/features/admin/top-dashboard/AdminTopDashboardSection';
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
 import type { AdminSection, SettingKey } from '@/features/admin/types';
 import type { AdminSession } from '@/shared/lib/adminAuth';
@@ -38,9 +39,10 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   const [authenticated, setAuthenticated] = useState(Boolean(initialSession));
   const [sessionReady, setSessionReady] = useState(Boolean(initialSession));
   const [sessionRole, setSessionRole] = useState<AdminSession['role'] | null>(initialSession?.role ?? null);
-  const [activeArea, setActiveArea] = useState<AdminArea>(
-    initialSession?.role !== 'admin' && initialArea === 'site' ? 'home' : initialArea,
-  );
+  const [activeArea, setActiveArea] = useState<AdminArea>(() => {
+    if (initialSession?.role === 'top') return initialArea === 'top' ? 'top' : 'home';
+    return initialSession?.role !== 'admin' && initialArea === 'site' ? 'home' : initialArea;
+  });
   const [activeSection, setActiveSection] = useState<AdminSection>('info');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -86,6 +88,17 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   };
 
   const switchArea = (area: AdminArea) => {
+    if (area === 'top') {
+      if (sessionRole !== 'admin' && sessionRole !== 'top') return;
+      router.replace('/admin/top', { scroll: false });
+      return;
+    }
+
+    if (sessionRole === 'top') {
+      router.replace('/admin', { scroll: false });
+      return;
+    }
+
     if (area === 'wholesale') {
       router.replace(isManagerRole(sessionRole) ? '/admin/wholesale/manager' : '/admin/wholesale/admin', { scroll: false });
       return;
@@ -133,8 +146,9 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
         setSessionRole(null);
         setAuthenticated(false);
       } else {
-        setSessionRole(normalizeSessionRole(session.role));
-        setAuthenticated(true);
+        const nextRole = normalizeSessionRole(session.role);
+        setSessionRole(nextRole);
+        setAuthenticated(Boolean(nextRole));
       }
       return;
     }
@@ -189,9 +203,24 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
         if (data.authenticated) {
           const nextRole = normalizeSessionRole(data.role);
+          if (!nextRole) {
+            setSessionRole(null);
+            setAuthenticated(false);
+            setSessionReady(true);
+            return;
+          }
           setSessionRole(nextRole);
           setAuthenticated(true);
           setSessionReady(true);
+          if (nextRole === 'top') {
+            const isTopPath = pathname === '/admin/top' || pathname === '/admin/top/';
+            const isHomePath = pathname === '/admin' || pathname === '/admin/';
+            setActiveArea(isTopPath ? 'top' : 'home');
+            if (!isTopPath && !isHomePath) {
+              router.replace('/admin', { scroll: false });
+            }
+            return;
+          }
           if (nextRole !== 'admin') {
             if (pathname.startsWith('/admin/site')) {
               router.replace('/admin', { scroll: false });
@@ -223,6 +252,21 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   }, [loadAdminData, pathname, router]);
 
   useEffect(() => {
+    if (sessionRole === 'top') {
+      const isTopPath = pathname === '/admin/top' || pathname === '/admin/top/';
+      const isHomePath = pathname === '/admin' || pathname === '/admin/';
+      setActiveArea(isTopPath ? 'top' : 'home');
+      if (!isTopPath && !isHomePath) {
+        router.replace('/admin', { scroll: false });
+      }
+      return;
+    }
+
+    if (pathname === '/admin/top' || pathname === '/admin/top/') {
+      setActiveArea(sessionRole === 'admin' ? 'top' : 'home');
+      return;
+    }
+
     if (pathname.startsWith('/admin/wholesale')) {
       setActiveArea('wholesale');
       return;
@@ -251,7 +295,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
     }
 
     setActiveArea(initialArea);
-  }, [initialArea, pathname, sessionRole]);
+  }, [initialArea, pathname, router, sessionRole]);
 
   useEffect(() => {
     if (pathname.startsWith('/admin/site/users')) {
@@ -321,17 +365,19 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   }
 
   const pageTitle =
-    activeArea === 'site'
-      ? 'Управление сайтом'
-      : activeArea === 'wholesale'
-        ? pathname.endsWith('/admin/wholesale/manager')
-          ? 'Кабинет менеджера'
-          : 'Индивидуальные прайсы'
-        : activeArea === 'clients'
-          ? 'Клиенты'
-          : activeArea === 'analogs'
-            ? 'Аналоги'
-          : 'Панель управления';
+    activeArea === 'top'
+      ? 'Стратегический обзор'
+      : activeArea === 'site'
+        ? 'Управление сайтом'
+        : activeArea === 'wholesale'
+          ? pathname.endsWith('/admin/wholesale/manager')
+            ? 'Кабинет менеджера'
+            : 'Индивидуальные прайсы'
+          : activeArea === 'clients'
+            ? 'Клиенты'
+            : activeArea === 'analogs'
+              ? 'Аналоги'
+              : 'Панель управления';
 
   return (
     <main className={styles.page}>
@@ -352,7 +398,10 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       {activeArea === 'home' && (
         <AdminDashboard
           canAccessSite={sessionRole === 'admin'}
+          canAccessTopDashboard={sessionRole === 'admin' || sessionRole === 'top'}
+          isTopUser={sessionRole === 'top'}
           onOpenSiteSettings={() => switchArea('site')}
+          onOpenTopDashboard={() => switchArea('top')}
           onOpenWholesale={() => switchArea('wholesale')}
           onOpenClients={() => switchArea('clients')}
           onOpenAnalogs={() => switchArea('analogs')}
@@ -360,6 +409,8 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       )}
 
       {activeArea === 'analogs' && <AnalogFinder />}
+
+      {activeArea === 'top' && <AdminTopDashboardSection showStatus={showStatus} />}
 
       {activeArea === 'wholesale' && (
         <AdminWholesaleGateway canManageWholesale={sessionRole === 'admin' || sessionRole === 'wholesale_admin'} onBack={() => switchArea('home')} />

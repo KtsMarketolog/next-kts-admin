@@ -68,7 +68,7 @@ jobs:
       - name: Build application
         run: |
           set -euo pipefail
-          npm run build
+          npm run build:webpack
 
       - name: Prepare release artifact
         run: |

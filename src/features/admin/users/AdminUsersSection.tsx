@@ -43,7 +43,7 @@ function attachSavedPasswords(users: AccessUser[]) {
 }
 
 function isAdminAccessUser(user: AccessUser) {
-  return tabForRole(user.role) === 'admin';
+  return user.source === 'admin';
 }
 
 async function readError(response: Response, fallback: string) {
