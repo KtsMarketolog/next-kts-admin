@@ -185,6 +185,22 @@
   }
 }
 
+.dashboardCardInteractive {
+  box-shadow: 0 7px 20px rgba(36, 38, 51, 0.05);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+
+  &:hover {
+    border-color: #8d78dc;
+    box-shadow: 0 12px 28px rgba(38, 11, 134, 0.1);
+    transform: translateY(-2px);
+  }
+
+  &:focus-visible {
+    outline: 3px solid rgba(38, 11, 134, 0.22);
+    outline-offset: 2px;
+  }
+}
+
 .dashboardCardLink {
   width: 100%;
   min-height: $apx-42;

@@ -4,6 +4,8 @@ import Link from 'next/link';
 
 import styles from '@/app/admin/admin.module.scss';
 
+const interactiveCardClassName = `${styles.dashboardCard} ${styles.dashboardCardInteractive}`;
+
 type AdminDashboardProps = {
   canAccessSite: boolean;
   canAccessTopDashboard: boolean;
@@ -23,7 +25,7 @@ export function AdminDashboard({
         className={`${styles.dashboardGrid} ${styles.dashboardGridSingle}`}
         aria-label="Разделы панели управления"
       >
-        <Link className={styles.dashboardCard} href="/admin/top" replace scroll={false}>
+        <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
           <div>
             <h2>HTML-страницы и отчёты</h2>
             <p>Отдельные блоки с HTML-дашбордами, загрузкой, предпросмотром и историей версий.</p>
@@ -37,7 +39,7 @@ export function AdminDashboard({
   return (
     <section className={styles.dashboardGrid} aria-label="Разделы панели управления">
       {canAccessSite ? (
-        <Link className={styles.dashboardCard} href="/admin/site" replace scroll={false}>
+        <Link className={interactiveCardClassName} href="/admin/site" replace scroll={false}>
           <div>
             <h2>Управление сайтом</h2>
             <p>Контент главной страницы, контакты, слайдер, новости, бренды и группа компаний.</p>
@@ -47,7 +49,7 @@ export function AdminDashboard({
       ) : null}
 
       {canAccessTopDashboard ? (
-        <Link className={styles.dashboardCard} href="/admin/top" replace scroll={false}>
+        <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
           <div>
             <h2>HTML-страницы и отчёты</h2>
             <p>Отдельные блоки с HTML-дашбордами, загрузкой, предпросмотром и историей версий.</p>
@@ -56,7 +58,7 @@ export function AdminDashboard({
         </Link>
       ) : null}
 
-      <Link className={styles.dashboardCard} href={wholesaleHref} replace scroll={false}>
+      <Link className={interactiveCardClassName} href={wholesaleHref} replace scroll={false}>
         <div>
           <h2>Индивидуальные прайсы</h2>
           <p>Отдельная база товаров для прайсов, индивидуальные цены, публичные ссылки и PDF.</p>
@@ -64,7 +66,7 @@ export function AdminDashboard({
         <span className={styles.dashboardCardLink}>Открыть</span>
       </Link>
 
-      <Link className={styles.dashboardCard} href="/admin/clients" replace scroll={false}>
+      <Link className={interactiveCardClassName} href="/admin/clients" replace scroll={false}>
         <div>
           <h2>Клиенты</h2>
           <p>Компании клиентов, личные кабинеты, документы, заявки и чат с менеджером.</p>
@@ -72,7 +74,7 @@ export function AdminDashboard({
         <span className={styles.dashboardCardLink}>Открыть</span>
       </Link>
 
-      <Link className={styles.dashboardCard} href="/admin/analogs" replace scroll={false}>
+      <Link className={interactiveCardClassName} href="/admin/analogs" replace scroll={false}>
         <div>
           <h2>Аналоги</h2>
           <p>Подбор замены оборудования по модели, артикулу или названию.</p>
