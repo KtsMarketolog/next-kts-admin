@@ -3,11 +3,6 @@ import type { PoolClient } from 'pg';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 import {
-  activateTopDashboardVersion,
-  createTopDashboardVersion,
-  deleteTopDashboardVersion,
-  getTopDashboardOverview,
-  getTopDashboardVersionContent,
   TopDashboardActiveVersionDeleteError,
   TopDashboardStateConflictError,
   TopDashboardVersionNotFoundError,
@@ -18,14 +13,11 @@ import {
   type TopDashboardVersion,
   type TopDashboardVersionContent,
   type TopDashboardVersionStatus,
-} from './topDashboardRepo';
-
-export type TopDashboardBlockStorageKind = 'legacy' | 'native';
+} from './topDashboardDomain';
 
 export type TopDashboardBlock = {
   id: number;
   title: string;
-  storageKind: TopDashboardBlockStorageKind;
   createdAt: string;
 };
 
@@ -38,6 +30,21 @@ export type TopDashboardBlockSummary = TopDashboardBlock & {
 
 export type TopDashboardBlockOverview = TopDashboardOverview & {
   block: TopDashboardBlock;
+};
+
+export type RenameTopDashboardBlockResult = {
+  block: TopDashboardBlock;
+  previousTitle: string;
+  changed: boolean;
+};
+
+export type DeleteTopDashboardBlockResult = {
+  deletedBlock: TopDashboardBlock & {
+    activeVersionId: number | null;
+    previousVersionId: number | null;
+    versionCount: number;
+    storedBytes: number;
+  };
 };
 
 export type CreateTopDashboardBlockVersionInput = CreateTopDashboardVersionInput & {
@@ -64,7 +71,6 @@ type Queryable = Pick<PoolClient, 'query'>;
 type TopDashboardBlockRow = {
   id: string;
   title: string;
-  storage_kind: TopDashboardBlockStorageKind;
   created_at: string;
 };
 
@@ -100,7 +106,6 @@ function mapBlock(row: TopDashboardBlockRow): TopDashboardBlock {
   return {
     id: Number(row.id),
     title: row.title,
-    storageKind: row.storage_kind,
     createdAt: row.created_at,
   };
 }
@@ -136,7 +141,7 @@ function mapVersion(row: TopDashboardVersionRow, activeVersionId: number | null)
 async function findBlock(blockId: number, client?: Queryable, lock = false) {
   const db = client ?? { query };
   const result = await db.query<TopDashboardBlockRow>(
-    `select id::text, title, storage_kind, created_at::text
+    `select id::text, title, created_at::text
      from top_dashboard_blocks
      where id = $1
      limit 1
@@ -188,44 +193,21 @@ export async function getTopDashboardBlocks(): Promise<TopDashboardBlockSummary[
     select
       blocks.id::text,
       blocks.title,
-      blocks.storage_kind,
       blocks.created_at::text,
-      case
-        when blocks.storage_kind = 'legacy' then legacy_state.active_version_id::text
-        else native_state.active_version_id::text
-      end as active_version_id,
-      case
-        when blocks.storage_kind = 'legacy' then legacy_active.original_name
-        else native_active.original_name
-      end as active_original_name,
-      case
-        when blocks.storage_kind = 'legacy' then (select count(*)::text from top_dashboard_versions)
-        else (
-          select count(*)::text
-          from top_dashboard_block_versions versions
-          where versions.block_id = blocks.id
-        )
-      end as version_count,
-      case
-        when blocks.storage_kind = 'legacy' then coalesce(
-          greatest(
-            legacy_state.updated_at,
-            (select max(versions.created_at) from top_dashboard_versions versions)
-          ),
-          blocks.updated_at
-        )::text
-        else greatest(blocks.updated_at, coalesce(native_state.updated_at, blocks.updated_at))::text
-      end as updated_at
+      native_state.active_version_id::text as active_version_id,
+      native_active.original_name as active_original_name,
+      (
+        select count(*)::text
+        from top_dashboard_block_versions versions
+        where versions.block_id = blocks.id
+      ) as version_count,
+      greatest(blocks.updated_at, coalesce(native_state.updated_at, blocks.updated_at))::text as updated_at
     from top_dashboard_blocks blocks
-    left join top_dashboard_state legacy_state
-      on blocks.storage_kind = 'legacy' and legacy_state.id = 1
-    left join top_dashboard_versions legacy_active
-      on blocks.storage_kind = 'legacy' and legacy_active.id = legacy_state.active_version_id
     left join top_dashboard_block_state native_state
-      on blocks.storage_kind = 'native' and native_state.block_id = blocks.id
+      on native_state.block_id = blocks.id
     left join top_dashboard_block_versions native_active
       on native_active.block_id = blocks.id and native_active.id = native_state.active_version_id
-    order by (blocks.storage_kind = 'legacy') desc, blocks.created_at asc, blocks.id asc
+    order by blocks.created_at asc, blocks.id asc
   `);
 
   return result.rows.map(mapBlockSummary);
@@ -244,11 +226,10 @@ export async function createTopDashboardBlock(input: {
     const result = await client.query<TopDashboardBlockRow>(
       `insert into top_dashboard_blocks (
          title,
-         storage_kind,
          created_by_admin_user_id
        )
-       values ($1, 'native', $2)
-       returning id::text, title, storage_kind, created_at::text`,
+       values ($1, $2)
+       returning id::text, title, created_at::text`,
       [title, input.createdByAdminUserId],
     );
     const row = result.rows[0];
@@ -269,6 +250,102 @@ export async function createTopDashboardBlock(input: {
   });
 }
 
+export async function renameTopDashboardBlock(input: {
+  blockId: number;
+  title: string;
+}): Promise<RenameTopDashboardBlockResult> {
+  await ensureSiteSchema();
+
+  const title = normalizeTopDashboardBlockTitle(input.title);
+  if (!title) throw new TopDashboardBlockTitleValidationError();
+
+  return withTransaction(async (client) => {
+    const existing = await requireBlock(input.blockId, client, true);
+    if (existing.title === title) {
+      return {
+        block: mapBlock(existing),
+        previousTitle: existing.title,
+        changed: false,
+      };
+    }
+
+    const result = await client.query<TopDashboardBlockRow>(
+      `update top_dashboard_blocks
+       set title = $2,
+           updated_at = now()
+       where id = $1
+       returning id::text, title, created_at::text`,
+      [input.blockId, title],
+    );
+    const updated = result.rows[0];
+    if (!updated) throw new TopDashboardBlockNotFoundError();
+
+    return {
+      block: mapBlock(updated),
+      previousTitle: existing.title,
+      changed: true,
+    };
+  });
+}
+
+export async function deleteTopDashboardBlock(
+  blockId: number,
+): Promise<DeleteTopDashboardBlockResult> {
+  await ensureSiteSchema();
+
+  return withTransaction(async (client) => {
+    await requireBlock(blockId, client, true);
+
+    const stateResult = await client.query<TopDashboardStateRow>(
+      `select active_version_id::text, previous_version_id::text, updated_at::text
+       from top_dashboard_block_state
+       where block_id = $1
+       for update`,
+      [blockId],
+    );
+    const state = stateResult.rows[0];
+    if (!state) throw new TopDashboardBlockStateNotFoundError();
+
+    const versionsResult = await client.query<{
+      version_count: string;
+      stored_bytes: string;
+    }>(
+      `select count(*)::text as version_count,
+              coalesce(sum(file_size), 0)::text as stored_bytes
+       from top_dashboard_block_versions
+       where block_id = $1`,
+      [blockId],
+    );
+    const versions = versionsResult.rows[0];
+
+    // Remove the state row first so its RESTRICT references to active and
+    // previous versions cannot block the block-level cascade.
+    await client.query(
+      `delete from top_dashboard_block_state
+       where block_id = $1`,
+      [blockId],
+    );
+    const deletedResult = await client.query<TopDashboardBlockRow>(
+      `delete from top_dashboard_blocks
+       where id = $1
+       returning id::text, title, created_at::text`,
+      [blockId],
+    );
+    const deleted = deletedResult.rows[0];
+    if (!deleted) throw new TopDashboardBlockNotFoundError();
+
+    return {
+      deletedBlock: {
+        ...mapBlock(deleted),
+        activeVersionId: numericId(state.active_version_id),
+        previousVersionId: numericId(state.previous_version_id),
+        versionCount: Number(versions?.version_count ?? 0),
+        storedBytes: Number(versions?.stored_bytes ?? 0),
+      },
+    };
+  });
+}
+
 export async function getTopDashboardBlockOverview(
   blockId: number,
 ): Promise<TopDashboardBlockOverview> {
@@ -276,10 +353,6 @@ export async function getTopDashboardBlockOverview(
 
   const blockRow = await requireBlock(blockId);
   const block = mapBlock(blockRow);
-  if (block.storageKind === 'legacy') {
-    const legacyOverview = await getTopDashboardOverview();
-    return { block, ...legacyOverview };
-  }
 
   const [stateResult, versionsResult] = await Promise.all([
     query<TopDashboardStateRow>(
@@ -324,14 +397,8 @@ export async function createTopDashboardBlockVersion(
 ): Promise<TopDashboardVersion> {
   await ensureSiteSchema();
 
-  const block = await requireBlock(input.blockId);
-  if (block.storage_kind === 'legacy') {
-    return createTopDashboardVersion(input);
-  }
-
   return withTransaction(async (client) => {
-    const lockedBlock = await requireBlock(input.blockId, client, true);
-    if (lockedBlock.storage_kind !== 'native') throw new TopDashboardBlockNotFoundError();
+    await requireBlock(input.blockId, client, true);
 
     const stateResult = await client.query<{ block_id: string }>(
       `select block_id
@@ -429,10 +496,7 @@ export async function getTopDashboardBlockVersionContent(
 ): Promise<TopDashboardVersionContent | null> {
   await ensureSiteSchema();
 
-  const block = await requireBlock(blockId);
-  if (block.storage_kind === 'legacy') {
-    return getTopDashboardVersionContent(versionId);
-  }
+  await requireBlock(blockId);
 
   const result = await query<{
     id: string;
@@ -464,14 +528,8 @@ export async function activateTopDashboardBlockVersion(
 ): Promise<ActivateTopDashboardVersionResult> {
   await ensureSiteSchema();
 
-  const block = await requireBlock(input.blockId);
-  if (block.storage_kind === 'legacy') {
-    return activateTopDashboardVersion(input);
-  }
-
   return withTransaction(async (client) => {
-    const lockedBlock = await requireBlock(input.blockId, client, true);
-    if (lockedBlock.storage_kind !== 'native') throw new TopDashboardBlockNotFoundError();
+    await requireBlock(input.blockId, client, true);
 
     const stateResult = await client.query<TopDashboardStateRow>(
       `select active_version_id::text, previous_version_id::text, updated_at::text
@@ -552,15 +610,8 @@ export async function deleteTopDashboardBlockVersion(input: {
 }): Promise<DeleteTopDashboardBlockVersionResult> {
   await ensureSiteSchema();
 
-  const block = await requireBlock(input.blockId);
-  if (block.storage_kind === 'legacy') {
-    const result = await deleteTopDashboardVersion(input);
-    return { blockId: input.blockId, ...result };
-  }
-
   return withTransaction(async (client) => {
-    const lockedBlock = await requireBlock(input.blockId, client, true);
-    if (lockedBlock.storage_kind !== 'native') throw new TopDashboardBlockNotFoundError();
+    await requireBlock(input.blockId, client, true);
 
     const stateResult = await client.query<TopDashboardStateRow>(
       `select active_version_id::text, previous_version_id::text, updated_at::text

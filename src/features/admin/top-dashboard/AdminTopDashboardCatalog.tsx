@@ -9,7 +9,6 @@ import styles from '@/app/admin/admin.module.scss';
 type TopDashboardBlock = {
   id: number;
   title: string;
-  storageKind: 'legacy' | 'native';
   activeVersionId: number | null;
   activeOriginalName: string | null;
   versionCount: number;

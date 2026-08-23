@@ -74,7 +74,6 @@ export async function POST(request: Request) {
       referer: request.headers.get('referer'),
       metadata: {
         title: block.title,
-        storageKind: block.storageKind,
       },
     });
 

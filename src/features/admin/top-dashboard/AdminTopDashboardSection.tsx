@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
@@ -23,7 +24,6 @@ type TopDashboardOverview = {
   block: {
     id: number;
     title: string;
-    storageKind: 'legacy' | 'native';
     createdAt: string;
   };
   activeVersionId: number | null;
@@ -105,6 +105,19 @@ function statusLabel(status: TopDashboardVersionStatus) {
   return 'Черновик';
 }
 
+function versionCountLabel(count: number) {
+  const normalized = Math.abs(count) % 100;
+  const lastDigit = normalized % 10;
+  const word = normalized >= 11 && normalized <= 19
+    ? 'версий'
+    : lastDigit === 1
+      ? 'версия'
+      : lastDigit >= 2 && lastDigit <= 4
+        ? 'версии'
+        : 'версий';
+  return `${count} ${word}`;
+}
+
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -120,7 +133,11 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [previewRevision, setPreviewRevision] = useState(0);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+  const [isEditingBlockTitle, setIsEditingBlockTitle] = useState(false);
+  const [blockTitleDraft, setBlockTitleDraft] = useState('');
+  const [blockMutationError, setBlockMutationError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const blockTitleInputRef = useRef<HTMLInputElement>(null);
   const previewCardRef = useRef<HTMLElement>(null);
   const showStatusRef = useRef(showStatus);
   const overviewRequestIdRef = useRef(0);
@@ -129,6 +146,13 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   useEffect(() => {
     showStatusRef.current = showStatus;
   }, [showStatus]);
+
+  useEffect(() => {
+    if (isEditingBlockTitle) {
+      blockTitleInputRef.current?.focus();
+      blockTitleInputRef.current?.select();
+    }
+  }, [isEditingBlockTitle]);
 
   const loadOverview = useCallback(async (preferredVersionId?: number | null) => {
     const requestId = overviewRequestIdRef.current + 1;
@@ -358,6 +382,115 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     }
   };
 
+  const beginBlockTitleEdit = () => {
+    if (!overview || busyAction !== null) return;
+    setBlockTitleDraft(overview.block.title);
+    setBlockMutationError(null);
+    setIsEditingBlockTitle(true);
+  };
+
+  const cancelBlockTitleEdit = () => {
+    setBlockTitleDraft('');
+    setBlockMutationError(null);
+    setIsEditingBlockTitle(false);
+  };
+
+  const renameBlock = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!overview || busyAction !== null) return;
+
+    const title = blockTitleDraft.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+    if (!title || Array.from(title).length > 120) {
+      setBlockMutationError('Название блока должно содержать от 1 до 120 символов');
+      blockTitleInputRef.current?.focus();
+      return;
+    }
+    if (title === overview.block.title) {
+      cancelBlockTitleEdit();
+      return;
+    }
+
+    setBusyAction('rename-block');
+    setBlockMutationError(null);
+    try {
+      const response = await fetch(apiBasePath, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ title }),
+      });
+      if (!response.ok) {
+        if (response.status === 404) {
+          showStatusRef.current('Блок уже удалён');
+          router.replace('/admin/top', { scroll: false });
+          return;
+        }
+        const message = await readError(response, 'Не удалось изменить название блока');
+        setBlockMutationError(message);
+        showStatusRef.current(message);
+        return;
+      }
+
+      const data = await response.json().catch(() => ({}));
+      const updatedTitle = typeof data.block?.title === 'string' ? data.block.title : title;
+      setOverview((current) => current
+        ? { ...current, block: { ...current.block, title: updatedTitle } }
+        : current);
+      setBlockTitleDraft('');
+      setIsEditingBlockTitle(false);
+      showStatusRef.current('Название блока изменено');
+    } catch {
+      const message = 'Не удалось изменить название блока';
+      setBlockMutationError(message);
+      showStatusRef.current(message);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const deleteBlock = async () => {
+    if (!overview || busyAction !== null) return;
+
+    const title = overview.block.title;
+    const versions = versionCountLabel(overview.versions.length);
+    if (
+      !window.confirm(
+        `Удалить блок «${title}» и все его версии (${versions})?\n\nЭто действие необратимо: блок и загруженные HTML-файлы будут удалены полностью.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusyAction('delete-block');
+    setBlockMutationError(null);
+    try {
+      const response = await fetch(apiBasePath, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        if (response.status === 404) {
+          showStatusRef.current('Блок уже удалён');
+          router.replace('/admin/top', { scroll: false });
+          return;
+        }
+        const message = await readError(response, 'Не удалось удалить блок');
+        setBlockMutationError(message);
+        showStatusRef.current(message);
+        return;
+      }
+
+      showStatusRef.current(`Блок «${title}» удалён`);
+      router.replace('/admin/top', { scroll: false });
+    } catch {
+      const message = 'Не удалось удалить блок';
+      setBlockMutationError(message);
+      showStatusRef.current(message);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const togglePreviewFullscreen = async () => {
     const previewCard = previewCardRef.current;
     if (!previewCard) return;
@@ -389,13 +522,78 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   return (
     <div className={styles.topDashboardLayout}>
       <section className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <div>
+        <div className={styles.sectionHeader} aria-busy={busyAction === 'rename-block' || busyAction === 'delete-block'}>
+          <div className={styles.topDashboardBlockHeading}>
             <p>HTML-дашборд</p>
-            <h2>{overview?.block.title ?? 'HTML-страница'}</h2>
+            {isEditingBlockTitle ? (
+              <form className={styles.topDashboardTitleForm} onSubmit={renameBlock}>
+                <label htmlFor="top-dashboard-block-title-edit">Название блока</label>
+                <div>
+                  <input
+                    ref={blockTitleInputRef}
+                    id="top-dashboard-block-title-edit"
+                    type="text"
+                    value={blockTitleDraft}
+                    maxLength={120}
+                    disabled={busyAction !== null}
+                    aria-describedby={blockMutationError ? 'top-dashboard-block-mutation-error' : undefined}
+                    onChange={(event) => setBlockTitleDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cancelBlockTitleEdit();
+                      }
+                    }}
+                  />
+                  <button type="submit" disabled={busyAction !== null || !blockTitleDraft.trim()}>
+                    {busyAction === 'rename-block' ? 'Сохраняем…' : 'Сохранить'}
+                  </button>
+                  <button
+                    className={styles.secondary}
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={cancelBlockTitleEdit}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className={styles.topDashboardBlockTitleRow}>
+                <h2>{overview?.block.title ?? 'HTML-страница'}</h2>
+                {overview ? (
+                  <button
+                    className={styles.secondary}
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={beginBlockTitleEdit}
+                  >
+                    Изменить название
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
-          <span className={styles.headingMeta}>{overview?.versions.length ?? 0} версий</span>
+          <div className={styles.topDashboardBlockHeaderActions}>
+            <span className={styles.headingMeta}>{versionCountLabel(overview?.versions.length ?? 0)}</span>
+            {overview ? (
+              <button
+                className={styles.danger}
+                type="button"
+                disabled={busyAction !== null || isEditingBlockTitle}
+                onClick={() => void deleteBlock()}
+              >
+                {busyAction === 'delete-block' ? 'Удаляем…' : 'Удалить блок'}
+              </button>
+            ) : null}
+          </div>
         </div>
+
+        {blockMutationError ? (
+          <p id="top-dashboard-block-mutation-error" className={styles.topDashboardMutationError} role="alert">
+            {blockMutationError}
+          </p>
+        ) : null}
 
         <div className={styles.topDashboardUploadCard}>
           <div>

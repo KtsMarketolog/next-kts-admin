@@ -213,6 +213,76 @@
   margin: 0 auto;
 }
 
+.topDashboardBlockHeading {
+  min-width: 0;
+}
+
+.topDashboardBlockTitleRow {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+
+  h2 {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  button {
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+}
+
+.topDashboardBlockHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+
+  .headingMeta {
+    margin-left: 0;
+  }
+}
+
+.topDashboardTitleForm {
+  min-width: min(100%, 680px);
+  display: grid;
+  gap: 6px;
+
+  label {
+    color: #4b4e61;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  input {
+    min-width: min(420px, 100%);
+    flex: 1 1 320px;
+  }
+}
+
+.topDashboardMutationError {
+  margin: -10px 0 18px;
+  border: 1px solid #e6b8b8;
+  border-radius: 8px;
+  background: #fff7f7;
+  color: #8a2424;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .topDashboardUploadCard {
   display: grid;
   grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.6fr);
@@ -489,6 +559,38 @@
 
   .topDashboardPreviewHeader {
     display: grid;
+  }
+
+  .topDashboardBlockTitleRow,
+  .topDashboardBlockHeaderActions,
+  .topDashboardTitleForm > div {
+    align-items: stretch;
+  }
+
+  .topDashboardBlockHeaderActions {
+    justify-content: stretch;
+
+    .headingMeta {
+      width: 100%;
+    }
+
+    button {
+      width: 100%;
+    }
+  }
+
+  .topDashboardTitleForm {
+    min-width: 0;
+
+    input {
+      width: 100%;
+      min-width: 0;
+      flex-basis: 100%;
+    }
+
+    button {
+      flex: 1 1 160px;
+    }
   }
 
   .topDashboardPreviewActions,

@@ -16,14 +16,14 @@ import {
   isTopDashboardSession,
 } from '../src/shared/lib/adminAuth';
 import type {
-  activateTopDashboardVersion,
-  CreateTopDashboardVersionInput,
-  deleteTopDashboardVersion,
-} from '../src/shared/lib/db/topDashboardRepo';
-import { TopDashboardActiveVersionDeleteError } from '../src/shared/lib/db/topDashboardRepo';
+  activateTopDashboardBlockVersion,
+  CreateTopDashboardBlockVersionInput,
+  deleteTopDashboardBlockVersion,
+} from '../src/shared/lib/db/topDashboardBlocksRepo';
+import { TopDashboardActiveVersionDeleteError } from '../src/shared/lib/db/topDashboardDomain';
 import {
   buildTopDashboardContentSecurityPolicy,
-  isTopDashboardFrameRequest,
+  isTopDashboardBlockFrameRequest,
 } from '../src/shared/lib/topDashboardContentSecurity';
 
 function cspHash(source: string) {
@@ -70,20 +70,23 @@ test('TOP sessions without a positive user id are rejected before persistence', 
 
 test('break-glass admin actions support nullable database attribution', () => {
   const uploadInput = {
+    blockId: 7,
     originalName: 'dashboard.html',
     htmlContent: '<!doctype html><html></html>',
     fileSize: 35,
     sha256: '0'.repeat(64),
     uploadedByAdminUserId: null,
-  } satisfies CreateTopDashboardVersionInput;
-  type ActivateInput = Parameters<typeof activateTopDashboardVersion>[0];
+  } satisfies CreateTopDashboardBlockVersionInput;
+  type ActivateInput = Parameters<typeof activateTopDashboardBlockVersion>[0];
   const activateInput = {
+    blockId: 7,
     versionId: 1,
     expectedActiveVersionId: null,
     adminUserId: null,
   } satisfies ActivateInput;
-  type DeleteInput = Parameters<typeof deleteTopDashboardVersion>[0];
+  type DeleteInput = Parameters<typeof deleteTopDashboardBlockVersion>[0];
   const deleteInput = {
+    blockId: 7,
     versionId: 2,
     adminUserId: null,
   } satisfies DeleteInput;
@@ -126,29 +129,30 @@ test('dashboard CSP permits only exact uploaded scripts and handlers', () => {
 });
 
 test('dashboard content is accepted only from its same-origin frame shell', () => {
+  const blockId = 7;
   const versionId = 42;
-  const request = new Request(`https://kts-impex.ru/api/admin/top-dashboard/versions/${versionId}/content`, {
+  const request = new Request(`https://kts-impex.ru/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/content`, {
     headers: {
       'sec-fetch-dest': 'iframe',
       'sec-fetch-mode': 'navigate',
       'sec-fetch-site': 'same-origin',
-      referer: `https://kts-impex.ru/api/admin/top-dashboard/versions/${versionId}/frame?revision=1`,
+      referer: `https://kts-impex.ru/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/frame?revision=1`,
     },
   });
-  assert.equal(isTopDashboardFrameRequest(request, versionId), true);
+  assert.equal(isTopDashboardBlockFrameRequest(request, blockId, versionId), true);
 
   const reverseProxyRequest = new Request(
-    `http://127.0.0.1:3000/api/admin/top-dashboard/versions/${versionId}/content`,
+    `http://127.0.0.1:3000/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/content`,
     {
       headers: {
         'sec-fetch-dest': 'iframe',
         'sec-fetch-mode': 'navigate',
         'sec-fetch-site': 'same-origin',
-        referer: `https://kts-impex.ru/api/admin/top-dashboard/versions/${versionId}/frame?revision=1`,
+        referer: `https://kts-impex.ru/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/frame?revision=1`,
       },
     },
   );
-  assert.equal(isTopDashboardFrameRequest(reverseProxyRequest, versionId), true);
+  assert.equal(isTopDashboardBlockFrameRequest(reverseProxyRequest, blockId, versionId), true);
 
   const directNavigation = new Request(request.url, {
     headers: {
@@ -157,7 +161,7 @@ test('dashboard content is accepted only from its same-origin frame shell', () =
       'sec-fetch-site': 'none',
     },
   });
-  assert.equal(isTopDashboardFrameRequest(directNavigation, versionId), false);
+  assert.equal(isTopDashboardBlockFrameRequest(directNavigation, blockId, versionId), false);
 
   const wrongParent = new Request(request.url, {
     headers: {
@@ -167,7 +171,7 @@ test('dashboard content is accepted only from its same-origin frame shell', () =
       referer: 'https://kts-impex.ru/admin/top',
     },
   });
-  assert.equal(isTopDashboardFrameRequest(wrongParent, versionId), false);
+  assert.equal(isTopDashboardBlockFrameRequest(wrongParent, blockId, versionId), false);
 
   const missingParent = new Request(request.url, {
     headers: {
@@ -176,15 +180,15 @@ test('dashboard content is accepted only from its same-origin frame shell', () =
       'sec-fetch-site': 'same-origin',
     },
   });
-  assert.equal(isTopDashboardFrameRequest(missingParent, versionId), false);
+  assert.equal(isTopDashboardBlockFrameRequest(missingParent, blockId, versionId), false);
 
   const crossSiteFrame = new Request(request.url, {
     headers: {
       'sec-fetch-dest': 'iframe',
       'sec-fetch-mode': 'navigate',
       'sec-fetch-site': 'cross-site',
-      referer: `https://example.com/api/admin/top-dashboard/versions/${versionId}/frame`,
+      referer: `https://example.com/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/frame`,
     },
   });
-  assert.equal(isTopDashboardFrameRequest(crossSiteFrame, versionId), false);
+  assert.equal(isTopDashboardBlockFrameRequest(crossSiteFrame, blockId, versionId), false);
 });

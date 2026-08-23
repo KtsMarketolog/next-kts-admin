@@ -182,6 +182,32 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202608230002_remove_legacy_top_dashboard',
+    description: 'Remove the superseded single TOP dashboard storage and keep native blocks only',
+    apply: async (client) => {
+      await client.query(`
+        delete from top_dashboard_block_state
+        where block_id in (
+          select id from top_dashboard_blocks where storage_kind = 'legacy'
+        );
+
+        delete from top_dashboard_block_versions
+        where block_id in (
+          select id from top_dashboard_blocks where storage_kind = 'legacy'
+        );
+
+        delete from top_dashboard_blocks
+        where storage_kind = 'legacy';
+
+        drop table if exists top_dashboard_state;
+        drop table if exists top_dashboard_versions;
+
+        alter table top_dashboard_blocks
+          drop column storage_kind;
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

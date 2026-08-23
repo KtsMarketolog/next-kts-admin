@@ -90,7 +90,7 @@ function isManagerAccessRole(role: AccessUserRole): role is ManagerAccessRole {
 function accessLabels(role: AccessUserRole) {
   if (role === 'admin') return ['Сайт', 'Прайсы', 'Пользователи'];
   if (role === 'wholesale_admin') return ['Индивидуальные прайсы'];
-  if (role === 'top') return ['Стратегический обзор'];
+  if (role === 'top') return ['HTML-страницы'];
   if (role === 'support_manager') return ['Прайсы менеджера'];
   return ['Свои прайсы'];
 }

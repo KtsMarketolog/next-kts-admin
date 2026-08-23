@@ -5,6 +5,8 @@ import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/route
 import type {
   ActivateTopDashboardBlockVersionInput,
   CreateTopDashboardBlockVersionInput,
+  DeleteTopDashboardBlockResult,
+  RenameTopDashboardBlockResult,
 } from '../src/shared/lib/db/topDashboardBlocksRepo';
 import {
   normalizeTopDashboardBlockTitle,
@@ -61,6 +63,31 @@ test('missing native block state has a dedicated fail-closed error', () => {
   assert.match(error.message, /Состояние блока не найдено/);
 });
 
+test('TOP block rename and deletion results keep block identity and deletion metadata', () => {
+  const renamed = {
+    block: {
+      id: 7,
+      title: 'Аналитика продаж',
+      createdAt: '2026-08-23T00:00:00.000Z',
+    },
+    previousTitle: 'Тест',
+    changed: true,
+  } satisfies RenameTopDashboardBlockResult;
+  const deleted = {
+    deletedBlock: {
+      ...renamed.block,
+      activeVersionId: 13,
+      previousVersionId: 12,
+      versionCount: 4,
+      storedBytes: 188_000,
+    },
+  } satisfies DeleteTopDashboardBlockResult;
+
+  assert.equal(renamed.block.id, deleted.deletedBlock.id);
+  assert.equal(deleted.deletedBlock.versionCount, 4);
+  assert.equal(deleted.deletedBlock.storedBytes, 188_000);
+});
+
 test('block HTML content accepts only its exact nested block-version frame pair', () => {
   const blockId = 7;
   const versionId = 13;
@@ -89,7 +116,7 @@ test('block HTML content accepts only its exact nested block-version frame pair'
       new Request(contentUrl, {
         headers: {
           ...headers,
-          referer: `https://kts-impex.ru/api/admin/top-dashboard/versions/${versionId}/frame`,
+          referer: `https://kts-impex.ru/api/admin/top-dashboard/blocks/${blockId + 1}/versions/${versionId}/frame`,
         },
       }),
       blockId,

@@ -40,13 +40,6 @@ export function buildTopDashboardContentSecurityPolicy(htmlContent: string) {
   ].join('; ');
 }
 
-export function isTopDashboardFrameRequest(request: Request, versionId: number) {
-  return isExpectedTopDashboardFrameRequest(
-    request,
-    `/api/admin/top-dashboard/versions/${versionId}/frame`,
-  );
-}
-
 export function isTopDashboardBlockFrameRequest(
   request: Request,
   blockId: number,

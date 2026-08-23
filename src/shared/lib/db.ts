@@ -8,15 +8,10 @@ export { revokeAdminUserSessions, revokeManagerSessions } from './db/adminSessio
 export { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin, updateAccessUser } from './db/adminUsersRepo';
 export type { AccessUser, AccessUserRole, AdminUserAuth } from './db/adminUsersRepo';
 export {
-  activateTopDashboardVersion,
-  createTopDashboardVersion,
-  deleteTopDashboardVersion,
-  getTopDashboardOverview,
-  getTopDashboardVersionContent,
   TopDashboardActiveVersionDeleteError,
   TopDashboardStateConflictError,
   TopDashboardVersionNotFoundError,
-} from './db/topDashboardRepo';
+} from './db/topDashboardDomain';
 export type {
   ActivateTopDashboardVersionResult,
   CreateTopDashboardVersionInput,
@@ -25,16 +20,18 @@ export type {
   TopDashboardVersion,
   TopDashboardVersionContent,
   TopDashboardVersionStatus,
-} from './db/topDashboardRepo';
+} from './db/topDashboardDomain';
 export {
   activateTopDashboardBlockVersion,
   createTopDashboardBlock,
   createTopDashboardBlockVersion,
+  deleteTopDashboardBlock,
   deleteTopDashboardBlockVersion,
   getTopDashboardBlockOverview,
   getTopDashboardBlocks,
   getTopDashboardBlockVersionContent,
   normalizeTopDashboardBlockTitle,
+  renameTopDashboardBlock,
   TopDashboardBlockNotFoundError,
   TopDashboardBlockStateNotFoundError,
   TopDashboardBlockTitleValidationError,
@@ -42,10 +39,11 @@ export {
 export type {
   ActivateTopDashboardBlockVersionInput,
   CreateTopDashboardBlockVersionInput,
+  DeleteTopDashboardBlockResult,
   DeleteTopDashboardBlockVersionResult,
+  RenameTopDashboardBlockResult,
   TopDashboardBlock,
   TopDashboardBlockOverview,
-  TopDashboardBlockStorageKind,
   TopDashboardBlockSummary,
 } from './db/topDashboardBlocksRepo';
 export {
