@@ -115,6 +115,73 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202608230001_top_dashboard_blocks',
+    description: 'Add unlimited independently versioned TOP dashboard blocks while preserving the legacy dashboard',
+    apply: async (client) => {
+      await client.query(`
+        create table top_dashboard_blocks (
+          id bigserial primary key,
+          title text not null check (
+            char_length(title) between 1 and 120
+            and title = btrim(title)
+          ),
+          storage_kind text not null check (storage_kind in ('legacy', 'native')),
+          created_by_admin_user_id bigint references admin_users(id) on delete set null,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now(),
+          check (storage_kind <> 'legacy' or id = 1)
+        );
+
+        create unique index top_dashboard_blocks_single_legacy_idx
+          on top_dashboard_blocks (storage_kind)
+          where storage_kind = 'legacy';
+
+        insert into top_dashboard_blocks (id, title, storage_kind)
+        values (1, 'Стратегический обзор', 'legacy');
+
+        select setval(
+          pg_get_serial_sequence('top_dashboard_blocks', 'id'),
+          (select max(id) from top_dashboard_blocks),
+          true
+        );
+
+        create table top_dashboard_block_versions (
+          block_id bigint not null references top_dashboard_blocks(id) on delete cascade,
+          id bigserial not null,
+          original_name text not null,
+          html_content text not null,
+          file_size bigint not null check (file_size between 1 and 5242880),
+          sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+          uploaded_by_admin_user_id bigint references admin_users(id) on delete set null,
+          first_published_at timestamptz,
+          first_published_by_admin_user_id bigint references admin_users(id) on delete set null,
+          created_at timestamptz not null default now(),
+          primary key (block_id, id)
+        );
+
+        create table top_dashboard_block_state (
+          block_id bigint primary key references top_dashboard_blocks(id) on delete cascade,
+          active_version_id bigint,
+          previous_version_id bigint,
+          updated_by_admin_user_id bigint references admin_users(id) on delete set null,
+          updated_at timestamptz not null default now(),
+          check (
+            active_version_id is null
+            or previous_version_id is null
+            or active_version_id <> previous_version_id
+          ),
+          foreign key (block_id, active_version_id)
+            references top_dashboard_block_versions(block_id, id) on delete restrict,
+          foreign key (block_id, previous_version_id)
+            references top_dashboard_block_versions(block_id, id) on delete restrict
+        );
+
+        create index top_dashboard_block_versions_created_idx
+          on top_dashboard_block_versions(block_id, created_at desc, id desc);
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

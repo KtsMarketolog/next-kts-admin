@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 
@@ -19,6 +20,12 @@ type TopDashboardVersion = {
 };
 
 type TopDashboardOverview = {
+  block: {
+    id: number;
+    title: string;
+    storageKind: 'legacy' | 'native';
+    createdAt: string;
+  };
   activeVersionId: number | null;
   previousVersionId: number | null;
   updatedAt: string | null;
@@ -26,6 +33,7 @@ type TopDashboardOverview = {
 };
 
 type AdminTopDashboardSectionProps = {
+  blockId: number;
   showStatus: (message: string) => void;
 };
 
@@ -102,8 +110,10 @@ async function readError(response: Response, fallback: string) {
   return typeof data.error === 'string' ? data.error : fallback;
 }
 
-export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectionProps) {
+export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashboardSectionProps) {
+  const router = useRouter();
   const [overview, setOverview] = useState<TopDashboardOverview | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,31 +123,41 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewCardRef = useRef<HTMLElement>(null);
   const showStatusRef = useRef(showStatus);
+  const overviewRequestIdRef = useRef(0);
+  const apiBasePath = `/api/admin/top-dashboard/blocks/${blockId}`;
 
   useEffect(() => {
     showStatusRef.current = showStatus;
   }, [showStatus]);
 
   const loadOverview = useCallback(async (preferredVersionId?: number | null) => {
+    const requestId = overviewRequestIdRef.current + 1;
+    overviewRequestIdRef.current = requestId;
     setLoading(true);
     try {
-      const response = await fetch('/api/admin/top-dashboard', {
+      const response = await fetch(apiBasePath, {
         cache: 'no-store',
         credentials: 'same-origin',
       });
       if (!response.ok) {
-        showStatusRef.current(await readError(response, 'Не удалось загрузить версии стратегического обзора'));
+        const message = await readError(response, 'Не удалось загрузить версии HTML-страницы');
+        if (requestId !== overviewRequestIdRef.current) return null;
+        setLoadError(message);
+        showStatusRef.current(message);
         return null;
       }
 
       const data = (await response.json()) as TopDashboardOverview;
+      if (requestId !== overviewRequestIdRef.current) return null;
       const versions = Array.isArray(data.versions) ? data.versions : [];
       const normalized: TopDashboardOverview = {
+        block: data.block,
         activeVersionId: Number.isInteger(data.activeVersionId) ? data.activeVersionId : null,
         previousVersionId: Number.isInteger(data.previousVersionId) ? data.previousVersionId : null,
         updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : null,
         versions,
       };
+      setLoadError(null);
       setOverview(normalized);
       setSelectedVersionId((current) => {
         const requested = preferredVersionId ?? current;
@@ -149,15 +169,21 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
       });
       return normalized;
     } catch {
-      showStatusRef.current('Не удалось загрузить версии стратегического обзора');
+      if (requestId !== overviewRequestIdRef.current) return null;
+      const message = 'Не удалось загрузить версии HTML-страницы';
+      setLoadError(message);
+      showStatusRef.current(message);
       return null;
     } finally {
-      setLoading(false);
+      if (requestId === overviewRequestIdRef.current) setLoading(false);
     }
-  }, []);
+  }, [apiBasePath]);
 
   useEffect(() => {
     void loadOverview();
+    return () => {
+      overviewRequestIdRef.current += 1;
+    };
   }, [loadOverview]);
 
   useEffect(() => {
@@ -228,7 +254,7 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
     try {
       const body = new FormData();
       body.set('file', selectedFile);
-      const response = await fetch('/api/admin/top-dashboard/versions', {
+      const response = await fetch(`${apiBasePath}/versions`, {
         method: 'POST',
         body,
         credentials: 'same-origin',
@@ -256,14 +282,14 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
     if (!overview || version.status === 'active') return;
     if (
       version.status === 'archived'
-      && !window.confirm(`Откатить опубликованный обзор на версию «${version.originalName}»?`)
+      && !window.confirm(`Откатить опубликованную HTML-страницу на версию «${version.originalName}»?`)
     ) {
       return;
     }
 
     setBusyAction(`activate:${version.id}`);
     try {
-      const response = await fetch('/api/admin/top-dashboard/active', {
+      const response = await fetch(`${apiBasePath}/active`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -309,7 +335,7 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
 
     setBusyAction(`delete:${version.id}`);
     try {
-      const response = await fetch(`/api/admin/top-dashboard/versions/${version.id}`, {
+      const response = await fetch(`${apiBasePath}/versions/${version.id}`, {
         method: 'DELETE',
         credentials: 'same-origin',
       });
@@ -347,13 +373,26 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
     }
   };
 
+  if (loadError && !overview) {
+    return (
+      <section className={`${styles.section} ${styles.topDashboardLoadError}`} role="alert">
+        <span className={styles.topDashboardEyebrow}>HTML-дашборд</span>
+        <h2>Страница не открылась</h2>
+        <p>{loadError}</p>
+        <button type="button" onClick={() => router.push('/admin/top', { scroll: false })}>
+          Вернуться к списку HTML-страниц
+        </button>
+      </section>
+    );
+  }
+
   return (
     <div className={styles.topDashboardLayout}>
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <div>
             <p>HTML-дашборд</p>
-            <h2>Публикация стратегического обзора</h2>
+            <h2>{overview?.block.title ?? 'HTML-страница'}</h2>
           </div>
           <span className={styles.headingMeta}>{overview?.versions.length ?? 0} версий</span>
         </div>
@@ -361,7 +400,7 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
         <div className={styles.topDashboardUploadCard}>
           <div>
             <h3>Загрузить новую версию</h3>
-            <p>Самодостаточный HTML до 5 МБ сохранится как черновик. Текущая публикация не изменится до подтверждения; история хранит до 50 версий и 100 МБ.</p>
+            <p>Самодостаточный HTML до 5 МБ сохранится как черновик. Текущая публикация не изменится до подтверждения; в этом блоке хранится до 50 версий общим объёмом до 100 МБ.</p>
           </div>
           <div className={styles.topDashboardUploadControls}>
             <label className={styles.topDashboardFilePicker}>
@@ -450,13 +489,13 @@ export function AdminTopDashboardSection({ showStatus }: AdminTopDashboardSectio
         </div>
 
         {loading && !overview ? (
-          <div className={styles.topDashboardEmpty}>Загружаем стратегический обзор…</div>
+          <div className={styles.topDashboardEmpty}>Загружаем HTML-страницу…</div>
         ) : selectedVersion ? (
           <div className={styles.topDashboardFrameShell}>
             <iframe
-              key={`${selectedVersion.id}:${previewRevision}`}
+              key={`${blockId}:${selectedVersion.id}:${previewRevision}`}
               className={styles.topDashboardFrame}
-              src={`/api/admin/top-dashboard/versions/${selectedVersion.id}/frame?revision=${previewRevision}`}
+              src={`${apiBasePath}/versions/${selectedVersion.id}/frame?revision=${previewRevision}`}
               title={`Предпросмотр ${selectedVersion.originalName}`}
               sandbox="allow-scripts allow-same-origin"
               referrerPolicy="no-referrer"

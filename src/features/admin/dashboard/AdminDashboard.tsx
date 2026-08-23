@@ -31,8 +31,8 @@ export function AdminDashboard({
       >
         <article className={styles.dashboardCard}>
           <div>
-            <h2>Стратегический обзор</h2>
-            <p>Загрузка, предпросмотр, публикация, история версий и откат HTML-дашборда.</p>
+            <h2>HTML-страницы и отчёты</h2>
+            <p>Отдельные блоки с HTML-дашбордами, загрузкой, предпросмотром и историей версий.</p>
           </div>
           <button onClick={onOpenTopDashboard}>Открыть</button>
         </article>
@@ -55,8 +55,8 @@ export function AdminDashboard({
       {canAccessTopDashboard ? (
         <article className={styles.dashboardCard}>
           <div>
-            <h2>Стратегический обзор</h2>
-            <p>Загрузка, предпросмотр, публикация, история версий и откат HTML-дашборда.</p>
+            <h2>HTML-страницы и отчёты</h2>
+            <p>Отдельные блоки с HTML-дашбордами, загрузкой, предпросмотром и историей версий.</p>
           </div>
           <button onClick={onOpenTopDashboard}>Открыть</button>
         </article>

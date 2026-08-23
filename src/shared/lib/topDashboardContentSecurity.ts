@@ -41,6 +41,24 @@ export function buildTopDashboardContentSecurityPolicy(htmlContent: string) {
 }
 
 export function isTopDashboardFrameRequest(request: Request, versionId: number) {
+  return isExpectedTopDashboardFrameRequest(
+    request,
+    `/api/admin/top-dashboard/versions/${versionId}/frame`,
+  );
+}
+
+export function isTopDashboardBlockFrameRequest(
+  request: Request,
+  blockId: number,
+  versionId: number,
+) {
+  return isExpectedTopDashboardFrameRequest(
+    request,
+    `/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/frame`,
+  );
+}
+
+function isExpectedTopDashboardFrameRequest(request: Request, expectedFramePath: string) {
   if (request.headers.get('sec-fetch-dest') !== 'iframe') return false;
   if (request.headers.get('sec-fetch-mode') !== 'navigate') return false;
   if (request.headers.get('sec-fetch-site') !== 'same-origin') return false;
@@ -54,7 +72,7 @@ export function isTopDashboardFrameRequest(request: Request, versionId: number) 
     // reverse proxy, while the browser Referer contains the public origin. The
     // forbidden Sec-Fetch-* headers above prove a same-origin iframe navigation;
     // only the exact trusted shell path needs to be matched here.
-    return refererUrl.pathname === `/api/admin/top-dashboard/versions/${versionId}/frame`;
+    return refererUrl.pathname === expectedFramePath;
   } catch {
     return false;
   }

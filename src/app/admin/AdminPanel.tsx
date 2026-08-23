@@ -13,6 +13,7 @@ import { useAdminNews } from '@/features/admin/model/useAdminNews';
 import { useAdminPriceGroups } from '@/features/admin/model/useAdminPriceGroups';
 import { useAdminSlides } from '@/features/admin/model/useAdminSlides';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
+import { AdminTopDashboardCatalog } from '@/features/admin/top-dashboard/AdminTopDashboardCatalog';
 import { AdminTopDashboardSection } from '@/features/admin/top-dashboard/AdminTopDashboardSection';
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
 import type { AdminSection, SettingKey } from '@/features/admin/types';
@@ -29,9 +30,18 @@ import styles from './admin.module.scss';
 type AdminPanelProps = {
   initialArea?: AdminArea;
   initialSession?: AdminSession | null;
+  initialTopDashboardBlockId?: number | null;
 };
 
-export default function AdminPanel({ initialArea = 'home', initialSession = null }: AdminPanelProps) {
+function isTopDashboardPath(pathname: string) {
+  return /^\/admin\/top(?:\/[1-9]\d*)?\/?$/.test(pathname);
+}
+
+export default function AdminPanel({
+  initialArea = 'home',
+  initialSession = null,
+  initialTopDashboardBlockId = null,
+}: AdminPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -54,6 +64,11 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
   const authenticatedRef = useRef(Boolean(initialSession));
   const clientDetailMatch = /^\/admin\/clients\/(\d+)(?:\/)?$/.exec(pathname);
   const clientDetailId = clientDetailMatch ? Number(clientDetailMatch[1]) : null;
+  const topDashboardDetailMatch = /^\/admin\/top\/([1-9]\d*)(?:\/)?$/.exec(pathname);
+  const matchedTopDashboardBlockId = topDashboardDetailMatch ? Number(topDashboardDetailMatch[1]) : null;
+  const topDashboardBlockId = Number.isSafeInteger(matchedTopDashboardBlockId)
+    ? matchedTopDashboardBlockId
+    : initialTopDashboardBlockId;
 
   const showStatus = (message: string) => {
     setStatus(message);
@@ -213,7 +228,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
           setAuthenticated(true);
           setSessionReady(true);
           if (nextRole === 'top') {
-            const isTopPath = pathname === '/admin/top' || pathname === '/admin/top/';
+            const isTopPath = isTopDashboardPath(pathname);
             const isHomePath = pathname === '/admin' || pathname === '/admin/';
             setActiveArea(isTopPath ? 'top' : 'home');
             if (!isTopPath && !isHomePath) {
@@ -253,7 +268,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
   useEffect(() => {
     if (sessionRole === 'top') {
-      const isTopPath = pathname === '/admin/top' || pathname === '/admin/top/';
+      const isTopPath = isTopDashboardPath(pathname);
       const isHomePath = pathname === '/admin' || pathname === '/admin/';
       setActiveArea(isTopPath ? 'top' : 'home');
       if (!isTopPath && !isHomePath) {
@@ -262,7 +277,7 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       return;
     }
 
-    if (pathname === '/admin/top' || pathname === '/admin/top/') {
+    if (isTopDashboardPath(pathname)) {
       setActiveArea(sessionRole === 'admin' ? 'top' : 'home');
       return;
     }
@@ -366,7 +381,9 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
   const pageTitle =
     activeArea === 'top'
-      ? 'Стратегический обзор'
+      ? topDashboardBlockId
+        ? 'Редактор HTML-страницы'
+        : 'HTML-страницы и отчёты'
       : activeArea === 'site'
         ? 'Управление сайтом'
         : activeArea === 'wholesale'
@@ -384,7 +401,14 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
       <AdminTopbar
         activeArea={activeArea}
         pageTitle={pageTitle}
-        onBackToHome={() => switchArea('home')}
+        backLabel={activeArea === 'top' && topDashboardBlockId ? 'К списку HTML-страниц' : undefined}
+        onBackToHome={() => {
+          if (activeArea === 'top' && topDashboardBlockId) {
+            router.push('/admin/top', { scroll: false });
+            return;
+          }
+          switchArea('home');
+        }}
         onLogout={async () => {
           await fetch('/api/admin/logout', { method: 'POST' });
           setSessionRole(null);
@@ -410,7 +434,17 @@ export default function AdminPanel({ initialArea = 'home', initialSession = null
 
       {activeArea === 'analogs' && <AnalogFinder />}
 
-      {activeArea === 'top' && <AdminTopDashboardSection showStatus={showStatus} />}
+      {activeArea === 'top' && (
+        topDashboardBlockId ? (
+          <AdminTopDashboardSection
+            key={topDashboardBlockId}
+            blockId={topDashboardBlockId}
+            showStatus={showStatus}
+          />
+        ) : (
+          <AdminTopDashboardCatalog showStatus={showStatus} />
+        )
+      )}
 
       {activeArea === 'wholesale' && (
         <AdminWholesaleGateway canManageWholesale={sessionRole === 'admin' || sessionRole === 'wholesale_admin'} onBack={() => switchArea('home')} />

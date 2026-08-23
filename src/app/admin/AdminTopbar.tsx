@@ -4,11 +4,12 @@ import styles from './admin.module.scss';
 type AdminTopbarProps = {
   activeArea: AdminArea;
   pageTitle: string;
+  backLabel?: string;
   onBackToHome: () => void;
   onLogout: () => Promise<void>;
 };
 
-export function AdminTopbar({ activeArea, pageTitle, onBackToHome, onLogout }: AdminTopbarProps) {
+export function AdminTopbar({ activeArea, pageTitle, backLabel, onBackToHome, onLogout }: AdminTopbarProps) {
   return (
     <div className={styles.topbar}>
       <div>
@@ -18,7 +19,7 @@ export function AdminTopbar({ activeArea, pageTitle, onBackToHome, onLogout }: A
       <div className={styles.topbarActions}>
         {(activeArea === 'site' || activeArea === 'analogs' || activeArea === 'top') && (
           <button className={styles.secondary} onClick={onBackToHome}>
-            Вернуться в панель управления
+            {backLabel ?? 'Вернуться в панель управления'}
           </button>
         )}
         <button className={styles.secondary} onClick={onLogout}>

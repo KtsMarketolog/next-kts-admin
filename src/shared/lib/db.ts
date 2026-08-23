@@ -27,6 +27,28 @@ export type {
   TopDashboardVersionStatus,
 } from './db/topDashboardRepo';
 export {
+  activateTopDashboardBlockVersion,
+  createTopDashboardBlock,
+  createTopDashboardBlockVersion,
+  deleteTopDashboardBlockVersion,
+  getTopDashboardBlockOverview,
+  getTopDashboardBlocks,
+  getTopDashboardBlockVersionContent,
+  normalizeTopDashboardBlockTitle,
+  TopDashboardBlockNotFoundError,
+  TopDashboardBlockStateNotFoundError,
+  TopDashboardBlockTitleValidationError,
+} from './db/topDashboardBlocksRepo';
+export type {
+  ActivateTopDashboardBlockVersionInput,
+  CreateTopDashboardBlockVersionInput,
+  DeleteTopDashboardBlockVersionResult,
+  TopDashboardBlock,
+  TopDashboardBlockOverview,
+  TopDashboardBlockStorageKind,
+  TopDashboardBlockSummary,
+} from './db/topDashboardBlocksRepo';
+export {
   assertClientCompanyVisible,
   createClientCompany,
   deleteClientCompany,

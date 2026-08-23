@@ -1,31 +1,237 @@
-@use "@/shared/styles/adaptive-px.scss" as *;
+.topDashboardCatalogSection {
+  max-width: 1680px;
+}
+
+.topDashboardCatalogIntro {
+  max-width: 760px;
+  margin: 0 0 22px;
+  color: #626577;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.topDashboardCatalogGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.topDashboardCatalogCard,
+.topDashboardCatalogAdd,
+.topDashboardCatalogCreate,
+.topDashboardCatalogError {
+  width: min(100%, 320px);
+  min-height: 190px;
+  flex: 0 1 320px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.topDashboardCatalogCard,
+.topDashboardCatalogAdd {
+  min-height: 190px !important;
+  padding: 18px !important;
+}
+
+.topDashboardCatalogCard {
+  display: grid;
+  grid-template-rows: auto auto minmax(40px, 1fr) auto auto;
+  gap: 8px;
+  border: 1px solid #dedfeb !important;
+  background: #fff !important;
+  color: #242633 !important;
+  box-shadow: 0 7px 20px rgba(36, 38, 51, 0.05);
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+
+  > strong {
+    overflow-wrap: anywhere;
+    font-size: 19px;
+    line-height: 1.25;
+  }
+
+  &:hover {
+    border-color: #8d78dc !important;
+    box-shadow: 0 12px 28px rgba(38, 11, 134, 0.1);
+    transform: translateY(-2px);
+  }
+
+  &:focus-visible {
+    outline: 3px solid rgba(38, 11, 134, 0.22);
+    outline-offset: 2px;
+  }
+}
+
+.topDashboardCatalogEyebrow {
+  color: #6f7182;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.topDashboardCatalogDescription {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #56596b;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.topDashboardCatalogMeta {
+  color: #7a7d8e;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.topDashboardCatalogOpen {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid #ececf3;
+  color: #260b86;
+  padding-top: 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.topDashboardCatalogAdd {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  border: 2px dashed #a9abc0 !important;
+  background: transparent !important;
+  color: #4b4e61 !important;
+  text-align: center;
+
+  strong {
+    font-size: 16px;
+  }
+
+  > span:last-child {
+    color: #77798a;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  &:hover {
+    border-color: #6a4bd9 !important;
+    background: #faf9ff !important;
+  }
+}
+
+.topDashboardCatalogPlus {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #eee9ff;
+  color: #260b86;
+  font-size: 34px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.topDashboardCatalogCreate {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  border: 2px dashed #6a4bd9;
+  background: #faf9ff;
+
+  label {
+    color: #363847;
+    font-size: 13px;
+    font-weight: 800;
+  }
+}
+
+.topDashboardCatalogCreateActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.topDashboardCatalogError {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  border: 1px solid #e6b8b8;
+  background: #fff7f7;
+  color: #6e2727;
+
+  strong {
+    font-size: 16px;
+  }
+
+  span {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  button {
+    justify-self: start;
+  }
+}
+
+.topDashboardCatalogLoading {
+  margin: 18px 0 0;
+  color: #6f7182;
+  font-size: 13px;
+}
+
+.topDashboardLoadError {
+  max-width: 760px;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+
+  h2,
+  p {
+    margin: 0;
+  }
+
+  p {
+    color: #626577;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+}
 
 .topDashboardLayout {
   display: grid;
-  gap: $apx-20;
-  max-width: $apx-1680;
+  gap: 20px;
+  max-width: 1680px;
   margin: 0 auto;
 }
 
 .topDashboardUploadCard {
   display: grid;
-  grid-template-columns: minmax($apx-260, 0.8fr) minmax(0, 1.6fr);
-  gap: $apx-24;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.6fr);
+  gap: 24px;
   align-items: center;
-  border: $apx-1 solid #dedfeb;
-  border-radius: $apx-10;
+  border: 1px solid #dedfeb;
+  border-radius: 10px;
   background: #f8f9fc;
-  padding: $apx-18;
+  padding: 18px;
 
   h3 {
-    margin: 0 0 $apx-8;
-    font-size: $apx-18;
+    margin: 0 0 8px;
+    font-size: 18px;
   }
 
   p {
     margin: 0;
     color: #626577;
-    font-size: $apx-13;
+    font-size: 13px;
     line-height: 1.55;
   }
 }
@@ -33,49 +239,49 @@
 .topDashboardUploadControls {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr) max-content;
-  gap: $apx-10;
+  gap: 10px;
   align-items: stretch;
 }
 
 .topDashboardFilePicker {
   position: relative;
-  min-height: $apx-44;
+  min-height: 44px;
   display: inline-grid;
   place-items: center;
   overflow: hidden;
-  border: $apx-1 solid #260b86;
-  border-radius: $apx-8;
+  border: 1px solid #260b86;
+  border-radius: 8px;
   background: #fff;
   color: #260b86;
-  padding: 0 $apx-16;
-  font-size: $apx-13;
+  padding: 0 16px;
+  font-size: 13px;
   font-weight: 800;
   cursor: pointer;
 
   input {
     position: absolute;
-    width: $apx-1;
-    height: $apx-1;
+    width: 1px;
+    height: 1px;
     opacity: 0;
     pointer-events: none;
   }
 
   &:focus-within {
-    outline: $apx-3 solid rgba(38, 11, 134, 0.22);
-    outline-offset: $apx-2;
+    outline: 3px solid rgba(38, 11, 134, 0.22);
+    outline-offset: 2px;
   }
 }
 
 .topDashboardSelectedFile {
   min-width: 0;
-  min-height: $apx-44;
+  min-height: 44px;
   display: grid;
   align-content: center;
-  gap: $apx-2;
-  border: $apx-1 solid #e1e3ee;
-  border-radius: $apx-8;
+  gap: 2px;
+  border: 1px solid #e1e3ee;
+  border-radius: 8px;
   background: #fff;
-  padding: $apx-6 $apx-12;
+  padding: 6px 12px;
 
   strong,
   span {
@@ -87,20 +293,20 @@
 
   strong {
     color: #242633;
-    font-size: $apx-13;
+    font-size: 13px;
   }
 
   span {
     color: #6f7182;
-    font-size: $apx-12;
+    font-size: 12px;
   }
 }
 
 .topDashboardPreviewCard {
   min-width: 0;
   overflow: hidden;
-  border: $apx-1 solid #dedfeb;
-  border-radius: $apx-12;
+  border: 1px solid #dedfeb;
+  border-radius: 12px;
   background: #fff;
 }
 
@@ -137,19 +343,19 @@
 .topDashboardPreviewHeader {
   display: flex;
   justify-content: space-between;
-  gap: $apx-20;
+  gap: 20px;
   align-items: flex-start;
-  padding: $apx-20;
+  padding: 20px;
 
   h2 {
-    margin: $apx-4 0 $apx-10;
-    font-size: $apx-22;
+    margin: 4px 0 10px;
+    font-size: 22px;
   }
 }
 
 .topDashboardEyebrow {
   color: #6f7182;
-  font-size: $apx-12;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -158,9 +364,9 @@
 .topDashboardMeta {
   display: flex;
   flex-wrap: wrap;
-  gap: $apx-6 $apx-12;
+  gap: 6px 12px;
   color: #6f7182;
-  font-size: $apx-12;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -169,84 +375,84 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: $apx-8;
+  gap: 8px;
   align-items: center;
 }
 
 .topDashboardFrameShell {
   min-width: 0;
-  border-top: $apx-1 solid #dedfeb;
+  border-top: 1px solid #dedfeb;
   background: #e8e9ef;
-  padding: $apx-10;
+  padding: 10px;
 }
 
 .topDashboardFrame {
   width: 100%;
-  min-height: clamp($apx-620, calc(100vh - $apx-230), $apx-980);
+  min-height: clamp(620px, calc(100vh - 230px), 980px);
   display: block;
   border: 0;
-  border-radius: $apx-8;
+  border-radius: 8px;
   background: #fff;
 }
 
 .topDashboardEmpty {
-  min-height: $apx-360;
+  min-height: 360px;
   display: grid;
   place-content: center;
-  gap: $apx-8;
-  border-top: $apx-1 solid #dedfeb;
+  gap: 8px;
+  border-top: 1px solid #dedfeb;
   color: #6f7182;
-  padding: $apx-24;
+  padding: 24px;
   text-align: center;
 
   strong {
     color: #242633;
-    font-size: $apx-20;
+    font-size: 20px;
   }
 }
 
 .topDashboardVersionList {
   display: grid;
-  gap: $apx-10;
+  gap: 10px;
 }
 
 .topDashboardVersionRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
-  gap: $apx-16;
+  gap: 16px;
   align-items: center;
-  border: $apx-1 solid #e1e3ee;
-  border-radius: $apx-10;
+  border: 1px solid #e1e3ee;
+  border-radius: 10px;
   background: #fff;
-  padding: $apx-14;
+  padding: 14px;
 }
 
 .topDashboardVersionSelected {
   border-color: #6a4bd9;
-  box-shadow: 0 0 0 $apx-2 rgba(38, 11, 134, 0.08);
+  box-shadow: 0 0 0 2px rgba(38, 11, 134, 0.08);
 }
 
 .topDashboardVersionTitle {
   display: flex;
   flex-wrap: wrap;
-  gap: $apx-8;
+  gap: 8px;
   align-items: center;
-  margin-bottom: $apx-7;
+  margin-bottom: 7px;
 
   strong {
     min-width: 0;
     overflow-wrap: anywhere;
-    font-size: $apx-15;
+    font-size: 15px;
   }
 }
 
 .topDashboardStatus {
   display: inline-flex;
   align-items: center;
-  min-height: $apx-28;
-  border-radius: $apx-999;
-  padding: 0 $apx-10;
-  font-size: $apx-11;
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -267,6 +473,14 @@
 }
 
 @media (max-width: 900px) {
+  .topDashboardCatalogCard,
+  .topDashboardCatalogAdd,
+  .topDashboardCatalogCreate,
+  .topDashboardCatalogError {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
   .topDashboardUploadCard,
   .topDashboardUploadControls,
   .topDashboardVersionRow {
@@ -282,11 +496,11 @@
     justify-content: stretch;
 
     button {
-      flex: 1 1 $apx-180;
+      flex: 1 1 180px;
     }
   }
 
   .topDashboardFrame {
-    min-height: $apx-620;
+    min-height: 620px;
   }
 }
