@@ -424,11 +424,7 @@ export default function AdminPanel({
           canAccessSite={sessionRole === 'admin'}
           canAccessTopDashboard={sessionRole === 'admin' || sessionRole === 'top'}
           isTopUser={sessionRole === 'top'}
-          onOpenSiteSettings={() => switchArea('site')}
-          onOpenTopDashboard={() => switchArea('top')}
-          onOpenWholesale={() => switchArea('wholesale')}
-          onOpenClients={() => switchArea('clients')}
-          onOpenAnalogs={() => switchArea('analogs')}
+          wholesaleHref={isManagerRole(sessionRole) ? '/admin/wholesale/manager' : '/admin/wholesale/admin'}
         />
       )}
 

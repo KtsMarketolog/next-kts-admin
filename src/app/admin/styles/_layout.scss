@@ -164,6 +164,7 @@
   border: $apx-1 solid #dedfeb;
   border-radius: $apx-12;
   padding: $apx-24;
+  text-decoration: none;
 
   h2 {
     margin: 0 0 $apx-12;
@@ -182,6 +183,20 @@
   button {
     width: 100%;
   }
+}
+
+.dashboardCardLink {
+  width: 100%;
+  min-height: $apx-42;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: $apx-8;
+  background: #260b86;
+  color: #fff;
+  padding: 0 $apx-18;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .dashboardCardDisabled {

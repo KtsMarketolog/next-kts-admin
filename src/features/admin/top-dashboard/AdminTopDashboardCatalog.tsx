@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -160,11 +161,11 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
 
       <div className={styles.topDashboardCatalogGrid} aria-busy={loading}>
         {blocks.map((block) => (
-          <button
+          <Link
             className={styles.topDashboardCatalogCard}
-            type="button"
+            href={`/admin/top/${block.id}`}
             key={block.id}
-            onClick={() => router.push(`/admin/top/${block.id}`, { scroll: false })}
+            scroll={false}
           >
             <span className={styles.topDashboardCatalogEyebrow}>HTML-дашборд</span>
             <strong>{block.title}</strong>
@@ -175,7 +176,7 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
               {block.versionCount} {pluralize(block.versionCount, 'версия', 'версии', 'версий')} · {formatDate(block.updatedAt ?? block.createdAt)}
             </span>
             <span className={styles.topDashboardCatalogOpen}>Открыть <span aria-hidden>→</span></span>
-          </button>
+          </Link>
         ))}
 
         {loadError && blocks.length === 0 ? (
