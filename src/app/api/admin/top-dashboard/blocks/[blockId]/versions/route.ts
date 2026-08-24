@@ -1,4 +1,4 @@
-import { requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   createTopDashboardBlockVersion,
@@ -43,16 +43,17 @@ export async function POST(request: Request, context: Context) {
     const parsed = await readTopDashboardHtmlUpload(request);
     if (parsed.error) return parsed.error;
 
+    const actor = getTopDashboardActor(session);
     const version = await createTopDashboardBlockVersion({
       blockId,
       ...parsed.upload,
-      uploadedByAdminUserId: session.adminUserId ?? null,
+      uploadedByAdminUserId: actor.adminUserId,
+      uploadedByManagerId: actor.managerId,
     });
 
     await recordSecurityEvent({
       eventType: 'top_dashboard_version_uploaded',
-      actorType: session.role === 'top' ? 'top' : 'admin',
-      adminUserId: session.adminUserId,
+      ...actor,
       sessionId: session.sessionId,
       entityType: 'top_dashboard_block_version',
       entityId: `${blockId}:${version.id}`,

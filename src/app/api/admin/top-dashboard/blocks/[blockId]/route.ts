@@ -1,4 +1,4 @@
-import { requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   deleteTopDashboardBlock,
@@ -78,10 +78,10 @@ export async function PATCH(request: Request, context: Context) {
     const result = await renameTopDashboardBlock({ blockId, title });
 
     if (result.changed) {
+      const actor = getTopDashboardActor(session);
       await recordSecurityEvent({
         eventType: 'top_dashboard_block_renamed',
-        actorType: session.role === 'top' ? 'top' : 'admin',
-        adminUserId: session.adminUserId,
+        ...actor,
         sessionId: session.sessionId,
         entityType: 'top_dashboard_block',
         entityId: blockId,
@@ -133,11 +133,11 @@ export async function DELETE(request: Request, context: Context) {
   try {
     const result = await deleteTopDashboardBlock(blockId);
     const deletedBlock = result.deletedBlock;
+    const actor = getTopDashboardActor(session);
 
     await recordSecurityEvent({
       eventType: 'top_dashboard_block_deleted',
-      actorType: session.role === 'top' ? 'top' : 'admin',
-      adminUserId: session.adminUserId,
+      ...actor,
       sessionId: session.sessionId,
       entityType: 'top_dashboard_block',
       entityId: blockId,

@@ -33,6 +33,7 @@ export type CreateTopDashboardVersionInput = {
   fileSize: number;
   sha256: string;
   uploadedByAdminUserId: number | null;
+  uploadedByManagerId: number | null;
 };
 
 export type ActivateTopDashboardVersionResult = {

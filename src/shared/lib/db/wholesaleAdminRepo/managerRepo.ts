@@ -20,6 +20,7 @@ type ManagerRow = {
   phone: string;
   display_password: string | null;
   role: string | null;
+  can_access_top_dashboard: boolean;
   support_manager_id: string | null;
   support_manager_name: string | null;
   is_active: boolean;
@@ -37,6 +38,7 @@ function mapManager(row: ManagerRow): WholesaleManager {
     phone: row.phone,
     displayPassword: row.display_password ?? '',
     role: normalizeManagerRole(row.role),
+    canAccessTopDashboard: row.can_access_top_dashboard,
     supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
     supportManagerName: row.support_manager_name ?? '',
     isActive: row.is_active,
@@ -57,6 +59,7 @@ export async function getWholesaleManagers() {
       m.phone,
       m.display_password,
       coalesce(nullif(m.role, ''), 'manager') as role,
+      m.can_access_top_dashboard,
       m.support_manager_id::text as support_manager_id,
       coalesce(support.name, '') as support_manager_name,
       m.is_active,
@@ -91,11 +94,12 @@ export async function getWholesaleManagerByLogin(login: string): Promise<Wholesa
     login: string;
     email: string;
     role: string | null;
+    can_access_top_dashboard: boolean;
     password_hash: string;
     is_active: boolean;
     password_changed_at: string | null;
   }>(
-    `select id::text, login, email, coalesce(nullif(role, ''), 'manager') as role, password_hash, is_active, password_changed_at::text
+    `select id::text, login, email, coalesce(nullif(role, ''), 'manager') as role, can_access_top_dashboard, password_hash, is_active, password_changed_at::text
      from wholesale_managers
      where login = $1 or lower(email) = $1
      limit 1`,
@@ -108,6 +112,7 @@ export async function getWholesaleManagerByLogin(login: string): Promise<Wholesa
     login: row.login,
     email: row.email,
     role: normalizeManagerRole(row.role),
+    canAccessTopDashboard: row.can_access_top_dashboard,
     passwordHash: row.password_hash,
     isActive: row.is_active,
     passwordChangedAt: row.password_changed_at,
@@ -123,9 +128,10 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
     email: string;
     phone: string;
     role: string | null;
+    can_access_top_dashboard: boolean;
     is_active: boolean;
   }>(
-    `select id::text, name, login, email, phone, coalesce(nullif(role, ''), 'manager') as role, is_active
+    `select id::text, name, login, email, phone, coalesce(nullif(role, ''), 'manager') as role, can_access_top_dashboard, is_active
      from wholesale_managers
      where id = $1
      limit 1`,
@@ -140,6 +146,7 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
     email: row.email,
     phone: row.phone,
     role: normalizeManagerRole(row.role),
+    canAccessTopDashboard: row.can_access_top_dashboard,
     isActive: row.is_active,
   };
 }
@@ -150,6 +157,7 @@ export async function createWholesaleManager(input: {
   email: string;
   phone: string;
   role?: WholesaleManagerRole;
+  canAccessTopDashboard?: boolean;
   supportManagerId?: number | null;
   passwordHash: string;
   displayPassword?: string;
@@ -159,10 +167,21 @@ export async function createWholesaleManager(input: {
   const role = normalizeManagerRole(input.role);
   const supportManagerId = role === 'manager' ? await normalizeWholesaleSupportManagerId(input.supportManagerId) : null;
   const result = await query<{ id: string }>(
-    `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, display_password, is_active, password_changed_at)
-     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8::text, ''), $9, now())
+    `insert into wholesale_managers (name, login, email, phone, role, can_access_top_dashboard, support_manager_id, password_hash, display_password, is_active, password_changed_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9::text, ''), $10, now())
      returning id`,
-    [input.name, normalizeLogin(input.login), input.email, input.phone, role, supportManagerId, input.passwordHash, input.displayPassword ?? '', input.isActive],
+    [
+      input.name,
+      normalizeLogin(input.login),
+      input.email,
+      input.phone,
+      role,
+      input.canAccessTopDashboard ?? false,
+      supportManagerId,
+      input.passwordHash,
+      input.displayPassword ?? '',
+      input.isActive,
+    ],
   );
   return Number(result.rows[0].id);
 }
@@ -174,6 +193,7 @@ export async function updateWholesaleManager(
     login: string;
     email: string;
     phone: string;
+    canAccessTopDashboard?: boolean;
     supportManagerId?: number | null;
     passwordHash?: string;
     displayPassword?: string;
@@ -193,6 +213,7 @@ export async function updateWholesaleManager(
          password_changed_at = case when $6::text is null then password_changed_at else now() end,
          is_active = $7,
          support_manager_id = $8,
+         can_access_top_dashboard = coalesce($10::boolean, can_access_top_dashboard),
          updated_at = now()
      where id = $1`,
     [
@@ -205,6 +226,7 @@ export async function updateWholesaleManager(
       input.isActive,
       supportManagerId,
       input.displayPassword ?? '',
+      input.canAccessTopDashboard ?? null,
     ],
   );
 }

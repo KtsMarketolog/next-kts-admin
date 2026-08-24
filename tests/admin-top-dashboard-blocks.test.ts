@@ -44,12 +44,14 @@ test('native TOP block inputs require both block and version identifiers', () =>
     fileSize: 35,
     sha256: '0'.repeat(64),
     uploadedByAdminUserId: null,
+    uploadedByManagerId: null,
   } satisfies CreateTopDashboardBlockVersionInput;
   const activation = {
     blockId: 7,
     versionId: 13,
     expectedActiveVersionId: null,
     adminUserId: null,
+    managerId: null,
   } satisfies ActivateTopDashboardBlockVersionInput;
 
   assert.equal(upload.blockId, 7);

@@ -8,6 +8,7 @@ export type WholesaleManager = {
   phone: string;
   displayPassword: string;
   role: WholesaleManagerRole;
+  canAccessTopDashboard: boolean;
   supportManagerId: number | null;
   supportManagerName: string;
   isActive: boolean;
@@ -23,6 +24,7 @@ export type WholesaleManagerAuth = {
   login: string;
   email: string;
   role: WholesaleManagerRole;
+  canAccessTopDashboard: boolean;
   passwordHash: string;
   isActive: boolean;
   passwordChangedAt: string | null;
@@ -35,6 +37,7 @@ export type WholesaleManagerProfile = {
   email: string;
   phone: string;
   role: WholesaleManagerRole;
+  canAccessTopDashboard: boolean;
   isActive: boolean;
 };
 

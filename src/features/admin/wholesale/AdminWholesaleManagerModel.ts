@@ -17,6 +17,7 @@ export const emptyManager: ManagerDraft = {
   supportManagerId: null,
   password: '',
   isActive: true,
+  canAccessTopDashboard: false,
 };
 
 export function isManagerRole(value: string | null): value is ManagerRole {
@@ -38,5 +39,6 @@ export function attachManagerPasswords(managers: Manager[]) {
   return managers.map((manager) => ({
     ...manager,
     displayPassword: manager.displayPassword || '',
+    canAccessTopDashboard: manager.canAccessTopDashboard === true,
   }));
 }

@@ -174,6 +174,7 @@ async function ensureSiteSchemaInternal() {
       email text not null default '',
       phone text not null default '',
       role text not null default 'manager',
+      can_access_top_dashboard boolean not null default false,
       support_manager_id bigint references wholesale_managers(id) on delete set null,
       password_hash text not null default '',
       display_password text not null default '',
@@ -479,6 +480,7 @@ async function ensureSiteSchemaInternal() {
     alter table admin_users add column if not exists password_changed_at timestamptz;
     alter table wholesale_managers add column if not exists phone text not null default '';
     alter table wholesale_managers add column if not exists role text not null default 'manager';
+    alter table wholesale_managers add column if not exists can_access_top_dashboard boolean not null default false;
     alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_managers add column if not exists password_hash text not null default '';
     alter table wholesale_managers add column if not exists display_password text not null default '';
@@ -633,6 +635,7 @@ async function ensureSiteSchemaInternal() {
   await query(`alter table admin_users add column if not exists password_changed_at timestamptz`);
   await query(`alter table wholesale_managers add column if not exists phone text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists role text not null default 'manager'`);
+  await query(`alter table wholesale_managers add column if not exists can_access_top_dashboard boolean not null default false`);
   await query(`alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_managers add column if not exists password_hash text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists display_password text not null default ''`);

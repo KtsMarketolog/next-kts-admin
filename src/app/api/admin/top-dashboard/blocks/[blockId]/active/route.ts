@@ -1,4 +1,4 @@
-import { requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   activateTopDashboardBlockVersion,
@@ -60,11 +60,13 @@ export async function PUT(request: Request, context: Context) {
   }
 
   try {
+    const actor = getTopDashboardActor(session);
     const state = await activateTopDashboardBlockVersion({
       blockId,
       versionId,
       expectedActiveVersionId,
-      adminUserId: session.adminUserId ?? null,
+      adminUserId: actor.adminUserId,
+      managerId: actor.managerId,
     });
 
     if (state.change !== 'unchanged') {
@@ -72,8 +74,7 @@ export async function PUT(request: Request, context: Context) {
         eventType: state.change === 'rolled_back'
           ? 'top_dashboard_version_rolled_back'
           : 'top_dashboard_version_published',
-        actorType: session.role === 'top' ? 'top' : 'admin',
-        adminUserId: session.adminUserId,
+        ...actor,
         sessionId: session.sessionId,
         entityType: 'top_dashboard_block_version',
         entityId: `${blockId}:${versionId}`,

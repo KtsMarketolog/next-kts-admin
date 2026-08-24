@@ -56,6 +56,7 @@ export type ActivateTopDashboardBlockVersionInput = {
   versionId: number;
   expectedActiveVersionId: number | null;
   adminUserId: number | null;
+  managerId: number | null;
 };
 
 export type DeleteTopDashboardBlockVersionResult = DeleteTopDashboardVersionResult & {
@@ -216,6 +217,7 @@ export async function getTopDashboardBlocks(): Promise<TopDashboardBlockSummary[
 export async function createTopDashboardBlock(input: {
   title: string;
   createdByAdminUserId: number | null;
+  createdByManagerId: number | null;
 }): Promise<TopDashboardBlockSummary> {
   await ensureSiteSchema();
 
@@ -226,11 +228,12 @@ export async function createTopDashboardBlock(input: {
     const result = await client.query<TopDashboardBlockRow>(
       `insert into top_dashboard_blocks (
          title,
-         created_by_admin_user_id
+         created_by_admin_user_id,
+         created_by_manager_id
        )
-       values ($1, $2)
+       values ($1, $2, $3)
        returning id::text, title, created_at::text`,
-      [title, input.createdByAdminUserId],
+      [title, input.createdByAdminUserId, input.createdByManagerId],
     );
     const row = result.rows[0];
 
@@ -368,13 +371,19 @@ export async function getTopDashboardBlockOverview(
          versions.original_name,
          versions.file_size::text,
          versions.sha256,
-         uploader.name as uploaded_by_name,
-         publisher.name as first_published_by_name,
+         coalesce(admin_uploader.name, manager_uploader.name) as uploaded_by_name,
+         coalesce(admin_publisher.name, manager_publisher.name) as first_published_by_name,
          versions.first_published_at::text,
          versions.created_at::text
        from top_dashboard_block_versions versions
-       left join admin_users uploader on uploader.id = versions.uploaded_by_admin_user_id
-       left join admin_users publisher on publisher.id = versions.first_published_by_admin_user_id
+       left join admin_users admin_uploader
+         on admin_uploader.id = versions.uploaded_by_admin_user_id
+       left join wholesale_managers manager_uploader
+         on manager_uploader.id = versions.uploaded_by_manager_id
+       left join admin_users admin_publisher
+         on admin_publisher.id = versions.first_published_by_admin_user_id
+       left join wholesale_managers manager_publisher
+         on manager_publisher.id = versions.first_published_by_manager_id
        where versions.block_id = $1
        order by versions.created_at desc, versions.id desc`,
       [blockId],
@@ -416,15 +425,19 @@ export async function createTopDashboardBlockVersion(
          html_content,
          file_size,
          sha256,
-         uploaded_by_admin_user_id
+         uploaded_by_admin_user_id,
+         uploaded_by_manager_id
        )
-       values ($1, $2, $3, $4, $5, $6)
+       values ($1, $2, $3, $4, $5, $6, $7)
        returning
          id::text,
          original_name,
          file_size::text,
          sha256,
-         (select name from admin_users where id = uploaded_by_admin_user_id) as uploaded_by_name,
+         coalesce(
+           (select name from admin_users where id = uploaded_by_admin_user_id),
+           (select name from wholesale_managers where id = uploaded_by_manager_id)
+         ) as uploaded_by_name,
          null::text as first_published_by_name,
          first_published_at::text,
          created_at::text`,
@@ -435,6 +448,7 @@ export async function createTopDashboardBlockVersion(
         input.fileSize,
         input.sha256,
         input.uploadedByAdminUserId,
+        input.uploadedByManagerId,
       ],
     );
 
@@ -570,9 +584,13 @@ export async function activateTopDashboardBlockVersion(
            first_published_by_admin_user_id = case
              when first_published_at is null then $3
              else first_published_by_admin_user_id
+           end,
+           first_published_by_manager_id = case
+             when first_published_at is null then $4
+             else first_published_by_manager_id
            end
        where block_id = $1 and id = $2`,
-      [input.blockId, input.versionId, input.adminUserId],
+      [input.blockId, input.versionId, input.adminUserId, input.managerId],
     );
 
     const updatedStateResult = await client.query<TopDashboardStateRow>(
@@ -580,10 +598,11 @@ export async function activateTopDashboardBlockVersion(
        set previous_version_id = active_version_id,
            active_version_id = $2,
            updated_by_admin_user_id = $3,
+           updated_by_manager_id = $4,
            updated_at = now()
        where block_id = $1
        returning active_version_id::text, previous_version_id::text, updated_at::text`,
-      [input.blockId, input.versionId, input.adminUserId],
+      [input.blockId, input.versionId, input.adminUserId, input.managerId],
     );
     const updatedState = updatedStateResult.rows[0];
 
@@ -607,6 +626,7 @@ export async function deleteTopDashboardBlockVersion(input: {
   blockId: number;
   versionId: number;
   adminUserId: number | null;
+  managerId: number | null;
 }): Promise<DeleteTopDashboardBlockVersionResult> {
   await ensureSiteSchema();
 
@@ -668,10 +688,11 @@ export async function deleteTopDashboardBlockVersion(input: {
         `update top_dashboard_block_state
          set previous_version_id = $2,
              updated_by_admin_user_id = $3,
+             updated_by_manager_id = $4,
              updated_at = now()
          where block_id = $1
          returning active_version_id::text, previous_version_id::text, updated_at::text`,
-        [input.blockId, previousVersionId, input.adminUserId],
+        [input.blockId, previousVersionId, input.adminUserId, input.managerId],
       );
       const updatedState = updatedStateResult.rows[0];
       previousVersionId = numericId(updatedState?.previous_version_id);

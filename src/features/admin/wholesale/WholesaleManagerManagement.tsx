@@ -117,10 +117,20 @@ export function WholesaleManagerManagement({
             <input type="password" value={managerDraft.password} onChange={(event) => setManagerDraft({ ...managerDraft, password: event.target.value })} autoComplete="new-password" />
             <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
           </label>
-          <label className={styles.userActiveToggle}>
-            <input type="checkbox" checked={managerDraft.isActive} onChange={(event) => setManagerDraft({ ...managerDraft, isActive: event.target.checked })} />
-            Активен
-          </label>
+          <div className={styles.managerAccessToggles}>
+            <label className={styles.userActiveToggle}>
+              <input type="checkbox" checked={managerDraft.isActive} onChange={(event) => setManagerDraft({ ...managerDraft, isActive: event.target.checked })} />
+              Активен
+            </label>
+            <label className={styles.userActiveToggle}>
+              <input
+                type="checkbox"
+                checked={managerDraft.canAccessTopDashboard}
+                onChange={(event) => setManagerDraft({ ...managerDraft, canAccessTopDashboard: event.target.checked })}
+              />
+              Доступ TOP
+            </label>
+          </div>
           <button className={managerCreated ? styles.savedButton : undefined} disabled={busy} onClick={createManager}>
             {managerCreated ? 'Сохранено' : `Добавить ${managerRoleLabel}`}
           </button>
@@ -205,10 +215,20 @@ export function WholesaleManagerManagement({
                   <span>Прайсов</span>
                   <strong>{manager.priceListCount}</strong>
                 </button>
-                <label className={styles.managerActive}>
-                  <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
-                  <span>Активен</span>
-                </label>
+                <div className={styles.managerAccessToggles}>
+                  <label className={styles.managerActive}>
+                    <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
+                    <span>Активен</span>
+                  </label>
+                  <label className={styles.managerActive}>
+                    <input
+                      type="checkbox"
+                      checked={manager.canAccessTopDashboard}
+                      onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, canAccessTopDashboard: event.target.checked } : item))}
+                    />
+                    <span>Доступ TOP</span>
+                  </label>
+                </div>
                 <div className={styles.managerActions}>
                   <button
                     className={styles.secondary}
@@ -324,10 +344,20 @@ export function WholesaleManagerManagement({
                     </label>
                   </div>
                   <div className={styles.userAccessMeta}>
-                    <label className={styles.userActiveToggle}>
-                      <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
-                      Активен
-                    </label>
+                    <div className={styles.managerAccessToggles}>
+                      <label className={styles.userActiveToggle}>
+                        <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
+                        Активен
+                      </label>
+                      <label className={styles.userActiveToggle}>
+                        <input
+                          type="checkbox"
+                          checked={manager.canAccessTopDashboard}
+                          onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, canAccessTopDashboard: event.target.checked } : item))}
+                        />
+                        Доступ TOP
+                      </label>
+                    </div>
                     <div className={styles.userAccessBadges}>
                       <span>Менеджер по сопровождению</span>
                       <span>Прайсов: {manager.priceListCount}</span>

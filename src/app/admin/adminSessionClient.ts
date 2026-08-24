@@ -5,6 +5,7 @@ import { isManagerRole } from './adminPanelConfig';
 export type AdminSessionResponse = {
   authenticated?: boolean;
   role?: AdminSession['role'] | null;
+  canAccessTopDashboard?: boolean;
 };
 
 function wait(ms: number) {

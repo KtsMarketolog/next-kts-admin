@@ -32,6 +32,11 @@ export async function POST(request: Request) {
   const password = typeof body.password === 'string' ? body.password : '';
   const role = body.role === 'support_manager' ? 'support_manager' : 'manager';
   const normalizedSupportManagerId = null;
+  const hasCanAccessTopDashboard = Object.prototype.hasOwnProperty.call(body, 'canAccessTopDashboard');
+  if (hasCanAccessTopDashboard && typeof body.canAccessTopDashboard !== 'boolean') {
+    return Response.json({ error: 'Доступ TOP должен быть указан как да или нет' }, { status: 400 });
+  }
+  const canAccessTopDashboard = hasCanAccessTopDashboard ? body.canAccessTopDashboard : false;
 
   if (!name || !login || !password) {
     return Response.json({ error: 'Имя, логин и пароль обязательны' }, { status: 400 });
@@ -53,6 +58,7 @@ export async function POST(request: Request) {
       passwordHash: hashPassword(password),
       displayPassword: password,
       isActive: Boolean(body.isActive ?? true),
+      canAccessTopDashboard,
     });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось добавить менеджера' }, { status: 400 });
@@ -68,7 +74,14 @@ export async function POST(request: Request) {
     ip: getClientIp(request),
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { login, email, phone, role, supportManagerId: normalizedSupportManagerId },
+    metadata: {
+      login,
+      email,
+      phone,
+      role,
+      supportManagerId: normalizedSupportManagerId,
+      canAccessTopDashboard,
+    },
   });
 
   return Response.json({ id });

@@ -208,6 +208,30 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202608240001_manager_top_dashboard_access',
+    description: 'Grant optional TOP dashboard access to wholesale managers and attribute their TOP changes',
+    apply: async (client) => {
+      await client.query(`
+        alter table wholesale_managers
+          add column if not exists can_access_top_dashboard boolean not null default false;
+
+        alter table top_dashboard_blocks
+          add column if not exists created_by_manager_id bigint
+            references wholesale_managers(id) on delete set null;
+
+        alter table top_dashboard_block_versions
+          add column if not exists uploaded_by_manager_id bigint
+            references wholesale_managers(id) on delete set null,
+          add column if not exists first_published_by_manager_id bigint
+            references wholesale_managers(id) on delete set null;
+
+        alter table top_dashboard_block_state
+          add column if not exists updated_by_manager_id bigint
+            references wholesale_managers(id) on delete set null;
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

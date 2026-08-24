@@ -10,6 +10,7 @@ export type Manager = {
   supportManagerId: number | null;
   supportManagerName: string;
   isActive: boolean;
+  canAccessTopDashboard: boolean;
   priceListCount: number;
   password?: string;
   displayPassword: string;
@@ -33,6 +34,7 @@ export type ManagerDraft = {
   supportManagerId: number | null;
   password: string;
   isActive: boolean;
+  canAccessTopDashboard: boolean;
 };
 
 export type PriceList = {

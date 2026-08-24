@@ -1,4 +1,4 @@
-import { requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   createTopDashboardBlock,
@@ -57,15 +57,16 @@ export async function POST(request: Request) {
   }
 
   try {
+    const actor = getTopDashboardActor(session);
     const block = await createTopDashboardBlock({
       title,
-      createdByAdminUserId: session.adminUserId ?? null,
+      createdByAdminUserId: actor.adminUserId,
+      createdByManagerId: actor.managerId,
     });
 
     await recordSecurityEvent({
       eventType: 'top_dashboard_block_created',
-      actorType: session.role === 'top' ? 'top' : 'admin',
-      adminUserId: session.adminUserId,
+      ...actor,
       sessionId: session.sessionId,
       entityType: 'top_dashboard_block',
       entityId: block.id,

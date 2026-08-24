@@ -39,9 +39,17 @@
     grid-row: 2;
   }
 
-  label.userActiveToggle {
+  > .managerAccessToggles {
     grid-column: 10 / 13;
     grid-row: 2;
+    align-self: start;
+    margin-top: $apx-20;
+  }
+
+  .managerAccessToggles label.userActiveToggle {
+    grid-column: auto;
+    grid-row: auto;
+    margin-top: 0;
   }
 
   > button {
@@ -154,12 +162,21 @@
 @media (max-width: 1180px) {
   .userCreateCard.managerCreateCard label,
   .userCreateCard.managerCreateCard label.userActiveToggle,
+  .userCreateCard.managerCreateCard > .managerAccessToggles,
   .userCreateCard.managerCreateCard > button,
   .userAccessFields.managerSupportFields label,
   .userAccessFields.managerSupportFields label.userPasswordWide {
     grid-column: auto;
     grid-row: auto;
   }
+}
+
+.managerAccessToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+  align-items: center;
+  min-width: 0;
 }
 
 .managerControls {

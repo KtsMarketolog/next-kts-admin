@@ -1,4 +1,4 @@
-import { requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   deleteTopDashboardBlockVersion,
@@ -40,16 +40,17 @@ export async function DELETE(request: Request, context: Context) {
   if (!versionId) return Response.json({ error: 'Некорректная версия HTML' }, { status: 400 });
 
   try {
+    const actor = getTopDashboardActor(session);
     const result = await deleteTopDashboardBlockVersion({
       blockId,
       versionId,
-      adminUserId: session.adminUserId ?? null,
+      adminUserId: actor.adminUserId,
+      managerId: actor.managerId,
     });
 
     await recordSecurityEvent({
       eventType: 'top_dashboard_version_deleted',
-      actorType: session.role === 'top' ? 'top' : 'admin',
-      adminUserId: session.adminUserId,
+      ...actor,
       sessionId: session.sessionId,
       entityType: 'top_dashboard_block_version',
       entityId: `${blockId}:${versionId}`,

@@ -11,6 +11,7 @@ import {
 } from '../src/features/admin/users/AdminUsersConfig';
 import {
   createAdminSession,
+  getTopDashboardActor,
   isAdminManagementSession,
   isOperationalEmployeeSessionRole,
   isTopDashboardSession,
@@ -60,6 +61,62 @@ test('TOP requires a persisted positive user id and never receives admin-managem
   assert.equal(isTopDashboardSession({ role: 'top', adminUserId: 1 }), true);
 });
 
+test('manager roles keep their primary permissions and receive TOP only through the additive flag', () => {
+  for (const role of ['manager', 'support_manager'] as const) {
+    assert.equal(isOperationalEmployeeSessionRole(role), true);
+    assert.equal(isAdminManagementSession({ role, managerId: 17 }), false);
+    assert.equal(isTopDashboardSession({ role, managerId: 17 }), false);
+    assert.equal(
+      isTopDashboardSession({ role, managerId: 17, canAccessTopDashboard: false }),
+      false,
+    );
+    assert.equal(
+      isTopDashboardSession({ role, managerId: 17, canAccessTopDashboard: true }),
+      true,
+    );
+  }
+});
+
+test('manager TOP access fails closed without a valid positive manager id', () => {
+  for (const managerId of [undefined, 0, -1, 1.5, Number.NaN]) {
+    assert.equal(
+      isTopDashboardSession({
+        role: 'manager',
+        managerId,
+        canAccessTopDashboard: true,
+      }),
+      false,
+    );
+  }
+});
+
+test('TOP audit attribution preserves the manager identity separately from admin users', () => {
+  assert.deepEqual(
+    getTopDashboardActor({
+      role: 'manager',
+      managerId: 17,
+      canAccessTopDashboard: true,
+    }),
+    { actorType: 'manager', adminUserId: null, managerId: 17 },
+  );
+  assert.deepEqual(
+    getTopDashboardActor({
+      role: 'support_manager',
+      managerId: 23,
+      canAccessTopDashboard: true,
+    }),
+    { actorType: 'manager', adminUserId: null, managerId: 23 },
+  );
+  assert.deepEqual(
+    getTopDashboardActor({ role: 'top', adminUserId: 31 }),
+    { actorType: 'top', adminUserId: 31, managerId: null },
+  );
+  assert.deepEqual(
+    getTopDashboardActor({ role: 'admin' }),
+    { actorType: 'admin', adminUserId: null, managerId: null },
+  );
+});
+
 test('TOP sessions without a positive user id are rejected before persistence', async () => {
   await assert.rejects(createAdminSession('top'), /requires an admin user id/i);
   await assert.rejects(
@@ -76,6 +133,7 @@ test('break-glass admin actions support nullable database attribution', () => {
     fileSize: 35,
     sha256: '0'.repeat(64),
     uploadedByAdminUserId: null,
+    uploadedByManagerId: null,
   } satisfies CreateTopDashboardBlockVersionInput;
   type ActivateInput = Parameters<typeof activateTopDashboardBlockVersion>[0];
   const activateInput = {
@@ -83,17 +141,22 @@ test('break-glass admin actions support nullable database attribution', () => {
     versionId: 1,
     expectedActiveVersionId: null,
     adminUserId: null,
+    managerId: null,
   } satisfies ActivateInput;
   type DeleteInput = Parameters<typeof deleteTopDashboardBlockVersion>[0];
   const deleteInput = {
     blockId: 7,
     versionId: 2,
     adminUserId: null,
+    managerId: null,
   } satisfies DeleteInput;
 
   assert.equal(uploadInput.uploadedByAdminUserId, null);
+  assert.equal(uploadInput.uploadedByManagerId, null);
   assert.equal(activateInput.adminUserId, null);
+  assert.equal(activateInput.managerId, null);
   assert.equal(deleteInput.adminUserId, null);
+  assert.equal(deleteInput.managerId, null);
 });
 
 test('active TOP dashboard versions have a dedicated deletion conflict', () => {

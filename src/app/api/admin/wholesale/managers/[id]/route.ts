@@ -31,6 +31,11 @@ export async function PUT(request: Request, context: Context) {
   const phone = normalizeTextField(body.phone, 60);
   const password = typeof body.password === 'string' ? body.password : '';
   const normalizedSupportManagerId = null;
+  const hasCanAccessTopDashboard = Object.prototype.hasOwnProperty.call(body, 'canAccessTopDashboard');
+  if (hasCanAccessTopDashboard && typeof body.canAccessTopDashboard !== 'boolean') {
+    return Response.json({ error: 'Доступ TOP должен быть указан как да или нет' }, { status: 400 });
+  }
+  const canAccessTopDashboard = hasCanAccessTopDashboard ? body.canAccessTopDashboard : undefined;
 
   if (!name || !login) {
     return Response.json({ error: 'Имя и логин обязательны' }, { status: 400 });
@@ -52,6 +57,7 @@ export async function PUT(request: Request, context: Context) {
       passwordHash: password ? hashPassword(password) : undefined,
       displayPassword: password || undefined,
       isActive: Boolean(body.isActive ?? true),
+      canAccessTopDashboard,
     });
     if (password) {
       await revokeManagerSessions(numericId);
@@ -70,7 +76,14 @@ export async function PUT(request: Request, context: Context) {
     ip: getClientIp(request),
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { login, email, phone, supportManagerId: normalizedSupportManagerId, isActive: Boolean(body.isActive ?? true) },
+    metadata: {
+      login,
+      email,
+      phone,
+      supportManagerId: normalizedSupportManagerId,
+      isActive: Boolean(body.isActive ?? true),
+      ...(canAccessTopDashboard === undefined ? {} : { canAccessTopDashboard }),
+    },
   });
 
   return Response.json({ ok: true });

@@ -104,6 +104,7 @@ export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions
         role: managerRoleTab,
         supportManagerId: null,
         password: managerDraft.password.trim(),
+        canAccessTopDashboard: managerDraft.canAccessTopDashboard,
       }),
     });
     setManagerBusy(false);
@@ -141,6 +142,7 @@ export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions
           phone: manager.phone.trim(),
           password: nextPassword,
           supportManagerId: null,
+          canAccessTopDashboard: manager.canAccessTopDashboard,
         }),
       });
       setManagerBusy(false);

@@ -16,6 +16,7 @@ export type AdminSession = {
   role: AdminSessionRole;
   adminUserId?: number;
   managerId?: number;
+  canAccessTopDashboard?: boolean;
   sessionId?: string;
 };
 
@@ -41,11 +42,37 @@ export function isAdminManagementSession(
 
 export function isTopDashboardSession(
   session: AdminSession | null | undefined,
-): session is (AdminSession & { role: 'admin' }) | (AdminSession & { role: 'top'; adminUserId: number }) {
+): session is
+  | (AdminSession & { role: 'admin' })
+  | (AdminSession & { role: 'top'; adminUserId: number })
+  | (AdminSession & {
+      role: AdminManagerSessionRole;
+      managerId: number;
+      canAccessTopDashboard: true;
+    }) {
   if (session?.role === 'admin') return true;
-  return session?.role === 'top'
-    && Number.isInteger(session.adminUserId)
-    && Number(session.adminUserId) > 0;
+  if (session?.role === 'top') {
+    return Number.isInteger(session.adminUserId) && Number(session.adminUserId) > 0;
+  }
+  return isManagerSessionRole(session?.role)
+    && session.canAccessTopDashboard === true
+    && Number.isInteger(session.managerId)
+    && Number(session.managerId) > 0;
+}
+
+export function getTopDashboardActor(session: AdminSession) {
+  if (isManagerSessionRole(session.role)) {
+    return {
+      actorType: 'manager' as const,
+      adminUserId: null,
+      managerId: session.managerId ?? null,
+    };
+  }
+  return {
+    actorType: session.role === 'top' ? 'top' as const : 'admin' as const,
+    adminUserId: session.adminUserId ?? null,
+    managerId: null,
+  };
 }
 
 function sign(value: string) {
@@ -113,6 +140,7 @@ export async function getAdminSession(): Promise<AdminSession | null> {
         role: storedSession.role,
         adminUserId: storedSession.adminUserId,
         managerId: storedSession.managerId,
+        canAccessTopDashboard: storedSession.canAccessTopDashboard,
         sessionId: storedSession.sessionId,
       };
     }

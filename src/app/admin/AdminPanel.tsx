@@ -37,6 +37,15 @@ function isTopDashboardPath(pathname: string) {
   return /^\/admin\/top(?:\/[1-9]\d*)?\/?$/.test(pathname);
 }
 
+function canRoleAccessTopDashboard(
+  role: AdminSession['role'] | null | undefined,
+  explicitPermission: boolean | undefined,
+) {
+  return role === 'admin'
+    || role === 'top'
+    || (isManagerRole(role) && explicitPermission === true);
+}
+
 export default function AdminPanel({
   initialArea = 'home',
   initialSession = null,
@@ -49,6 +58,9 @@ export default function AdminPanel({
   const [authenticated, setAuthenticated] = useState(Boolean(initialSession));
   const [sessionReady, setSessionReady] = useState(Boolean(initialSession));
   const [sessionRole, setSessionRole] = useState<AdminSession['role'] | null>(initialSession?.role ?? null);
+  const [canAccessTopDashboard, setCanAccessTopDashboard] = useState(
+    canRoleAccessTopDashboard(initialSession?.role, initialSession?.canAccessTopDashboard),
+  );
   const [activeArea, setActiveArea] = useState<AdminArea>(() => {
     if (initialSession?.role === 'top') return initialArea === 'top' ? 'top' : 'home';
     return initialSession?.role !== 'admin' && initialArea === 'site' ? 'home' : initialArea;
@@ -104,7 +116,7 @@ export default function AdminPanel({
 
   const switchArea = (area: AdminArea) => {
     if (area === 'top') {
-      if (sessionRole !== 'admin' && sessionRole !== 'top') return;
+      if (!canAccessTopDashboard) return;
       router.replace('/admin/top', { scroll: false });
       return;
     }
@@ -159,10 +171,14 @@ export default function AdminPanel({
 
       if (!session?.authenticated) {
         setSessionRole(null);
+        setCanAccessTopDashboard(false);
         setAuthenticated(false);
       } else {
         const nextRole = normalizeSessionRole(session.role);
         setSessionRole(nextRole);
+        setCanAccessTopDashboard(
+          canRoleAccessTopDashboard(nextRole, session.canAccessTopDashboard),
+        );
         setAuthenticated(Boolean(nextRole));
       }
       return;
@@ -220,11 +236,17 @@ export default function AdminPanel({
           const nextRole = normalizeSessionRole(data.role);
           if (!nextRole) {
             setSessionRole(null);
+            setCanAccessTopDashboard(false);
             setAuthenticated(false);
             setSessionReady(true);
             return;
           }
+          const nextCanAccessTopDashboard = canRoleAccessTopDashboard(
+            nextRole,
+            data.canAccessTopDashboard,
+          );
           setSessionRole(nextRole);
+          setCanAccessTopDashboard(nextCanAccessTopDashboard);
           setAuthenticated(true);
           setSessionReady(true);
           if (nextRole === 'top') {
@@ -237,6 +259,10 @@ export default function AdminPanel({
             return;
           }
           if (nextRole !== 'admin') {
+            if (isTopDashboardPath(pathname) && !nextCanAccessTopDashboard) {
+              router.replace('/admin', { scroll: false });
+              return;
+            }
             if (pathname.startsWith('/admin/site')) {
               router.replace('/admin', { scroll: false });
             }
@@ -247,6 +273,7 @@ export default function AdminPanel({
           });
         } else {
           setSessionRole(null);
+          setCanAccessTopDashboard(false);
           setAuthenticated(false);
           setSessionReady(true);
         }
@@ -256,6 +283,7 @@ export default function AdminPanel({
         console.error('Failed to verify admin session', error);
         if (!authenticatedRef.current) {
           setSessionRole(null);
+          setCanAccessTopDashboard(false);
           setAuthenticated(false);
         }
         setSessionReady(true);
@@ -278,7 +306,10 @@ export default function AdminPanel({
     }
 
     if (isTopDashboardPath(pathname)) {
-      setActiveArea(sessionRole === 'admin' ? 'top' : 'home');
+      setActiveArea(canAccessTopDashboard ? 'top' : 'home');
+      if (sessionReady && sessionRole && !canAccessTopDashboard) {
+        router.replace('/admin', { scroll: false });
+      }
       return;
     }
 
@@ -310,7 +341,7 @@ export default function AdminPanel({
     }
 
     setActiveArea(initialArea);
-  }, [initialArea, pathname, router, sessionRole]);
+  }, [canAccessTopDashboard, initialArea, pathname, router, sessionReady, sessionRole]);
 
   useEffect(() => {
     if (pathname.startsWith('/admin/site/users')) {
@@ -412,6 +443,7 @@ export default function AdminPanel({
         onLogout={async () => {
           await fetch('/api/admin/logout', { method: 'POST' });
           setSessionRole(null);
+          setCanAccessTopDashboard(false);
           setAuthenticated(false);
           setSessionReady(true);
         }}
@@ -422,7 +454,7 @@ export default function AdminPanel({
       {activeArea === 'home' && (
         <AdminDashboard
           canAccessSite={sessionRole === 'admin'}
-          canAccessTopDashboard={sessionRole === 'admin' || sessionRole === 'top'}
+          canAccessTopDashboard={canAccessTopDashboard}
           isTopUser={sessionRole === 'top'}
           wholesaleHref={isManagerRole(sessionRole) ? '/admin/wholesale/manager' : '/admin/wholesale/admin'}
         />
