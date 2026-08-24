@@ -8,18 +8,20 @@ const interactiveCardClassName = `${styles.dashboardCard} ${styles.dashboardCard
 
 type AdminDashboardProps = {
   canAccessSite: boolean;
-  canAccessTopDashboard: boolean;
-  isTopUser: boolean;
+  topDashboardMode: 'manage' | 'view' | null;
+  isTopAreaOnlyUser: boolean;
   wholesaleHref: '/admin/wholesale/admin' | '/admin/wholesale/manager';
 };
 
 export function AdminDashboard({
   canAccessSite,
-  canAccessTopDashboard,
-  isTopUser,
+  topDashboardMode,
+  isTopAreaOnlyUser,
   wholesaleHref,
 }: AdminDashboardProps) {
-  if (isTopUser) {
+  const isTopDashboardManager = topDashboardMode === 'manage';
+
+  if (isTopAreaOnlyUser) {
     return (
       <section
         className={`${styles.dashboardGrid} ${styles.dashboardGridSingle}`}
@@ -27,8 +29,12 @@ export function AdminDashboard({
       >
         <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
           <div>
-            <h2>HTML-страницы и отчёты</h2>
-            <p>Отдельные блоки с HTML-дашбордами, загрузкой, предпросмотром и историей версий.</p>
+            <h2>{isTopDashboardManager ? 'HTML-страницы и отчёты' : 'Готовые отчёты'}</h2>
+            <p>
+              {isTopDashboardManager
+                ? 'Управление HTML-дашбордами, данными и опубликованными версиями.'
+                : 'Готовые дашборды с актуальными данными для просмотра результатов бизнеса.'}
+            </p>
           </div>
           <span className={styles.dashboardCardLink}>Открыть</span>
         </Link>
@@ -48,11 +54,15 @@ export function AdminDashboard({
         </Link>
       ) : null}
 
-      {canAccessTopDashboard ? (
+      {topDashboardMode ? (
         <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
           <div>
-            <h2>HTML-страницы и отчёты</h2>
-            <p>Отдельные блоки с HTML-дашбордами, загрузкой, предпросмотром и историей версий.</p>
+            <h2>{isTopDashboardManager ? 'HTML-страницы и отчёты' : 'Готовые отчёты'}</h2>
+            <p>
+              {isTopDashboardManager
+                ? 'Отдельные блоки с HTML-дашбордами, загрузкой, предпросмотром и историей версий.'
+                : 'Опубликованные дашборды с актуальными данными в защищённом режиме.'}
+            </p>
           </div>
           <span className={styles.dashboardCardLink}>Открыть</span>
         </Link>

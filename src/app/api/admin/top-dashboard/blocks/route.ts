@@ -1,7 +1,13 @@
-import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import {
+  getTopDashboardActor,
+  isTopDashboardManagementSession,
+  requireTopDashboardManagementSession,
+  requireTopDashboardSession,
+} from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   createTopDashboardBlock,
+  getPublishedTopDashboardBlocks,
   getTopDashboardBlocks,
   normalizeTopDashboardBlockTitle,
   TopDashboardBlockTitleValidationError,
@@ -13,11 +19,13 @@ import { getClientIp } from '@/shared/lib/rateLimit';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const { denied } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardSession();
   if (denied) return denied;
 
   try {
-    const blocks = await getTopDashboardBlocks();
+    const blocks = isTopDashboardManagementSession(session)
+      ? await getTopDashboardBlocks()
+      : await getPublishedTopDashboardBlocks();
     return Response.json(
       { blocks },
       { headers: { 'Cache-Control': 'private, no-store' } },
@@ -29,7 +37,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { denied, session } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardManagementSession();
   if (denied) return denied;
 
   const forbiddenOrigin = enforceSameOriginRequest(request);

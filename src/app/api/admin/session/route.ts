@@ -1,4 +1,9 @@
-import { getAdminSession, isManagerSessionRole, isTopDashboardSession } from '@/shared/lib/adminAuth';
+import {
+  getAdminSession,
+  isManagerSessionRole,
+  isTopDashboardManagementSession,
+  isTopDashboardSession,
+} from '@/shared/lib/adminAuth';
 import { getWholesaleManagerById } from '@/shared/lib/db';
 
 export async function GET() {
@@ -9,6 +14,7 @@ export async function GET() {
       authenticated: true,
       role: session.role,
       canAccessTopDashboard: isTopDashboardSession(session),
+      canManageTopDashboard: isTopDashboardManagementSession(session),
       manager: manager
         ? {
             id: manager.id,
@@ -24,6 +30,7 @@ export async function GET() {
     authenticated: Boolean(session),
     role: session?.role ?? null,
     canAccessTopDashboard: isTopDashboardSession(session),
+    canManageTopDashboard: isTopDashboardManagementSession(session),
     manager: null,
   });
 }

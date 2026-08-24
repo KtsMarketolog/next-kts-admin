@@ -15,6 +15,7 @@ import { useAdminSlides } from '@/features/admin/model/useAdminSlides';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
 import { AdminTopDashboardCatalog } from '@/features/admin/top-dashboard/AdminTopDashboardCatalog';
 import { AdminTopDashboardSection } from '@/features/admin/top-dashboard/AdminTopDashboardSection';
+import { TopDashboardViewer } from '@/features/admin/top-dashboard/TopDashboardViewer';
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
 import type { AdminSection, SettingKey } from '@/features/admin/types';
 import type { AdminSession } from '@/shared/lib/adminAuth';
@@ -42,8 +43,17 @@ function canRoleAccessTopDashboard(
   explicitPermission: boolean | undefined,
 ) {
   return role === 'admin'
+    || role === 'admintop'
     || role === 'top'
     || (isManagerRole(role) && explicitPermission === true);
+}
+
+function canRoleManageTopDashboard(role: AdminSession['role'] | null | undefined) {
+  return role === 'admin' || role === 'admintop';
+}
+
+function isTopAreaOnlyRole(role: AdminSession['role'] | null | undefined) {
+  return role === 'top' || role === 'admintop';
 }
 
 export default function AdminPanel({
@@ -62,7 +72,7 @@ export default function AdminPanel({
     canRoleAccessTopDashboard(initialSession?.role, initialSession?.canAccessTopDashboard),
   );
   const [activeArea, setActiveArea] = useState<AdminArea>(() => {
-    if (initialSession?.role === 'top') return initialArea === 'top' ? 'top' : 'home';
+    if (isTopAreaOnlyRole(initialSession?.role)) return initialArea === 'top' ? 'top' : 'home';
     return initialSession?.role !== 'admin' && initialArea === 'site' ? 'home' : initialArea;
   });
   const [activeSection, setActiveSection] = useState<AdminSection>('info');
@@ -121,7 +131,7 @@ export default function AdminPanel({
       return;
     }
 
-    if (sessionRole === 'top') {
+    if (isTopAreaOnlyRole(sessionRole)) {
       router.replace('/admin', { scroll: false });
       return;
     }
@@ -249,7 +259,7 @@ export default function AdminPanel({
           setCanAccessTopDashboard(nextCanAccessTopDashboard);
           setAuthenticated(true);
           setSessionReady(true);
-          if (nextRole === 'top') {
+          if (isTopAreaOnlyRole(nextRole)) {
             const isTopPath = isTopDashboardPath(pathname);
             const isHomePath = pathname === '/admin' || pathname === '/admin/';
             setActiveArea(isTopPath ? 'top' : 'home');
@@ -295,7 +305,7 @@ export default function AdminPanel({
   }, [loadAdminData, pathname, router]);
 
   useEffect(() => {
-    if (sessionRole === 'top') {
+    if (isTopAreaOnlyRole(sessionRole)) {
       const isTopPath = isTopDashboardPath(pathname);
       const isHomePath = pathname === '/admin' || pathname === '/admin/';
       setActiveArea(isTopPath ? 'top' : 'home');
@@ -410,11 +420,22 @@ export default function AdminPanel({
     );
   }
 
+  const canManageTopDashboard = canRoleManageTopDashboard(sessionRole);
+  const topDashboardMode = canAccessTopDashboard
+    ? canManageTopDashboard
+      ? 'manage' as const
+      : 'view' as const
+    : null;
+
   const pageTitle =
     activeArea === 'top'
       ? topDashboardBlockId
-        ? 'Редактор HTML-страницы'
-        : 'HTML-страницы и отчёты'
+        ? canManageTopDashboard
+          ? 'Редактор HTML-страницы'
+          : 'Готовый отчёт'
+        : canManageTopDashboard
+          ? 'HTML-страницы и отчёты'
+          : 'Готовые отчёты'
       : activeArea === 'site'
         ? 'Управление сайтом'
         : activeArea === 'wholesale'
@@ -432,7 +453,11 @@ export default function AdminPanel({
       <AdminTopbar
         activeArea={activeArea}
         pageTitle={pageTitle}
-        backLabel={activeArea === 'top' && topDashboardBlockId ? 'К списку HTML-страниц' : undefined}
+        backLabel={activeArea === 'top' && topDashboardBlockId
+          ? canManageTopDashboard
+            ? 'К списку HTML-страниц'
+            : 'К списку отчётов'
+          : undefined}
         onBackToHome={() => {
           if (activeArea === 'top' && topDashboardBlockId) {
             router.push('/admin/top', { scroll: false });
@@ -454,8 +479,8 @@ export default function AdminPanel({
       {activeArea === 'home' && (
         <AdminDashboard
           canAccessSite={sessionRole === 'admin'}
-          canAccessTopDashboard={canAccessTopDashboard}
-          isTopUser={sessionRole === 'top'}
+          topDashboardMode={topDashboardMode}
+          isTopAreaOnlyUser={isTopAreaOnlyRole(sessionRole)}
           wholesaleHref={isManagerRole(sessionRole) ? '/admin/wholesale/manager' : '/admin/wholesale/admin'}
         />
       )}
@@ -464,13 +489,24 @@ export default function AdminPanel({
 
       {activeArea === 'top' && (
         topDashboardBlockId ? (
-          <AdminTopDashboardSection
-            key={topDashboardBlockId}
-            blockId={topDashboardBlockId}
+          canManageTopDashboard ? (
+            <AdminTopDashboardSection
+              key={topDashboardBlockId}
+              blockId={topDashboardBlockId}
+              showStatus={showStatus}
+            />
+          ) : (
+            <TopDashboardViewer
+              key={topDashboardBlockId}
+              blockId={topDashboardBlockId}
+              showStatus={showStatus}
+            />
+          )
+        ) : (
+          <AdminTopDashboardCatalog
+            canManage={canManageTopDashboard}
             showStatus={showStatus}
           />
-        ) : (
-          <AdminTopDashboardCatalog showStatus={showStatus} />
         )
       )}
 

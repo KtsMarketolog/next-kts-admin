@@ -8,7 +8,8 @@ export const ROLE_LABELS: Record<AccessUserRole, string> = {
   wholesale_admin: 'Админ прайсов',
   manager: 'Менеджер по развитию',
   support_manager: 'Менеджер по сопровождению',
-  top: 'TOP',
+  top: 'TOP — просмотр',
+  admintop: 'Админ TOP — управление',
 };
 
 const ADMIN_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
@@ -25,19 +26,25 @@ const SUPPORT_MANAGER_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string
 ];
 
 const TOP_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
-  { value: 'top', label: 'TOP' },
+  { value: 'top', label: 'TOP — только просмотр' },
+];
+
+const ADMINTOP_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
+  { value: 'admintop', label: 'Админ TOP — управление' },
 ];
 
 export const USER_TABS: Array<{ value: UserTab; label: string }> = [
   { value: 'admin', label: 'Админ' },
   { value: 'top', label: 'TOP' },
+  { value: 'admintop', label: 'Админ TOP' },
 ];
 
 export function isUserTab(value: string | null): value is UserTab {
-  return value === 'admin' || value === 'top';
+  return value === 'admin' || value === 'top' || value === 'admintop';
 }
 
 export function tabForRole(role: AccessUserRole): UserTab {
+  if (role === 'admintop') return 'admintop';
   if (role === 'top') return 'top';
   if (role === 'support_manager') return 'support_manager';
   if (role === 'manager') return 'manager';
@@ -45,6 +52,7 @@ export function tabForRole(role: AccessUserRole): UserTab {
 }
 
 export function roleOptionsForTab(tab: UserTab) {
+  if (tab === 'admintop') return ADMINTOP_ROLE_OPTIONS;
   if (tab === 'top') return TOP_ROLE_OPTIONS;
   if (tab === 'manager') return MANAGER_ROLE_OPTIONS;
   if (tab === 'support_manager') return SUPPORT_MANAGER_ROLE_OPTIONS;
@@ -52,6 +60,7 @@ export function roleOptionsForTab(tab: UserTab) {
 }
 
 export function defaultRoleForTab(tab: UserTab): AccessUserRole {
+  if (tab === 'admintop') return 'admintop';
   if (tab === 'top') return 'top';
   if (tab === 'manager') return 'manager';
   if (tab === 'support_manager') return 'support_manager';
@@ -67,6 +76,7 @@ export function emptyDraftForTab(tab: UserTab): Draft {
 }
 
 export function addButtonLabel(tab: UserTab) {
+  if (tab === 'admintop') return 'Добавить администратора TOP';
   if (tab === 'top') return 'Добавить сотрудника TOP';
   if (tab === 'manager') return 'Добавить менеджера по развитию';
   if (tab === 'support_manager') return 'Добавить менеджера по сопровождению';

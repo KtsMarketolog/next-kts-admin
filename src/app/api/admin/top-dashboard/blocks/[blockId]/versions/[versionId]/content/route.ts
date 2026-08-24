@@ -1,5 +1,9 @@
-import { requireTopDashboardSession } from '@/shared/lib/adminAuth';
 import {
+  isTopDashboardManagementSession,
+  requireTopDashboardSession,
+} from '@/shared/lib/adminAuth';
+import {
+  getPublishedTopDashboardBlockVersionContent,
   getTopDashboardBlockVersionContent,
   TopDashboardBlockNotFoundError,
 } from '@/shared/lib/db';
@@ -18,7 +22,7 @@ type Context = {
 };
 
 export async function GET(request: Request, context: Context) {
-  const { denied } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardSession();
   if (denied) return denied;
 
   const { blockId: rawBlockId, versionId: rawVersionId } = await context.params;
@@ -34,10 +38,14 @@ export async function GET(request: Request, context: Context) {
   }
 
   try {
-    const version = await getTopDashboardBlockVersionContent(blockId, versionId);
+    const version = isTopDashboardManagementSession(session)
+      ? await getTopDashboardBlockVersionContent(blockId, versionId)
+      : await getPublishedTopDashboardBlockVersionContent(blockId, versionId);
     if (!version) return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
 
-    const htmlContent = injectTopDashboardDataAdapter(version.htmlContent);
+    const htmlContent = injectTopDashboardDataAdapter(version.htmlContent, {
+      readOnly: !isTopDashboardManagementSession(session),
+    });
     const bytes = Buffer.from(htmlContent, 'utf8');
     return new Response(new Uint8Array(bytes), {
       headers: {

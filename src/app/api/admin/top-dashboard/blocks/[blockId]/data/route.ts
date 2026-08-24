@@ -1,8 +1,14 @@
-import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import {
+  getTopDashboardActor,
+  isTopDashboardManagementSession,
+  requireTopDashboardManagementSession,
+  requireTopDashboardSession,
+} from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   createAndActivateTopDashboardBlockDataVersion,
   getActiveTopDashboardBlockDataContent,
+  getPublishedTopDashboardBlockOverview,
   getTopDashboardBlockOverview,
   getTopDashboardBlockVersionContent,
   TopDashboardActiveHtmlRequiredError,
@@ -17,7 +23,7 @@ import { getClientIp } from '@/shared/lib/rateLimit';
 import {
   detectTopDashboardExpectedProfile,
   detectTopDashboardExpectedSnapshotFormat,
-  isTopDashboardBlockDataFrameRequest,
+  getTopDashboardBlockDataFrameVersionId,
 } from '@/shared/lib/topDashboardContentSecurity';
 
 import { readTopDashboardDataUpload } from '../../dataUpload';
@@ -38,13 +44,14 @@ function fallbackDownloadName(originalName: string) {
 }
 
 export async function GET(request: Request, context: Context) {
-  const { denied } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardSession();
   if (denied) return denied;
 
   const { blockId: rawBlockId } = await context.params;
   const blockId = parsePositiveId(rawBlockId);
   if (!blockId) return Response.json({ error: 'Некорректный блок' }, { status: 400 });
-  if (!isTopDashboardBlockDataFrameRequest(request, blockId)) {
+  const frameVersionId = getTopDashboardBlockDataFrameVersionId(request, blockId);
+  if (!frameVersionId) {
     return Response.json(
       { error: 'Данные доступны только в защищённом просмотре' },
       { status: 403 },
@@ -52,6 +59,13 @@ export async function GET(request: Request, context: Context) {
   }
 
   try {
+    if (!isTopDashboardManagementSession(session)) {
+      const publishedBlock = await getPublishedTopDashboardBlockOverview(blockId);
+      if (!publishedBlock || publishedBlock.activeVersionId !== frameVersionId) {
+        return Response.json({ error: 'Данные дашборда не найдены' }, { status: 404 });
+      }
+    }
+
     const snapshot = await getActiveTopDashboardBlockDataContent(blockId);
     if (!snapshot) return Response.json({ error: 'Данные ещё не загружены' }, { status: 404 });
 
@@ -85,7 +99,7 @@ export async function GET(request: Request, context: Context) {
 }
 
 export async function PUT(request: Request, context: Context) {
-  const { denied, session } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardManagementSession();
   if (denied) return denied;
 
   const forbiddenOrigin = enforceSameOriginRequest(request);

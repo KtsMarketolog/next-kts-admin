@@ -1,5 +1,5 @@
-export type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top';
-export type UserTab = 'admin' | 'manager' | 'support_manager' | 'top';
+export type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
+export type UserTab = 'admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
 
 export type AccessUser = {
   id: string;

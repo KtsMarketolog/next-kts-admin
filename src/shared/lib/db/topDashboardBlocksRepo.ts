@@ -43,6 +43,23 @@ export type TopDashboardBlockSummary = TopDashboardBlock & {
   updatedAt: string;
 };
 
+export type TopDashboardPublishedBlockSummary = {
+  id: number;
+  title: string;
+  activeVersionId: number;
+  updatedAt: string;
+};
+
+export type TopDashboardPublishedBlockOverview = {
+  block: {
+    id: number;
+    title: string;
+    createdAt: string;
+  };
+  activeVersionId: number;
+  updatedAt: string;
+};
+
 export type TopDashboardBlockOverview = TopDashboardOverview & {
   block: TopDashboardBlock;
   data: TopDashboardBlockDataOverview;
@@ -101,6 +118,14 @@ type TopDashboardBlockSummaryRow = TopDashboardBlockRow & {
   active_version_id: string | null;
   active_original_name: string | null;
   version_count: string;
+  updated_at: string;
+};
+
+type TopDashboardPublishedBlockRow = {
+  id: string;
+  title: string;
+  created_at: string;
+  active_version_id: string;
   updated_at: string;
 };
 
@@ -317,6 +342,83 @@ export async function getTopDashboardBlocks(): Promise<TopDashboardBlockSummary[
   `);
 
   return result.rows.map(mapBlockSummary);
+}
+
+export async function getPublishedTopDashboardBlocks(): Promise<TopDashboardPublishedBlockSummary[]> {
+  await ensureSiteSchema();
+
+  const result = await query<TopDashboardPublishedBlockRow>(`
+    select
+      blocks.id::text,
+      blocks.title,
+      blocks.created_at::text,
+      native_state.active_version_id::text as active_version_id,
+      greatest(blocks.updated_at, native_state.updated_at, native_data_state.updated_at)::text as updated_at
+    from top_dashboard_blocks blocks
+    join top_dashboard_block_state native_state
+      on native_state.block_id = blocks.id
+     and native_state.active_version_id is not null
+    join top_dashboard_block_versions native_active
+      on native_active.block_id = blocks.id
+     and native_active.id = native_state.active_version_id
+    join top_dashboard_block_data_state native_data_state
+      on native_data_state.block_id = blocks.id
+     and native_data_state.active_version_id is not null
+    join top_dashboard_block_data_versions native_active_data
+      on native_active_data.block_id = blocks.id
+     and native_active_data.id = native_data_state.active_version_id
+    order by blocks.created_at asc, blocks.id asc
+  `);
+
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    title: row.title,
+    activeVersionId: Number(row.active_version_id),
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function getPublishedTopDashboardBlockOverview(
+  blockId: number,
+): Promise<TopDashboardPublishedBlockOverview | null> {
+  await ensureSiteSchema();
+
+  const result = await query<TopDashboardPublishedBlockRow>(
+    `select
+       blocks.id::text,
+       blocks.title,
+       blocks.created_at::text,
+       native_state.active_version_id::text as active_version_id,
+       greatest(blocks.updated_at, native_state.updated_at, native_data_state.updated_at)::text as updated_at
+     from top_dashboard_blocks blocks
+     join top_dashboard_block_state native_state
+       on native_state.block_id = blocks.id
+      and native_state.active_version_id is not null
+     join top_dashboard_block_versions native_active
+       on native_active.block_id = blocks.id
+      and native_active.id = native_state.active_version_id
+     join top_dashboard_block_data_state native_data_state
+       on native_data_state.block_id = blocks.id
+      and native_data_state.active_version_id is not null
+     join top_dashboard_block_data_versions native_active_data
+       on native_active_data.block_id = blocks.id
+      and native_active_data.id = native_data_state.active_version_id
+     where blocks.id = $1
+     limit 1`,
+    [blockId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+
+  return {
+    block: {
+      id: Number(row.id),
+      title: row.title,
+      createdAt: row.created_at,
+    },
+    activeVersionId: Number(row.active_version_id),
+    updatedAt: row.updated_at,
+  };
 }
 
 export async function createTopDashboardBlock(input: {
@@ -995,6 +1097,78 @@ export async function getTopDashboardBlockVersionContent(
     `select id::text, original_name, html_content, file_size::text, sha256
      from top_dashboard_block_versions
      where block_id = $1 and id = $2
+     limit 1`,
+    [blockId, versionId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+
+  return {
+    id: Number(row.id),
+    originalName: row.original_name,
+    htmlContent: row.html_content,
+    fileSize: Number(row.file_size),
+    sha256: row.sha256,
+  };
+}
+
+export async function isPublishedTopDashboardBlockVersion(
+  blockId: number,
+  versionId: number,
+): Promise<boolean> {
+  await ensureSiteSchema();
+
+  const result = await query<{ found: number }>(
+    `select 1 as found
+     from top_dashboard_block_state state
+     join top_dashboard_block_versions versions
+       on versions.block_id = state.block_id
+      and versions.id = state.active_version_id
+     join top_dashboard_block_data_state data_state
+       on data_state.block_id = state.block_id
+      and data_state.active_version_id is not null
+     join top_dashboard_block_data_versions data_versions
+       on data_versions.block_id = state.block_id
+      and data_versions.id = data_state.active_version_id
+     where state.block_id = $1
+       and state.active_version_id = $2
+     limit 1`,
+    [blockId, versionId],
+  );
+  return Boolean(result.rows[0]);
+}
+
+export async function getPublishedTopDashboardBlockVersionContent(
+  blockId: number,
+  versionId: number,
+): Promise<TopDashboardVersionContent | null> {
+  await ensureSiteSchema();
+
+  const result = await query<{
+    id: string;
+    original_name: string;
+    html_content: string;
+    file_size: string;
+    sha256: string;
+  }>(
+    `select
+       versions.id::text,
+       versions.original_name,
+       versions.html_content,
+       versions.file_size::text,
+       versions.sha256
+     from top_dashboard_block_state state
+     join top_dashboard_block_versions versions
+       on versions.block_id = state.block_id
+      and versions.id = state.active_version_id
+     join top_dashboard_block_data_state data_state
+       on data_state.block_id = state.block_id
+      and data_state.active_version_id is not null
+     join top_dashboard_block_data_versions data_versions
+       on data_versions.block_id = state.block_id
+      and data_versions.id = data_state.active_version_id
+     where state.block_id = $1
+       and state.active_version_id = $2
      limit 1`,
     [blockId, versionId],
   );

@@ -75,15 +75,18 @@ function sha256Source(value: string) {
 export function getTopDashboardDataAdapterScript(
   expectedFormat: TopDashboardSnapshotFormat | null = null,
   expectedProfile: TopDashboardProfile | null = null,
+  readOnly = false,
 ) {
   const expectedFormatJson = JSON.stringify(expectedFormat);
   const expectedProfileJson = JSON.stringify(expectedProfile);
+  const readOnlyJson = JSON.stringify(readOnly);
   return String.raw`(() => {
   'use strict';
   const MARKER = '${TOP_DASHBOARD_DATA_MESSAGE_MARKER}';
   const MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES};
   const EXPECTED_FORMAT = ${expectedFormatJson};
   const EXPECTED_PROFILE = ${expectedProfileJson};
+  const READ_ONLY = ${readOnlyJson};
   const SNAPSHOT_NAME = /\.json(?:\.gz)?$/i;
   let pendingSnapshot = null;
   let inputObserver = null;
@@ -116,6 +119,51 @@ export function getTopDashboardDataAdapterScript(
     if (preferred instanceof HTMLInputElement && preferred.type === 'file') return preferred;
     const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
     return inputs.find((input) => /(?:\.json|\.gz|application\/json)/i.test(input.accept || '')) || null;
+  }
+
+  function isFileInput(value) {
+    return value instanceof HTMLInputElement && value.type === 'file';
+  }
+
+  function lockFileInputs() {
+    if (!READ_ONLY) return;
+    document.querySelectorAll('input[type="file"]').forEach((input) => {
+      if (!isFileInput(input)) return;
+      if (!input.disabled) input.disabled = true;
+      if (input.tabIndex !== -1) input.tabIndex = -1;
+      if (input.getAttribute('aria-hidden') !== 'true') input.setAttribute('aria-hidden', 'true');
+    });
+  }
+
+  function blockOwnerFileInteraction(event) {
+    if (!READ_ONLY) return;
+    const target = event.target;
+    const transfer = event.dataTransfer || event.clipboardData;
+    const hasFiles = transfer
+      && (transfer.files.length > 0 || Array.from(transfer.types || []).includes('Files'));
+    const isBlockedFileEvent = (event.type === 'click' && isFileInput(target))
+      || ((event.type === 'drop' || event.type === 'dragenter' || event.type === 'dragover') && hasFiles)
+      || (event.type === 'change' && event.isTrusted && isFileInput(target));
+    if (!isBlockedFileEvent) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  if (READ_ONLY) {
+    const readOnlyStyle = document.createElement('style');
+    readOnlyStyle.textContent = 'input[type="file"],label[for="file"],label[for="folder"],label[for="snapInp"],#drop,#btnFiles,#btnDir,#btnSnapLoad,button[onclick*="pickFiles("],button[onclick*="connectFolder("],button[onclick*="refreshFromFolder("]{display:none!important}';
+    document.head.appendChild(readOnlyStyle);
+    ['click', 'change', 'dragenter', 'dragover', 'drop'].forEach((type) => {
+      document.addEventListener(type, blockOwnerFileInteraction, true);
+    });
+    const fileInputObserver = new MutationObserver(lockFileInputs);
+    fileInputObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['disabled', 'type'],
+      childList: true,
+      subtree: true,
+    });
+    lockFileInputs();
   }
 
   function stopWaitingForInput() {
@@ -166,6 +214,7 @@ export function getTopDashboardDataAdapterScript(
         input.dispatchEvent(new Event('change', { bubbles: true }));
         await new Promise((resolve) => window.setTimeout(resolve, 750));
       }
+      lockFileInputs();
       send('snapshot-installed');
     } catch {
       report('SNAPSHOT_INSTALL_FAILED');
@@ -202,12 +251,13 @@ export function getTopDashboardDataAdapterScript(
 })();`;
 }
 
-export function injectTopDashboardDataAdapter(htmlContent: string) {
-  if (htmlContent.includes(TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE)) return htmlContent;
-
+export function injectTopDashboardDataAdapter(
+  htmlContent: string,
+  options: { readOnly?: boolean } = {},
+) {
   const expectedFormat = detectTopDashboardExpectedSnapshotFormat(htmlContent);
   const expectedProfile = detectTopDashboardExpectedProfile(htmlContent);
-  const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile)}</script>`;
+  const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, options.readOnly === true)}</script>`;
   const head = HEAD_OPEN_PATTERN.exec(htmlContent);
   if (head) {
     const index = head.index + head[0].length;
@@ -487,25 +537,35 @@ export function isTopDashboardBlockFrameRequest(
   );
 }
 
-export function isTopDashboardBlockDataFrameRequest(request: Request, blockId: number) {
-  if (request.method !== 'GET') return false;
-  if (request.headers.get('sec-fetch-dest') !== 'empty') return false;
-  if (request.headers.get('sec-fetch-mode') !== 'cors') return false;
-  if (request.headers.get('sec-fetch-site') !== 'same-origin') return false;
+export function getTopDashboardBlockDataFrameVersionId(
+  request: Request,
+  blockId: number,
+): number | null {
+  if (request.method !== 'GET') return null;
+  if (request.headers.get('sec-fetch-dest') !== 'empty') return null;
+  if (request.headers.get('sec-fetch-mode') !== 'cors') return null;
+  if (request.headers.get('sec-fetch-site') !== 'same-origin') return null;
 
   const referer = request.headers.get('referer');
-  if (!referer) return false;
+  if (!referer) return null;
 
   try {
     const refererUrl = new URL(referer);
     const escapedBlockId = String(blockId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const expectedPath = new RegExp(
-      `^/api/admin/top-dashboard/blocks/${escapedBlockId}/versions/[1-9]\\d*/frame$`,
+      `^/api/admin/top-dashboard/blocks/${escapedBlockId}/versions/([1-9]\\d*)/frame$`,
     );
-    return expectedPath.test(refererUrl.pathname);
+    const match = expectedPath.exec(refererUrl.pathname);
+    if (!match) return null;
+    const versionId = Number(match[1]);
+    return Number.isSafeInteger(versionId) ? versionId : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function isTopDashboardBlockDataFrameRequest(request: Request, blockId: number) {
+  return getTopDashboardBlockDataFrameVersionId(request, blockId) !== null;
 }
 
 function isExpectedTopDashboardFrameRequest(request: Request, expectedFramePath: string) {

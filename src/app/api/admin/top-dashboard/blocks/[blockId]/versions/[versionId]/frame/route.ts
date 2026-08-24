@@ -1,4 +1,8 @@
-import { requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import {
+  isTopDashboardManagementSession,
+  requireTopDashboardSession,
+} from '@/shared/lib/adminAuth';
+import { isPublishedTopDashboardBlockVersion } from '@/shared/lib/db';
 import {
   buildTopDashboardFrameSecurityPolicy,
   createTopDashboardFrameBridgeScript,
@@ -13,7 +17,7 @@ type Context = {
 };
 
 export async function GET(_request: Request, context: Context) {
-  const { denied } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardSession();
   if (denied) return denied;
 
   const { blockId: rawBlockId, versionId: rawVersionId } = await context.params;
@@ -21,6 +25,12 @@ export async function GET(_request: Request, context: Context) {
   const versionId = parsePositiveId(rawVersionId);
   if (!blockId) return Response.json({ error: 'Некорректный блок' }, { status: 400 });
   if (!versionId) return Response.json({ error: 'Некорректная версия HTML' }, { status: 400 });
+  if (
+    !isTopDashboardManagementSession(session)
+    && !(await isPublishedTopDashboardBlockVersion(blockId, versionId))
+  ) {
+    return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
+  }
 
   const contentPath = `/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/content`;
   const bridgeScript = createTopDashboardFrameBridgeScript(blockId);

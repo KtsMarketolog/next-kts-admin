@@ -128,7 +128,7 @@ export function WholesaleManagerManagement({
                 checked={managerDraft.canAccessTopDashboard}
                 onChange={(event) => setManagerDraft({ ...managerDraft, canAccessTopDashboard: event.target.checked })}
               />
-              Доступ TOP
+              Просмотр TOP
             </label>
           </div>
           <button className={managerCreated ? styles.savedButton : undefined} disabled={busy} onClick={createManager}>
@@ -226,7 +226,7 @@ export function WholesaleManagerManagement({
                       checked={manager.canAccessTopDashboard}
                       onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, canAccessTopDashboard: event.target.checked } : item))}
                     />
-                    <span>Доступ TOP</span>
+                    <span>Просмотр TOP</span>
                   </label>
                 </div>
                 <div className={styles.managerActions}>
@@ -355,7 +355,7 @@ export function WholesaleManagerManagement({
                           checked={manager.canAccessTopDashboard}
                           onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, canAccessTopDashboard: event.target.checked } : item))}
                         />
-                        Доступ TOP
+                        Просмотр TOP
                       </label>
                     </div>
                     <div className={styles.userAccessBadges}>

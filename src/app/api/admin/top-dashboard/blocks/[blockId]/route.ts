@@ -1,7 +1,13 @@
-import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import {
+  getTopDashboardActor,
+  isTopDashboardManagementSession,
+  requireTopDashboardManagementSession,
+  requireTopDashboardSession,
+} from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   deleteTopDashboardBlock,
+  getPublishedTopDashboardBlockOverview,
   getTopDashboardBlockOverview,
   normalizeTopDashboardBlockTitle,
   renameTopDashboardBlock,
@@ -21,7 +27,7 @@ type Context = {
 };
 
 export async function GET(_request: Request, context: Context) {
-  const { denied } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardSession();
   if (denied) return denied;
 
   const { blockId: rawBlockId } = await context.params;
@@ -29,7 +35,12 @@ export async function GET(_request: Request, context: Context) {
   if (!blockId) return Response.json({ error: 'Некорректный блок' }, { status: 400 });
 
   try {
-    const overview = await getTopDashboardBlockOverview(blockId);
+    const overview = isTopDashboardManagementSession(session)
+      ? await getTopDashboardBlockOverview(blockId)
+      : await getPublishedTopDashboardBlockOverview(blockId);
+    if (!overview) {
+      return Response.json({ error: 'Блок не найден' }, { status: 404 });
+    }
     return Response.json(overview, {
       headers: { 'Cache-Control': 'private, no-store' },
     });
@@ -43,7 +54,7 @@ export async function GET(_request: Request, context: Context) {
 }
 
 export async function PATCH(request: Request, context: Context) {
-  const { denied, session } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardManagementSession();
   if (denied) return denied;
 
   const forbiddenOrigin = enforceSameOriginRequest(request);
@@ -112,7 +123,7 @@ export async function PATCH(request: Request, context: Context) {
 }
 
 export async function DELETE(request: Request, context: Context) {
-  const { denied, session } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardManagementSession();
   if (denied) return denied;
 
   const forbiddenOrigin = enforceSameOriginRequest(request);

@@ -8,9 +8,9 @@ const COOKIE_NAME = 'kts_admin_session';
 const PASSWORD_KEYLEN = 64;
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 100;
 
-export type AdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top';
+export type AdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
 export type AdminManagerSessionRole = 'manager' | 'support_manager';
-export type AdminUserSessionRole = 'admin' | 'wholesale_admin' | 'top';
+export type AdminUserSessionRole = 'admin' | 'wholesale_admin' | 'top' | 'admintop';
 
 export type AdminSession = {
   role: AdminSessionRole;
@@ -40,10 +40,26 @@ export function isAdminManagementSession(
   return session?.role === 'admin';
 }
 
+export type TopDashboardManagementSession =
+  | (AdminSession & { role: 'admin' })
+  | (AdminSession & { role: 'admintop'; adminUserId: number });
+
+function hasPersistedAdminUserId(session: AdminSession | null | undefined) {
+  return Number.isInteger(session?.adminUserId) && Number(session?.adminUserId) > 0;
+}
+
+export function isTopDashboardManagementSession(
+  session: AdminSession | null | undefined,
+): session is TopDashboardManagementSession {
+  if (session?.role === 'admin') return true;
+  return session?.role === 'admintop' && hasPersistedAdminUserId(session);
+}
+
 export function isTopDashboardSession(
   session: AdminSession | null | undefined,
 ): session is
   | (AdminSession & { role: 'admin' })
+  | (AdminSession & { role: 'admintop'; adminUserId: number })
   | (AdminSession & { role: 'top'; adminUserId: number })
   | (AdminSession & {
       role: AdminManagerSessionRole;
@@ -51,8 +67,8 @@ export function isTopDashboardSession(
       canAccessTopDashboard: true;
     }) {
   if (session?.role === 'admin') return true;
-  if (session?.role === 'top') {
-    return Number.isInteger(session.adminUserId) && Number(session.adminUserId) > 0;
+  if (session?.role === 'top' || session?.role === 'admintop') {
+    return hasPersistedAdminUserId(session);
   }
   return isManagerSessionRole(session?.role)
     && session.canAccessTopDashboard === true
@@ -60,16 +76,9 @@ export function isTopDashboardSession(
     && Number(session.managerId) > 0;
 }
 
-export function getTopDashboardActor(session: AdminSession) {
-  if (isManagerSessionRole(session.role)) {
-    return {
-      actorType: 'manager' as const,
-      adminUserId: null,
-      managerId: session.managerId ?? null,
-    };
-  }
+export function getTopDashboardActor(session: TopDashboardManagementSession) {
   return {
-    actorType: session.role === 'top' ? 'top' as const : 'admin' as const,
+    actorType: session.role === 'admintop' ? 'admintop' as const : 'admin' as const,
     adminUserId: session.adminUserId ?? null,
     managerId: null,
   };
@@ -83,7 +92,7 @@ export async function createAdminSession(
   role: AdminUserSessionRole = 'admin',
   options: CreateSessionOptions = {},
 ) {
-  if (role === 'top' && !options.adminUserId) {
+  if ((role === 'top' || role === 'admintop') && !options.adminUserId) {
     throw new Error('TOP session requires an admin user id');
   }
   return createEmployeeSession({ role, adminUserId: options.adminUserId ?? undefined }, options);
@@ -91,7 +100,10 @@ export async function createAdminSession(
 
 export async function createEmployeeSession(session: AdminSession, options: CreateSessionOptions = {}) {
   const adminUserId = session.adminUserId ?? options.adminUserId ?? null;
-  if (session.role === 'top' && (!Number.isInteger(adminUserId) || Number(adminUserId) <= 0)) {
+  if (
+    (session.role === 'top' || session.role === 'admintop')
+    && (!Number.isInteger(adminUserId) || Number(adminUserId) <= 0)
+  ) {
     throw new Error('Top session requires an admin user');
   }
 
@@ -219,7 +231,27 @@ export async function requireEmployee() {
 export async function requireTopDashboardSession() {
   const session = await getAdminSession();
   if (!isTopDashboardSession(session)) {
-    return { denied: Response.json({ error: 'Unauthorized' }, { status: 401 }), session: null };
+    return {
+      denied: Response.json(
+        { error: session ? 'Недостаточно прав для просмотра HTML-страниц' : 'Unauthorized' },
+        { status: session ? 403 : 401 },
+      ),
+      session: null,
+    };
+  }
+  return { denied: null, session };
+}
+
+export async function requireTopDashboardManagementSession() {
+  const session = await getAdminSession();
+  if (!isTopDashboardManagementSession(session)) {
+    return {
+      denied: Response.json(
+        { error: session ? 'Недостаточно прав для управления HTML-страницами' : 'Unauthorized' },
+        { status: session ? 403 : 401 },
+      ),
+      session: null,
+    };
   }
   return { denied: null, session };
 }

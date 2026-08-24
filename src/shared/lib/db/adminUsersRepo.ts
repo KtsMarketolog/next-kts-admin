@@ -3,7 +3,7 @@ import type { PoolClient } from 'pg';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type AdminUserRole = 'admin' | 'wholesale_admin' | 'top';
+export type AdminUserRole = 'admin' | 'wholesale_admin' | 'top' | 'admintop';
 export type ManagerAccessRole = 'manager' | 'support_manager';
 export type AccessUserRole = AdminUserRole | ManagerAccessRole;
 export type AccessUserSource = 'admin' | 'manager';
@@ -72,12 +72,19 @@ function normalizeLogin(login: string) {
 }
 
 function normalizeAdminRole(role: string): AdminUserRole {
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'top') return role;
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'top' || role === 'admintop') return role;
   throw new Error('Некорректная роль пользователя');
 }
 
 function normalizeAccessRole(role: string): AccessUserRole | null {
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager' || role === 'support_manager' || role === 'top') {
+  if (
+    role === 'admin'
+    || role === 'wholesale_admin'
+    || role === 'manager'
+    || role === 'support_manager'
+    || role === 'top'
+    || role === 'admintop'
+  ) {
     return role;
   }
   return null;
@@ -90,7 +97,8 @@ function isManagerAccessRole(role: AccessUserRole): role is ManagerAccessRole {
 function accessLabels(role: AccessUserRole) {
   if (role === 'admin') return ['Сайт', 'Прайсы', 'Пользователи'];
   if (role === 'wholesale_admin') return ['Индивидуальные прайсы'];
-  if (role === 'top') return ['HTML-страницы'];
+  if (role === 'top') return ['HTML-страницы: просмотр'];
+  if (role === 'admintop') return ['HTML-страницы: управление'];
   if (role === 'support_manager') return ['Прайсы менеджера'];
   return ['Свои прайсы'];
 }
@@ -272,7 +280,7 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
       group by wm.id, support.name
     ) users
     order by
-      case role when 'admin' then 1 when 'wholesale_admin' then 2 when 'top' then 3 when 'manager' then 4 when 'support_manager' then 5 else 6 end,
+      case role when 'admin' then 1 when 'wholesale_admin' then 2 when 'admintop' then 3 when 'top' then 4 when 'manager' then 5 when 'support_manager' then 6 else 7 end,
       is_active desc,
       name asc,
       login asc

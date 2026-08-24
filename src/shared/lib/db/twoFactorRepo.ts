@@ -9,13 +9,15 @@ export type TwoFactorActorType = 'admin' | 'manager' | 'client';
 export type TwoFactorChallengeActor =
   | {
       challengeId: string;
+      createdAt: string;
       actorType: 'admin';
-      role: 'admin' | 'wholesale_admin' | 'top';
+      role: 'admin' | 'wholesale_admin' | 'top' | 'admintop';
       login: string;
       adminUserId?: number;
     }
   | {
       challengeId: string;
+      createdAt: string;
       actorType: 'manager';
       role: 'manager' | 'support_manager';
       login: string;
@@ -23,6 +25,7 @@ export type TwoFactorChallengeActor =
     }
   | {
       challengeId: string;
+      createdAt: string;
       actorType: 'client';
       role: 'client';
       login: string;
@@ -47,7 +50,7 @@ function hashTwoFactorCode(challengeId: string, loginSessionId: string, code: st
 export async function createTwoFactorChallenge(input: {
   login: string;
   actorType: TwoFactorActorType;
-  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'client';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'client';
   adminUserId?: number | null;
   managerId?: number | null;
   clientUserId?: number | null;
@@ -103,6 +106,7 @@ export async function consumeTwoFactorChallenge(input: {
     admin_user_id: string | null;
     manager_id: string | null;
     client_user_id: string | null;
+    created_at: string;
     code_hash: string;
     attempts: number;
   }>(
@@ -114,6 +118,7 @@ export async function consumeTwoFactorChallenge(input: {
        admin_user_id::text,
        manager_id::text,
        client_user_id::text,
+       created_at::text,
        code_hash,
        attempts
      from admin_2fa_challenges
@@ -143,6 +148,7 @@ export async function consumeTwoFactorChallenge(input: {
     if (row.role !== 'client') return null;
     return {
       challengeId: row.id,
+      createdAt: row.created_at,
       actorType: 'client',
       role: 'client',
       login: row.login,
@@ -154,6 +160,7 @@ export async function consumeTwoFactorChallenge(input: {
     if (row.role !== 'manager' && row.role !== 'support_manager') return null;
     return {
       challengeId: row.id,
+      createdAt: row.created_at,
       actorType: 'manager',
       role: row.role,
       login: row.login,
@@ -162,10 +169,16 @@ export async function consumeTwoFactorChallenge(input: {
   }
 
   if (row.actor_type !== 'admin') return null;
-  if (row.role !== 'admin' && row.role !== 'wholesale_admin' && row.role !== 'top') return null;
+  if (
+    row.role !== 'admin'
+    && row.role !== 'wholesale_admin'
+    && row.role !== 'top'
+    && row.role !== 'admintop'
+  ) return null;
 
   return {
     challengeId: row.id,
+    createdAt: row.created_at,
     actorType: 'admin',
     role: row.role,
     login: row.login,

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { normalizeSessionRole } from '../src/app/admin/adminSessionClient';
@@ -14,6 +15,7 @@ import {
   getTopDashboardActor,
   isAdminManagementSession,
   isOperationalEmployeeSessionRole,
+  isTopDashboardManagementSession,
   isTopDashboardSession,
 } from '../src/shared/lib/adminAuth';
 import type {
@@ -28,6 +30,7 @@ import {
   createTopDashboardFrameBridgeScript,
   detectTopDashboardExpectedProfile,
   detectTopDashboardExpectedSnapshotFormat,
+  getTopDashboardBlockDataFrameVersionId,
   getTopDashboardDataAdapterScript,
   injectTopDashboardDataAdapter,
   isTopDashboardBlockDataFrameRequest,
@@ -39,19 +42,21 @@ function cspHash(source: string) {
   return `'sha256-${createHash('sha256').update(source, 'utf8').digest('base64')}'`;
 }
 
-test('top role is preserved client-side and unknown roles fail closed', () => {
+test('TOP roles are preserved client-side and unknown roles fail closed', () => {
   assert.equal(normalizeSessionRole('top'), 'top');
+  assert.equal(normalizeSessionRole('admintop'), 'admintop');
   assert.equal(normalizeSessionRole('admin'), 'admin');
   assert.equal(normalizeSessionRole('manager'), 'manager');
   assert.equal(normalizeSessionRole('unexpected' as never), null);
 });
 
-test('top is excluded from operational employee permissions', () => {
+test('TOP-only roles are excluded from operational employee permissions', () => {
   assert.equal(isOperationalEmployeeSessionRole('admin'), true);
   assert.equal(isOperationalEmployeeSessionRole('wholesale_admin'), true);
   assert.equal(isOperationalEmployeeSessionRole('manager'), true);
   assert.equal(isOperationalEmployeeSessionRole('support_manager'), true);
   assert.equal(isOperationalEmployeeSessionRole('top'), false);
+  assert.equal(isOperationalEmployeeSessionRole('admintop'), false);
   assert.equal(isOperationalEmployeeSessionRole(null), false);
 });
 
@@ -60,6 +65,7 @@ test('break-glass admin can bootstrap users and manage TOP dashboard without a d
 
   assert.equal(isAdminManagementSession(breakGlassAdmin), true);
   assert.equal(isTopDashboardSession(breakGlassAdmin), true);
+  assert.equal(isTopDashboardManagementSession(breakGlassAdmin), true);
 });
 
 test('TOP requires a persisted positive user id and never receives admin-management access', () => {
@@ -67,12 +73,27 @@ test('TOP requires a persisted positive user id and never receives admin-managem
   assert.equal(isTopDashboardSession({ role: 'top' }), false);
   assert.equal(isTopDashboardSession({ role: 'top', adminUserId: -1 }), false);
   assert.equal(isTopDashboardSession({ role: 'top', adminUserId: 1 }), true);
+  assert.equal(isTopDashboardManagementSession({ role: 'top', adminUserId: 1 }), false);
+});
+
+test('Admin TOP requires a persisted user id and receives TOP management only', () => {
+  assert.equal(isAdminManagementSession({ role: 'admintop', adminUserId: 1 }), false);
+  assert.equal(isTopDashboardSession({ role: 'admintop' }), false);
+  assert.equal(isTopDashboardManagementSession({ role: 'admintop' }), false);
+  assert.equal(isTopDashboardSession({ role: 'admintop', adminUserId: -1 }), false);
+  assert.equal(isTopDashboardManagementSession({ role: 'admintop', adminUserId: -1 }), false);
+  assert.equal(isTopDashboardSession({ role: 'admintop', adminUserId: 1 }), true);
+  assert.equal(isTopDashboardManagementSession({ role: 'admintop', adminUserId: 1 }), true);
 });
 
 test('manager roles keep their primary permissions and receive TOP only through the additive flag', () => {
   for (const role of ['manager', 'support_manager'] as const) {
     assert.equal(isOperationalEmployeeSessionRole(role), true);
     assert.equal(isAdminManagementSession({ role, managerId: 17 }), false);
+    assert.equal(
+      isTopDashboardManagementSession({ role, managerId: 17, canAccessTopDashboard: true }),
+      false,
+    );
     assert.equal(isTopDashboardSession({ role, managerId: 17 }), false);
     assert.equal(
       isTopDashboardSession({ role, managerId: 17, canAccessTopDashboard: false }),
@@ -98,26 +119,10 @@ test('manager TOP access fails closed without a valid positive manager id', () =
   }
 });
 
-test('TOP audit attribution preserves the manager identity separately from admin users', () => {
+test('TOP management audit attribution distinguishes Admin TOP from the main admin', () => {
   assert.deepEqual(
-    getTopDashboardActor({
-      role: 'manager',
-      managerId: 17,
-      canAccessTopDashboard: true,
-    }),
-    { actorType: 'manager', adminUserId: null, managerId: 17 },
-  );
-  assert.deepEqual(
-    getTopDashboardActor({
-      role: 'support_manager',
-      managerId: 23,
-      canAccessTopDashboard: true,
-    }),
-    { actorType: 'manager', adminUserId: null, managerId: 23 },
-  );
-  assert.deepEqual(
-    getTopDashboardActor({ role: 'top', adminUserId: 31 }),
-    { actorType: 'top', adminUserId: 31, managerId: null },
+    getTopDashboardActor({ role: 'admintop', adminUserId: 31 }),
+    { actorType: 'admintop', adminUserId: 31, managerId: null },
   );
   assert.deepEqual(
     getTopDashboardActor({ role: 'admin' }),
@@ -127,8 +132,13 @@ test('TOP audit attribution preserves the manager identity separately from admin
 
 test('TOP sessions without a positive user id are rejected before persistence', async () => {
   await assert.rejects(createAdminSession('top'), /requires an admin user id/i);
+  await assert.rejects(createAdminSession('admintop'), /requires an admin user id/i);
   await assert.rejects(
     createAdminSession('top', { adminUserId: -1 }),
+    /requires an admin user/i,
+  );
+  await assert.rejects(
+    createAdminSession('admintop', { adminUserId: -1 }),
     /requires an admin user/i,
   );
 });
@@ -177,11 +187,87 @@ test('active TOP dashboard versions have a dedicated deletion conflict', () => {
   assert.match(error.message, /Активную версию нельзя удалить/);
 });
 
-test('admin users screen exposes a separate single-role TOP tab', () => {
-  assert.deepEqual(USER_TABS.map((tab) => tab.value), ['admin', 'top']);
+test('admin users screen exposes separate single-role TOP and Admin TOP tabs', () => {
+  assert.deepEqual(USER_TABS.map((tab) => tab.value), ['admin', 'top', 'admintop']);
   assert.equal(tabForRole('top'), 'top');
+  assert.equal(tabForRole('admintop'), 'admintop');
   assert.equal(defaultRoleForTab('top'), 'top');
-  assert.deepEqual(roleOptionsForTab('top'), [{ value: 'top', label: 'TOP' }]);
+  assert.equal(defaultRoleForTab('admintop'), 'admintop');
+  assert.deepEqual(roleOptionsForTab('top'), [{ value: 'top', label: 'TOP — только просмотр' }]);
+  assert.deepEqual(roleOptionsForTab('admintop'), [{
+    value: 'admintop',
+    label: 'Админ TOP — управление',
+  }]);
+});
+
+test('every TOP mutation route uses the management-only server guard', () => {
+  const routePaths = [
+    '../src/app/api/admin/top-dashboard/blocks/route.ts',
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/route.ts',
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/versions/route.ts',
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/active/route.ts',
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/versions/[versionId]/route.ts',
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/data/route.ts',
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/data/active/route.ts',
+  ];
+
+  for (const path of routePaths) {
+    const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+    assert.match(source, /requireTopDashboardManagementSession/);
+  }
+});
+
+test('TOP viewer routes enforce published-only HTML at both frame layers', () => {
+  const frameSource = readFileSync(new URL(
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/versions/[versionId]/frame/route.ts',
+    import.meta.url,
+  ), 'utf8');
+  const contentSource = readFileSync(new URL(
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/versions/[versionId]/content/route.ts',
+    import.meta.url,
+  ), 'utf8');
+
+  assert.match(frameSource, /isPublishedTopDashboardBlockVersion/);
+  assert.match(frameSource, /isTopDashboardManagementSession/);
+  assert.match(contentSource, /getPublishedTopDashboardBlockVersionContent/);
+  assert.match(contentSource, /isTopDashboardManagementSession/);
+});
+
+test('TOP viewer exposes only reports with both active HTML and active data', () => {
+  const source = readFileSync(new URL(
+    '../src/shared/lib/db/topDashboardBlocksRepo.ts',
+    import.meta.url,
+  ), 'utf8');
+  const publishedFunctions = [
+    'getPublishedTopDashboardBlocks',
+    'getPublishedTopDashboardBlockOverview',
+    'isPublishedTopDashboardBlockVersion',
+    'getPublishedTopDashboardBlockVersionContent',
+  ];
+
+  publishedFunctions.forEach((functionName, index) => {
+    const start = source.indexOf(`export async function ${functionName}`);
+    const nextFunctionName = publishedFunctions[index + 1];
+    const end = nextFunctionName
+      ? source.indexOf(`export async function ${nextFunctionName}`, start)
+      : source.indexOf('export async function activateTopDashboardBlockVersion', start);
+    const section = source.slice(start, end);
+    assert.ok(start >= 0 && end > start, `${functionName} source is present`);
+    assert.match(section, /top_dashboard_block_data_state/);
+    assert.match(section, /active_version_id is not null/);
+  });
+});
+
+test('TOP viewer component contains no dashboard mutation controls', () => {
+  const source = readFileSync(new URL(
+    '../src/features/admin/top-dashboard/TopDashboardViewer.tsx',
+    import.meta.url,
+  ), 'utf8');
+
+  assert.doesNotMatch(source, /method=["'](?:POST|PUT|PATCH|DELETE)["']/);
+  assert.doesNotMatch(source, /Загрузить|Удалить|Опубликовать|Откатить/);
+  assert.match(source, /Обновить/);
+  assert.match(source, /На весь экран/);
 });
 
 test('dashboard CSP permits only exact uploaded scripts and handlers', () => {
@@ -208,7 +294,6 @@ test('dashboard data adapter is injected before application scripts and receives
   const adapterScript = getTopDashboardDataAdapterScript();
 
   assert.ok(transformed.indexOf(adapterScript) < transformed.indexOf(appScript));
-  assert.equal(injectTopDashboardDataAdapter(transformed), transformed);
   assert.match(transformed, /<script data-kts-top-dashboard-data-adapter>/);
 
   const csp = buildTopDashboardContentSecurityPolicy(transformed);
@@ -254,6 +339,31 @@ test('dashboard data adapter hydrates supported file inputs without granting ser
   assert.match(adapter, /data\.type === 'bridge-probe'/);
   assert.doesNotMatch(adapter, /snapshot-selected/);
   assert.doesNotMatch(adapter, /method: 'PUT'/);
+});
+
+test('TOP read-only adapter blocks local file replacement and hides upload controls', () => {
+  const adapter = getTopDashboardDataAdapterScript(null, null, true);
+  const transformed = injectTopDashboardDataAdapter(
+    '<!doctype html><html><head></head><body><input id="file" type="file"></body></html>',
+    { readOnly: true },
+  );
+
+  assert.match(adapter, /const READ_ONLY = true/);
+  assert.match(adapter, /input\.disabled = true/);
+  assert.match(adapter, /event\.isTrusted/);
+  assert.match(adapter, /stopImmediatePropagation/);
+  assert.match(adapter, /#drop/);
+  assert.ok(transformed.includes(adapter));
+  assert.match(getTopDashboardDataAdapterScript(), /const READ_ONLY = false/);
+});
+
+test('uploaded HTML cannot spoof the server adapter marker to bypass TOP read-only mode', () => {
+  const spoofed = '<!doctype html><html><head><!-- data-kts-top-dashboard-data-adapter --></head><body><input type="file"></body></html>';
+  const transformed = injectTopDashboardDataAdapter(spoofed, { readOnly: true });
+
+  assert.notEqual(transformed, spoofed);
+  assert.match(transformed, /const READ_ONLY = true/);
+  assert.ok(transformed.indexOf('const READ_ONLY = true') < transformed.indexOf('<!-- data-kts'));
 });
 
 test('trusted dashboard frame bridge is read-only and has one exact script hash', () => {
@@ -357,6 +467,7 @@ test('dashboard data is readable only by the exact same-origin trusted frame', (
     },
   });
   assert.equal(isTopDashboardBlockDataFrameRequest(trusted, blockId), true);
+  assert.equal(getTopDashboardBlockDataFrameVersionId(trusted, blockId), versionId);
 
   const wrongBlock = new Request(dataUrl, {
     headers: {
@@ -367,6 +478,7 @@ test('dashboard data is readable only by the exact same-origin trusted frame', (
     },
   });
   assert.equal(isTopDashboardBlockDataFrameRequest(wrongBlock, blockId), false);
+  assert.equal(getTopDashboardBlockDataFrameVersionId(wrongBlock, blockId), null);
 
   const directNavigation = new Request(dataUrl, {
     headers: {

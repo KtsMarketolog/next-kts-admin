@@ -4,7 +4,7 @@ import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top';
+export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
 
 export type StoredAdminSession = {
   sessionId: string;
@@ -32,7 +32,14 @@ function hashSessionToken(token: string) {
 }
 
 function normalizeRole(role: string): StoredAdminSessionRole | null {
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'manager' || role === 'support_manager' || role === 'top') {
+  if (
+    role === 'admin'
+    || role === 'wholesale_admin'
+    || role === 'manager'
+    || role === 'support_manager'
+    || role === 'top'
+    || role === 'admintop'
+  ) {
     return role;
   }
   return null;
@@ -81,7 +88,9 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     created_at: string;
     expires_at: string;
     admin_is_active: boolean | null;
+    admin_role: string | null;
     manager_is_active: boolean | null;
+    manager_role: string | null;
     manager_can_access_top_dashboard: boolean | null;
     admin_password_changed_at: string | null;
     manager_password_changed_at: string | null;
@@ -94,7 +103,9 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
        s.created_at::text,
        s.expires_at::text,
        au.is_active as admin_is_active,
+       au.role as admin_role,
        wm.is_active as manager_is_active,
+       coalesce(nullif(wm.role, ''), 'manager') as manager_role,
        wm.can_access_top_dashboard as manager_can_access_top_dashboard,
        au.password_changed_at::text as admin_password_changed_at,
        wm.password_changed_at::text as manager_password_changed_at
@@ -119,18 +130,25 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     return null;
   }
 
-  if (row.admin_user_id && row.admin_is_active === false) {
+  if (
+    row.admin_user_id
+    && (row.admin_is_active !== true || row.admin_role !== role)
+  ) {
     await revokeStoredAdminSession(token);
     return null;
   }
 
-  if (role === 'top' && !row.admin_user_id) {
+  if ((role === 'top' || role === 'admintop') && !row.admin_user_id) {
     await revokeStoredAdminSession(token);
     return null;
   }
 
   if (isStoredManagerRole(role)) {
-    if (!row.manager_id || row.manager_is_active === false) {
+    if (
+      !row.manager_id
+      || row.manager_is_active !== true
+      || row.manager_role !== role
+    ) {
       await revokeStoredAdminSession(token);
       return null;
     }

@@ -44,10 +44,14 @@ export {
   createTopDashboardBlockVersion,
   deleteTopDashboardBlock,
   deleteTopDashboardBlockVersion,
+  getPublishedTopDashboardBlockOverview,
+  getPublishedTopDashboardBlocks,
+  getPublishedTopDashboardBlockVersionContent,
   getTopDashboardBlockOverview,
   getTopDashboardBlocks,
   getActiveTopDashboardBlockDataContent,
   getTopDashboardBlockVersionContent,
+  isPublishedTopDashboardBlockVersion,
   normalizeTopDashboardBlockTitle,
   renameTopDashboardBlock,
   TopDashboardBlockNotFoundError,
@@ -63,6 +67,8 @@ export type {
   TopDashboardBlock,
   TopDashboardBlockOverview,
   TopDashboardBlockSummary,
+  TopDashboardPublishedBlockOverview,
+  TopDashboardPublishedBlockSummary,
 } from './db/topDashboardBlocksRepo';
 export {
   assertClientCompanyVisible,

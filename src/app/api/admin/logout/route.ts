@@ -11,9 +11,11 @@ export async function POST(request: Request) {
       ? 'manager'
       : session?.role === 'wholesale_admin'
         ? 'wholesale_admin'
-        : session?.role === 'top'
-          ? 'top'
-          : 'admin',
+        : session?.role === 'admintop'
+          ? 'admintop'
+          : session?.role === 'top'
+            ? 'top'
+            : 'admin',
     adminUserId: session?.adminUserId,
     managerId: session?.managerId,
     sessionId: session?.sessionId,

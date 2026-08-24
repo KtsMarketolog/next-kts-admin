@@ -2,7 +2,7 @@ import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type SecurityActorType = 'admin' | 'wholesale_admin' | 'manager' | 'top' | 'client' | 'system';
+export type SecurityActorType = 'admin' | 'wholesale_admin' | 'manager' | 'top' | 'admintop' | 'client' | 'system';
 
 export type SecurityEventType =
   | 'login_success'

@@ -14,7 +14,7 @@ type LoginPanelProps = {
   defaultMode?: LoginMode;
   clientRedirect?: string;
   employeeRedirect?: string;
-  onEmployeeAuthenticated?: (role: 'admin' | 'wholesale_admin' | 'top') => Promise<void> | void;
+  onEmployeeAuthenticated?: (role: 'admin' | 'wholesale_admin' | 'top' | 'admintop') => Promise<void> | void;
 };
 
 export function LoginPanel({
@@ -71,7 +71,12 @@ export function LoginPanel({
     }
 
     if (onEmployeeAuthenticated) {
-      if (data.role !== 'admin' && data.role !== 'wholesale_admin' && data.role !== 'top') {
+      if (
+        data.role !== 'admin'
+        && data.role !== 'wholesale_admin'
+        && data.role !== 'top'
+        && data.role !== 'admintop'
+      ) {
         setStatus('Не удалось определить права сотрудника');
         return;
       }

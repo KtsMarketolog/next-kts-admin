@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function ClientCabinetPage() {
   const employeeSession = await getAdminSession();
-  if (employeeSession?.role === 'top') redirect('/admin');
+  if (employeeSession?.role === 'top' || employeeSession?.role === 'admintop') redirect('/admin');
   if (employeeSession) redirect('/admin/clients');
 
   const session = await getClientSession();

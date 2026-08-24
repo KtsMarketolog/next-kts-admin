@@ -1,4 +1,4 @@
-import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import { getTopDashboardActor, requireTopDashboardManagementSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   deleteTopDashboardBlockVersion,
@@ -19,7 +19,7 @@ type Context = {
 };
 
 export async function DELETE(request: Request, context: Context) {
-  const { denied, session } = await requireTopDashboardSession();
+  const { denied, session } = await requireTopDashboardManagementSession();
   if (denied) return denied;
 
   const forbiddenOrigin = enforceSameOriginRequest(request);

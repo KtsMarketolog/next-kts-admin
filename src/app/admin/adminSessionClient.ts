@@ -6,6 +6,7 @@ export type AdminSessionResponse = {
   authenticated?: boolean;
   role?: AdminSession['role'] | null;
   canAccessTopDashboard?: boolean;
+  canManageTopDashboard?: boolean;
 };
 
 function wait(ms: number) {
@@ -45,6 +46,6 @@ export async function fetchAdminSessionWithRetry(attempts = 4) {
 
 export function normalizeSessionRole(role: AdminSessionResponse['role']) {
   if (isManagerRole(role)) return role as AdminSession['role'];
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'top') return role;
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'top' || role === 'admintop') return role;
   return null;
 }

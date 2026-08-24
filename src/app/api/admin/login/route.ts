@@ -41,6 +41,18 @@ function twoFactorRecipient(email: string | null | undefined) {
   return email || process.env.ADMIN_2FA_EMAIL || process.env.SMTP_TO || '';
 }
 
+function challengePredatesPasswordChange(
+  challengeCreatedAt: string,
+  passwordChangedAt: string | null,
+) {
+  if (!passwordChangedAt) return false;
+  const challengeTime = new Date(challengeCreatedAt).getTime();
+  const passwordChangeTime = new Date(passwordChangedAt).getTime();
+  return !Number.isFinite(challengeTime)
+    || !Number.isFinite(passwordChangeTime)
+    || challengeTime < passwordChangeTime;
+}
+
 async function sendTwoFactorCode(email: string, code: string) {
   await sendSystemMail({
     to: email,
@@ -65,6 +77,16 @@ async function finishLogin(input: {
 
   if (actor.actorType === 'manager') {
     if (!actor.managerId) return Response.json({ error: 'Invalid session' }, { status: 401 });
+    const currentManager = await getWholesaleManagerByLogin(actor.login);
+    if (
+      !currentManager?.isActive
+      || currentManager.id !== actor.managerId
+      || currentManager.login !== actor.login
+      || currentManager.role !== actor.role
+      || challengePredatesPasswordChange(actor.createdAt, currentManager.passwordChangedAt)
+    ) {
+      return Response.json({ error: 'Invalid session' }, { status: 401 });
+    }
     await createEmployeeSession(
       { role: actor.role, managerId: actor.managerId },
       { ip, userAgent },
@@ -90,8 +112,20 @@ async function finishLogin(input: {
     return Response.json({ ok: true, role: actor.role });
   }
 
-  if (actor.role === 'top' && !actor.adminUserId) {
+  if ((actor.role === 'top' || actor.role === 'admintop') && !actor.adminUserId) {
     return Response.json({ error: 'Invalid session' }, { status: 401 });
+  }
+  if (actor.adminUserId) {
+    const currentAdminUser = await getAdminUserByLogin(actor.login);
+    if (
+      !currentAdminUser?.isActive
+      || currentAdminUser.id !== actor.adminUserId
+      || currentAdminUser.login !== actor.login
+      || currentAdminUser.role !== actor.role
+      || challengePredatesPasswordChange(actor.createdAt, currentAdminUser.passwordChangedAt)
+    ) {
+      return Response.json({ error: 'Invalid session' }, { status: 401 });
+    }
   }
 
   await createAdminSession(actor.role, {
@@ -124,7 +158,7 @@ async function finishLogin(input: {
 async function startTwoFactor(input: {
   login: string;
   actorType: 'admin' | 'manager';
-  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
   email: string;
   loginSessionId: string;
   adminUserId?: number | null;

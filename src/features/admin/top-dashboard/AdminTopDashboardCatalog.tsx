@@ -11,13 +11,14 @@ type TopDashboardBlock = {
   id: number;
   title: string;
   activeVersionId: number | null;
-  activeOriginalName: string | null;
-  versionCount: number;
+  activeOriginalName?: string | null;
+  versionCount?: number;
   updatedAt: string | null;
-  createdAt: string;
+  createdAt?: string;
 };
 
 type AdminTopDashboardCatalogProps = {
+  canManage: boolean;
   showStatus: (message: string) => void;
 };
 
@@ -47,11 +48,11 @@ function pluralize(count: number, one: string, few: string, many: string) {
 
 function blockDescription(block: TopDashboardBlock) {
   if (block.activeOriginalName) return block.activeOriginalName;
-  if (block.versionCount > 0) return 'Есть неопубликованные версии';
+  if ((block.versionCount ?? 0) > 0) return 'Есть неопубликованные версии';
   return 'HTML ещё не загружен';
 }
 
-export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalogProps) {
+export function AdminTopDashboardCatalog({ canManage, showStatus }: AdminTopDashboardCatalogProps) {
   const router = useRouter();
   const [blocks, setBlocks] = useState<TopDashboardBlock[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,7 +82,10 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
       }
 
       const data = await response.json().catch(() => ({}));
-      setBlocks(Array.isArray(data.blocks) ? data.blocks : []);
+      const nextBlocks = Array.isArray(data.blocks) ? data.blocks as TopDashboardBlock[] : [];
+      setBlocks(canManage
+        ? nextBlocks
+        : nextBlocks.filter((block) => Number.isInteger(block.activeVersionId)));
       setLoadError(null);
     } catch {
       const message = 'Не удалось загрузить HTML-страницы';
@@ -90,7 +94,7 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canManage]);
 
   useEffect(() => {
     void loadBlocks();
@@ -145,18 +149,25 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
     <section className={`${styles.section} ${styles.topDashboardCatalogSection}`}>
       <div className={styles.sectionHeader}>
         <div>
-          <p>HTML-страницы</p>
-          <h2>HTML-страницы и отчёты</h2>
+          <p>{canManage ? 'HTML-страницы' : 'Опубликованные дашборды'}</p>
+          <h2>{canManage ? 'HTML-страницы и отчёты' : 'Готовые отчёты'}</h2>
         </div>
         <span className={styles.headingMeta}>
           {loadError && blocks.length === 0
             ? 'Список недоступен'
-            : `${blocks.length} ${pluralize(blocks.length, 'блок', 'блока', 'блоков')}`}
+            : `${blocks.length} ${pluralize(
+              blocks.length,
+              canManage ? 'блок' : 'отчёт',
+              canManage ? 'блока' : 'отчёта',
+              canManage ? 'блоков' : 'отчётов',
+            )}`}
         </span>
       </div>
 
       <p className={styles.topDashboardCatalogIntro}>
-        Каждый блок хранит собственную HTML-страницу и отдельную историю до 50 версий и 100 МБ. Количество блоков не ограничено.
+        {canManage
+          ? 'Каждый блок хранит собственную HTML-страницу и отдельную историю до 50 версий и 100 МБ. Количество блоков не ограничено.'
+          : 'Откройте нужный отчёт — актуальные данные уже сохранены и загрузятся автоматически.'}
       </p>
 
       <div className={styles.topDashboardCatalogGrid} aria-busy={loading}>
@@ -167,13 +178,17 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
             key={block.id}
             scroll={false}
           >
-            <span className={styles.topDashboardCatalogEyebrow}>HTML-дашборд</span>
+            <span className={styles.topDashboardCatalogEyebrow}>
+              {canManage ? 'HTML-дашборд' : 'Готовый отчёт'}
+            </span>
             <strong>{block.title}</strong>
             <span className={styles.topDashboardCatalogDescription}>
-              {blockDescription(block)}
+              {canManage ? blockDescription(block) : 'Опубликован и готов к просмотру'}
             </span>
             <span className={styles.topDashboardCatalogMeta}>
-              {block.versionCount} {pluralize(block.versionCount, 'версия', 'версии', 'версий')} · {formatDate(block.updatedAt ?? block.createdAt)}
+              {canManage
+                ? `${block.versionCount ?? 0} ${pluralize(block.versionCount ?? 0, 'версия', 'версии', 'версий')} · ${formatDate(block.updatedAt ?? block.createdAt ?? null)}`
+                : `Обновлён: ${formatDate(block.updatedAt)}`}
             </span>
             <span className={styles.topDashboardCatalogOpen}>Открыть <span aria-hidden>→</span></span>
           </Link>
@@ -187,7 +202,7 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
               {loading ? 'Проверяем…' : 'Повторить'}
             </button>
           </div>
-        ) : creating ? (
+        ) : canManage && creating ? (
           <form className={styles.topDashboardCatalogCreate} onSubmit={createBlock}>
             <label htmlFor="top-dashboard-block-title">Название нового блока</label>
             <input
@@ -217,7 +232,7 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
               </button>
             </div>
           </form>
-        ) : (
+        ) : canManage ? (
           <button
             className={styles.topDashboardCatalogAdd}
             type="button"
@@ -227,11 +242,18 @@ export function AdminTopDashboardCatalog({ showStatus }: AdminTopDashboardCatalo
             <strong>Создать новый блок</strong>
             <span>Добавить отдельную HTML-страницу</span>
           </button>
-        )}
+        ) : null}
       </div>
 
       {loading && blocks.length === 0 ? (
-        <p className={styles.topDashboardCatalogLoading}>Загружаем блоки…</p>
+        <p className={styles.topDashboardCatalogLoading}>
+          {canManage ? 'Загружаем блоки…' : 'Загружаем готовые отчёты…'}
+        </p>
+      ) : !canManage && !loadError && blocks.length === 0 ? (
+        <div className={styles.topDashboardDataEmpty}>
+          <strong>Готовых отчётов пока нет</strong>
+          <span>Они появятся здесь после публикации администратором.</span>
+        </div>
       ) : null}
     </section>
   );
