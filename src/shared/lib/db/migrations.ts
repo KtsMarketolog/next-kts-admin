@@ -232,6 +232,78 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202608240002_top_dashboard_block_data_versions',
+    description: 'Store versioned compressed data snapshots independently for every TOP dashboard block',
+    apply: async (client) => {
+      await client.query(`
+        create table top_dashboard_block_data_versions (
+          block_id bigint not null references top_dashboard_blocks(id) on delete cascade,
+          id bigserial not null,
+          original_name text not null,
+          compressed_payload bytea not null,
+          file_size bigint not null check (
+            file_size between 1 and 16777216
+            and file_size = octet_length(compressed_payload)
+          ),
+          uncompressed_size bigint not null check (
+            uncompressed_size between 1 and 134217728
+          ),
+          sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+          snapshot_format text not null check (
+            snapshot_format in ('kts-bundle-v1', 'purchases-v1')
+          ),
+          dashboard_profile text not null check (
+            dashboard_profile in ('sales-analytics', 'assortment-optimization', 'purchases')
+          ),
+          check (
+            (snapshot_format = 'purchases-v1' and dashboard_profile = 'purchases')
+            or (
+              snapshot_format = 'kts-bundle-v1'
+              and dashboard_profile is distinct from 'purchases'
+            )
+          ),
+          uploaded_by_admin_user_id bigint references admin_users(id) on delete set null,
+          uploaded_by_manager_id bigint references wholesale_managers(id) on delete set null,
+          created_at timestamptz not null default now(),
+          primary key (block_id, id),
+          check (
+            uploaded_by_admin_user_id is null
+            or uploaded_by_manager_id is null
+          )
+        );
+
+        create table top_dashboard_block_data_state (
+          block_id bigint primary key references top_dashboard_blocks(id) on delete cascade,
+          active_version_id bigint,
+          previous_version_id bigint,
+          updated_by_admin_user_id bigint references admin_users(id) on delete set null,
+          updated_by_manager_id bigint references wholesale_managers(id) on delete set null,
+          updated_at timestamptz not null default now(),
+          check (
+            active_version_id is null
+            or previous_version_id is null
+            or active_version_id <> previous_version_id
+          ),
+          check (
+            updated_by_admin_user_id is null
+            or updated_by_manager_id is null
+          ),
+          foreign key (block_id, active_version_id)
+            references top_dashboard_block_data_versions(block_id, id) on delete restrict,
+          foreign key (block_id, previous_version_id)
+            references top_dashboard_block_data_versions(block_id, id) on delete restrict
+        );
+
+        insert into top_dashboard_block_data_state (block_id)
+        select id from top_dashboard_blocks
+        on conflict (block_id) do nothing;
+
+        create index top_dashboard_block_data_versions_created_idx
+          on top_dashboard_block_data_versions(block_id, created_at desc, id desc);
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

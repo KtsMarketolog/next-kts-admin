@@ -20,6 +20,28 @@ type TopDashboardVersion = {
   createdAt: string;
 };
 
+type TopDashboardDataVersionStatus = 'active' | 'previous' | 'archived';
+type TopDashboardSnapshotFormat = 'kts-bundle-v1' | 'purchases-v1';
+
+type TopDashboardDataVersion = {
+  id: number;
+  originalName: string;
+  fileSize: number;
+  uncompressedSize: number;
+  sha256: string;
+  snapshotFormat: TopDashboardSnapshotFormat;
+  status: TopDashboardDataVersionStatus;
+  uploadedByName: string;
+  createdAt: string;
+};
+
+type TopDashboardDataOverview = {
+  activeVersionId: number | null;
+  previousVersionId: number | null;
+  updatedAt: string | null;
+  versions: TopDashboardDataVersion[];
+};
+
 type TopDashboardOverview = {
   block: {
     id: number;
@@ -30,6 +52,7 @@ type TopDashboardOverview = {
   previousVersionId: number | null;
   updatedAt: string | null;
   versions: TopDashboardVersion[];
+  data: TopDashboardDataOverview;
 };
 
 type AdminTopDashboardSectionProps = {
@@ -38,6 +61,7 @@ type AdminTopDashboardSectionProps = {
 };
 
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
+const MAX_DATA_BYTES = 16 * 1024 * 1024;
 
 type WebkitFullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
@@ -105,6 +129,16 @@ function statusLabel(status: TopDashboardVersionStatus) {
   return 'Черновик';
 }
 
+function dataStatusLabel(status: TopDashboardDataVersionStatus) {
+  if (status === 'active') return 'Активные данные';
+  if (status === 'previous') return 'Предыдущая';
+  return 'Архивные';
+}
+
+function snapshotFormatLabel(format: TopDashboardSnapshotFormat) {
+  return format === 'purchases-v1' ? 'Снимок закупок' : 'Снимок КТС';
+}
+
 function versionCountLabel(count: number) {
   const normalized = Math.abs(count) % 100;
   const lastDigit = normalized % 10;
@@ -129,6 +163,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedDataFile, setSelectedDataFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -137,6 +172,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   const [blockTitleDraft, setBlockTitleDraft] = useState('');
   const [blockMutationError, setBlockMutationError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dataFileInputRef = useRef<HTMLInputElement>(null);
   const blockTitleInputRef = useRef<HTMLInputElement>(null);
   const previewCardRef = useRef<HTMLElement>(null);
   const showStatusRef = useRef(showStatus);
@@ -180,6 +216,12 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         previousVersionId: Number.isInteger(data.previousVersionId) ? data.previousVersionId : null,
         updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : null,
         versions,
+        data: {
+          activeVersionId: Number.isInteger(data.data?.activeVersionId) ? data.data.activeVersionId : null,
+          previousVersionId: Number.isInteger(data.data?.previousVersionId) ? data.data.previousVersionId : null,
+          updatedAt: typeof data.data?.updatedAt === 'string' ? data.data.updatedAt : null,
+          versions: Array.isArray(data.data?.versions) ? data.data.versions : [],
+        },
       };
       setLoadError(null);
       setOverview(normalized);
@@ -249,6 +291,11 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     () => overview?.versions.find((version) => version.id === selectedVersionId) ?? null,
     [overview, selectedVersionId],
   );
+  const activeDataVersion = useMemo(
+    () => overview?.data.versions.find((version) => version.id === overview.data.activeVersionId) ?? null,
+    [overview],
+  );
+  const hasActiveHtml = Boolean(overview?.activeVersionId);
 
   const chooseFile = (file: File | null) => {
     if (!file) {
@@ -266,6 +313,24 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       return;
     }
     setSelectedFile(file);
+  };
+
+  const chooseDataFile = (file: File | null) => {
+    if (!file) {
+      setSelectedDataFile(null);
+      return;
+    }
+    if (!/\.json(?:\.gz)?$/i.test(file.name)) {
+      setSelectedDataFile(null);
+      showStatusRef.current('Выберите файл с расширением .json или .json.gz');
+      return;
+    }
+    if (file.size <= 0 || file.size > MAX_DATA_BYTES) {
+      setSelectedDataFile(null);
+      showStatusRef.current('Файл данных должен быть непустым и не больше 16 МБ');
+      return;
+    }
+    setSelectedDataFile(file);
   };
 
   const uploadVersion = async () => {
@@ -297,6 +362,84 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       showStatusRef.current('Новая версия загружена как черновик');
     } catch {
       showStatusRef.current('Не удалось загрузить HTML-файл');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const uploadDataVersion = async () => {
+    if (!overview || !selectedDataFile) {
+      showStatusRef.current('Сначала выберите файл данных');
+      return;
+    }
+    if (!overview.activeVersionId) {
+      showStatusRef.current('Сначала опубликуйте HTML-страницу');
+      return;
+    }
+
+    setBusyAction('upload-data');
+    try {
+      const body = new FormData();
+      body.set('file', selectedDataFile);
+      body.set(
+        'expectedActiveVersionId',
+        overview.data.activeVersionId === null ? '' : String(overview.data.activeVersionId),
+      );
+      const response = await fetch(`${apiBasePath}/data`, {
+        method: 'PUT',
+        body,
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        const message = await readError(response, 'Не удалось сохранить данные дашборда');
+        if (response.status === 409) await loadOverview(selectedVersionId);
+        showStatusRef.current(message);
+        return;
+      }
+
+      setSelectedDataFile(null);
+      if (dataFileInputRef.current) dataFileInputRef.current.value = '';
+      await loadOverview(selectedVersionId);
+      setPreviewRevision((current) => current + 1);
+      showStatusRef.current(activeDataVersion ? 'Данные обновлены для всех пользователей' : 'Данные сохранены для всех пользователей');
+    } catch {
+      showStatusRef.current('Не удалось сохранить данные дашборда');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const activateDataVersion = async (version: TopDashboardDataVersion) => {
+    if (!overview || version.status === 'active') return;
+    if (!overview.activeVersionId) {
+      showStatusRef.current('Сначала опубликуйте HTML-страницу');
+      return;
+    }
+    if (!window.confirm(`Вернуть данные из файла «${version.originalName}»?`)) return;
+
+    setBusyAction(`activate-data:${version.id}`);
+    try {
+      const response = await fetch(`${apiBasePath}/data/active`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          versionId: version.id,
+          expectedActiveVersionId: overview.data.activeVersionId,
+        }),
+      });
+      if (!response.ok) {
+        const message = await readError(response, 'Не удалось вернуть выбранные данные');
+        if (response.status === 409) await loadOverview(selectedVersionId);
+        showStatusRef.current(message);
+        return;
+      }
+
+      await loadOverview(selectedVersionId);
+      setPreviewRevision((current) => current + 1);
+      showStatusRef.current('Выбранная версия данных восстановлена для всех пользователей');
+    } catch {
+      showStatusRef.current('Не удалось вернуть выбранные данные');
     } finally {
       setBusyAction(null);
     }
@@ -626,6 +769,136 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
             </button>
           </div>
         </div>
+      </section>
+
+      <section
+        className={`${styles.section} ${styles.topDashboardDataSection}`}
+        aria-busy={busyAction === 'upload-data' || busyAction?.startsWith('activate-data:')}
+      >
+        <div className={styles.sectionHeader}>
+          <div>
+            <p>Общие данные</p>
+            <h2>Данные дашборда</h2>
+          </div>
+          <span className={styles.headingMeta}>{versionCountLabel(overview?.data.versions.length ?? 0)}</span>
+        </div>
+
+        <p className={styles.topDashboardDataIntro}>
+          {hasActiveHtml
+            ? 'Сохранённый файл автоматически откроется в дашборде у всех пользователей с доступом. Новый файл сразу заменит текущие данные, а предыдущая версия останется доступна для отката.'
+            : 'Сначала опубликуйте HTML-страницу. После этого здесь можно будет сохранить подходящий файл данных для всех пользователей.'}
+        </p>
+
+        <div className={`${styles.topDashboardUploadCard} ${styles.topDashboardDataUploadCard}`}>
+          <div>
+            <h3>{activeDataVersion ? 'Обновить данные' : 'Загрузить данные'}</h3>
+            <p>Поддерживаются снимки .json и .json.gz размером до 16 МБ. HTML-страницу повторно загружать не нужно.</p>
+          </div>
+          <div className={styles.topDashboardUploadControls}>
+            <label className={styles.topDashboardFilePicker}>
+              <span>Выбрать данные</span>
+              <input
+                ref={dataFileInputRef}
+                type="file"
+                accept=".json,.json.gz,application/json,application/gzip"
+                disabled={busyAction !== null || !overview || !hasActiveHtml}
+                onChange={(event) => chooseDataFile(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <div className={styles.topDashboardSelectedFile}>
+              {selectedDataFile ? (
+                <>
+                  <strong>{selectedDataFile.name}</strong>
+                  <span>{formatFileSize(selectedDataFile.size)}</span>
+                </>
+              ) : (
+                <span>Файл не выбран</span>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={!selectedDataFile || busyAction !== null || !overview || !hasActiveHtml}
+              onClick={() => void uploadDataVersion()}
+            >
+              {busyAction === 'upload-data'
+                ? 'Сохраняем…'
+                : activeDataVersion
+                  ? 'Заменить для всех'
+                  : 'Сохранить для всех'}
+            </button>
+          </div>
+        </div>
+
+        {activeDataVersion ? (
+          <article className={styles.topDashboardActiveDataCard}>
+            <div>
+              <span className={styles.topDashboardDataCardEyebrow}>Сейчас используется</span>
+              <div className={styles.topDashboardVersionTitle}>
+                <strong>{activeDataVersion.originalName}</strong>
+                <span className={`${styles.topDashboardStatus} ${styles.topDashboardStatusactive}`}>
+                  Активные данные
+                </span>
+              </div>
+              <div className={styles.topDashboardMeta}>
+                <span>{snapshotFormatLabel(activeDataVersion.snapshotFormat)}</span>
+                <span>Файл: {formatFileSize(activeDataVersion.fileSize)}</span>
+                <span>После распаковки: {formatFileSize(activeDataVersion.uncompressedSize)}</span>
+                <span>Загрузил: {activeDataVersion.uploadedByName || 'Администратор'}</span>
+                <span>{formatDate(activeDataVersion.createdAt)}</span>
+                <span>SHA-256: {activeDataVersion.sha256.slice(0, 12)}…</span>
+              </div>
+            </div>
+          </article>
+        ) : (
+          <div className={styles.topDashboardDataEmpty}>
+            <strong>Данные ещё не загружены</strong>
+            <span>Выберите снимок выше. После сохранения другим пользователям не придётся выбирать его заново.</span>
+          </div>
+        )}
+
+        {overview?.data.versions.length ? (
+          <div className={styles.topDashboardDataHistory}>
+            <div className={styles.topDashboardDataHistoryHeader}>
+              <h3>История данных</h3>
+              {overview.data.previousVersionId ? (
+                <span>Предыдущая версия #{overview.data.previousVersionId}</span>
+              ) : null}
+            </div>
+            <div className={styles.topDashboardVersionList}>
+              {overview.data.versions.map((version) => (
+                <article className={styles.topDashboardVersionRow} key={version.id}>
+                  <div>
+                    <div className={styles.topDashboardVersionTitle}>
+                      <strong>{version.originalName}</strong>
+                      <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${version.status}`]}`}>
+                        {dataStatusLabel(version.status)}
+                      </span>
+                    </div>
+                    <div className={styles.topDashboardMeta}>
+                      <span>Версия данных #{version.id}</span>
+                      <span>{snapshotFormatLabel(version.snapshotFormat)}</span>
+                      <span>Файл: {formatFileSize(version.fileSize)}</span>
+                      <span>После распаковки: {formatFileSize(version.uncompressedSize)}</span>
+                      <span>Загрузил: {version.uploadedByName || 'Администратор'}</span>
+                      <span>{formatDate(version.createdAt)}</span>
+                    </div>
+                  </div>
+                  {version.status !== 'active' ? (
+                    <div className={styles.topDashboardVersionActions}>
+                      <button
+                        type="button"
+                        disabled={busyAction !== null || !hasActiveHtml}
+                        onClick={() => void activateDataVersion(version)}
+                      >
+                        {busyAction === `activate-data:${version.id}` ? 'Возвращаем…' : 'Откатить данные'}
+                      </button>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section

@@ -14,6 +14,7 @@
     "stock:import-email": "tsx scripts/import-stock-from-email.ts"
   },
   "dependencies": {
+    "@streamparser/json": "0.0.26",
     "@types/pdfkit": "^0.17.6",
     "@types/sanitize-html": "^2.16.1",
     "imapflow": "^1.7.1",

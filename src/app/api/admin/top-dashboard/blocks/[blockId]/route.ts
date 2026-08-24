@@ -148,6 +148,8 @@ export async function DELETE(request: Request, context: Context) {
         title: deletedBlock.title,
         versionCount: deletedBlock.versionCount,
         storedBytes: deletedBlock.storedBytes,
+        dataVersionCount: deletedBlock.dataVersionCount,
+        dataStoredBytes: deletedBlock.dataStoredBytes,
         activeVersionId: deletedBlock.activeVersionId,
         previousVersionId: deletedBlock.previousVersionId,
       },

@@ -2,13 +2,19 @@ import { getTopDashboardActor, requireTopDashboardSession } from '@/shared/lib/a
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   activateTopDashboardBlockVersion,
+  getTopDashboardBlockVersionContent,
   TopDashboardBlockNotFoundError,
+  TopDashboardDataCompatibilityError,
   TopDashboardStateConflictError,
   TopDashboardVersionNotFoundError,
 } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import {
+  detectTopDashboardExpectedProfile,
+  detectTopDashboardExpectedSnapshotFormat,
+} from '@/shared/lib/topDashboardContentSecurity';
 
 import { parsePositiveId } from '../../routeUtils';
 
@@ -60,11 +66,22 @@ export async function PUT(request: Request, context: Context) {
   }
 
   try {
+    const targetHtml = await getTopDashboardBlockVersionContent(blockId, versionId);
+    if (!targetHtml) {
+      return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
+    }
+    const expectedSnapshotFormat = detectTopDashboardExpectedSnapshotFormat(
+      targetHtml.htmlContent,
+    );
+    const expectedProfile = detectTopDashboardExpectedProfile(targetHtml.htmlContent);
+
     const actor = getTopDashboardActor(session);
     const state = await activateTopDashboardBlockVersion({
       blockId,
       versionId,
       expectedActiveVersionId,
+      expectedSnapshotFormat,
+      expectedProfile,
       adminUserId: actor.adminUserId,
       managerId: actor.managerId,
     });
@@ -86,6 +103,8 @@ export async function PUT(request: Request, context: Context) {
           fromVersionId: expectedActiveVersionId,
           toVersionId: versionId,
           previousVersionId: state.previousVersionId,
+          expectedSnapshotFormat,
+          expectedProfile,
         },
       });
     }
@@ -106,6 +125,9 @@ export async function PUT(request: Request, context: Context) {
     }
     if (error instanceof TopDashboardBlockNotFoundError || error instanceof TopDashboardVersionNotFoundError) {
       return Response.json({ error: error.message }, { status: 404 });
+    }
+    if (error instanceof TopDashboardDataCompatibilityError) {
+      return Response.json({ error: error.message }, { status: 422 });
     }
     console.error('Failed to activate TOP dashboard block HTML', error);
     return Response.json({ error: 'Не удалось опубликовать версию HTML' }, { status: 500 });

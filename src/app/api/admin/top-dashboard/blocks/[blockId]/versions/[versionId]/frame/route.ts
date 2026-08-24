@@ -1,4 +1,8 @@
 import { requireTopDashboardSession } from '@/shared/lib/adminAuth';
+import {
+  buildTopDashboardFrameSecurityPolicy,
+  createTopDashboardFrameBridgeScript,
+} from '@/shared/lib/topDashboardContentSecurity';
 
 import { parsePositiveId } from '../../../../routeUtils';
 
@@ -19,6 +23,7 @@ export async function GET(_request: Request, context: Context) {
   if (!versionId) return Response.json({ error: 'Некорректная версия HTML' }, { status: 400 });
 
   const contentPath = `/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/content`;
+  const bridgeScript = createTopDashboardFrameBridgeScript(blockId);
   const html = `<!doctype html>
 <html lang="ru">
 <head>
@@ -27,18 +32,28 @@ export async function GET(_request: Request, context: Context) {
   <title>Защищенный предпросмотр</title>
   <style>
     html,body,iframe{width:100%;height:100%;margin:0;border:0;background:#fff}
-    body{overflow:hidden}
+    body{position:relative;overflow:hidden}
     iframe{display:block}
+    #data-notice{position:fixed;z-index:10;top:14px;right:14px;max-width:min(420px,calc(100% - 28px));
+      box-sizing:border-box;padding:10px 14px;border:1px solid transparent;border-radius:10px;
+      box-shadow:0 8px 24px rgba(22,27,46,.18);font:600 14px/1.35 Arial,sans-serif;color:#202333;background:#fff}
+    #data-notice[data-kind="success"]{color:#146c3b;background:#eaf8f0;border-color:#bde8cd}
+    #data-notice[data-kind="error"]{color:#9d271e;background:#fff0ee;border-color:#f2c4bf}
+    #data-notice[data-kind="pending"]{color:#32208c;background:#f0edff;border-color:#d4cbff}
+    #data-notice[hidden]{display:none}
   </style>
 </head>
 <body>
   <iframe
+    id="dashboard-frame"
     src="${contentPath}"
     title="HTML-дашборд"
     sandbox="allow-scripts"
     referrerpolicy="same-origin"
     allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'"
   ></iframe>
+  <div id="data-notice" role="status" aria-live="polite" hidden></div>
+  <script>${bridgeScript}</script>
 </body>
 </html>`;
 
@@ -46,17 +61,7 @@ export async function GET(_request: Request, context: Context) {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-      'Content-Security-Policy': [
-        "default-src 'none'",
-        "base-uri 'none'",
-        "object-src 'none'",
-        "frame-ancestors 'self'",
-        "frame-src 'self'",
-        "child-src 'self'",
-        "form-action 'none'",
-        "script-src 'none'",
-        "style-src 'unsafe-inline'",
-      ].join('; '),
+      'Content-Security-Policy': buildTopDashboardFrameSecurityPolicy(bridgeScript),
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'SAMEORIGIN',
       'Referrer-Policy': 'same-origin',

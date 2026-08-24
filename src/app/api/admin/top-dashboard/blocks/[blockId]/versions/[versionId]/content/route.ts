@@ -5,6 +5,7 @@ import {
 } from '@/shared/lib/db';
 import {
   buildTopDashboardContentSecurityPolicy,
+  injectTopDashboardDataAdapter,
   isTopDashboardBlockFrameRequest,
 } from '@/shared/lib/topDashboardContentSecurity';
 
@@ -36,14 +37,15 @@ export async function GET(request: Request, context: Context) {
     const version = await getTopDashboardBlockVersionContent(blockId, versionId);
     if (!version) return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
 
-    const bytes = Buffer.from(version.htmlContent, 'utf8');
+    const htmlContent = injectTopDashboardDataAdapter(version.htmlContent);
+    const bytes = Buffer.from(htmlContent, 'utf8');
     return new Response(new Uint8Array(bytes), {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Content-Length': String(bytes.length),
         'Content-Disposition': 'inline; filename="dashboard.html"',
         'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-        'Content-Security-Policy': buildTopDashboardContentSecurityPolicy(version.htmlContent),
+        'Content-Security-Policy': buildTopDashboardContentSecurityPolicy(htmlContent),
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'SAMEORIGIN',
         'X-DNS-Prefetch-Control': 'off',

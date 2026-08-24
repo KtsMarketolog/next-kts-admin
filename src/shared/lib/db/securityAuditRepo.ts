@@ -23,6 +23,8 @@ export type SecurityEventType =
   | 'top_dashboard_block_created'
   | 'top_dashboard_block_renamed'
   | 'top_dashboard_block_deleted'
+  | 'top_dashboard_data_uploaded'
+  | 'top_dashboard_data_rolled_back'
   | 'manager_created'
   | 'manager_updated'
   | 'manager_deleted'

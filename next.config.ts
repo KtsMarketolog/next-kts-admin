@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: __dirname,
   experimental: {
     optimizePackageImports: ["react-select", "@emotion/react"],
+    proxyClientMaxBodySize: "17mb",
   },
   images: {
     formats: ["image/avif", "image/webp"],

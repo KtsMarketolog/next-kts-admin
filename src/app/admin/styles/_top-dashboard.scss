@@ -373,6 +373,93 @@
   }
 }
 
+.topDashboardDataSection {
+  display: grid;
+  gap: 16px;
+}
+
+.topDashboardDataIntro {
+  max-width: 960px;
+  margin: -6px 0 0;
+  color: #626577;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.topDashboardDataUploadCard {
+  margin-top: 2px;
+  background: #f7f5ff;
+}
+
+.topDashboardActiveDataCard {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #bfe4cd;
+  border-radius: 10px;
+  background: #f4fcf7;
+  padding: 16px;
+
+  .topDashboardVersionTitle {
+    margin: 5px 0 8px;
+  }
+}
+
+.topDashboardDataCardEyebrow {
+  color: #14743a;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.topDashboardDataEmpty {
+  min-height: 110px;
+  display: grid;
+  place-content: center;
+  gap: 5px;
+  border: 1px dashed #c7c9d8;
+  border-radius: 10px;
+  color: #6f7182;
+  padding: 18px;
+  text-align: center;
+
+  strong {
+    color: #242633;
+    font-size: 16px;
+  }
+
+  span {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+}
+
+.topDashboardDataHistory {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e1e3ee;
+  padding-top: 16px;
+}
+
+.topDashboardDataHistoryHeader {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  align-items: center;
+
+  h3 {
+    margin: 0;
+    font-size: 18px;
+  }
+
+  span {
+    color: #6f7182;
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
 .topDashboardPreviewCard {
   min-width: 0;
   overflow: hidden;
@@ -538,6 +625,11 @@
   color: #4521aa;
 }
 
+.topDashboardStatusprevious {
+  background: #fff4d8;
+  color: #875d00;
+}
+
 .topDashboardStatusarchived {
   background: #eef0f5;
   color: #5d6070;
@@ -556,6 +648,10 @@
   .topDashboardUploadControls,
   .topDashboardVersionRow {
     grid-template-columns: 1fr;
+  }
+
+  .topDashboardDataHistoryHeader {
+    align-items: flex-start;
   }
 
   .topDashboardPreviewHeader {

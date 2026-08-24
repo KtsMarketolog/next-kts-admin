@@ -3,13 +3,28 @@ import type { PoolClient } from 'pg';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 import {
+  TopDashboardActiveHtmlRequiredError,
   TopDashboardActiveVersionDeleteError,
+  TopDashboardBlockDataStateConflictError,
+  TopDashboardBlockDataStateNotFoundError,
+  TopDashboardBlockDataVersionNotFoundError,
+  TopDashboardDataCompatibilityError,
   TopDashboardStateConflictError,
   TopDashboardVersionNotFoundError,
+  type ActivateTopDashboardBlockDataVersionInput,
+  type ActivateTopDashboardBlockDataVersionResult,
   type ActivateTopDashboardVersionResult,
+  type CreateAndActivateTopDashboardBlockDataVersionInput,
+  type CreateAndActivateTopDashboardBlockDataVersionResult,
   type CreateTopDashboardVersionInput,
   type DeleteTopDashboardVersionResult,
+  type TopDashboardBlockDataOverview,
+  type TopDashboardBlockDataVersion,
+  type TopDashboardBlockDataVersionContent,
+  type TopDashboardBlockDataVersionStatus,
   type TopDashboardOverview,
+  type TopDashboardProfile,
+  type TopDashboardSnapshotFormat,
   type TopDashboardVersion,
   type TopDashboardVersionContent,
   type TopDashboardVersionStatus,
@@ -30,6 +45,7 @@ export type TopDashboardBlockSummary = TopDashboardBlock & {
 
 export type TopDashboardBlockOverview = TopDashboardOverview & {
   block: TopDashboardBlock;
+  data: TopDashboardBlockDataOverview;
 };
 
 export type RenameTopDashboardBlockResult = {
@@ -44,6 +60,8 @@ export type DeleteTopDashboardBlockResult = {
     previousVersionId: number | null;
     versionCount: number;
     storedBytes: number;
+    dataVersionCount: number;
+    dataStoredBytes: number;
   };
 };
 
@@ -55,6 +73,8 @@ export type ActivateTopDashboardBlockVersionInput = {
   blockId: number;
   versionId: number;
   expectedActiveVersionId: number | null;
+  expectedSnapshotFormat: TopDashboardSnapshotFormat | null;
+  expectedProfile: TopDashboardProfile | null;
   adminUserId: number | null;
   managerId: number | null;
 };
@@ -65,6 +85,8 @@ export type DeleteTopDashboardBlockVersionResult = DeleteTopDashboardVersionResu
 
 const TOP_DASHBOARD_VERSION_LIMIT = 50;
 const TOP_DASHBOARD_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
+const TOP_DASHBOARD_DATA_VERSION_LIMIT = 10;
+const TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 const TOP_DASHBOARD_BLOCK_TITLE_MAX_LENGTH = 120;
 
 type Queryable = Pick<PoolClient, 'query'>;
@@ -96,6 +118,18 @@ type TopDashboardVersionRow = {
   uploaded_by_name: string | null;
   first_published_by_name: string | null;
   first_published_at: string | null;
+  created_at: string;
+};
+
+type TopDashboardBlockDataVersionRow = {
+  id: string;
+  original_name: string;
+  file_size: string;
+  uncompressed_size: string;
+  sha256: string;
+  snapshot_format: TopDashboardSnapshotFormat;
+  dashboard_profile: TopDashboardProfile;
+  uploaded_by_name: string | null;
   created_at: string;
 };
 
@@ -137,6 +171,77 @@ function mapVersion(row: TopDashboardVersionRow, activeVersionId: number | null)
     firstPublishedAt: row.first_published_at,
     createdAt: row.created_at,
   };
+}
+
+function mapDataVersion(
+  row: TopDashboardBlockDataVersionRow,
+  activeVersionId: number | null,
+  previousVersionId: number | null,
+): TopDashboardBlockDataVersion {
+  const id = Number(row.id);
+  const status: TopDashboardBlockDataVersionStatus =
+    id === activeVersionId ? 'active' : id === previousVersionId ? 'previous' : 'archived';
+
+  return {
+    id,
+    originalName: row.original_name,
+    fileSize: Number(row.file_size),
+    uncompressedSize: Number(row.uncompressed_size),
+    sha256: row.sha256,
+    snapshotFormat: row.snapshot_format,
+    dashboardProfile: row.dashboard_profile,
+    status,
+    uploadedByName: row.uploaded_by_name ?? '',
+    createdAt: row.created_at,
+  };
+}
+
+function assertDashboardDataCompatibility(input: {
+  htmlSnapshotFormat: TopDashboardSnapshotFormat | null;
+  htmlProfile: TopDashboardProfile | null;
+  dataSnapshotFormat: TopDashboardSnapshotFormat;
+  dataProfile: TopDashboardProfile;
+  action: 'html' | 'data';
+}) {
+  if (!input.htmlSnapshotFormat || !input.htmlProfile) {
+    throw new TopDashboardDataCompatibilityError(
+      input.action === 'html'
+        ? 'Нельзя опубликовать HTML: не удалось определить подходящий тип данных'
+        : 'Для опубликованной HTML-страницы не удалось определить подходящий тип данных',
+    );
+  }
+  if (
+    input.htmlSnapshotFormat !== input.dataSnapshotFormat
+    || input.htmlProfile !== input.dataProfile
+  ) {
+    throw new TopDashboardDataCompatibilityError(
+      input.action === 'html'
+        ? 'Нельзя опубликовать HTML: он не подходит к текущим данным'
+        : 'Этот файл данных не подходит для опубликованной HTML-страницы',
+    );
+  }
+}
+
+async function assertExpectedActiveHtmlVersion(
+  client: Queryable,
+  blockId: number,
+  expectedActiveHtmlVersionId: number,
+) {
+  const stateResult = await client.query<{ active_version_id: string | null }>(
+    `select active_version_id::text
+     from top_dashboard_block_state
+     where block_id = $1
+     for update`,
+    [blockId],
+  );
+  const state = stateResult.rows[0];
+  if (!state) throw new TopDashboardBlockStateNotFoundError();
+
+  const activeHtmlVersionId = numericId(state.active_version_id);
+  if (activeHtmlVersionId !== expectedActiveHtmlVersionId) {
+    throw new TopDashboardStateConflictError(activeHtmlVersionId);
+  }
+  if (activeHtmlVersionId === null) throw new TopDashboardActiveHtmlRequiredError();
 }
 
 async function findBlock(blockId: number, client?: Queryable, lock = false) {
@@ -242,6 +347,11 @@ export async function createTopDashboardBlock(input: {
        values ($1)`,
       [row.id],
     );
+    await client.query(
+      `insert into top_dashboard_block_data_state (block_id)
+       values ($1)`,
+      [row.id],
+    );
 
     return {
       ...mapBlock(row),
@@ -320,9 +430,25 @@ export async function deleteTopDashboardBlock(
       [blockId],
     );
     const versions = versionsResult.rows[0];
+    const dataVersionsResult = await client.query<{
+      version_count: string;
+      stored_bytes: string;
+    }>(
+      `select count(*)::text as version_count,
+              coalesce(sum(file_size), 0)::text as stored_bytes
+       from top_dashboard_block_data_versions
+       where block_id = $1`,
+      [blockId],
+    );
+    const dataVersions = dataVersionsResult.rows[0];
 
     // Remove the state row first so its RESTRICT references to active and
     // previous versions cannot block the block-level cascade.
+    await client.query(
+      `delete from top_dashboard_block_data_state
+       where block_id = $1`,
+      [blockId],
+    );
     await client.query(
       `delete from top_dashboard_block_state
        where block_id = $1`,
@@ -344,6 +470,8 @@ export async function deleteTopDashboardBlock(
         previousVersionId: numericId(state.previous_version_id),
         versionCount: Number(versions?.version_count ?? 0),
         storedBytes: Number(versions?.stored_bytes ?? 0),
+        dataVersionCount: Number(dataVersions?.version_count ?? 0),
+        dataStoredBytes: Number(dataVersions?.stored_bytes ?? 0),
       },
     };
   });
@@ -357,7 +485,7 @@ export async function getTopDashboardBlockOverview(
   const blockRow = await requireBlock(blockId);
   const block = mapBlock(blockRow);
 
-  const [stateResult, versionsResult] = await Promise.all([
+  const [stateResult, versionsResult, dataStateResult, dataVersionsResult] = await Promise.all([
     query<TopDashboardStateRow>(
       `select active_version_id::text, previous_version_id::text, updated_at::text
        from top_dashboard_block_state
@@ -388,9 +516,39 @@ export async function getTopDashboardBlockOverview(
        order by versions.created_at desc, versions.id desc`,
       [blockId],
     ),
+    query<TopDashboardStateRow>(
+      `select active_version_id::text, previous_version_id::text, updated_at::text
+       from top_dashboard_block_data_state
+       where block_id = $1
+       limit 1`,
+      [blockId],
+    ),
+    query<TopDashboardBlockDataVersionRow>(
+      `select
+         versions.id::text,
+         versions.original_name,
+         versions.file_size::text,
+         versions.uncompressed_size::text,
+         versions.sha256,
+         versions.snapshot_format,
+         versions.dashboard_profile,
+         coalesce(admin_uploader.name, manager_uploader.name) as uploaded_by_name,
+         versions.created_at::text
+       from top_dashboard_block_data_versions versions
+       left join admin_users admin_uploader
+         on admin_uploader.id = versions.uploaded_by_admin_user_id
+       left join wholesale_managers manager_uploader
+         on manager_uploader.id = versions.uploaded_by_manager_id
+       where versions.block_id = $1
+       order by versions.created_at desc, versions.id desc`,
+      [blockId],
+    ),
   ]);
   const state = stateResult.rows[0];
   const activeVersionId = numericId(state?.active_version_id);
+  const dataState = dataStateResult.rows[0];
+  const activeDataVersionId = numericId(dataState?.active_version_id);
+  const previousDataVersionId = numericId(dataState?.previous_version_id);
 
   return {
     block,
@@ -398,6 +556,321 @@ export async function getTopDashboardBlockOverview(
     previousVersionId: numericId(state?.previous_version_id),
     updatedAt: state?.updated_at ?? null,
     versions: versionsResult.rows.map((row) => mapVersion(row, activeVersionId)),
+    data: {
+      activeVersionId: activeDataVersionId,
+      previousVersionId: previousDataVersionId,
+      updatedAt: dataState?.updated_at ?? null,
+      versions: dataVersionsResult.rows.map((row) =>
+        mapDataVersion(row, activeDataVersionId, previousDataVersionId),
+      ),
+    },
+  };
+}
+
+export async function createAndActivateTopDashboardBlockDataVersion(
+  input: CreateAndActivateTopDashboardBlockDataVersionInput,
+): Promise<CreateAndActivateTopDashboardBlockDataVersionResult> {
+  await ensureSiteSchema();
+
+  return withTransaction(async (client) => {
+    await requireBlock(input.blockId, client, true);
+    await assertExpectedActiveHtmlVersion(
+      client,
+      input.blockId,
+      input.expectedActiveHtmlVersionId,
+    );
+
+    assertDashboardDataCompatibility({
+      htmlSnapshotFormat: input.expectedHtmlSnapshotFormat,
+      htmlProfile: input.expectedHtmlProfile,
+      dataSnapshotFormat: input.snapshotFormat,
+      dataProfile: input.dashboardProfile,
+      action: 'data',
+    });
+
+    const stateResult = await client.query<TopDashboardStateRow>(
+      `select active_version_id::text, previous_version_id::text, updated_at::text
+       from top_dashboard_block_data_state
+       where block_id = $1
+       for update`,
+      [input.blockId],
+    );
+    const state = stateResult.rows[0];
+    if (!state) throw new TopDashboardBlockDataStateNotFoundError();
+
+    const currentActiveVersionId = numericId(state.active_version_id);
+    if (currentActiveVersionId !== input.expectedActiveVersionId) {
+      throw new TopDashboardBlockDataStateConflictError(currentActiveVersionId);
+    }
+
+    const versionResult = await client.query<TopDashboardBlockDataVersionRow>(
+      `insert into top_dashboard_block_data_versions (
+         block_id,
+         original_name,
+         compressed_payload,
+         file_size,
+         uncompressed_size,
+         sha256,
+         snapshot_format,
+         dashboard_profile,
+         uploaded_by_admin_user_id,
+         uploaded_by_manager_id
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       returning
+         id::text,
+         original_name,
+         file_size::text,
+         uncompressed_size::text,
+         sha256,
+         snapshot_format,
+         dashboard_profile,
+         coalesce(
+           (select name from admin_users where id = uploaded_by_admin_user_id),
+           (select name from wholesale_managers where id = uploaded_by_manager_id)
+         ) as uploaded_by_name,
+         created_at::text`,
+      [
+        input.blockId,
+        input.originalName,
+        input.content,
+        input.fileSize,
+        input.uncompressedSize,
+        input.sha256,
+        input.snapshotFormat,
+        input.dashboardProfile,
+        input.uploadedByAdminUserId,
+        input.uploadedByManagerId,
+      ],
+    );
+    const versionRow = versionResult.rows[0];
+    const versionId = Number(versionRow.id);
+
+    const updatedStateResult = await client.query<TopDashboardStateRow>(
+      `update top_dashboard_block_data_state
+       set previous_version_id = active_version_id,
+           active_version_id = $2,
+           updated_by_admin_user_id = $3,
+           updated_by_manager_id = $4,
+           updated_at = now()
+       where block_id = $1
+       returning active_version_id::text, previous_version_id::text, updated_at::text`,
+      [input.blockId, versionId, input.uploadedByAdminUserId, input.uploadedByManagerId],
+    );
+    const updatedState = updatedStateResult.rows[0];
+
+    const prunedResult = await client.query<{ id: string }>(
+      `with state as (
+         select active_version_id, previous_version_id
+         from top_dashboard_block_data_state
+         where block_id = $3
+       ), protected_versions as (
+         select
+           count(*) as version_count,
+           coalesce(sum(versions.file_size), 0) as stored_bytes
+         from top_dashboard_block_data_versions versions
+         cross join state
+         where versions.block_id = $3
+           and (
+             versions.id = state.active_version_id
+             or versions.id = state.previous_version_id
+           )
+       ), ranked as (
+         select
+           versions.id,
+           row_number() over (order by versions.created_at desc, versions.id desc) as position,
+           sum(versions.file_size) over (order by versions.created_at desc, versions.id desc) as running_bytes,
+           protected_versions.version_count as protected_version_count,
+           protected_versions.stored_bytes as protected_stored_bytes
+         from top_dashboard_block_data_versions versions
+         cross join state
+         cross join protected_versions
+         where versions.block_id = $3
+           and versions.id <> coalesce(state.active_version_id, 0)
+           and versions.id <> coalesce(state.previous_version_id, 0)
+       )
+       delete from top_dashboard_block_data_versions versions
+       using ranked
+       where versions.block_id = $3
+         and versions.id = ranked.id
+         and (
+           ranked.position + ranked.protected_version_count > $1
+           or ranked.running_bytes + ranked.protected_stored_bytes > $2
+         )
+       returning versions.id::text`,
+      [TOP_DASHBOARD_DATA_VERSION_LIMIT, TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES, input.blockId],
+    );
+
+    await client.query(
+      `update top_dashboard_blocks
+       set updated_at = now()
+       where id = $1`,
+      [input.blockId],
+    );
+
+    return {
+      version: mapDataVersion(versionRow, versionId, currentActiveVersionId),
+      activeVersionId: versionId,
+      previousVersionId: numericId(updatedState.previous_version_id),
+      updatedAt: updatedState.updated_at,
+      prunedVersionIds: prunedResult.rows.map((row) => Number(row.id)),
+    };
+  });
+}
+
+export async function activateTopDashboardBlockDataVersion(
+  input: ActivateTopDashboardBlockDataVersionInput,
+): Promise<ActivateTopDashboardBlockDataVersionResult> {
+  await ensureSiteSchema();
+
+  return withTransaction(async (client) => {
+    await requireBlock(input.blockId, client, true);
+    await assertExpectedActiveHtmlVersion(
+      client,
+      input.blockId,
+      input.expectedActiveHtmlVersionId,
+    );
+
+    const stateResult = await client.query<TopDashboardStateRow>(
+      `select active_version_id::text, previous_version_id::text, updated_at::text
+       from top_dashboard_block_data_state
+       where block_id = $1
+       for update`,
+      [input.blockId],
+    );
+    const state = stateResult.rows[0];
+    if (!state) throw new TopDashboardBlockDataStateNotFoundError();
+
+    const currentActiveVersionId = numericId(state.active_version_id);
+    if (currentActiveVersionId !== input.expectedActiveVersionId) {
+      throw new TopDashboardBlockDataStateConflictError(currentActiveVersionId);
+    }
+
+    const versionResult = await client.query<{
+      id: string;
+      snapshot_format: TopDashboardSnapshotFormat;
+      dashboard_profile: TopDashboardProfile;
+    }>(
+      `select id::text, snapshot_format, dashboard_profile
+       from top_dashboard_block_data_versions
+       where block_id = $1 and id = $2
+       limit 1
+       for update`,
+      [input.blockId, input.versionId],
+    );
+    const version = versionResult.rows[0];
+    if (!version) throw new TopDashboardBlockDataVersionNotFoundError();
+
+    assertDashboardDataCompatibility({
+      htmlSnapshotFormat: input.expectedHtmlSnapshotFormat,
+      htmlProfile: input.expectedHtmlProfile,
+      dataSnapshotFormat: version.snapshot_format,
+      dataProfile: version.dashboard_profile,
+      action: 'data',
+    });
+
+    if (currentActiveVersionId === input.versionId) {
+      return {
+        activeVersionId: input.versionId,
+        previousVersionId: numericId(state.previous_version_id),
+        updatedAt: state.updated_at,
+        change: 'unchanged',
+      };
+    }
+
+    const updatedStateResult = await client.query<TopDashboardStateRow>(
+      `update top_dashboard_block_data_state
+       set previous_version_id = active_version_id,
+           active_version_id = $2,
+           updated_by_admin_user_id = $3,
+           updated_by_manager_id = $4,
+           updated_at = now()
+       where block_id = $1
+       returning active_version_id::text, previous_version_id::text, updated_at::text`,
+      [input.blockId, input.versionId, input.adminUserId, input.managerId],
+    );
+    const updatedState = updatedStateResult.rows[0];
+
+    await client.query(
+      `update top_dashboard_blocks
+       set updated_at = now()
+       where id = $1`,
+      [input.blockId],
+    );
+
+    return {
+      activeVersionId: input.versionId,
+      previousVersionId: numericId(updatedState.previous_version_id),
+      updatedAt: updatedState.updated_at,
+      change: 'rolled_back',
+    };
+  });
+}
+
+export async function getActiveTopDashboardBlockDataContent(
+  blockId: number,
+): Promise<TopDashboardBlockDataVersionContent | null> {
+  await ensureSiteSchema();
+
+  await requireBlock(blockId);
+
+  const result = await query<{
+    active_version_id: string | null;
+    id: string | null;
+    original_name: string | null;
+    compressed_payload: Buffer | null;
+    file_size: string | null;
+    uncompressed_size: string | null;
+    sha256: string | null;
+    snapshot_format: TopDashboardSnapshotFormat | null;
+    dashboard_profile: TopDashboardProfile;
+    created_at: string | null;
+  }>(
+    `select
+       state.active_version_id::text,
+       versions.id::text,
+       versions.original_name,
+       versions.compressed_payload,
+       versions.file_size::text,
+       versions.uncompressed_size::text,
+       versions.sha256,
+       versions.snapshot_format,
+       versions.dashboard_profile,
+       versions.created_at::text
+     from top_dashboard_block_data_state state
+     left join top_dashboard_block_data_versions versions
+       on versions.block_id = state.block_id
+      and versions.id = state.active_version_id
+     where state.block_id = $1
+     limit 1`,
+    [blockId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new TopDashboardBlockDataStateNotFoundError();
+  if (row.active_version_id === null) return null;
+  if (
+    row.id === null
+    || row.original_name === null
+    || row.compressed_payload === null
+    || row.file_size === null
+    || row.uncompressed_size === null
+    || row.sha256 === null
+    || row.snapshot_format === null
+    || row.created_at === null
+  ) {
+    throw new TopDashboardBlockDataVersionNotFoundError();
+  }
+
+  return {
+    id: Number(row.id),
+    originalName: row.original_name,
+    content: row.compressed_payload,
+    fileSize: Number(row.file_size),
+    uncompressedSize: Number(row.uncompressed_size),
+    sha256: row.sha256,
+    snapshotFormat: row.snapshot_format,
+    dashboardProfile: row.dashboard_profile,
+    createdAt: row.created_at,
   };
 }
 
@@ -568,6 +1041,39 @@ export async function activateTopDashboardBlockVersion(
     );
     const version = versionResult.rows[0];
     if (!version) throw new TopDashboardVersionNotFoundError();
+
+    const dataResult = await client.query<{
+      active_version_id: string | null;
+      snapshot_format: TopDashboardSnapshotFormat | null;
+      dashboard_profile: TopDashboardProfile | null;
+    }>(
+      `select
+         data_state.active_version_id::text,
+         data_versions.snapshot_format,
+         data_versions.dashboard_profile
+       from top_dashboard_block_data_state data_state
+       left join top_dashboard_block_data_versions data_versions
+         on data_versions.block_id = data_state.block_id
+        and data_versions.id = data_state.active_version_id
+       where data_state.block_id = $1
+       limit 1
+       for update of data_state`,
+      [input.blockId],
+    );
+    const dataState = dataResult.rows[0];
+    if (!dataState) throw new TopDashboardBlockDataStateNotFoundError();
+    if (dataState.active_version_id !== null) {
+      if (!dataState.snapshot_format || !dataState.dashboard_profile) {
+        throw new TopDashboardBlockDataVersionNotFoundError();
+      }
+      assertDashboardDataCompatibility({
+        htmlSnapshotFormat: input.expectedSnapshotFormat,
+        htmlProfile: input.expectedProfile,
+        dataSnapshotFormat: dataState.snapshot_format,
+        dataProfile: dataState.dashboard_profile,
+        action: 'html',
+      });
+    }
 
     if (currentActiveVersionId === input.versionId) {
       return {

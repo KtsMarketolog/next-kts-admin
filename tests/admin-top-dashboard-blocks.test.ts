@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 
+import { readTopDashboardDataUpload } from '../src/app/api/admin/top-dashboard/blocks/dataUpload';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
 import type {
   ActivateTopDashboardBlockVersionInput,
@@ -12,6 +14,12 @@ import {
   normalizeTopDashboardBlockTitle,
   TopDashboardBlockStateNotFoundError,
 } from '../src/shared/lib/db/topDashboardBlocksRepo';
+import {
+  TopDashboardActiveHtmlRequiredError,
+  TopDashboardDataCompatibilityError,
+  type ActivateTopDashboardBlockDataVersionInput,
+  type CreateAndActivateTopDashboardBlockDataVersionInput,
+} from '../src/shared/lib/db/topDashboardDomain';
 import { isTopDashboardBlockFrameRequest } from '../src/shared/lib/topDashboardContentSecurity';
 
 test('TOP dashboard block titles are normalized and strictly bounded', () => {
@@ -50,6 +58,8 @@ test('native TOP block inputs require both block and version identifiers', () =>
     blockId: 7,
     versionId: 13,
     expectedActiveVersionId: null,
+    expectedSnapshotFormat: 'kts-bundle-v1',
+    expectedProfile: 'sales-analytics',
     adminUserId: null,
     managerId: null,
   } satisfies ActivateTopDashboardBlockVersionInput;
@@ -63,6 +73,48 @@ test('missing native block state has a dedicated fail-closed error', () => {
   const error = new TopDashboardBlockStateNotFoundError();
   assert.equal(error.name, 'TopDashboardBlockStateNotFoundError');
   assert.match(error.message, /Состояние блока не найдено/);
+});
+
+test('TOP data mutations are bound to one HTML version and exact dashboard contract', () => {
+  const upload = {
+    blockId: 7,
+    expectedActiveVersionId: null,
+    expectedActiveHtmlVersionId: 13,
+    expectedHtmlSnapshotFormat: 'kts-bundle-v1',
+    expectedHtmlProfile: 'sales-analytics',
+    originalName: 'sales.json.gz',
+    content: Buffer.from('gzip'),
+    fileSize: 4,
+    uncompressedSize: 128,
+    sha256: '0'.repeat(64),
+    snapshotFormat: 'kts-bundle-v1',
+    dashboardProfile: 'sales-analytics',
+    uploadedByAdminUserId: null,
+    uploadedByManagerId: 5,
+  } satisfies CreateAndActivateTopDashboardBlockDataVersionInput;
+  const rollback = {
+    blockId: upload.blockId,
+    versionId: 9,
+    expectedActiveVersionId: 10,
+    expectedActiveHtmlVersionId: upload.expectedActiveHtmlVersionId,
+    expectedHtmlSnapshotFormat: upload.expectedHtmlSnapshotFormat,
+    expectedHtmlProfile: upload.expectedHtmlProfile,
+    adminUserId: null,
+    managerId: 5,
+  } satisfies ActivateTopDashboardBlockDataVersionInput;
+
+  assert.equal(upload.dashboardProfile, rollback.expectedHtmlProfile);
+  assert.equal(rollback.expectedActiveHtmlVersionId, 13);
+});
+
+test('TOP data compatibility failures have dedicated safe errors', () => {
+  const missingHtml = new TopDashboardActiveHtmlRequiredError();
+  const mismatch = new TopDashboardDataCompatibilityError();
+
+  assert.equal(missingHtml.name, 'TopDashboardActiveHtmlRequiredError');
+  assert.match(missingHtml.message, /Сначала опубликуйте HTML/);
+  assert.equal(mismatch.name, 'TopDashboardDataCompatibilityError');
+  assert.match(mismatch.message, /несовместимы/);
 });
 
 test('TOP block rename and deletion results keep block identity and deletion metadata', () => {
@@ -82,6 +134,8 @@ test('TOP block rename and deletion results keep block identity and deletion met
       previousVersionId: 12,
       versionCount: 4,
       storedBytes: 188_000,
+      dataVersionCount: 3,
+      dataStoredBytes: 8_400_000,
     },
   } satisfies DeleteTopDashboardBlockResult;
 
@@ -126,4 +180,168 @@ test('block HTML content accepts only its exact nested block-version frame pair'
     ),
     false,
   );
+});
+
+function dataUploadRequest(file: File, expectedActiveVersionId = '') {
+  const body = new FormData();
+  body.set('file', file);
+  body.set('expectedActiveVersionId', expectedActiveVersionId);
+  return new Request('https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data', {
+    method: 'PUT',
+    body,
+  });
+}
+
+test('TOP dashboard accepts and identifies a bounded gzip KTS snapshot', async () => {
+  const source = Buffer.from(JSON.stringify({
+    format: 'kts-bundle',
+    version: 1,
+    n: 2,
+    dict: {},
+    cols: {},
+    extra: {},
+  }));
+  const compressed = gzipSync(source);
+  const result = await readTopDashboardDataUpload(dataUploadRequest(
+    new File([compressed], `${'д'.repeat(230)}.json.gz`, { type: 'application/gzip' }),
+    '12',
+  ));
+
+  assert.equal(result.error, undefined);
+  if (!result.parsed) return assert.fail('Expected a parsed dashboard snapshot');
+  assert.equal(result.parsed.expectedActiveVersionId, 12);
+  assert.equal(result.parsed.upload.snapshotFormat, 'kts-bundle-v1');
+  assert.equal(result.parsed.upload.fileSize, compressed.length);
+  assert.equal(result.parsed.upload.uncompressedSize, source.length);
+  assert.ok(result.parsed.upload.originalName.length <= 220);
+  assert.match(result.parsed.upload.originalName, /\.json\.gz$/i);
+  assert.match(result.parsed.upload.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(result.parsed.upload.dashboardProfile, null);
+});
+
+test('TOP dashboard accepts the purchases snapshot contract as plain JSON', async () => {
+  const source = `\ufeff${JSON.stringify({
+    v: 1,
+    savedAt: Date.now(),
+    raw: { orders: [] },
+    meta: {},
+    params: {},
+  })}`;
+  const result = await readTopDashboardDataUpload(dataUploadRequest(
+    new File([source], 'снимок закупки.json', { type: 'application/json' }),
+  ));
+
+  assert.equal(result.error, undefined);
+  if (!result.parsed) return assert.fail('Expected a parsed purchases snapshot');
+  assert.equal(result.parsed.expectedActiveVersionId, null);
+  assert.equal(result.parsed.upload.snapshotFormat, 'purchases-v1');
+  assert.equal(result.parsed.upload.dashboardProfile, 'purchases');
+});
+
+test('TOP dashboard rejects disguised gzip and unrelated JSON data', async () => {
+  const disguised = await readTopDashboardDataUpload(dataUploadRequest(
+    new File(['{"v":1}'], 'fake.json.gz', { type: 'application/gzip' }),
+  ));
+  assert.equal(disguised.error?.status, 400);
+  assert.match(await disguised.error!.text(), /не является корректным gzip/i);
+
+  const unrelated = await readTopDashboardDataUpload(dataUploadRequest(
+    new File(['{"hello":"world"}'], 'unrelated.json', { type: 'application/json' }),
+  ));
+  assert.equal(unrelated.error?.status, 400);
+  assert.match(await unrelated.error!.text(), /поддерживаемый снимок данных КТС/i);
+});
+
+test('TOP dashboard streaming parser rejects invalid JSON grammar', async () => {
+  const invalidSources = [
+    '{"format":"kts-bundle" "version":1,"n":1,"dict":{},"cols":{},"extra":{}}',
+    '{"format":"kts-bundle","version":truth,"n":1,"dict":{},"cols":{},"extra":{}}',
+    '{"format":"kts-bundle",,"version":1,"n":1,"dict":{},"cols":{},"extra":{}}',
+  ];
+
+  for (const [index, source] of invalidSources.entries()) {
+    const payload = index === 1 ? gzipSync(Buffer.from(source)) : source;
+    const extension = index === 1 ? '.json.gz' : '.json';
+    const result = await readTopDashboardDataUpload(dataUploadRequest(
+      new File([payload], `invalid-${index}${extension}`),
+    ));
+    assert.equal(result.error?.status, 400);
+    assert.match(await result.error!.text(), /некорректный JSON/i);
+  }
+});
+
+test('TOP dashboard snapshot signatures must be complete and at the top level', async () => {
+  const nestedOnly = JSON.stringify({
+    payload: {
+      format: 'kts-bundle',
+      version: 1,
+      n: 1,
+      dict: {},
+      cols: {},
+      extra: {},
+    },
+  });
+  const incompleteOrWrong = [
+    JSON.stringify({ format: 'kts-bundle', version: 1, n: 1, dict: {}, extra: {} }),
+    JSON.stringify({ format: 'kts-bundle', version: 1, n: 1, dict: [], cols: {}, extra: {} }),
+    JSON.stringify({ v: 1, raw: {}, params: {} }),
+  ];
+
+  for (const [index, source] of [nestedOnly, ...incompleteOrWrong].entries()) {
+    const result = await readTopDashboardDataUpload(dataUploadRequest(
+      new File([source], `unsupported-${index}.json`, { type: 'application/json' }),
+    ));
+    assert.equal(result.error?.status, 400);
+    assert.match(await result.error!.text(), /поддерживаемый снимок данных КТС/i);
+  }
+});
+
+test('TOP dashboard finds a gzip snapshot signature beyond the first 64 KiB', async () => {
+  const source = Buffer.from(JSON.stringify({
+    padding: 'x'.repeat(70 * 1024),
+    format: 'kts-bundle',
+    version: 1,
+    n: 3,
+    dict: {},
+    cols: {},
+    extra: { plan: {}, hr: {} },
+  }));
+  const compressed = gzipSync(source);
+  const result = await readTopDashboardDataUpload(dataUploadRequest(
+    new File([compressed], 'analytics.json.gz', { type: 'application/gzip' }),
+  ));
+
+  assert.equal(result.error, undefined);
+  if (!result.parsed) return assert.fail('Expected a parsed dashboard snapshot');
+  assert.equal(result.parsed.upload.snapshotFormat, 'kts-bundle-v1');
+  assert.equal(result.parsed.upload.dashboardProfile, 'sales-analytics');
+  assert.equal(result.parsed.upload.uncompressedSize, source.length);
+});
+
+test('TOP dashboard profiles KTS bundles by direct extra keys and fails ambiguous profiles closed', async () => {
+  const assortment = await readTopDashboardDataUpload(dataUploadRequest(new File([
+    JSON.stringify({
+      format: 'kts-bundle',
+      version: 1,
+      n: 1,
+      dict: {},
+      cols: {},
+      extra: { actual: {}, reserve: {}, nested: { plan: {} } },
+    }),
+  ], 'assortment.json')));
+  assert.equal(assortment.error, undefined);
+  assert.equal(assortment.parsed?.upload.dashboardProfile, 'assortment-optimization');
+
+  const ambiguous = await readTopDashboardDataUpload(dataUploadRequest(new File([
+    JSON.stringify({
+      format: 'kts-bundle',
+      version: 1,
+      n: 1,
+      dict: {},
+      cols: {},
+      extra: { plan: {}, actual: {} },
+    }),
+  ], 'ambiguous.json')));
+  assert.equal(ambiguous.error, undefined);
+  assert.equal(ambiguous.parsed?.upload.dashboardProfile, null);
 });

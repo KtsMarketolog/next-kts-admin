@@ -23,8 +23,16 @@ import type {
 } from '../src/shared/lib/db/topDashboardBlocksRepo';
 import { TopDashboardActiveVersionDeleteError } from '../src/shared/lib/db/topDashboardDomain';
 import {
+  buildTopDashboardFrameSecurityPolicy,
   buildTopDashboardContentSecurityPolicy,
+  createTopDashboardFrameBridgeScript,
+  detectTopDashboardExpectedProfile,
+  detectTopDashboardExpectedSnapshotFormat,
+  getTopDashboardDataAdapterScript,
+  injectTopDashboardDataAdapter,
+  isTopDashboardBlockDataFrameRequest,
   isTopDashboardBlockFrameRequest,
+  TOP_DASHBOARD_DATA_MAX_BYTES,
 } from '../src/shared/lib/topDashboardContentSecurity';
 
 function cspHash(source: string) {
@@ -140,6 +148,8 @@ test('break-glass admin actions support nullable database attribution', () => {
     blockId: 7,
     versionId: 1,
     expectedActiveVersionId: null,
+    expectedSnapshotFormat: 'kts-bundle-v1',
+    expectedProfile: 'sales-analytics',
     adminUserId: null,
     managerId: null,
   } satisfies ActivateInput;
@@ -189,6 +199,84 @@ test('dashboard CSP permits only exact uploaded scripts and handlers', () => {
   const scriptDirective = csp.split(';').find((directive) => directive.trim().startsWith('script-src')) ?? '';
   assert.doesNotMatch(scriptDirective, /'unsafe-inline'/);
   assert.doesNotMatch(scriptDirective, /'unsafe-eval'/);
+});
+
+test('dashboard data adapter is injected before application scripts and receives an exact CSP hash', () => {
+  const appScript = "document.body.dataset.app = 'ready';";
+  const original = `<!doctype html><html><head><script>${appScript}</script></head><body></body></html>`;
+  const transformed = injectTopDashboardDataAdapter(original);
+  const adapterScript = getTopDashboardDataAdapterScript();
+
+  assert.ok(transformed.indexOf(adapterScript) < transformed.indexOf(appScript));
+  assert.equal(injectTopDashboardDataAdapter(transformed), transformed);
+  assert.match(transformed, /<script data-kts-top-dashboard-data-adapter>/);
+
+  const csp = buildTopDashboardContentSecurityPolicy(transformed);
+  assert.match(csp, /connect-src 'none'/);
+  assert.match(csp, /sandbox allow-scripts/);
+  assert.ok(csp.includes(cspHash(adapterScript)));
+  assert.doesNotMatch(csp, /allow-same-origin/);
+});
+
+test('dashboard HTML declares the compatible snapshot family without trusting its filename', () => {
+  assert.equal(
+    detectTopDashboardExpectedSnapshotFormat('<input id="snapInp" type="file">'),
+    'purchases-v1',
+  );
+  assert.equal(
+    detectTopDashboardExpectedSnapshotFormat('return { format: "kts-bundle", version: 1 };'),
+    'kts-bundle-v1',
+  );
+  assert.equal(detectTopDashboardExpectedSnapshotFormat('<input id="anything" type="file">'), null);
+  assert.equal(
+    detectTopDashboardExpectedProfile('const DASH_NAME = "аналитика_продаж";'),
+    'sales-analytics',
+  );
+  assert.equal(
+    detectTopDashboardExpectedProfile('const DASH_NAME = "оптимизация_ассортимента";'),
+    'assortment-optimization',
+  );
+  assert.equal(detectTopDashboardExpectedProfile('<input id="snapInp" type="file">'), 'purchases');
+});
+
+test('dashboard data adapter hydrates supported file inputs without granting server-write access', () => {
+  const adapter = getTopDashboardDataAdapterScript();
+
+  assert.match(adapter, /event\.source !== window\.parent/);
+  assert.match(adapter, /value instanceof ArrayBuffer/);
+  assert.match(adapter, new RegExp(`MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES}`));
+  assert.match(adapter, /#snapInp/);
+  assert.match(adapter, /#file/);
+  assert.match(adapter, /new DataTransfer\(\)/);
+  assert.match(adapter, /dispatchEvent\(new Event\('change'/);
+  assert.match(adapter, /window\.handleFiles/);
+  assert.match(adapter, /snapshot-installed/);
+  assert.match(adapter, /data\.type === 'bridge-probe'/);
+  assert.doesNotMatch(adapter, /snapshot-selected/);
+  assert.doesNotMatch(adapter, /method: 'PUT'/);
+});
+
+test('trusted dashboard frame bridge is read-only and has one exact script hash', () => {
+  const bridge = createTopDashboardFrameBridgeScript(7);
+  const csp = buildTopDashboardFrameSecurityPolicy(bridge);
+  const scriptDirective = csp.split(';').find((directive) => directive.trim().startsWith('script-src')) ?? '';
+
+  assert.match(csp, /connect-src 'self'/);
+  assert.ok(scriptDirective.includes(cspHash(bridge)));
+  assert.doesNotMatch(scriptDirective, /'unsafe-inline'/);
+  assert.doesNotMatch(scriptDirective, /'unsafe-eval'/);
+  assert.match(bridge, /event\.source !== iframe\.contentWindow/);
+  assert.match(bridge, /value instanceof ArrayBuffer/);
+  assert.match(bridge, /X-Top-Dashboard-Data-Version-Id/);
+  assert.match(bridge, /X-Top-Dashboard-Data-Original-Name/);
+  assert.match(bridge, /X-Top-Dashboard-Data-Snapshot-Format/);
+  assert.match(bridge, /X-Top-Dashboard-Data-Profile/);
+  assert.match(bridge, /snapshot-installed/);
+  assert.match(bridge, /type: 'bridge-probe'/);
+  assert.match(bridge, /setInterval\(probeAdapter, 250\)/);
+  assert.doesNotMatch(bridge, /snapshot-selected/);
+  assert.doesNotMatch(bridge, /method: 'PUT'/);
+  assert.ok(bridge.includes('/api/admin/top-dashboard/blocks/7/data'));
 });
 
 test('dashboard content is accepted only from its same-origin frame shell', () => {
@@ -254,4 +342,59 @@ test('dashboard content is accepted only from its same-origin frame shell', () =
     },
   });
   assert.equal(isTopDashboardBlockFrameRequest(crossSiteFrame, blockId, versionId), false);
+});
+
+test('dashboard data is readable only by the exact same-origin trusted frame', () => {
+  const blockId = 7;
+  const versionId = 42;
+  const dataUrl = `https://kts-impex.ru/api/admin/top-dashboard/blocks/${blockId}/data`;
+  const trusted = new Request(dataUrl, {
+    headers: {
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      referer: `https://kts-impex.ru/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/frame?revision=3`,
+    },
+  });
+  assert.equal(isTopDashboardBlockDataFrameRequest(trusted, blockId), true);
+
+  const wrongBlock = new Request(dataUrl, {
+    headers: {
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      referer: `https://kts-impex.ru/api/admin/top-dashboard/blocks/8/versions/${versionId}/frame`,
+    },
+  });
+  assert.equal(isTopDashboardBlockDataFrameRequest(wrongBlock, blockId), false);
+
+  const directNavigation = new Request(dataUrl, {
+    headers: {
+      'sec-fetch-dest': 'document',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-site': 'none',
+    },
+  });
+  assert.equal(isTopDashboardBlockDataFrameRequest(directNavigation, blockId), false);
+
+  const crossSite = new Request(dataUrl, {
+    headers: {
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'cross-site',
+      referer: `https://example.com/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/frame`,
+    },
+  });
+  assert.equal(isTopDashboardBlockDataFrameRequest(crossSite, blockId), false);
+
+  const putFromFrame = new Request(dataUrl, {
+    method: 'PUT',
+    headers: {
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      referer: `https://kts-impex.ru/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/frame`,
+    },
+  });
+  assert.equal(isTopDashboardBlockDataFrameRequest(putFromFrame, blockId), false);
 });
