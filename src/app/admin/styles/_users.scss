@@ -99,11 +99,17 @@
     grid-column: 4 / 10;
   }
 
-  label.userActiveToggle {
+  > .userCreateAccessToggles {
     grid-column: 10 / 13;
     grid-row: 2;
     align-self: start;
     margin-top: $apx-20;
+  }
+
+  .userCreateAccessToggles label.userActiveToggle {
+    grid-column: auto;
+    grid-row: auto;
+    margin-top: 0;
   }
 
   > button {
@@ -137,7 +143,7 @@
       grid-column: 5 / 11;
     }
 
-    label.userActiveToggle {
+    > .userCreateAccessToggles {
       grid-column: 11 / 13;
     }
 
@@ -321,6 +327,15 @@
   align-items: center;
   padding-top: $apx-10;
   border-top: $apx-1 solid #edf0f6;
+}
+
+.userCreateAccessToggles,
+.userAccessToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $apx-8;
+  align-items: center;
+  min-width: 0;
 }
 
 .userActiveToggle {

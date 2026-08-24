@@ -17,6 +17,7 @@ export type AdminSession = {
   adminUserId?: number;
   managerId?: number;
   canAccessTopDashboard?: boolean;
+  canManageTopDashboard?: boolean;
   sessionId?: string;
 };
 
@@ -42,7 +43,12 @@ export function isAdminManagementSession(
 
 export type TopDashboardManagementSession =
   | (AdminSession & { role: 'admin' })
-  | (AdminSession & { role: 'admintop'; adminUserId: number });
+  | (AdminSession & { role: 'admintop'; adminUserId: number })
+  | (AdminSession & {
+      role: 'top';
+      adminUserId: number;
+      canManageTopDashboard: true;
+    });
 
 function hasPersistedAdminUserId(session: AdminSession | null | undefined) {
   return Number.isInteger(session?.adminUserId) && Number(session?.adminUserId) > 0;
@@ -52,7 +58,10 @@ export function isTopDashboardManagementSession(
   session: AdminSession | null | undefined,
 ): session is TopDashboardManagementSession {
   if (session?.role === 'admin') return true;
-  return session?.role === 'admintop' && hasPersistedAdminUserId(session);
+  if (session?.role === 'admintop') return hasPersistedAdminUserId(session);
+  return session?.role === 'top'
+    && session.canManageTopDashboard === true
+    && hasPersistedAdminUserId(session);
 }
 
 export function isTopDashboardSession(
@@ -78,7 +87,11 @@ export function isTopDashboardSession(
 
 export function getTopDashboardActor(session: TopDashboardManagementSession) {
   return {
-    actorType: session.role === 'admintop' ? 'admintop' as const : 'admin' as const,
+    actorType: session.role === 'admin'
+      ? 'admin' as const
+      : session.role === 'admintop'
+        ? 'admintop' as const
+        : 'top' as const,
     adminUserId: session.adminUserId ?? null,
     managerId: null,
   };
@@ -153,6 +166,7 @@ export async function getAdminSession(): Promise<AdminSession | null> {
         adminUserId: storedSession.adminUserId,
         managerId: storedSession.managerId,
         canAccessTopDashboard: storedSession.canAccessTopDashboard,
+        canManageTopDashboard: storedSession.canManageTopDashboard,
         sessionId: storedSession.sessionId,
       };
     }

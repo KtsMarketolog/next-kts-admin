@@ -47,6 +47,9 @@ export async function POST(request: Request) {
   const password = typeof body.password === 'string' ? body.password : '';
   const role = normalizeRole(body.role);
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
+  if (body.canManageTopDashboard !== undefined && typeof body.canManageTopDashboard !== 'boolean') {
+    return badRequest('Некорректное значение доступа «Админ TOP»');
+  }
 
   if (!name || !login || !password || !role) {
     if (!role) return badRequest('Некорректная роль пользователя');
@@ -54,6 +57,7 @@ export async function POST(request: Request) {
   }
 
   const supportManagerId = normalizeSupportManagerId(role, body.supportManagerId);
+  const canManageTopDashboard = role === 'top' && body.canManageTopDashboard === true;
 
   const passwordPolicy = validatePasswordPolicy(password);
   if (!passwordPolicy.ok) {
@@ -67,6 +71,7 @@ export async function POST(request: Request) {
       email,
       role,
       isActive,
+      canManageTopDashboard,
       supportManagerId,
       passwordHash: hashPassword(password),
     });
@@ -81,7 +86,13 @@ export async function POST(request: Request) {
       ip: getClientIp(request),
       userAgent: request.headers.get('user-agent'),
       referer: request.headers.get('referer'),
-      metadata: { login: user.login, email: user.email, role: user.role, source: user.source },
+      metadata: {
+        login: user.login,
+        email: user.email,
+        role: user.role,
+        source: user.source,
+        canManageTopDashboard: user.canManageTopDashboard,
+      },
     });
 
     return Response.json({ user });

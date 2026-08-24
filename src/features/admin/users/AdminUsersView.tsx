@@ -127,14 +127,29 @@ export function AdminUsersView({
           />
           <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
         </label>
-        <label className={styles.userActiveToggle}>
-          <input
-            type="checkbox"
-            checked={draft.isActive}
-            onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))}
-          />
-          Активен
-        </label>
+        <div className={styles.userCreateAccessToggles}>
+          {draft.role === 'top' && (
+            <label className={styles.userActiveToggle}>
+              <input
+                type="checkbox"
+                checked={draft.canManageTopDashboard}
+                onChange={(event) => setDraft((current) => ({
+                  ...current,
+                  canManageTopDashboard: event.target.checked,
+                }))}
+              />
+              Админ TOP
+            </label>
+          )}
+          <label className={styles.userActiveToggle}>
+            <input
+              type="checkbox"
+              checked={draft.isActive}
+              onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))}
+            />
+            Активен
+          </label>
+        </div>
         <button className={savedId === 'new' ? styles.savedButton : undefined} disabled={busyId === 'new'} onClick={createUser}>
           {savedId === 'new' ? 'Сохранено' : addButtonLabel(activeTab)}
         </button>
@@ -219,15 +234,29 @@ export function AdminUsersView({
                 </div>
 
                 <div className={styles.userAccessMeta}>
-                  <label className={styles.userActiveToggle}>
-                    <input
-                      type="checkbox"
-                      checked={user.isActive}
-                      disabled={user.isCurrent}
-                      onChange={(event) => updateUser(user.id, { isActive: event.target.checked })}
-                    />
-                    Активен
-                  </label>
+                  <div className={styles.userAccessToggles}>
+                    {user.role === 'top' && (
+                      <label className={styles.userActiveToggle}>
+                        <input
+                          type="checkbox"
+                          checked={user.canManageTopDashboard}
+                          onChange={(event) => updateUser(user.id, {
+                            canManageTopDashboard: event.target.checked,
+                          })}
+                        />
+                        Админ TOP
+                      </label>
+                    )}
+                    <label className={styles.userActiveToggle}>
+                      <input
+                        type="checkbox"
+                        checked={user.isActive}
+                        disabled={user.isCurrent}
+                        onChange={(event) => updateUser(user.id, { isActive: event.target.checked })}
+                      />
+                      Активен
+                    </label>
+                  </div>
                   <div className={styles.userAccessBadges}>
                     {user.isCurrent && <span className={styles.userCurrentBadge}>Это вы</span>}
                     <span>{ROLE_LABELS[user.role]}</span>

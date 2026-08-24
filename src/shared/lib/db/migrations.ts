@@ -304,6 +304,31 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202608250001_admin_user_top_management_access',
+    description: 'Grant optional TOP dashboard management while preserving the TOP primary role',
+    apply: async (client) => {
+      await client.query(`
+        alter table admin_users
+          add column if not exists can_manage_top_dashboard boolean not null default false;
+
+        do $$
+        begin
+          if not exists (
+            select 1
+            from pg_constraint
+            where conrelid = 'admin_users'::regclass
+              and conname = 'admin_users_top_management_role_check'
+          ) then
+            alter table admin_users
+              add constraint admin_users_top_management_role_check check (
+                can_manage_top_dashboard = false or role = 'top'
+              );
+          end if;
+        end $$;
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

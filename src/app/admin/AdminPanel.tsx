@@ -48,8 +48,13 @@ function canRoleAccessTopDashboard(
     || (isManagerRole(role) && explicitPermission === true);
 }
 
-function canRoleManageTopDashboard(role: AdminSession['role'] | null | undefined) {
-  return role === 'admin' || role === 'admintop';
+function canRoleManageTopDashboard(
+  role: AdminSession['role'] | null | undefined,
+  explicitPermission: boolean | undefined,
+) {
+  return role === 'admin'
+    || role === 'admintop'
+    || (role === 'top' && explicitPermission === true);
 }
 
 function isTopAreaOnlyRole(role: AdminSession['role'] | null | undefined) {
@@ -70,6 +75,9 @@ export default function AdminPanel({
   const [sessionRole, setSessionRole] = useState<AdminSession['role'] | null>(initialSession?.role ?? null);
   const [canAccessTopDashboard, setCanAccessTopDashboard] = useState(
     canRoleAccessTopDashboard(initialSession?.role, initialSession?.canAccessTopDashboard),
+  );
+  const [canManageTopDashboard, setCanManageTopDashboard] = useState(
+    canRoleManageTopDashboard(initialSession?.role, initialSession?.canManageTopDashboard),
   );
   const [activeArea, setActiveArea] = useState<AdminArea>(() => {
     if (isTopAreaOnlyRole(initialSession?.role)) return initialArea === 'top' ? 'top' : 'home';
@@ -182,12 +190,16 @@ export default function AdminPanel({
       if (!session?.authenticated) {
         setSessionRole(null);
         setCanAccessTopDashboard(false);
+        setCanManageTopDashboard(false);
         setAuthenticated(false);
       } else {
         const nextRole = normalizeSessionRole(session.role);
         setSessionRole(nextRole);
         setCanAccessTopDashboard(
           canRoleAccessTopDashboard(nextRole, session.canAccessTopDashboard),
+        );
+        setCanManageTopDashboard(
+          canRoleManageTopDashboard(nextRole, session.canManageTopDashboard),
         );
         setAuthenticated(Boolean(nextRole));
       }
@@ -247,6 +259,7 @@ export default function AdminPanel({
           if (!nextRole) {
             setSessionRole(null);
             setCanAccessTopDashboard(false);
+            setCanManageTopDashboard(false);
             setAuthenticated(false);
             setSessionReady(true);
             return;
@@ -257,6 +270,9 @@ export default function AdminPanel({
           );
           setSessionRole(nextRole);
           setCanAccessTopDashboard(nextCanAccessTopDashboard);
+          setCanManageTopDashboard(
+            canRoleManageTopDashboard(nextRole, data.canManageTopDashboard),
+          );
           setAuthenticated(true);
           setSessionReady(true);
           if (isTopAreaOnlyRole(nextRole)) {
@@ -284,6 +300,7 @@ export default function AdminPanel({
         } else {
           setSessionRole(null);
           setCanAccessTopDashboard(false);
+          setCanManageTopDashboard(false);
           setAuthenticated(false);
           setSessionReady(true);
         }
@@ -294,6 +311,7 @@ export default function AdminPanel({
         if (!authenticatedRef.current) {
           setSessionRole(null);
           setCanAccessTopDashboard(false);
+          setCanManageTopDashboard(false);
           setAuthenticated(false);
         }
         setSessionReady(true);
@@ -420,7 +438,6 @@ export default function AdminPanel({
     );
   }
 
-  const canManageTopDashboard = canRoleManageTopDashboard(sessionRole);
   const topDashboardMode = canAccessTopDashboard
     ? canManageTopDashboard
       ? 'manage' as const
@@ -469,6 +486,7 @@ export default function AdminPanel({
           await fetch('/api/admin/logout', { method: 'POST' });
           setSessionRole(null);
           setCanAccessTopDashboard(false);
+          setCanManageTopDashboard(false);
           setAuthenticated(false);
           setSessionReady(true);
         }}

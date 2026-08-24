@@ -12,6 +12,7 @@ export type StoredAdminSession = {
   adminUserId?: number;
   managerId?: number;
   canAccessTopDashboard?: boolean;
+  canManageTopDashboard?: boolean;
   createdAt: string;
   expiresAt: string;
 };
@@ -89,6 +90,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     expires_at: string;
     admin_is_active: boolean | null;
     admin_role: string | null;
+    admin_can_manage_top_dashboard: boolean | null;
     manager_is_active: boolean | null;
     manager_role: string | null;
     manager_can_access_top_dashboard: boolean | null;
@@ -104,6 +106,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
        s.expires_at::text,
        au.is_active as admin_is_active,
        au.role as admin_role,
+       au.can_manage_top_dashboard as admin_can_manage_top_dashboard,
        wm.is_active as manager_is_active,
        coalesce(nullif(wm.role, ''), 'manager') as manager_role,
        wm.can_access_top_dashboard as manager_can_access_top_dashboard,
@@ -165,6 +168,9 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     managerId: row.manager_id ? Number(row.manager_id) : undefined,
     canAccessTopDashboard: isStoredManagerRole(role)
       ? row.manager_can_access_top_dashboard === true
+      : undefined,
+    canManageTopDashboard: role === 'top'
+      ? row.admin_can_manage_top_dashboard === true
       : undefined,
     createdAt: row.created_at,
     expiresAt: row.expires_at,

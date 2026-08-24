@@ -72,6 +72,7 @@ export function emptyDraftForTab(tab: UserTab): Draft {
     ...EMPTY_DRAFT,
     role: defaultRoleForTab(tab),
     supportManagerId: tab === 'manager' ? EMPTY_DRAFT.supportManagerId : null,
+    canManageTopDashboard: false,
   };
 }
 

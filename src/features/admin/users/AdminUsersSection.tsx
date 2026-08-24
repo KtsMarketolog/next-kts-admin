@@ -100,6 +100,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
         ...current,
         role,
         supportManagerId: null,
+        canManageTopDashboard: role === 'top' ? current.canManageTopDashboard : false,
       };
     });
   }, [activeTab]);
@@ -109,7 +110,14 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   };
 
   const updateUserRole = (id: string, role: AccessUserRole) => {
-    updateUser(id, { role, supportManagerId: null, supportManagerName: '' });
+    updateUser(id, {
+      role,
+      supportManagerId: null,
+      supportManagerName: '',
+      canManageTopDashboard: role === 'top'
+        ? users.find((user) => user.id === id)?.canManageTopDashboard === true
+        : false,
+    });
   };
 
   const markSaved = (id: string) => {
@@ -161,6 +169,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       password: draft.password.trim(),
       role,
       supportManagerId: null,
+      canManageTopDashboard: role === 'top' && draft.canManageTopDashboard,
     };
 
     if (!payload.name || !payload.login || !payload.password) {

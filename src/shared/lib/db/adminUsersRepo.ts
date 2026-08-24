@@ -16,6 +16,7 @@ export type AdminUserAuth = {
   passwordHash: string;
   isActive: boolean;
   role: AdminUserRole;
+  canManageTopDashboard: boolean;
   passwordChangedAt: string | null;
 };
 
@@ -28,6 +29,7 @@ export type AccessUser = {
   email: string;
   role: AccessUserRole;
   isActive: boolean;
+  canManageTopDashboard: boolean;
   accesses: string[];
   priceListCount: number;
   supportManagerId: number | null;
@@ -43,6 +45,7 @@ type AccessUserInput = {
   email: string;
   role: AccessUserRole;
   isActive: boolean;
+  canManageTopDashboard: boolean;
   passwordHash?: string;
   supportManagerId?: number | null;
 };
@@ -55,6 +58,7 @@ type AccessUserRow = {
   email: string;
   role: string;
   is_active: boolean;
+  can_manage_top_dashboard: boolean;
   price_list_count: string;
   support_manager_id: string | null;
   support_manager_name: string | null;
@@ -94,10 +98,18 @@ function isManagerAccessRole(role: AccessUserRole): role is ManagerAccessRole {
   return role === 'manager' || role === 'support_manager';
 }
 
-function accessLabels(role: AccessUserRole) {
+function normalizeTopManagementAccess(role: AccessUserRole, value: unknown) {
+  return role === 'top' && value === true;
+}
+
+function accessLabels(role: AccessUserRole, canManageTopDashboard: boolean) {
   if (role === 'admin') return ['Сайт', 'Прайсы', 'Пользователи'];
   if (role === 'wholesale_admin') return ['Индивидуальные прайсы'];
-  if (role === 'top') return ['HTML-страницы: просмотр'];
+  if (role === 'top') {
+    return canManageTopDashboard
+      ? ['HTML-страницы: просмотр', 'HTML-страницы: управление']
+      : ['HTML-страницы: просмотр'];
+  }
   if (role === 'admintop') return ['HTML-страницы: управление'];
   if (role === 'support_manager') return ['Прайсы менеджера'];
   return ['Свои прайсы'];
@@ -107,6 +119,7 @@ function mapAccessUser(row: AccessUserRow, currentAdminUserId?: number | null): 
   const role = normalizeAccessRole(row.role);
   if (!role) throw new Error('Некорректная роль пользователя');
   const numericId = Number(row.id);
+  const canManageTopDashboard = normalizeTopManagementAccess(role, row.can_manage_top_dashboard);
   return {
     id: `${row.source}:${numericId}`,
     source: row.source,
@@ -116,7 +129,8 @@ function mapAccessUser(row: AccessUserRow, currentAdminUserId?: number | null): 
     email: row.email,
     role,
     isActive: row.is_active,
-    accesses: accessLabels(role),
+    canManageTopDashboard,
+    accesses: accessLabels(role, canManageTopDashboard),
     priceListCount: Number(row.price_list_count),
     supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
     supportManagerName: row.support_manager_name ?? '',
@@ -217,9 +231,11 @@ export async function getAdminUserByLogin(login: string): Promise<AdminUserAuth 
     password_hash: string;
     is_active: boolean;
     role: string;
+    can_manage_top_dashboard: boolean;
     password_changed_at: string | null;
   }>(
-    `select id::text, login, name, email, password_hash, is_active, role, password_changed_at::text
+    `select id::text, login, name, email, password_hash, is_active, role,
+            can_manage_top_dashboard, password_changed_at::text
      from admin_users
      where login = $1 or lower(email) = $1
      limit 1`,
@@ -228,6 +244,7 @@ export async function getAdminUserByLogin(login: string): Promise<AdminUserAuth 
 
   const row = result.rows[0];
   if (!row) return null;
+  const role = normalizeAdminRole(row.role);
 
   return {
     id: Number(row.id),
@@ -236,7 +253,8 @@ export async function getAdminUserByLogin(login: string): Promise<AdminUserAuth 
     email: row.email,
     passwordHash: row.password_hash,
     isActive: row.is_active,
-    role: normalizeAdminRole(row.role),
+    role,
+    canManageTopDashboard: normalizeTopManagementAccess(role, row.can_manage_top_dashboard),
     passwordChangedAt: row.password_changed_at,
   };
 }
@@ -254,6 +272,7 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
         au.email,
         au.role,
         au.is_active,
+        au.can_manage_top_dashboard,
         '0'::text as price_list_count,
         null::text as support_manager_id,
         ''::text as support_manager_name,
@@ -269,6 +288,7 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
         wm.email,
         coalesce(nullif(wm.role, ''), 'manager') as role,
         wm.is_active,
+        false as can_manage_top_dashboard,
         count(pl.id)::text as price_list_count,
         wm.support_manager_id::text as support_manager_id,
         coalesce(support.name, '') as support_manager_name,
@@ -307,6 +327,7 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
            email,
            role,
            is_active,
+           false as can_manage_top_dashboard,
            '0'::text as price_list_count,
            support_manager_id::text as support_manager_id,
            coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
@@ -318,8 +339,10 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
     }
 
     const result = await client.query<AccessUserRow>(
-      `insert into admin_users (name, login, email, role, password_hash, is_active, password_changed_at)
-       values ($1, $2, $3, $4, $5, $6, now())
+      `insert into admin_users (
+         name, login, email, role, can_manage_top_dashboard, password_hash, is_active, password_changed_at
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, now())
        returning
          'admin'::text as source,
          id::text,
@@ -328,12 +351,21 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
          email,
          role,
          is_active,
+         can_manage_top_dashboard,
          '0'::text as price_list_count,
          null::text as support_manager_id,
          ''::text as support_manager_name,
          created_at::text,
          updated_at::text`,
-      [input.name, normalizeLogin(input.login), input.email, input.role, input.passwordHash, input.isActive],
+      [
+        input.name,
+        normalizeLogin(input.login),
+        input.email,
+        input.role,
+        normalizeTopManagementAccess(input.role, input.canManageTopDashboard),
+        input.passwordHash,
+        input.isActive,
+      ],
     );
     return mapAccessUser(result.rows[0]);
   });
@@ -343,7 +375,13 @@ export async function updateAccessUser(
   id: string,
   input: AccessUserInput,
   currentAdminUserId?: number | null,
-): Promise<{ user: AccessUser; previous: AccessUser; roleChanged: boolean; passwordChanged: boolean }> {
+): Promise<{
+  user: AccessUser;
+  previous: AccessUser;
+  roleChanged: boolean;
+  permissionsChanged: boolean;
+  passwordChanged: boolean;
+}> {
   await ensureSiteSchema();
   const parsed = parseAccessUserId(id);
   if (!parsed) throw new Error('Некорректный пользователь');
@@ -361,6 +399,7 @@ export async function updateAccessUser(
            email,
            role,
            is_active,
+           can_manage_top_dashboard,
            '0'::text as price_list_count,
            null::text as support_manager_id,
            ''::text as support_manager_name,
@@ -376,6 +415,10 @@ export async function updateAccessUser(
       const previous = mapAccessUser(existingRow, currentAdminUserId);
       const isSelf = previous.isCurrent;
       const nextRole = input.role;
+      const nextCanManageTopDashboard = normalizeTopManagementAccess(
+        nextRole,
+        input.canManageTopDashboard,
+      );
       const activeAdminCount = await countActiveSiteAdmins(client);
 
       if (isSelf && (nextRole !== 'admin' || !input.isActive)) {
@@ -400,6 +443,7 @@ export async function updateAccessUser(
              email,
              role,
              is_active,
+             false as can_manage_top_dashboard,
              '0'::text as price_list_count,
              support_manager_id::text as support_manager_id,
              coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
@@ -421,6 +465,7 @@ export async function updateAccessUser(
           previous,
           user: mapAccessUser(insertResult.rows[0], currentAdminUserId),
           roleChanged: true,
+          permissionsChanged: previous.canManageTopDashboard,
           passwordChanged: Boolean(input.passwordHash),
         };
       }
@@ -431,9 +476,10 @@ export async function updateAccessUser(
              login = $3,
              email = $4,
              role = $5,
-             password_hash = case when $6::text is null then password_hash else $6 end,
-             password_changed_at = case when $6::text is null then password_changed_at else now() end,
-             is_active = $7,
+             can_manage_top_dashboard = $6,
+             password_hash = case when $7::text is null then password_hash else $7 end,
+             password_changed_at = case when $7::text is null then password_changed_at else now() end,
+             is_active = $8,
              updated_at = now()
          where id = $1
          returning
@@ -444,6 +490,7 @@ export async function updateAccessUser(
            email,
            role,
            is_active,
+           can_manage_top_dashboard,
            '0'::text as price_list_count,
            null::text as support_manager_id,
            ''::text as support_manager_name,
@@ -455,6 +502,7 @@ export async function updateAccessUser(
           normalizeLogin(input.login),
           input.email,
           nextRole,
+          nextCanManageTopDashboard,
           input.passwordHash ?? null,
           input.isActive,
         ],
@@ -463,6 +511,7 @@ export async function updateAccessUser(
         previous,
         user: mapAccessUser(updateResult.rows[0], currentAdminUserId),
         roleChanged: previous.role !== nextRole || previous.isActive !== input.isActive,
+        permissionsChanged: previous.canManageTopDashboard !== nextCanManageTopDashboard,
         passwordChanged: Boolean(input.passwordHash),
       };
     }
@@ -476,6 +525,7 @@ export async function updateAccessUser(
          wm.email,
          coalesce(nullif(wm.role, ''), 'manager') as role,
          wm.is_active,
+         false as can_manage_top_dashboard,
          count(pl.id)::text as price_list_count,
          wm.support_manager_id::text as support_manager_id,
          coalesce(support.name, '') as support_manager_name,
@@ -497,11 +547,18 @@ export async function updateAccessUser(
       if (previous.priceListCount > 0) {
         throw new Error('Сначала передайте прайсы другому менеджеру, затем меняйте роль');
       }
+      const nextCanManageTopDashboard = normalizeTopManagementAccess(
+        input.role,
+        input.canManageTopDashboard,
+      );
       const insertResult = await client.query<AccessUserRow>(
-        `insert into admin_users (name, login, email, role, password_hash, is_active, password_changed_at)
-         select $1, $2, $3, $4, coalesce($5::text, password_hash), $6, case when $5::text is null then password_changed_at else now() end
+        `insert into admin_users (
+           name, login, email, role, can_manage_top_dashboard, password_hash, is_active, password_changed_at
+         )
+         select $1, $2, $3, $4, $5, coalesce($6::text, password_hash), $7,
+                case when $6::text is null then password_changed_at else now() end
          from wholesale_managers
-         where id = $7
+         where id = $8
          returning
            'admin'::text as source,
            id::text,
@@ -510,6 +567,7 @@ export async function updateAccessUser(
            email,
            role,
            is_active,
+           can_manage_top_dashboard,
            '0'::text as price_list_count,
            null::text as support_manager_id,
            ''::text as support_manager_name,
@@ -520,6 +578,7 @@ export async function updateAccessUser(
           normalizeLogin(input.login),
           input.email,
           input.role,
+          nextCanManageTopDashboard,
           input.passwordHash ?? null,
           input.isActive,
           parsed.numericId,
@@ -530,6 +589,7 @@ export async function updateAccessUser(
         previous,
         user: mapAccessUser(insertResult.rows[0], currentAdminUserId),
         roleChanged: true,
+        permissionsChanged: nextCanManageTopDashboard,
         passwordChanged: Boolean(input.passwordHash),
       };
     }
@@ -558,6 +618,7 @@ export async function updateAccessUser(
          email,
          role,
          is_active,
+         false as can_manage_top_dashboard,
          (select count(*)::text from wholesale_price_lists where manager_id = wholesale_managers.id) as price_list_count,
          support_manager_id::text as support_manager_id,
          coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
@@ -580,6 +641,7 @@ export async function updateAccessUser(
       user: mapAccessUser(updateResult.rows[0], currentAdminUserId),
       roleChanged:
         previous.role !== input.role || previous.isActive !== input.isActive || previous.supportManagerId !== supportManagerId,
+      permissionsChanged: false,
       passwordChanged: Boolean(input.passwordHash),
     };
   });
@@ -601,6 +663,7 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
            email,
            role,
            is_active,
+           can_manage_top_dashboard,
            '0'::text as price_list_count,
            null::text as support_manager_id,
            ''::text as support_manager_name,
@@ -631,6 +694,7 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
          wm.email,
          coalesce(nullif(wm.role, ''), 'manager') as role,
          wm.is_active,
+         false as can_manage_top_dashboard,
          count(pl.id)::text as price_list_count,
          wm.support_manager_id::text as support_manager_id,
          coalesce(support.name, '') as support_manager_name,

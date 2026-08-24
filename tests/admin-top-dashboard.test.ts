@@ -68,12 +68,34 @@ test('break-glass admin can bootstrap users and manage TOP dashboard without a d
   assert.equal(isTopDashboardManagementSession(breakGlassAdmin), true);
 });
 
-test('TOP requires a persisted positive user id and never receives admin-management access', () => {
+test('TOP keeps its primary role and receives dashboard management only through the additive flag', () => {
   assert.equal(isAdminManagementSession({ role: 'top', adminUserId: 1 }), false);
   assert.equal(isTopDashboardSession({ role: 'top' }), false);
   assert.equal(isTopDashboardSession({ role: 'top', adminUserId: -1 }), false);
   assert.equal(isTopDashboardSession({ role: 'top', adminUserId: 1 }), true);
   assert.equal(isTopDashboardManagementSession({ role: 'top', adminUserId: 1 }), false);
+  assert.equal(isTopDashboardManagementSession({
+    role: 'top',
+    adminUserId: 1,
+    canManageTopDashboard: false,
+  }), false);
+  assert.equal(isTopDashboardManagementSession({
+    role: 'top',
+    adminUserId: 1,
+    canManageTopDashboard: true,
+  }), true);
+  assert.equal(isAdminManagementSession({
+    role: 'top',
+    adminUserId: 1,
+    canManageTopDashboard: true,
+  }), false);
+  for (const adminUserId of [undefined, 0, -1, 1.5, Number.NaN]) {
+    assert.equal(isTopDashboardManagementSession({
+      role: 'top',
+      adminUserId,
+      canManageTopDashboard: true,
+    }), false);
+  }
 });
 
 test('Admin TOP requires a persisted user id and receives TOP management only', () => {
@@ -127,6 +149,14 @@ test('TOP management audit attribution distinguishes Admin TOP from the main adm
   assert.deepEqual(
     getTopDashboardActor({ role: 'admin' }),
     { actorType: 'admin', adminUserId: null, managerId: null },
+  );
+  assert.deepEqual(
+    getTopDashboardActor({
+      role: 'top',
+      adminUserId: 32,
+      canManageTopDashboard: true,
+    }),
+    { actorType: 'top', adminUserId: 32, managerId: null },
   );
 });
 
@@ -198,6 +228,36 @@ test('admin users screen exposes separate single-role TOP and Admin TOP tabs', (
     value: 'admintop',
     label: 'Админ TOP — управление',
   }]);
+});
+
+test('TOP users expose a separate Admin TOP capability without changing their primary role', () => {
+  const viewSource = readFileSync(new URL(
+    '../src/features/admin/users/AdminUsersView.tsx',
+    import.meta.url,
+  ), 'utf8');
+  const repositorySource = readFileSync(new URL(
+    '../src/shared/lib/db/adminUsersRepo.ts',
+    import.meta.url,
+  ), 'utf8');
+  const sessionRepositorySource = readFileSync(new URL(
+    '../src/shared/lib/db/adminSessionsRepo.ts',
+    import.meta.url,
+  ), 'utf8');
+  const panelSource = readFileSync(new URL(
+    '../src/app/admin/AdminPanel.tsx',
+    import.meta.url,
+  ), 'utf8');
+  const updateRouteSource = readFileSync(new URL(
+    '../src/app/api/admin/users/[id]/route.ts',
+    import.meta.url,
+  ), 'utf8');
+
+  assert.match(viewSource, /canManageTopDashboard/);
+  assert.match(viewSource, /Админ TOP/);
+  assert.match(repositorySource, /role === 'top' && value === true/);
+  assert.match(sessionRepositorySource, /au\.can_manage_top_dashboard/);
+  assert.match(panelSource, /data\.canManageTopDashboard/);
+  assert.match(updateRouteSource, /result\.permissionsChanged/);
 });
 
 test('every TOP mutation route uses the management-only server guard', () => {

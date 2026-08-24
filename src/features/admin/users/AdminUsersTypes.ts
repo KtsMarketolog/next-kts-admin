@@ -10,6 +10,7 @@ export type AccessUser = {
   email: string;
   role: AccessUserRole;
   isActive: boolean;
+  canManageTopDashboard: boolean;
   accesses: string[];
   priceListCount: number;
   supportManagerId: number | null;
@@ -26,6 +27,7 @@ export type Draft = {
   supportManagerId: number | null;
   password: string;
   isActive: boolean;
+  canManageTopDashboard: boolean;
 };
 
 export const EMPTY_DRAFT: Draft = {
@@ -36,4 +38,5 @@ export const EMPTY_DRAFT: Draft = {
   supportManagerId: null,
   password: '',
   isActive: true,
+  canManageTopDashboard: false,
 };

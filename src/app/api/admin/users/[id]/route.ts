@@ -58,6 +58,9 @@ export async function PUT(request: Request, context: Context) {
   const password = typeof body.password === 'string' ? body.password : '';
   const role = normalizeRole(body.role);
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
+  if (body.canManageTopDashboard !== undefined && typeof body.canManageTopDashboard !== 'boolean') {
+    return badRequest('Некорректное значение доступа «Админ TOP»');
+  }
   const supportManagerId = role ? normalizeSupportManagerId(role, body.supportManagerId) : null;
 
   if (!name || !login || !role) {
@@ -79,13 +82,19 @@ export async function PUT(request: Request, context: Context) {
         email,
         role,
         isActive,
+        canManageTopDashboard: role === 'top' && body.canManageTopDashboard === true,
         supportManagerId,
         passwordHash: password ? hashPassword(password) : undefined,
       },
       session.adminUserId ?? null,
     );
 
-    if (result.roleChanged || result.passwordChanged || result.previous.isActive !== result.user.isActive) {
+    if (
+      result.roleChanged
+      || result.permissionsChanged
+      || result.passwordChanged
+      || result.previous.isActive !== result.user.isActive
+    ) {
       await revokePreviousSessions(result.previous.source, result.previous.numericId);
     }
 
@@ -108,6 +117,9 @@ export async function PUT(request: Request, context: Context) {
         login: result.user.login,
         email: result.user.email,
         roleChanged: result.roleChanged,
+        permissionsChanged: result.permissionsChanged,
+        previousCanManageTopDashboard: result.previous.canManageTopDashboard,
+        canManageTopDashboard: result.user.canManageTopDashboard,
         passwordChanged: result.passwordChanged,
         isActive: result.user.isActive,
       },

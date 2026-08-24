@@ -27,10 +27,14 @@ async function ensureSiteSchemaInternal() {
       name text not null default '',
       password_hash text not null default '',
       role text not null default 'admin',
+      can_manage_top_dashboard boolean not null default false,
       is_active boolean not null default true,
       password_changed_at timestamptz,
       created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now()
+      updated_at timestamptz not null default now(),
+      constraint admin_users_top_management_role_check check (
+        can_manage_top_dashboard = false or role = 'top'
+      )
     );
 
     create table if not exists hero_slides (
@@ -477,6 +481,7 @@ async function ensureSiteSchemaInternal() {
     alter table admin_users add column if not exists email text not null default '';
     alter table admin_users add column if not exists name text not null default '';
     alter table admin_users add column if not exists role text not null default 'admin';
+    alter table admin_users add column if not exists can_manage_top_dashboard boolean not null default false;
     alter table admin_users add column if not exists password_changed_at timestamptz;
     alter table wholesale_managers add column if not exists phone text not null default '';
     alter table wholesale_managers add column if not exists role text not null default 'manager';
@@ -632,6 +637,7 @@ async function ensureSiteSchemaInternal() {
   await query(`alter table admin_users add column if not exists email text not null default ''`);
   await query(`alter table admin_users add column if not exists name text not null default ''`);
   await query(`alter table admin_users add column if not exists role text not null default 'admin'`);
+  await query(`alter table admin_users add column if not exists can_manage_top_dashboard boolean not null default false`);
   await query(`alter table admin_users add column if not exists password_changed_at timestamptz`);
   await query(`alter table wholesale_managers add column if not exists phone text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists role text not null default 'manager'`);
