@@ -91,32 +91,59 @@ export function getTopDashboardDataAdapterScript(
   const READ_ONLY = ${readOnlyJson};
   const SNAPSHOT_NAME = /\.json(?:\.gz)?$/i;
   const nativeOpen = window.open.bind(window);
+  const popupObjectUrls = new Set();
   let pendingSnapshot = null;
   let inputObserver = null;
   let inputTimeout = 0;
 
   /*
-   * Some dashboards open a blank page with the noopener window feature and
-   * then fill it with document.write(). Browsers are allowed to return null for
-   * that call even when the page was created, so the dashboard mistakes a
-   * successful open for a popup-blocker failure. Open the same sandboxed page
-   * with a usable handle and detach its opener before returning control to the
-   * uploaded dashboard.
+   * Some dashboards open a blank page with noopener and then fill the returned
+   * handle with document.write(). Noopener deliberately returns null, while a
+   * sandboxed popup also has a different opaque origin in Safari. Collect that
+   * synchronous write into a Blob and open the finished document directly so
+   * it keeps noopener and inherits this document's CSP and sandbox.
    */
   window.open = function openSandboxedWindow(url, target, features) {
     const hasNoopener = typeof features === 'string'
       && features.split(',').some((feature) => /^\s*noopener(?:\s*=\s*(?:yes|1|true))?\s*$/i.test(feature));
-    if (!hasNoopener) return nativeOpen(url, target, features);
+    const requestedUrl = url == null ? '' : String(url);
+    const writableBlank = requestedUrl === '' || requestedUrl.toLowerCase() === 'about:blank';
+    if (!hasNoopener || !writableBlank) return nativeOpen(url, target, features);
 
-    const forwardedFeatures = features
-      .split(',')
-      .filter((feature) => !/^\s*noopener(?:\s*=\s*(?:yes|1|true))?\s*$/i.test(feature))
-      .join(',');
-    const opened = nativeOpen(url, target, forwardedFeatures);
-    if (!opened) return null;
-    try { opened.opener = null; } catch {}
-    return opened;
+    let html = '';
+    let committed = false;
+    const popupDocument = {
+      open() {
+        html = '';
+        committed = false;
+        return popupDocument;
+      },
+      write(...parts) {
+        if (!committed) html += parts.map(String).join('');
+      },
+      writeln(...parts) {
+        if (!committed) html += parts.map(String).join('') + '\n';
+      },
+      close() {
+        if (committed) return;
+        committed = true;
+        const objectUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+        popupObjectUrls.add(objectUrl);
+        nativeOpen(objectUrl, target, features);
+      },
+    };
+
+    return {
+      document: popupDocument,
+      close() { committed = true; },
+      get closed() { return committed; },
+    };
   };
+
+  window.addEventListener('pagehide', () => {
+    popupObjectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+    popupObjectUrls.clear();
+  }, { once: true });
 
   function validName(value) {
     return typeof value === 'string'

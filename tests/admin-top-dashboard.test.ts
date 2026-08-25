@@ -501,10 +501,55 @@ test('dashboard data adapter hydrates supported file inputs without granting ser
   assert.match(adapter, /snapshot-installed/);
   assert.match(adapter, /data\.type === 'bridge-probe'/);
   assert.match(adapter, /window\.open = function openSandboxedWindow/);
-  assert.match(adapter, /opened\.opener = null/);
-  assert.match(adapter, /nativeOpen\(url, target, forwardedFeatures\)/);
+  assert.match(adapter, /requestedUrl\.toLowerCase\(\) === 'about:blank'/);
+  assert.match(adapter, /URL\.createObjectURL\(new Blob/);
+  assert.match(adapter, /nativeOpen\(objectUrl, target, features\)/);
+  assert.match(adapter, /URL\.revokeObjectURL/);
+  assert.doesNotMatch(adapter, /opened\.opener = null/);
   assert.doesNotMatch(adapter, /snapshot-selected/);
   assert.doesNotMatch(adapter, /method: 'PUT'/);
+});
+
+test('dashboard adapter turns a legacy writable noopener popup into one Blob navigation', async () => {
+  const adapter = getTopDashboardDataAdapterScript();
+  const nativeOpenCalls: unknown[][] = [];
+  const createdBlobs: Blob[] = [];
+  const revokedUrls: string[] = [];
+  const listeners = new Map<string, EventListener>();
+  const fakeWindow = {
+    open: (...args: unknown[]) => {
+      nativeOpenCalls.push(args);
+      return null;
+    },
+    parent: { postMessage: () => undefined },
+    addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
+  } as unknown as Window;
+  const fakeDocument = { readyState: 'complete' } as unknown as Document;
+  const fakeUrl = {
+    createObjectURL: (blob: Blob) => {
+      createdBlobs.push(blob);
+      return 'blob:null/office-screen';
+    },
+    revokeObjectURL: (url: string) => revokedUrls.push(url),
+  };
+  const execute = new Function('window', 'document', 'URL', 'Blob', adapter);
+
+  execute(fakeWindow, fakeDocument, fakeUrl, Blob);
+  const popup = fakeWindow.open('', '_blank', 'noopener');
+  assert.ok(popup);
+  popup.document.open();
+  popup.document.write('<h1>Экран');
+  popup.document.writeln(' для офиса</h1>');
+  popup.document.close();
+
+  assert.deepEqual(nativeOpenCalls, [['blob:null/office-screen', '_blank', 'noopener']]);
+  assert.equal(createdBlobs.length, 1);
+  assert.equal(await createdBlobs[0].text(), '<h1>Экран для офиса</h1>\n');
+
+  fakeWindow.open('https://example.com', '_blank', 'noopener');
+  assert.deepEqual(nativeOpenCalls[1], ['https://example.com', '_blank', 'noopener']);
+  listeners.get('pagehide')?.(new Event('pagehide'));
+  assert.deepEqual(revokedUrls, ['blob:null/office-screen']);
 });
 
 test('dashboard frames permit sandboxed popups and explicitly delegate fullscreen', () => {
