@@ -59,7 +59,7 @@ export async function GET(request: Request, context: Context) {
         'X-DNS-Prefetch-Control': 'off',
         'Referrer-Policy': 'no-referrer',
         'Cross-Origin-Resource-Policy': 'same-origin',
-        'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=*',
       },
     });
   } catch (error) {

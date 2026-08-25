@@ -968,9 +968,10 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
               className={styles.topDashboardFrame}
               src={`${apiBasePath}/versions/${selectedVersion.id}/frame?revision=${previewRevision}`}
               title={`Предпросмотр ${selectedVersion.originalName}`}
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-scripts allow-same-origin allow-popups"
               referrerPolicy="no-referrer"
-              allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen 'none'"
+              allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
+              allowFullScreen
             />
           </div>
         ) : (

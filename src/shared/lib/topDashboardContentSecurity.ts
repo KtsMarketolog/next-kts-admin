@@ -68,9 +68,11 @@ function sha256Source(value: string) {
 }
 
 /**
- * This code runs inside the opaque-origin, script-only sandbox that contains an
- * uploaded dashboard. It has no network access. The trusted outer frame is the
- * only component allowed to read or persist a snapshot.
+ * This code runs inside the opaque-origin sandbox that contains an uploaded
+ * dashboard. Direct requests and network subresources remain blocked by CSP.
+ * User-initiated popups are allowed only when they keep the same sandbox
+ * restrictions; the trusted outer frame is the only component allowed to read
+ * or persist a snapshot.
  */
 export function getTopDashboardDataAdapterScript(
   expectedFormat: TopDashboardSnapshotFormat | null = null,
@@ -88,9 +90,33 @@ export function getTopDashboardDataAdapterScript(
   const EXPECTED_PROFILE = ${expectedProfileJson};
   const READ_ONLY = ${readOnlyJson};
   const SNAPSHOT_NAME = /\.json(?:\.gz)?$/i;
+  const nativeOpen = window.open.bind(window);
   let pendingSnapshot = null;
   let inputObserver = null;
   let inputTimeout = 0;
+
+  /*
+   * Some dashboards open a blank page with the noopener window feature and
+   * then fill it with document.write(). Browsers are allowed to return null for
+   * that call even when the page was created, so the dashboard mistakes a
+   * successful open for a popup-blocker failure. Open the same sandboxed page
+   * with a usable handle and detach its opener before returning control to the
+   * uploaded dashboard.
+   */
+  window.open = function openSandboxedWindow(url, target, features) {
+    const hasNoopener = typeof features === 'string'
+      && features.split(',').some((feature) => /^\s*noopener(?:\s*=\s*(?:yes|1|true))?\s*$/i.test(feature));
+    if (!hasNoopener) return nativeOpen(url, target, features);
+
+    const forwardedFeatures = features
+      .split(',')
+      .filter((feature) => !/^\s*noopener(?:\s*=\s*(?:yes|1|true))?\s*$/i.test(feature))
+      .join(',');
+    const opened = nativeOpen(url, target, forwardedFeatures);
+    if (!opened) return null;
+    try { opened.opener = null; } catch {}
+    return opened;
+  };
 
   function validName(value) {
     return typeof value === 'string'
@@ -522,7 +548,7 @@ export function buildTopDashboardContentSecurityPolicy(htmlContent: string) {
     'media-src data: blob:',
     'worker-src blob:',
     "manifest-src 'none'",
-    'sandbox allow-scripts',
+    'sandbox allow-scripts allow-popups',
   ].join('; ');
 }
 

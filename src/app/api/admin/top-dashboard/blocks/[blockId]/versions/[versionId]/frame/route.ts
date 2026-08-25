@@ -58,9 +58,10 @@ export async function GET(_request: Request, context: Context) {
     id="dashboard-frame"
     src="${contentPath}"
     title="HTML-дашборд"
-    sandbox="allow-scripts"
+    sandbox="allow-scripts allow-popups"
     referrerpolicy="same-origin"
-    allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'"
+    allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
+    allowfullscreen
   ></iframe>
   <div id="data-notice" role="status" aria-live="polite" hidden></div>
   <script>${bridgeScript}</script>
@@ -76,7 +77,7 @@ export async function GET(_request: Request, context: Context) {
       'X-Frame-Options': 'SAMEORIGIN',
       'Referrer-Policy': 'same-origin',
       'Cross-Origin-Resource-Policy': 'same-origin',
-      'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+      'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=*',
     },
   });
 }

@@ -438,7 +438,8 @@ test('dashboard CSP permits only exact uploaded scripts and handlers', () => {
 
   assert.match(csp, /default-src 'none'/);
   assert.match(csp, /connect-src 'none'/);
-  assert.match(csp, /sandbox allow-scripts/);
+  assert.match(csp, /sandbox allow-scripts allow-popups/);
+  assert.doesNotMatch(csp, /allow-popups-to-escape-sandbox/);
   assert.match(csp, /'unsafe-hashes'/);
   assert.ok(csp.includes(cspHash(script)));
   assert.ok(csp.includes(cspHash(handler)));
@@ -458,7 +459,8 @@ test('dashboard data adapter is injected before application scripts and receives
 
   const csp = buildTopDashboardContentSecurityPolicy(transformed);
   assert.match(csp, /connect-src 'none'/);
-  assert.match(csp, /sandbox allow-scripts/);
+  assert.match(csp, /sandbox allow-scripts allow-popups/);
+  assert.doesNotMatch(csp, /allow-popups-to-escape-sandbox/);
   assert.ok(csp.includes(cspHash(adapterScript)));
   assert.doesNotMatch(csp, /allow-same-origin/);
 });
@@ -487,6 +489,7 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
 test('dashboard data adapter hydrates supported file inputs without granting server-write access', () => {
   const adapter = getTopDashboardDataAdapterScript();
 
+  assert.doesNotThrow(() => new Function(adapter));
   assert.match(adapter, /event\.source !== window\.parent/);
   assert.match(adapter, /value instanceof ArrayBuffer/);
   assert.match(adapter, new RegExp(`MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES}`));
@@ -497,8 +500,48 @@ test('dashboard data adapter hydrates supported file inputs without granting ser
   assert.match(adapter, /window\.handleFiles/);
   assert.match(adapter, /snapshot-installed/);
   assert.match(adapter, /data\.type === 'bridge-probe'/);
+  assert.match(adapter, /window\.open = function openSandboxedWindow/);
+  assert.match(adapter, /opened\.opener = null/);
+  assert.match(adapter, /nativeOpen\(url, target, forwardedFeatures\)/);
   assert.doesNotMatch(adapter, /snapshot-selected/);
   assert.doesNotMatch(adapter, /method: 'PUT'/);
+});
+
+test('dashboard frames permit sandboxed popups and explicitly delegate fullscreen', () => {
+  const sources = [
+    readFileSync(new URL(
+      '../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx',
+      import.meta.url,
+    ), 'utf8'),
+    readFileSync(new URL(
+      '../src/features/admin/top-dashboard/TopDashboardViewer.tsx',
+      import.meta.url,
+    ), 'utf8'),
+    readFileSync(new URL(
+      '../src/app/api/admin/top-dashboard/blocks/[blockId]/versions/[versionId]/frame/route.ts',
+      import.meta.url,
+    ), 'utf8'),
+    readFileSync(new URL(
+      '../src/app/api/admin/top-dashboard/blocks/[blockId]/versions/[versionId]/content/route.ts',
+      import.meta.url,
+    ), 'utf8'),
+  ];
+
+  assert.match(sources[0], /sandbox="allow-scripts allow-same-origin allow-popups"/);
+  assert.match(sources[1], /sandbox="allow-scripts allow-same-origin allow-popups"/);
+  assert.match(sources[2], /sandbox="allow-scripts allow-popups"/);
+  assert.match(sources[0], /fullscreen \*"/);
+  assert.match(sources[1], /fullscreen \*"/);
+  assert.match(sources[2], /fullscreen \*"/);
+  assert.match(sources[0], /allowFullScreen/);
+  assert.match(sources[1], /allowFullScreen/);
+  assert.match(sources[2], /allowfullscreen/);
+  assert.match(sources[2], /fullscreen=\*/);
+  assert.match(sources[3], /fullscreen=\*/);
+  sources.forEach((source) => {
+    assert.doesNotMatch(source, /allow-popups-to-escape-sandbox/);
+    assert.doesNotMatch(source, /fullscreen 'none'/);
+  });
 });
 
 test('TOP read-only adapter blocks local file replacement and hides upload controls', () => {
