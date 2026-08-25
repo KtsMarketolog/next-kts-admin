@@ -1,7 +1,12 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
-import { deleteWholesaleManager, revokeManagerSessions, updateWholesaleManager } from '@/shared/lib/db';
+import {
+  deleteWholesaleManager,
+  getWholesaleManagerById,
+  updateWholesaleManager,
+} from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
+import { shouldRevokeManagerSessionsForUpdate } from '@/shared/lib/managerSessionPolicy';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
@@ -35,7 +40,10 @@ export async function PUT(request: Request, context: Context) {
   if (hasCanAccessTopDashboard && typeof body.canAccessTopDashboard !== 'boolean') {
     return Response.json({ error: 'Доступ TOP должен быть указан как да или нет' }, { status: 400 });
   }
-  const canAccessTopDashboard = hasCanAccessTopDashboard ? body.canAccessTopDashboard : undefined;
+  const hasCanManageTopDashboard = Object.prototype.hasOwnProperty.call(body, 'canManageTopDashboard');
+  if (hasCanManageTopDashboard && typeof body.canManageTopDashboard !== 'boolean') {
+    return Response.json({ error: 'Админ-доступ TOP должен быть указан как да или нет' }, { status: 400 });
+  }
 
   if (!name || !login) {
     return Response.json({ error: 'Имя и логин обязательны' }, { status: 400 });
@@ -47,6 +55,33 @@ export async function PUT(request: Request, context: Context) {
     }
   }
 
+  const existingManager = await getWholesaleManagerById(numericId);
+  if (!existingManager) {
+    return Response.json({ error: 'Менеджер не найден' }, { status: 404 });
+  }
+
+  let canAccessTopDashboard = hasCanAccessTopDashboard
+    ? body.canAccessTopDashboard
+    : existingManager.canAccessTopDashboard;
+  let canManageTopDashboard = hasCanManageTopDashboard
+    ? body.canManageTopDashboard
+    : existingManager.canManageTopDashboard;
+  if (hasCanAccessTopDashboard && body.canAccessTopDashboard === false && !hasCanManageTopDashboard) {
+    canManageTopDashboard = false;
+  }
+  if (canManageTopDashboard) {
+    canAccessTopDashboard = true;
+  }
+  const permissionsChanged = canAccessTopDashboard !== existingManager.canAccessTopDashboard
+    || canManageTopDashboard !== existingManager.canManageTopDashboard;
+  const isActive = Boolean(body.isActive ?? true);
+  const activeStateChanged = isActive !== existingManager.isActive;
+  const revokeSessions = shouldRevokeManagerSessionsForUpdate({
+    passwordChanged: Boolean(password),
+    permissionsChanged,
+    activeStateChanged,
+  });
+
   try {
     await updateWholesaleManager(numericId, {
       name,
@@ -56,12 +91,11 @@ export async function PUT(request: Request, context: Context) {
       supportManagerId: normalizedSupportManagerId,
       passwordHash: password ? hashPassword(password) : undefined,
       displayPassword: password || undefined,
-      isActive: Boolean(body.isActive ?? true),
+      isActive,
       canAccessTopDashboard,
+      canManageTopDashboard,
+      revokeSessions,
     });
-    if (password) {
-      await revokeManagerSessions(numericId);
-    }
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить менеджера' }, { status: 400 });
   }
@@ -81,8 +115,11 @@ export async function PUT(request: Request, context: Context) {
       email,
       phone,
       supportManagerId: normalizedSupportManagerId,
-      isActive: Boolean(body.isActive ?? true),
-      ...(canAccessTopDashboard === undefined ? {} : { canAccessTopDashboard }),
+      isActive,
+      canAccessTopDashboard,
+      canManageTopDashboard,
+      permissionsChanged,
+      activeStateChanged,
     },
   });
 

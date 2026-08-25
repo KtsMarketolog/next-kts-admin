@@ -329,6 +329,36 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202608250002_manager_top_dashboard_management_access',
+    description: 'Grant optional TOP dashboard management to wholesale managers without changing their primary role',
+    apply: async (client) => {
+      await client.query(`
+        alter table wholesale_managers
+          add column if not exists can_manage_top_dashboard boolean not null default false;
+
+        update wholesale_managers
+        set can_access_top_dashboard = true
+        where can_manage_top_dashboard = true
+          and can_access_top_dashboard = false;
+
+        do $$
+        begin
+          if not exists (
+            select 1
+            from pg_constraint
+            where conrelid = 'wholesale_managers'::regclass
+              and conname = 'wholesale_managers_top_management_access_check'
+          ) then
+            alter table wholesale_managers
+              add constraint wholesale_managers_top_management_access_check check (
+                can_manage_top_dashboard = false or can_access_top_dashboard = true
+              );
+          end if;
+        end $$;
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

@@ -18,6 +18,7 @@ export const emptyManager: ManagerDraft = {
   password: '',
   isActive: true,
   canAccessTopDashboard: false,
+  canManageTopDashboard: false,
 };
 
 export function isManagerRole(value: string | null): value is ManagerRole {
@@ -36,9 +37,13 @@ export function saveManagerRoleTab(tab: ManagerRole) {
 }
 
 export function attachManagerPasswords(managers: Manager[]) {
-  return managers.map((manager) => ({
-    ...manager,
-    displayPassword: manager.displayPassword || '',
-    canAccessTopDashboard: manager.canAccessTopDashboard === true,
-  }));
+  return managers.map((manager) => {
+    const canManageTopDashboard = manager.canManageTopDashboard === true;
+    return {
+      ...manager,
+      displayPassword: manager.displayPassword || '',
+      canAccessTopDashboard: manager.canAccessTopDashboard === true || canManageTopDashboard,
+      canManageTopDashboard,
+    };
+  });
 }

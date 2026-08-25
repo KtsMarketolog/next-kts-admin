@@ -54,7 +54,7 @@ function canRoleManageTopDashboard(
 ) {
   return role === 'admin'
     || role === 'admintop'
-    || (role === 'top' && explicitPermission === true);
+    || ((role === 'top' || isManagerRole(role)) && explicitPermission === true);
 }
 
 function isTopAreaOnlyRole(role: AdminSession['role'] | null | undefined) {

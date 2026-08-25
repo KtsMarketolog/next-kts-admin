@@ -179,13 +179,17 @@ async function ensureSiteSchemaInternal() {
       phone text not null default '',
       role text not null default 'manager',
       can_access_top_dashboard boolean not null default false,
+      can_manage_top_dashboard boolean not null default false,
       support_manager_id bigint references wholesale_managers(id) on delete set null,
       password_hash text not null default '',
       display_password text not null default '',
       is_active boolean not null default true,
       password_changed_at timestamptz,
       created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now()
+      updated_at timestamptz not null default now(),
+      constraint wholesale_managers_top_management_access_check check (
+        can_manage_top_dashboard = false or can_access_top_dashboard = true
+      )
     );
 
     create table if not exists wholesale_price_lists (
@@ -486,6 +490,7 @@ async function ensureSiteSchemaInternal() {
     alter table wholesale_managers add column if not exists phone text not null default '';
     alter table wholesale_managers add column if not exists role text not null default 'manager';
     alter table wholesale_managers add column if not exists can_access_top_dashboard boolean not null default false;
+    alter table wholesale_managers add column if not exists can_manage_top_dashboard boolean not null default false;
     alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null;
     alter table wholesale_managers add column if not exists password_hash text not null default '';
     alter table wholesale_managers add column if not exists display_password text not null default '';
@@ -642,6 +647,7 @@ async function ensureSiteSchemaInternal() {
   await query(`alter table wholesale_managers add column if not exists phone text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists role text not null default 'manager'`);
   await query(`alter table wholesale_managers add column if not exists can_access_top_dashboard boolean not null default false`);
+  await query(`alter table wholesale_managers add column if not exists can_manage_top_dashboard boolean not null default false`);
   await query(`alter table wholesale_managers add column if not exists support_manager_id bigint references wholesale_managers(id) on delete set null`);
   await query(`alter table wholesale_managers add column if not exists password_hash text not null default ''`);
   await query(`alter table wholesale_managers add column if not exists display_password text not null default ''`);

@@ -18,6 +18,7 @@ import {
   isTopDashboardManagementSession,
   isTopDashboardSession,
 } from '../src/shared/lib/adminAuth';
+import { shouldRevokeManagerSessionsForUpdate } from '../src/shared/lib/managerSessionPolicy';
 import type {
   activateTopDashboardBlockVersion,
   CreateTopDashboardBlockVersionInput,
@@ -116,6 +117,10 @@ test('manager roles keep their primary permissions and receive TOP only through 
       isTopDashboardManagementSession({ role, managerId: 17, canAccessTopDashboard: true }),
       false,
     );
+    assert.equal(
+      isTopDashboardManagementSession({ role, managerId: 17, canManageTopDashboard: true }),
+      true,
+    );
     assert.equal(isTopDashboardSession({ role, managerId: 17 }), false);
     assert.equal(
       isTopDashboardSession({ role, managerId: 17, canAccessTopDashboard: false }),
@@ -125,10 +130,18 @@ test('manager roles keep their primary permissions and receive TOP only through 
       isTopDashboardSession({ role, managerId: 17, canAccessTopDashboard: true }),
       true,
     );
+    assert.equal(
+      isTopDashboardSession({ role, managerId: 17, canManageTopDashboard: true }),
+      true,
+    );
+    assert.equal(
+      isAdminManagementSession({ role, managerId: 17, canManageTopDashboard: true }),
+      false,
+    );
   }
 });
 
-test('manager TOP access fails closed without a valid positive manager id', () => {
+test('manager TOP viewing and management fail closed without a valid positive manager id', () => {
   for (const managerId of [undefined, 0, -1, 1.5, Number.NaN]) {
     assert.equal(
       isTopDashboardSession({
@@ -138,7 +151,41 @@ test('manager TOP access fails closed without a valid positive manager id', () =
       }),
       false,
     );
+    assert.equal(
+      isTopDashboardSession({
+        role: 'manager',
+        managerId,
+        canManageTopDashboard: true,
+      }),
+      false,
+    );
+    assert.equal(
+      isTopDashboardManagementSession({
+        role: 'manager',
+        managerId,
+        canManageTopDashboard: true,
+      }),
+      false,
+    );
   }
+});
+
+test('manager sessions are revoked when activity or TOP permissions change', () => {
+  assert.equal(shouldRevokeManagerSessionsForUpdate({
+    passwordChanged: false,
+    permissionsChanged: false,
+    activeStateChanged: false,
+  }), false);
+  assert.equal(shouldRevokeManagerSessionsForUpdate({
+    passwordChanged: false,
+    permissionsChanged: true,
+    activeStateChanged: false,
+  }), true);
+  assert.equal(shouldRevokeManagerSessionsForUpdate({
+    passwordChanged: false,
+    permissionsChanged: false,
+    activeStateChanged: true,
+  }), true);
 });
 
 test('TOP management audit attribution distinguishes Admin TOP from the main admin', () => {
@@ -158,6 +205,16 @@ test('TOP management audit attribution distinguishes Admin TOP from the main adm
     }),
     { actorType: 'top', adminUserId: 32, managerId: null },
   );
+  for (const role of ['manager', 'support_manager'] as const) {
+    assert.deepEqual(
+      getTopDashboardActor({
+        role,
+        managerId: 33,
+        canManageTopDashboard: true,
+      }),
+      { actorType: 'manager', adminUserId: null, managerId: 33 },
+    );
+  }
 });
 
 test('TOP sessions without a positive user id are rejected before persistence', async () => {
@@ -258,6 +315,49 @@ test('TOP users expose a separate Admin TOP capability without changing their pr
   assert.match(sessionRepositorySource, /au\.can_manage_top_dashboard/);
   assert.match(panelSource, /data\.canManageTopDashboard/);
   assert.match(updateRouteSource, /result\.permissionsChanged/);
+});
+
+test('wholesale managers expose separate TOP viewing and management capabilities', () => {
+  const viewSource = readFileSync(new URL(
+    '../src/features/admin/wholesale/WholesaleManagerManagement.tsx',
+    import.meta.url,
+  ), 'utf8');
+  const repositorySource = readFileSync(new URL(
+    '../src/shared/lib/db/wholesaleAdminRepo/managerRepo.ts',
+    import.meta.url,
+  ), 'utf8');
+  const sessionRepositorySource = readFileSync(new URL(
+    '../src/shared/lib/db/adminSessionsRepo.ts',
+    import.meta.url,
+  ), 'utf8');
+  const schemaSource = readFileSync(new URL(
+    '../src/shared/lib/db/schema.ts',
+    import.meta.url,
+  ), 'utf8');
+  const createRouteSource = readFileSync(new URL(
+    '../src/app/api/admin/wholesale/managers/route.ts',
+    import.meta.url,
+  ), 'utf8');
+  const updateRouteSource = readFileSync(new URL(
+    '../src/app/api/admin/wholesale/managers/[id]/route.ts',
+    import.meta.url,
+  ), 'utf8');
+  const panelSource = readFileSync(new URL(
+    '../src/app/admin/AdminPanel.tsx',
+    import.meta.url,
+  ), 'utf8');
+
+  assert.match(viewSource, /Админ TOP/);
+  assert.match(viewSource, /canManageTopDashboard/);
+  assert.match(repositorySource, /can_manage_top_dashboard/);
+  assert.match(repositorySource, /withTransaction/);
+  assert.match(repositorySource, /if \(input\.revokeSessions\)/);
+  assert.match(sessionRepositorySource, /wm\.can_manage_top_dashboard/);
+  assert.match(schemaSource, /wholesale_managers_top_management_access_check/);
+  assert.match(createRouteSource, /typeof body\.canManageTopDashboard !== 'boolean'/);
+  assert.match(updateRouteSource, /permissionsChanged/);
+  assert.match(updateRouteSource, /shouldRevokeManagerSessionsForUpdate/);
+  assert.match(panelSource, /role === 'top' \|\| isManagerRole\(role\)/);
 });
 
 test('every TOP mutation route uses the management-only server guard', () => {

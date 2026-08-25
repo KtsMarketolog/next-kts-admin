@@ -105,6 +105,7 @@ export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions
         supportManagerId: null,
         password: managerDraft.password.trim(),
         canAccessTopDashboard: managerDraft.canAccessTopDashboard,
+        canManageTopDashboard: managerDraft.canManageTopDashboard,
       }),
     });
     setManagerBusy(false);
@@ -143,6 +144,7 @@ export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions
           password: nextPassword,
           supportManagerId: null,
           canAccessTopDashboard: manager.canAccessTopDashboard,
+          canManageTopDashboard: manager.canManageTopDashboard,
         }),
       });
       setManagerBusy(false);

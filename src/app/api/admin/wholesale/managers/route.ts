@@ -36,7 +36,13 @@ export async function POST(request: Request) {
   if (hasCanAccessTopDashboard && typeof body.canAccessTopDashboard !== 'boolean') {
     return Response.json({ error: 'Доступ TOP должен быть указан как да или нет' }, { status: 400 });
   }
-  const canAccessTopDashboard = hasCanAccessTopDashboard ? body.canAccessTopDashboard : false;
+  const hasCanManageTopDashboard = Object.prototype.hasOwnProperty.call(body, 'canManageTopDashboard');
+  if (hasCanManageTopDashboard && typeof body.canManageTopDashboard !== 'boolean') {
+    return Response.json({ error: 'Админ-доступ TOP должен быть указан как да или нет' }, { status: 400 });
+  }
+  const canManageTopDashboard = hasCanManageTopDashboard ? body.canManageTopDashboard : false;
+  const canAccessTopDashboard = (hasCanAccessTopDashboard ? body.canAccessTopDashboard : false)
+    || canManageTopDashboard;
 
   if (!name || !login || !password) {
     return Response.json({ error: 'Имя, логин и пароль обязательны' }, { status: 400 });
@@ -59,6 +65,7 @@ export async function POST(request: Request) {
       displayPassword: password,
       isActive: Boolean(body.isActive ?? true),
       canAccessTopDashboard,
+      canManageTopDashboard,
     });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось добавить менеджера' }, { status: 400 });
@@ -81,6 +88,7 @@ export async function POST(request: Request) {
       role,
       supportManagerId: normalizedSupportManagerId,
       canAccessTopDashboard,
+      canManageTopDashboard,
     },
   });
 

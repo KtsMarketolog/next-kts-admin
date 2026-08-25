@@ -41,6 +41,27 @@ type WholesaleManagerManagementProps = {
   deleteManager: (id: number) => Promise<void>;
 };
 
+type ManagerTopPermissions = {
+  canAccessTopDashboard: boolean;
+  canManageTopDashboard: boolean;
+};
+
+function updateTopViewing<T extends ManagerTopPermissions>(value: T, enabled: boolean): T {
+  return {
+    ...value,
+    canAccessTopDashboard: enabled,
+    canManageTopDashboard: enabled ? value.canManageTopDashboard : false,
+  };
+}
+
+function updateTopManagement<T extends ManagerTopPermissions>(value: T, enabled: boolean): T {
+  return {
+    ...value,
+    canAccessTopDashboard: enabled ? true : value.canAccessTopDashboard,
+    canManageTopDashboard: enabled,
+  };
+}
+
 export function WholesaleManagerManagement({
   managerRoleTab,
   managerDraft,
@@ -126,9 +147,17 @@ export function WholesaleManagerManagement({
               <input
                 type="checkbox"
                 checked={managerDraft.canAccessTopDashboard}
-                onChange={(event) => setManagerDraft({ ...managerDraft, canAccessTopDashboard: event.target.checked })}
+                onChange={(event) => setManagerDraft((current) => updateTopViewing(current, event.target.checked))}
               />
               Просмотр TOP
+            </label>
+            <label className={styles.userActiveToggle}>
+              <input
+                type="checkbox"
+                checked={managerDraft.canManageTopDashboard}
+                onChange={(event) => setManagerDraft((current) => updateTopManagement(current, event.target.checked))}
+              />
+              Админ TOP
             </label>
           </div>
           <button className={managerCreated ? styles.savedButton : undefined} disabled={busy} onClick={createManager}>
@@ -224,9 +253,17 @@ export function WholesaleManagerManagement({
                     <input
                       type="checkbox"
                       checked={manager.canAccessTopDashboard}
-                      onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, canAccessTopDashboard: event.target.checked } : item))}
+                      onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? updateTopViewing(item, event.target.checked) : item))}
                     />
                     <span>Просмотр TOP</span>
+                  </label>
+                  <label className={styles.managerActive}>
+                    <input
+                      type="checkbox"
+                      checked={manager.canManageTopDashboard}
+                      onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? updateTopManagement(item, event.target.checked) : item))}
+                    />
+                    <span>Админ TOP</span>
                   </label>
                 </div>
                 <div className={styles.managerActions}>
@@ -353,9 +390,17 @@ export function WholesaleManagerManagement({
                         <input
                           type="checkbox"
                           checked={manager.canAccessTopDashboard}
-                          onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, canAccessTopDashboard: event.target.checked } : item))}
+                          onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? updateTopViewing(item, event.target.checked) : item))}
                         />
                         Просмотр TOP
+                      </label>
+                      <label className={styles.userActiveToggle}>
+                        <input
+                          type="checkbox"
+                          checked={manager.canManageTopDashboard}
+                          onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? updateTopManagement(item, event.target.checked) : item))}
+                        />
+                        Админ TOP
                       </label>
                     </div>
                     <div className={styles.userAccessBadges}>

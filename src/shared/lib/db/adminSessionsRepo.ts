@@ -94,6 +94,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     manager_is_active: boolean | null;
     manager_role: string | null;
     manager_can_access_top_dashboard: boolean | null;
+    manager_can_manage_top_dashboard: boolean | null;
     admin_password_changed_at: string | null;
     manager_password_changed_at: string | null;
   }>(
@@ -110,6 +111,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
        wm.is_active as manager_is_active,
        coalesce(nullif(wm.role, ''), 'manager') as manager_role,
        wm.can_access_top_dashboard as manager_can_access_top_dashboard,
+       wm.can_manage_top_dashboard as manager_can_manage_top_dashboard,
        au.password_changed_at::text as admin_password_changed_at,
        wm.password_changed_at::text as manager_password_changed_at
      from admin_sessions s
@@ -167,11 +169,13 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     adminUserId: row.admin_user_id ? Number(row.admin_user_id) : undefined,
     managerId: row.manager_id ? Number(row.manager_id) : undefined,
     canAccessTopDashboard: isStoredManagerRole(role)
-      ? row.manager_can_access_top_dashboard === true
+      ? row.manager_can_access_top_dashboard === true || row.manager_can_manage_top_dashboard === true
       : undefined,
-    canManageTopDashboard: role === 'top'
-      ? row.admin_can_manage_top_dashboard === true
-      : undefined,
+    canManageTopDashboard: isStoredManagerRole(role)
+      ? row.manager_can_manage_top_dashboard === true
+      : role === 'top'
+        ? row.admin_can_manage_top_dashboard === true
+        : undefined,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
   };

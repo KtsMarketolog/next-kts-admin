@@ -48,6 +48,11 @@ export type TopDashboardManagementSession =
       role: 'top';
       adminUserId: number;
       canManageTopDashboard: true;
+    })
+  | (AdminSession & {
+      role: AdminManagerSessionRole;
+      managerId: number;
+      canManageTopDashboard: true;
     });
 
 function hasPersistedAdminUserId(session: AdminSession | null | undefined) {
@@ -59,9 +64,13 @@ export function isTopDashboardManagementSession(
 ): session is TopDashboardManagementSession {
   if (session?.role === 'admin') return true;
   if (session?.role === 'admintop') return hasPersistedAdminUserId(session);
-  return session?.role === 'top'
+  if (session?.role === 'top') {
+    return session.canManageTopDashboard === true && hasPersistedAdminUserId(session);
+  }
+  return isManagerSessionRole(session?.role)
     && session.canManageTopDashboard === true
-    && hasPersistedAdminUserId(session);
+    && Number.isInteger(session.managerId)
+    && Number(session.managerId) > 0;
 }
 
 export function isTopDashboardSession(
@@ -80,12 +89,19 @@ export function isTopDashboardSession(
     return hasPersistedAdminUserId(session);
   }
   return isManagerSessionRole(session?.role)
-    && session.canAccessTopDashboard === true
+    && (session.canAccessTopDashboard === true || session.canManageTopDashboard === true)
     && Number.isInteger(session.managerId)
     && Number(session.managerId) > 0;
 }
 
 export function getTopDashboardActor(session: TopDashboardManagementSession) {
+  if (isManagerSessionRole(session.role)) {
+    return {
+      actorType: 'manager' as const,
+      adminUserId: null,
+      managerId: session.managerId ?? null,
+    };
+  }
   return {
     actorType: session.role === 'admin'
       ? 'admin' as const
