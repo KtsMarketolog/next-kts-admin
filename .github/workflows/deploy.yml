@@ -66,9 +66,12 @@ jobs:
           npm audit --omit=dev --audit-level=high
 
       - name: Build application
+        env:
+          YANDEX_SITE_VERIFICATION: ${{ secrets.YANDEX_SITE_VERIFICATION }}
         run: |
           set -euo pipefail
           npm run build:webpack
+          node scripts/verify-yandex-metadata.mjs
 
       - name: Prepare release artifact
         run: |

@@ -9,14 +9,12 @@ import { ConditionalFooter } from "@/widgets/layout/ConditionalFooter";
 import { BitrixSiteButton } from "@/widgets/layout/BitrixSiteButton";
 import { getBitrixSiteButtonInlineScript } from "@/widgets/layout/bitrixSiteButtonConfig";
 import ScrollToHashWrapper from "@/shared/lib/ScrollToHashWrapper";
+import { createRootMetadata } from "@/shared/lib/seo/rootMetadata";
 import CookieBannerLoader from '@/shared/ui/CookieBanner/CookieBannerLoader';
 
-export const metadata: Metadata = {
-
-  title: "KTS",
-  description: "Компоненты технических систем",
-
-};
+export const metadata: Metadata = createRootMetadata({
+  yandexVerification: process.env.YANDEX_SITE_VERIFICATION,
+});
 
 export const viewport: Viewport = {
 
