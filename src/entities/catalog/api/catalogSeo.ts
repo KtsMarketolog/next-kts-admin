@@ -7,6 +7,15 @@ import { PUBLIC_CATALOG_CACHE_TAG } from './catalogRevalidation';
 
 export const CATALOG_PAGE_SIZE = 36;
 
+export function catalogSubcategoryMetadataTitle(
+  subcategoryTitle: string,
+  categoryTitle: string,
+  page = 1,
+): string {
+  const pageSuffix = page > 1 ? ` — страница ${page}` : '';
+  return `${subcategoryTitle} — ${categoryTitle}${pageSuffix}`;
+}
+
 export type CatalogCategorySeoData = {
   slug: string;
   title: string;

@@ -8,6 +8,7 @@ import {
   CATALOG_PAGE_SIZE,
   catalogPagePath,
   catalogRedirectPath,
+  catalogSubcategoryMetadataTitle,
   getCatalogTotalPages,
   getPublicSubcategorySeoData,
   hasUnsupportedCatalogQuery,
@@ -49,7 +50,11 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   const basePath = `/catalog/${entity.categorySlug}/${entity.subcategorySlug}`;
   const pageSuffix = page > 1 ? ` — страница ${page}` : '';
   return createPageMetadata({
-    title: `${entity.subcategoryTitle}${pageSuffix}`,
+    title: catalogSubcategoryMetadataTitle(
+      entity.subcategoryTitle,
+      entity.categoryTitle,
+      page,
+    ),
     description: `${entity.subcategoryTitle} в категории «${entity.categoryTitle}»: оборудование и комплектующие в каталоге КТС${pageSuffix}.`,
     path: catalogPagePath(basePath, page),
     image: mediaUrl(entity.categoryImage) || undefined,

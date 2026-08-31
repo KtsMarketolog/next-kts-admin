@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   catalogPagePath,
   catalogRedirectPath,
+  catalogSubcategoryMetadataTitle,
   getCatalogTotalPages,
   hasUnsupportedCatalogQuery,
   normalizeCatalogRouteParam,
@@ -45,6 +46,18 @@ test('catalog pagination accepts positive integer pages and builds canonical pag
   assert.equal(
     catalogRedirectPath('/catalog/brands/carel', { page: '2', source: ['a', 'b'] }),
     '/catalog/brands/carel?page=2&source=a&source=b',
+  );
+});
+
+test('subcategory metadata titles stay unique across parent categories', () => {
+  const pressure = catalogSubcategoryMetadataTitle('Аксессуары', 'Сосуды давления');
+  const electronics = catalogSubcategoryMetadataTitle('Аксессуары', 'Электронные компоненты');
+
+  assert.notEqual(pressure, electronics);
+  assert.equal(pressure, 'Аксессуары — Сосуды давления');
+  assert.equal(
+    catalogSubcategoryMetadataTitle('Аксессуары', 'Сосуды давления', 2),
+    'Аксессуары — Сосуды давления — страница 2',
   );
 });
 
