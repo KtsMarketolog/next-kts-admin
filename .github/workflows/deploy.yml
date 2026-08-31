@@ -131,6 +131,8 @@ jobs:
 
             set +e
             echo "Release activation failed; rolling back to the previous release."
+            echo "Failed release logs:"
+            pm2 logs kts-next-admin --lines 120 --nostream || true
             pm2 delete kts-next-admin >/dev/null 2>&1 || true
 
             if [ -n "$ROLLBACK_TARGET" ] && [ -d "$ROLLBACK_TARGET" ]; then

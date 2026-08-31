@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 
+import { ensureCatalogSchema } from "@/entities/catalog/api/catalogDb";
 import { query } from "@/shared/lib/db";
 
 import { canonicalUrl } from "./siteUrl";
@@ -23,6 +24,8 @@ export const EMPTY_CATALOG_SITEMAP_DATA: CatalogSitemapData = {
 };
 
 export async function loadCatalogSitemapData(): Promise<CatalogSitemapData> {
+  await ensureCatalogSchema();
+
   const [categories, subcategories, brands, promo] = await Promise.all([
     query<CategoryRow>(
       `select distinct c.slug, c.image_url
