@@ -1,6 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const PRIVATE_CACHE_PREFIXES = ['/admin', '/cabinet', '/login', '/price'];
+const PRIVATE_API_PREFIXES = ['/api/admin', '/api/client', '/api/price'];
+const X_ROBOTS_TAG_PRIVATE = 'noindex, nofollow, noarchive';
+
+function matchesPathPrefix(pathname: string, prefix: string) {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function isPrivatePagePath(pathname: string) {
+  return PRIVATE_CACHE_PREFIXES.some((prefix) => matchesPathPrefix(pathname, prefix));
+}
+
+function isApiPath(pathname: string) {
+  return matchesPathPrefix(pathname, '/api');
+}
+
+function isPrivateApiPath(pathname: string) {
+  return PRIVATE_API_PREFIXES.some((prefix) => matchesPathPrefix(pathname, prefix));
+}
 
 function isSameOrigin(request: NextRequest) {
   const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
@@ -42,12 +61,13 @@ export function proxy(request: NextRequest) {
 
   const response = NextResponse.next();
   if (
-    request.nextUrl.pathname.startsWith('/admin') ||
-    request.nextUrl.pathname.startsWith('/cabinet') ||
-    request.nextUrl.pathname.startsWith('/api/admin/') ||
-    request.nextUrl.pathname.startsWith('/api/client/')
+    isPrivatePagePath(request.nextUrl.pathname) ||
+    isPrivateApiPath(request.nextUrl.pathname)
   ) {
     response.headers.set('Cache-Control', 'private, no-store');
+  }
+  if (isPrivatePagePath(request.nextUrl.pathname) || isApiPath(request.nextUrl.pathname)) {
+    response.headers.set('X-Robots-Tag', X_ROBOTS_TAG_PRIVATE);
   }
   return response;
 }

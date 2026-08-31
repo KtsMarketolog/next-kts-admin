@@ -1,9 +1,10 @@
 // src/app/page.tsx
+import type { Metadata } from "next";
 import { preload } from "react-dom";
 import { DEFAULT_GROUP_COMPANIES } from "@/entities/site/model/defaultGroupCompanies";
 import { DEFAULT_HERO_SLIDES, type HeroSlide } from "@/entities/site/model/defaultSlides";
 import { DEFAULT_NEWS } from "@/entities/site/model/defaultNews";
-import { HomeDeferredSectionsIsland } from "@/widgets/home/HomeDeferredSectionsIsland";
+import { HomeDeferredSections } from "@/widgets/home/HomeDeferredSections";
 import { MainPromo } from "@/widgets/home/sections/MainPromo/MainPromo";
 import {
   getBrandPortfolio,
@@ -12,6 +13,9 @@ import {
   getNewsItems,
 } from "@/shared/lib/db";
 import { getHeroSlideImagePropsSet } from "@/widgets/home/sections/MainPromo/MainPromo.images";
+import { createHomeMetadata } from "@/shared/lib/seo/rootMetadata";
+
+export const metadata: Metadata = createHomeMetadata();
 
 export const revalidate = 600;
 
@@ -85,7 +89,7 @@ export default async function Home() {
   return (
     <div>
       <MainPromo initialSlides={slides} />
-      <HomeDeferredSectionsIsland
+      <HomeDeferredSections
         groupCompanies={groupCompanies}
         news={news}
         brandCategories={brandPortfolio.categories}

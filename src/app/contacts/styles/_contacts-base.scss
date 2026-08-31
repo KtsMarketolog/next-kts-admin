@@ -25,6 +25,7 @@
     gap: $apx-11;
   }
 
+  h1,
   h2 {
     font-size: $apx-53;
     font-weight: 600;
@@ -111,6 +112,7 @@
   }
 }
 
+
 .fileBadge {
   display: flex;
   justify-content: space-between;
@@ -189,4 +191,3 @@
     box-shadow: 0 0 0 $apx-3 rgba(160, 130, 220, 0.25);
   }
 }
-

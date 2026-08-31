@@ -10,6 +10,7 @@ import { BitrixSiteButton } from "@/widgets/layout/BitrixSiteButton";
 import { getBitrixSiteButtonInlineScript } from "@/widgets/layout/bitrixSiteButtonConfig";
 import ScrollToHashWrapper from "@/shared/lib/ScrollToHashWrapper";
 import { createRootMetadata } from "@/shared/lib/seo/rootMetadata";
+import { createGlobalJsonLd, JsonLd } from "@/shared/lib/seo/jsonLd";
 import CookieBannerLoader from '@/shared/ui/CookieBanner/CookieBannerLoader';
 
 export const metadata: Metadata = createRootMetadata({
@@ -29,6 +30,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
 
     <html lang="ru" data-scroll-behavior="smooth">
+
+      <head>
+
+        <JsonLd data={createGlobalJsonLd()} />
+
+      </head>
 
       <body>
 

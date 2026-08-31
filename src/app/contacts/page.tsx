@@ -223,7 +223,7 @@ export default function ContactsPage() {
 
             <div className={styles.formBlock}>
 
-              <h2>Оставьте заявку</h2>
+              <h1>Оставьте заявку</h1>
 
               <form onSubmit={handleSubmit} suppressHydrationWarning>
 

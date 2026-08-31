@@ -67,6 +67,7 @@ jobs:
 
       - name: Build application
         env:
+          SITE_URL: https://kts-impex.ru
           YANDEX_SITE_VERIFICATION: ${{ secrets.YANDEX_SITE_VERIFICATION }}
         run: |
           set -euo pipefail
@@ -80,12 +81,13 @@ jobs:
           echo "RELEASE_ID=${RELEASE_ID}" >> "$GITHUB_ENV"
 
           rm -rf deploy-artifact
-          mkdir -p deploy-artifact/.next deploy-artifact/public
+          mkdir -p deploy-artifact/.next deploy-artifact/public deploy-artifact/scripts
 
           cp -R .next/standalone/. deploy-artifact/
           cp -R .next/static deploy-artifact/.next/static
           rsync -a --exclude='uploads/' public/ deploy-artifact/public/
           cp ecosystem.config.cjs deploy-artifact/ecosystem.config.cjs
+          cp scripts/verify-production-seo.mjs deploy-artifact/scripts/verify-production-seo.mjs
 
           tar -czf "kts-release-${RELEASE_ID}.tar.gz" -C deploy-artifact .
 
@@ -116,6 +118,36 @@ jobs:
           PREVIOUS="$BASE/previous"
           RELEASE="$RELEASES/$RELEASE_ID"
           ARCHIVE="/tmp/kts-release-$RELEASE_ID.tar.gz"
+          ROLLBACK_TARGET=""
+          ACTIVATION_STARTED=0
+
+          rollback_on_exit() {
+            status=$?
+            trap - EXIT
+
+            if [ "$status" -eq 0 ] || [ "$ACTIVATION_STARTED" != "1" ]; then
+              exit "$status"
+            fi
+
+            set +e
+            echo "Release activation failed; rolling back to the previous release."
+            pm2 delete kts-next-admin >/dev/null 2>&1 || true
+
+            if [ -n "$ROLLBACK_TARGET" ] && [ -d "$ROLLBACK_TARGET" ]; then
+              ln -sfn "$ROLLBACK_TARGET" "$CURRENT"
+              pm2 start "$CURRENT/ecosystem.config.cjs" --update-env
+              sleep 2
+              curl -fsS "http://127.0.0.1:3000/" >/dev/null
+              pm2 save
+              echo "Rollback completed: $ROLLBACK_TARGET"
+            else
+              echo "Rollback target is unavailable; manual recovery is required."
+            fi
+
+            exit "$status"
+          }
+
+          trap rollback_on_exit EXIT
 
           if systemctl is-active --quiet kts-next-admin.service 2>/dev/null; then
             echo "Legacy systemd service kts-next-admin.service is active and occupies port 3000."
@@ -159,10 +191,12 @@ jobs:
           if [ -L "$CURRENT" ] || [ -e "$CURRENT" ]; then
             CURRENT_TARGET="$(readlink -f "$CURRENT" || true)"
             if [ -n "$CURRENT_TARGET" ] && [ -d "$CURRENT_TARGET" ]; then
+              ROLLBACK_TARGET="$CURRENT_TARGET"
               ln -sfn "$CURRENT_TARGET" "$PREVIOUS"
             fi
           fi
 
+          ACTIVATION_STARTED=1
           ln -sfn "$RELEASE" "$CURRENT"
 
           (pm2 delete kts-next-admin >/dev/null 2>&1 || true)
@@ -217,7 +251,12 @@ jobs:
             exit 1
           fi
           curl -fsS "http://127.0.0.1:3000/" >/dev/null
+          SEO_REQUIRE_YANDEX_VERIFICATION=1 SEO_REQUIRE_CATALOG_ENTITIES=1 \
+            node "$CURRENT/scripts/verify-production-seo.mjs" "http://127.0.0.1:3000" "https://kts-impex.ru"
           pm2 save
+
+          ACTIVATION_STARTED=0
+          trap - EXIT
 
           cd "$RELEASES"
           ls -1dt */ | tail -n +3 | xargs -r rm -rf

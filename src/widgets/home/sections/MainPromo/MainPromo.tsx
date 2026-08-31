@@ -33,6 +33,7 @@ const mainPromoCriticalCss = `
 .kts-main-promo__pagination{justify-content:center;gap:min(.832464vw,16px);display:flex}
 .kts-main-promo__dot{background-color:#d9d9d9;border-radius:50%;width:min(.728406vw,14px);height:min(.728406vw,14px);transition:all .3s}
 .kts-main-promo__dot--active{background-color:#333;border-radius:min(2.60145vw,50px);width:min(3.64203vw,70px)}
+.kts-main-promo__seo-title{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @keyframes ktsMainPromoSkeletonSweep{0%{transform:translate3d(-58%,0,0) rotate(4deg)}55%,100%{transform:translate3d(58%,0,0) rotate(4deg)}}
 @keyframes ktsMainPromoSkeletonSparkle{0%,30%{transform:translate3d(-135%,0,0) rotate(15deg)}72%,100%{transform:translate3d(650%,0,0) rotate(15deg)}}
 @media (prefers-reduced-motion:reduce){
@@ -108,7 +109,11 @@ function MainPromoCriticalSlide({ slide }: { slide: CriticalSlide }) {
         srcSet={tabletImage.srcSet ?? tabletImage.src}
         sizes={tabletImage.sizes}
       />
-      <img {...desktopImage} alt="" className="kts-main-promo__img" />
+      <img
+        {...desktopImage}
+        alt={slide.title ? slide.title : "Предложения и решения КТС"}
+        className="kts-main-promo__img"
+      />
     </picture>
   );
 
@@ -151,6 +156,9 @@ export const MainPromo = ({ initialSlides }: MainPromoProps) => {
   return (
     <section className="kts-main-promo" id="top">
       <style dangerouslySetInnerHTML={{ __html: mainPromoCriticalCss }} />
+      <h1 className="kts-main-promo__seo-title">
+        КТС — компоненты для холодильных и климатических систем
+      </h1>
       <div className="kts-main-promo__container">
         <div className="kts-main-promo__track" data-main-promo-track>
           <MainPromoCriticalSlide slide={firstSlide} />

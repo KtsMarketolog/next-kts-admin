@@ -1,7 +1,10 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 
 import { getPublicWholesalePriceList } from '@/shared/lib/db';
 import { phoneHref } from '@/shared/lib/phone';
+import { createPrivateMetadata } from '@/shared/lib/seo/privateMetadata';
 
 import { PriceAnalyticsTracker } from './PriceAnalyticsTracker';
 import { PriceEventLink } from './PriceEventLink';
@@ -14,9 +17,20 @@ type PricePageProps = {
 
 export const dynamic = 'force-dynamic';
 
+const getCachedPublicWholesalePriceList = cache(getPublicWholesalePriceList);
+
+export async function generateMetadata({ params }: PricePageProps): Promise<Metadata> {
+  const { token } = await params;
+  const priceList = await getCachedPublicWholesalePriceList(token);
+
+  if (!priceList) notFound();
+
+  return createPrivateMetadata();
+}
+
 export default async function PricePage({ params }: PricePageProps) {
   const { token } = await params;
-  const priceList = await getPublicWholesalePriceList(token);
+  const priceList = await getCachedPublicWholesalePriceList(token);
 
   if (!priceList) notFound();
 

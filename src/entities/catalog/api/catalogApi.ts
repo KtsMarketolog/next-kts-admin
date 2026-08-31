@@ -1,5 +1,7 @@
 import { query } from '@/shared/lib/db';
+import { unstable_cache } from 'next/cache';
 import { ensureCatalogSchema } from './catalogDb';
+import { PUBLIC_CATALOG_CACHE_TAG } from './catalogRevalidation';
 
 export type Category = {
   slug: string;
@@ -27,6 +29,11 @@ export type Product = {
   stock: number;
   isExpected: boolean;
   stockUpdatedAt: string | null;
+};
+
+export type ProductPage = {
+  items: Product[];
+  total: number;
 };
 
 export type BrandSubLite = { slug: string; title: string; category?: string };
@@ -143,6 +150,73 @@ async function fetchProductsWhere(whereSql: string, params: unknown[]): Promise<
   return result.rows.map(mapProduct);
 }
 
+async function fetchProductsPageWhere(
+  whereSql: string,
+  params: unknown[],
+  page: number,
+  pageSize: number,
+): Promise<ProductPage> {
+  await ensureCatalogSchema();
+
+  const safePage = Math.max(1, Math.trunc(page));
+  const safePageSize = Math.max(1, Math.min(100, Math.trunc(pageSize)));
+  const offset = (safePage - 1) * safePageSize;
+  const limitParameter = params.length + 1;
+  const offsetParameter = params.length + 2;
+
+  const [countResult, productsResult] = await Promise.all([
+    query<{ total: string }>(
+      `select count(*)::text as total
+       from catalog_products p
+       inner join catalog_categories c on c.id = p.category_id and c.is_active = true and c.show_on_site = true
+       left join catalog_brands b on b.id = p.brand_id and b.is_active = true
+       left join catalog_subcategories s on s.id = p.subcategory_id and s.is_active = true
+       where p.is_active = true
+         ${whereSql}`,
+      params,
+    ),
+    query<ProductRow>(
+      `select p.id::text as id,
+              p.slug,
+              p.title,
+              p.article,
+              p.model,
+              p.promo,
+              b.slug as brand_slug,
+              b.title as brand_title,
+              c.title as category_title,
+              s.title as subcategory_title,
+              p.stock,
+              p.is_expected,
+              p.stock_updated_at::text
+       from catalog_products p
+       inner join catalog_categories c on c.id = p.category_id and c.is_active = true and c.show_on_site = true
+       left join catalog_brands b on b.id = p.brand_id and b.is_active = true
+       left join catalog_subcategories s on s.id = p.subcategory_id and s.is_active = true
+       where p.is_active = true
+         ${whereSql}
+       order by p.title asc, p.id asc
+       limit $${limitParameter}
+       offset $${offsetParameter}`,
+      [...params, safePageSize, offset],
+    ),
+  ]);
+
+  return {
+    items: productsResult.rows.map(mapProduct),
+    total: Number(countResult.rows[0]?.total ?? 0),
+  };
+}
+
+const fetchCachedProductsPageWhere = unstable_cache(
+  fetchProductsPageWhere,
+  ['public-catalog-products-page'],
+  {
+    revalidate: 60,
+    tags: [PUBLIC_CATALOG_CACHE_TAG],
+  },
+);
+
 export async function fetchCategories(): Promise<Category[]> {
   await ensureCatalogSchema();
   const result = await query<CategoryRow>(
@@ -247,6 +321,20 @@ export async function fetchProductsByCategorySubcategory(categorySlug: string, s
   return fetchProductsWhere('and lower(c.slug) = lower($1) and lower(s.slug) = lower($2)', [categorySlug, subSlug]);
 }
 
+export async function fetchProductsByCategorySubcategoryPage(
+  categorySlug: string,
+  subSlug: string,
+  page: number,
+  pageSize: number,
+): Promise<ProductPage> {
+  return fetchCachedProductsPageWhere(
+    'and lower(c.slug) = lower($1) and lower(s.slug) = lower($2)',
+    [categorySlug, subSlug],
+    page,
+    pageSize,
+  );
+}
+
 export async function fetchProductsBySubcategoryBrand(
   subSlug: string,
   brandSlug: string,
@@ -268,12 +356,44 @@ export async function fetchProductsByCategorySubcategoryBrand(
   );
 }
 
+export async function fetchProductsByCategorySubcategoryBrandPage(
+  categorySlug: string,
+  subSlug: string,
+  brandSlug: string,
+  page: number,
+  pageSize: number,
+): Promise<ProductPage> {
+  return fetchCachedProductsPageWhere(
+    'and lower(c.slug) = lower($1) and lower(s.slug) = lower($2) and lower(b.slug) = lower($3)',
+    [categorySlug, subSlug, brandSlug],
+    page,
+    pageSize,
+  );
+}
+
 export async function fetchProductsByBrand(brandSlug: string): Promise<Product[]> {
   return fetchProductsWhere('and lower(b.slug) = lower($1)', [brandSlug]);
 }
 
+export async function fetchProductsByBrandPage(
+  brandSlug: string,
+  page: number,
+  pageSize: number,
+): Promise<ProductPage> {
+  return fetchCachedProductsPageWhere(
+    'and lower(b.slug) = lower($1)',
+    [brandSlug],
+    page,
+    pageSize,
+  );
+}
+
 export async function fetchPromoProducts(): Promise<Product[]> {
   return fetchProductsWhere('and p.promo = true', []);
+}
+
+export async function fetchPromoProductsPage(page: number, pageSize: number): Promise<ProductPage> {
+  return fetchCachedProductsPageWhere('and p.promo = true', [], page, pageSize);
 }
 
 export async function fetchBrandSubcategories(brandSlug: string): Promise<BrandSubLite[]> {

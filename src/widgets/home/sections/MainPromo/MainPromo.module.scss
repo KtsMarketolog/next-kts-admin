@@ -83,7 +83,7 @@
   gap: $apx-14;
 }
 
-.contentCardBase h1 {
+.contentCardBase h2 {
   font-size: $apx-72;
   font-weight: 700;
   line-height: 1.1;
@@ -282,7 +282,7 @@
     gap: $apx-l-18;
   }
 
-  .contentCardBase h1 {
+  .contentCardBase h2 {
     font-size: $apx-l-50;
   }
 
@@ -386,7 +386,7 @@
     gap: $apx-m-16;
   }
 
-  .contentCardBase h1 {
+  .contentCardBase h2 {
     font-size: $apx-m-24;
     color: #fff;
   }
@@ -459,7 +459,7 @@
       text-align: center;
     }
 
-    .contentCardBase h1 {
+    .contentCardBase h2 {
       font-size: $apx-m-24;
       margin-bottom: $apx-m-21;
       color: #fff;

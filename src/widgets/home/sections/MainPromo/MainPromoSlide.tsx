@@ -71,7 +71,9 @@ export function MainPromoSlide({
           />
           <img
             {...desktopImage}
-            alt=""
+            alt={typeof slide.title === "string" && slide.title.trim()
+              ? slide.title
+              : "Предложения и решения КТС"}
             className={styles.bgImage}
           />
         </picture>
@@ -79,7 +81,7 @@ export function MainPromoSlide({
         <div className={styles.contentCardBase}>
           {(slide.title || slide.subtitle) && (
             <div className={styles.textWrap}>
-              <h1>{slide.title}</h1>
+              <h2>{slide.title}</h2>
               <span className={styles.subTitle}>{slide.subtitle}</span>
             </div>
           )}

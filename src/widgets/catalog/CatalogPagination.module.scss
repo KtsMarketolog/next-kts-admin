@@ -1,0 +1,60 @@
+@use "@/shared/styles/adaptive-px.scss" as *;
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $apx-16;
+  margin: $apx-24 0;
+}
+
+.link,
+.status {
+  padding: $apx-10 $apx-14;
+  border-radius: $apx-8;
+  font-size: $apx-14;
+  font-weight: 700;
+}
+
+.link {
+  border: $apx-1 solid #deddf3;
+  background: #f1f3f6;
+  color: #2b285f;
+  text-decoration: none;
+}
+
+.disabled {
+  opacity: .45;
+}
+
+.status {
+  color: #5a5c7a;
+}
+
+@media (max-width: 1024px) {
+  .pagination {
+    gap: $apx-l-12;
+    margin: $apx-l-20 0;
+  }
+
+  .link,
+  .status {
+    padding: $apx-l-10 $apx-l-12;
+    border-radius: $apx-l-8;
+    font-size: $apx-l-14;
+  }
+}
+
+@media (max-width: 450px) {
+  .pagination {
+    gap: $apx-m-8;
+    margin: $apx-m-18 0;
+  }
+
+  .link,
+  .status {
+    padding: $apx-m-8 $apx-m-10;
+    border-radius: $apx-m-8;
+    font-size: $apx-m-12;
+  }
+}

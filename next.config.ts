@@ -23,6 +23,9 @@ const nextConfig: NextConfig = {
     const bitrixWidgetOrigin = "https://crm.kts-impex.ru";
     const bitrixWidgetSocketOrigin = "wss://crm.kts-impex.ru";
     const yandexMapOrigin = "https://yandex.ru";
+    const nonIndexableFileHeaders = [
+      { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+    ];
     const scriptSrc = `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${bitrixWidgetOrigin}`;
     const securityHeaders = [
       { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
@@ -60,6 +63,14 @@ const nextConfig: NextConfig = {
       {
         source: "/:all*(js|css|png|jpg|jpeg|gif|svg|webp|avif|woff2|ico)",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+      {
+        source: "/data/:path*",
+        headers: nonIndexableFileHeaders,
+      },
+      {
+        source: "/klimatika/prog/firmware/update/:path*",
+        headers: nonIndexableFileHeaders,
       },
     ];
   },

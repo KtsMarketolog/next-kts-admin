@@ -14,11 +14,11 @@ export const AboutHero = () => {
 
         <section className = { styles.aboutHero }>
 
-          <h2 className = { styles.title }>
+          <h1 className = { styles.title }>
 
             15 лет делаем<br />рынок холода сильнее
 
-          </h2>
+          </h1>
 
           <p className = { styles.desc }>
 
