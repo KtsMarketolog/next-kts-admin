@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createRequire } from "node:module";
 import test from "node:test";
 
 import { NextRequest } from "next/server";
 
-import { proxy } from "../src/proxy";
+import { config, proxy } from "../src/proxy";
 import { createPrivateMetadata } from "../src/shared/lib/seo/privateMetadata";
+
+const requireForNextTesting = createRequire(import.meta.url);
 
 test("private page metadata prevents indexing, following, and caching", () => {
   const metadata = createPrivateMetadata();
@@ -62,4 +66,36 @@ test("proxy prevents private pages from being stored", () => {
     const response = proxy(new NextRequest(`https://kts-impex.ru${pathname}`));
     assert.equal(response.headers.get("cache-control"), "private, no-store", pathname);
   }
+});
+
+test("large TOP data upload bypasses proxy buffering without bypassing adjacent routes", () => {
+  const runtimeGlobal = globalThis as typeof globalThis & {
+    AsyncLocalStorage?: typeof AsyncLocalStorage;
+  };
+  runtimeGlobal.AsyncLocalStorage ??= AsyncLocalStorage;
+  const { unstable_doesMiddlewareMatch } = requireForNextTesting(
+    "next/experimental/testing/server",
+  ) as {
+    unstable_doesMiddlewareMatch: (input: {
+      config: typeof config;
+      nextConfig: Record<string, never>;
+      url: string;
+      headers?: Record<string, string>;
+    }) => boolean;
+  };
+  const matches = (url: string, headers?: Record<string, string>) =>
+    unstable_doesMiddlewareMatch({ config, nextConfig: {}, url, headers });
+
+  assert.equal(matches("/api/admin/top-dashboard/blocks/7/data"), true);
+  assert.equal(
+    matches("/api/admin/top-dashboard/blocks/7/data", { "x-kts-top-data-upload": "1" }),
+    false,
+  );
+  assert.equal(
+    matches("/api/admin/top-dashboard/blocks/7/data/active", {
+      "x-kts-top-data-upload": "1",
+    }),
+    true,
+  );
+  assert.equal(matches("/api/admin/top-dashboard/blocks/7/versions"), true);
 });

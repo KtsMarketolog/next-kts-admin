@@ -4,6 +4,7 @@ import type {
   TopDashboardProfile,
   TopDashboardSnapshotFormat,
 } from './db/topDashboardDomain';
+import { TOP_DASHBOARD_DATA_MAX_BYTES } from './topDashboardLimits';
 
 const INLINE_SCRIPT_PATTERN = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi;
 const INLINE_EVENT_HANDLER_PATTERN = /\son[a-z][\w:-]*\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
@@ -11,7 +12,7 @@ const HEAD_OPEN_PATTERN = /<head\b[^>]*>/i;
 const DOCTYPE_PATTERN = /<!doctype\b[^>]*>/i;
 
 export const TOP_DASHBOARD_DATA_MESSAGE_MARKER = 'kts-top-dashboard-data-v1';
-export const TOP_DASHBOARD_DATA_MAX_BYTES = 16 * 1024 * 1024;
+export { TOP_DASHBOARD_DATA_MAX_BYTES } from './topDashboardLimits';
 export const TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE = 'data-kts-top-dashboard-data-adapter';
 
 export function detectTopDashboardExpectedProfile(

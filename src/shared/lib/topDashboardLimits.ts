@@ -1,0 +1,12 @@
+export const TOP_DASHBOARD_DATA_MAX_MEGABYTES = 100;
+export const TOP_DASHBOARD_DATA_MAX_BYTES = TOP_DASHBOARD_DATA_MAX_MEGABYTES * 1024 * 1024;
+
+export const TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES = 256;
+export const TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES =
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES * 1024 * 1024;
+
+// Keep enough room for the active version, the rollback version and one additional
+// historical snapshot even when every file reaches the upload limit.
+export const TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES = TOP_DASHBOARD_DATA_MAX_BYTES * 3;
+
+export const TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES = 512 * 1024;

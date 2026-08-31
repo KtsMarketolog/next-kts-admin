@@ -5,6 +5,11 @@ import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import {
+  TOP_DASHBOARD_DATA_MAX_BYTES,
+  TOP_DASHBOARD_DATA_MAX_MEGABYTES,
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
+} from '@/shared/lib/topDashboardLimits';
 
 type TopDashboardVersionStatus = 'active' | 'draft' | 'archived';
 
@@ -61,7 +66,6 @@ type AdminTopDashboardSectionProps = {
 };
 
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
-const MAX_DATA_BYTES = 16 * 1024 * 1024;
 
 type WebkitFullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
@@ -325,9 +329,11 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       showStatusRef.current('Выберите файл с расширением .json или .json.gz');
       return;
     }
-    if (file.size <= 0 || file.size > MAX_DATA_BYTES) {
+    if (file.size <= 0 || file.size > TOP_DASHBOARD_DATA_MAX_BYTES) {
       setSelectedDataFile(null);
-      showStatusRef.current('Файл данных должен быть непустым и не больше 16 МБ');
+      showStatusRef.current(
+        `Файл данных должен быть непустым и не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+      );
       return;
     }
     setSelectedDataFile(file);
@@ -387,6 +393,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       );
       const response = await fetch(`${apiBasePath}/data`, {
         method: 'PUT',
+        headers: { 'X-KTS-TOP-Data-Upload': '1' },
         body,
         credentials: 'same-origin',
       });
@@ -792,7 +799,11 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         <div className={`${styles.topDashboardUploadCard} ${styles.topDashboardDataUploadCard}`}>
           <div>
             <h3>{activeDataVersion ? 'Обновить данные' : 'Загрузить данные'}</h3>
-            <p>Поддерживаются снимки .json и .json.gz размером до 16 МБ. HTML-страницу повторно загружать не нужно.</p>
+            <p>
+              Поддерживаются снимки .json и .json.gz размером до{' '}
+              {TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ. Для .json.gz размер после распаковки — до{' '}
+              {TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES} МБ. HTML-страницу повторно загружать не нужно.
+            </p>
           </div>
           <div className={styles.topDashboardUploadControls}>
             <label className={styles.topDashboardFilePicker}>

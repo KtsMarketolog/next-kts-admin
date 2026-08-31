@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 
+import { TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 import {
@@ -103,7 +104,6 @@ export type DeleteTopDashboardBlockVersionResult = DeleteTopDashboardVersionResu
 const TOP_DASHBOARD_VERSION_LIMIT = 50;
 const TOP_DASHBOARD_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 const TOP_DASHBOARD_DATA_VERSION_LIMIT = 10;
-const TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 const TOP_DASHBOARD_BLOCK_TITLE_MAX_LENGTH = 120;
 
 type Queryable = Pick<PoolClient, 'query'>;

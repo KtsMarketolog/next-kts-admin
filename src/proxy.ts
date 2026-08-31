@@ -73,5 +73,11 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)'],
+  matcher: [
+    {
+      source: '/api/admin/top-dashboard/blocks/:blockId/data',
+      missing: [{ type: 'header', key: 'x-kts-top-data-upload', value: '1' }],
+    },
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$).*)',
+  ],
 };

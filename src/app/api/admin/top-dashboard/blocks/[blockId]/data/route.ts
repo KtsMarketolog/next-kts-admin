@@ -25,6 +25,7 @@ import {
   detectTopDashboardExpectedSnapshotFormat,
   getTopDashboardBlockDataFrameVersionId,
 } from '@/shared/lib/topDashboardContentSecurity';
+import { acquireTopDashboardDataUploadSlot } from '@/shared/lib/topDashboardUploadConcurrency';
 
 import { readTopDashboardDataUpload } from '../../dataUpload';
 import { parsePositiveId } from '../../routeUtils';
@@ -116,6 +117,21 @@ export async function PUT(request: Request, context: Context) {
   const { blockId: rawBlockId } = await context.params;
   const blockId = parsePositiveId(rawBlockId);
   if (!blockId) return Response.json({ error: 'Некорректный блок' }, { status: 400 });
+
+  const releaseUploadSlot = acquireTopDashboardDataUploadSlot();
+  if (!releaseUploadSlot) {
+    return Response.json(
+      { error: 'Уже выполняется другая загрузка данных. Дождитесь её завершения и повторите.' },
+      {
+        status: 409,
+        headers: {
+          'Cache-Control': 'private, no-store',
+          'Retry-After': '5',
+          'X-Robots-Tag': 'noindex, nofollow, noarchive',
+        },
+      },
+    );
+  }
 
   try {
     const parsed = await readTopDashboardDataUpload(request);
@@ -239,5 +255,7 @@ export async function PUT(request: Request, context: Context) {
     }
     console.error('Failed to upload TOP dashboard data', error);
     return Response.json({ error: 'Не удалось сохранить данные дашборда' }, { status: 500 });
+  } finally {
+    releaseUploadSlot();
   }
 }

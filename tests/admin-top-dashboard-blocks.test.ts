@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 
-import { readTopDashboardDataUpload } from '../src/app/api/admin/top-dashboard/blocks/dataUpload';
+import {
+  inspectGzipJsonWithLimit,
+  readTopDashboardDataUpload,
+} from '../src/app/api/admin/top-dashboard/blocks/dataUpload';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
 import type {
   ActivateTopDashboardBlockVersionInput,
@@ -21,6 +24,15 @@ import {
   type CreateAndActivateTopDashboardBlockDataVersionInput,
 } from '../src/shared/lib/db/topDashboardDomain';
 import { isTopDashboardBlockFrameRequest } from '../src/shared/lib/topDashboardContentSecurity';
+import {
+  TOP_DASHBOARD_DATA_MAX_BYTES,
+  TOP_DASHBOARD_DATA_MAX_MEGABYTES,
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES,
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
+  TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES,
+} from '../src/shared/lib/topDashboardLimits';
+import { acquireTopDashboardDataUploadSlot } from '../src/shared/lib/topDashboardUploadConcurrency';
 
 test('TOP dashboard block titles are normalized and strictly bounded', () => {
   assert.equal(normalizeTopDashboardBlockTitle('  Отчет   по продажам  '), 'Отчет по продажам');
@@ -192,6 +204,61 @@ function dataUploadRequest(file: File, expectedActiveVersionId = '') {
   });
 }
 
+test('TOP dashboard data limits allow 100 MiB while bounding unpacked data and history', () => {
+  assert.equal(TOP_DASHBOARD_DATA_MAX_MEGABYTES, 100);
+  assert.equal(TOP_DASHBOARD_DATA_MAX_BYTES, 100 * 1024 * 1024);
+  assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES, 256);
+  assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES, 256 * 1024 * 1024);
+  assert.ok(TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES >= TOP_DASHBOARD_DATA_MAX_BYTES * 3);
+});
+
+test('TOP dashboard rejects oversized multipart requests before parsing the body', async () => {
+  const request = new Request('https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data', {
+    method: 'PUT',
+    headers: {
+      'content-length': String(
+        TOP_DASHBOARD_DATA_MAX_BYTES + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES + 1
+      ),
+    },
+  });
+  const result = await readTopDashboardDataUpload(request);
+
+  assert.equal(result.error?.status, 413);
+  assert.match(await result.error!.text(), /не больше 100 МБ/i);
+});
+
+test('TOP dashboard gzip inspection enforces its real unpacked-byte limit', async () => {
+  const source = Buffer.from(JSON.stringify({
+    format: 'kts-bundle',
+    version: 1,
+    n: 1,
+    dict: {},
+    cols: {},
+    extra: {},
+    padding: 'x'.repeat(4096),
+  }));
+  const compressed = gzipSync(source);
+
+  await assert.rejects(
+    inspectGzipJsonWithLimit(compressed, source.length - 1),
+    /UNCOMPRESSED_TOO_LARGE/,
+  );
+  const inspection = await inspectGzipJsonWithLimit(compressed, source.length);
+  assert.equal(inspection.size, source.length);
+});
+
+test('TOP dashboard permits only one large data upload per server process', () => {
+  const release = acquireTopDashboardDataUploadSlot();
+  assert.ok(release);
+  assert.equal(acquireTopDashboardDataUploadSlot(), null);
+
+  release();
+  release();
+  const releaseNext = acquireTopDashboardDataUploadSlot();
+  assert.ok(releaseNext);
+  releaseNext();
+});
+
 test('TOP dashboard accepts and identifies a bounded gzip KTS snapshot', async () => {
   const source = Buffer.from(JSON.stringify({
     format: 'kts-bundle',
@@ -250,6 +317,14 @@ test('TOP dashboard rejects disguised gzip and unrelated JSON data', async () =>
   ));
   assert.equal(unrelated.error?.status, 400);
   assert.match(await unrelated.error!.text(), /поддерживаемый снимок данных КТС/i);
+
+  const corrupted = await readTopDashboardDataUpload(dataUploadRequest(
+    new File([Buffer.from([0x1f, 0x8b, 0x08])], 'corrupted.json.gz', {
+      type: 'application/gzip',
+    }),
+  ));
+  assert.equal(corrupted.error?.status, 400);
+  assert.match(await corrupted.error!.text(), /повреждён/i);
 });
 
 test('TOP dashboard streaming parser rejects invalid JSON grammar', async () => {

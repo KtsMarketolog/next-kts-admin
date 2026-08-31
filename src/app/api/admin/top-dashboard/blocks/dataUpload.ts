@@ -8,12 +8,20 @@ import {
   type ParsedTokenInfo,
 } from '@streamparser/json';
 
+import {
+  TOP_DASHBOARD_DATA_MAX_BYTES,
+  TOP_DASHBOARD_DATA_MAX_MEGABYTES,
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES,
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
+} from '@/shared/lib/topDashboardLimits';
+
 import { parsePositiveId } from './routeUtils';
 
-export const MAX_TOP_DASHBOARD_DATA_BYTES = 16 * 1024 * 1024;
-export const MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES = 128 * 1024 * 1024;
+export const MAX_TOP_DASHBOARD_DATA_BYTES = TOP_DASHBOARD_DATA_MAX_BYTES;
+export const MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES =
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES;
 
-const MAX_MULTIPART_OVERHEAD_BYTES = 512 * 1024;
 const MAX_KTS_BUNDLE_ROWS = 500_000;
 
 const INVALID_UTF8 = 'INVALID_UTF8';
@@ -64,7 +72,7 @@ function contentLengthTooLarge(request: Request) {
   if (!value) return false;
   const length = Number(value);
   return Number.isFinite(length)
-    && length > MAX_TOP_DASHBOARD_DATA_BYTES + MAX_MULTIPART_OVERHEAD_BYTES;
+    && length > MAX_TOP_DASHBOARD_DATA_BYTES + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES;
 }
 
 function parseExpectedActiveVersionId(
@@ -339,7 +347,10 @@ function inspectJsonBuffer(bytes: Buffer) {
   return finishJsonInspection(inspector);
 }
 
-async function inspectGzipJsonWithLimit(bytes: Buffer) {
+export async function inspectGzipJsonWithLimit(
+  bytes: Buffer,
+  maxUncompressedBytes = MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES,
+) {
   return new Promise<JsonInspection>((resolve, reject) => {
     const gunzip = createGunzip();
     const inspector = createJsonStreamInspector();
@@ -353,6 +364,9 @@ async function inspectGzipJsonWithLimit(bytes: Buffer) {
 
     gunzip.on('data', (chunk: Buffer) => {
       try {
+        if (inspector.size + chunk.length > maxUncompressedBytes) {
+          throw new Error(UNCOMPRESSED_TOO_LARGE);
+        }
         writeJsonInspectionChunk(inspector, chunk);
       } catch (error) {
         gunzip.destroy(error instanceof Error ? error : new Error('Invalid JSON'));
@@ -436,7 +450,12 @@ function detectDashboardProfile(
 
 export async function readTopDashboardDataUpload(request: Request): Promise<UploadResult> {
   if (contentLengthTooLarge(request)) {
-    return { error: errorResponse('Файл данных должен быть не больше 16 МБ', 413) };
+    return {
+      error: errorResponse(
+        `Файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+        413,
+      ),
+    };
   }
 
   let formData: FormData;
@@ -453,7 +472,12 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
   if (!(file instanceof File)) return { error: errorResponse('Выберите файл данных') };
   if (file.size <= 0) return { error: errorResponse('Файл данных пустой') };
   if (file.size > MAX_TOP_DASHBOARD_DATA_BYTES) {
-    return { error: errorResponse('Файл данных должен быть не больше 16 МБ', 413) };
+    return {
+      error: errorResponse(
+        `Файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+        413,
+      ),
+    };
   }
   if (!/\.json(?:\.gz)?$/i.test(file.name)) {
     return { error: errorResponse('Загрузите файл с расширением .json или .json.gz') };
@@ -462,7 +486,12 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
   const bytes = Buffer.from(await file.arrayBuffer());
   if (bytes.length <= 0) return { error: errorResponse('Файл данных пустой') };
   if (bytes.length > MAX_TOP_DASHBOARD_DATA_BYTES) {
-    return { error: errorResponse('Файл данных должен быть не больше 16 МБ', 413) };
+    return {
+      error: errorResponse(
+        `Файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+        413,
+      ),
+    };
   }
 
   const isGzip = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
@@ -484,7 +513,10 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
     } catch (error) {
       if (error instanceof Error && error.message === UNCOMPRESSED_TOO_LARGE) {
         return {
-          error: errorResponse('Распакованный файл данных должен быть не больше 128 МБ', 413),
+          error: errorResponse(
+            `Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES} МБ`,
+            413,
+          ),
         };
       }
       if (error instanceof Error && error.message === INVALID_UTF8) {
