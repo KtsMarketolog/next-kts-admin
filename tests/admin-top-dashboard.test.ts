@@ -38,6 +38,13 @@ import {
   isTopDashboardBlockFrameRequest,
   TOP_DASHBOARD_DATA_MAX_BYTES,
 } from '../src/shared/lib/topDashboardContentSecurity';
+import {
+  TOP_DASHBOARD_DOWNLOAD_MAX_BYTES,
+  TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER,
+  getTopDashboardDownloadMimeType,
+  normalizeTopDashboardDownloadName,
+  readTopDashboardDownloadMessage,
+} from '../src/shared/lib/topDashboardDownloadBridge';
 
 function cspHash(source: string) {
   return `'sha256-${createHash('sha256').update(source, 'utf8').digest('base64')}'`;
@@ -438,7 +445,8 @@ test('dashboard CSP permits only exact uploaded scripts and handlers', () => {
 
   assert.match(csp, /default-src 'none'/);
   assert.match(csp, /connect-src 'none'/);
-  assert.match(csp, /sandbox allow-scripts allow-popups allow-downloads/);
+  assert.match(csp, /sandbox allow-scripts allow-popups/);
+  assert.doesNotMatch(csp, /allow-downloads/);
   assert.doesNotMatch(csp, /allow-popups-to-escape-sandbox/);
   assert.match(csp, /'unsafe-hashes'/);
   assert.ok(csp.includes(cspHash(script)));
@@ -459,7 +467,8 @@ test('dashboard data adapter is injected before application scripts and receives
 
   const csp = buildTopDashboardContentSecurityPolicy(transformed);
   assert.match(csp, /connect-src 'none'/);
-  assert.match(csp, /sandbox allow-scripts allow-popups allow-downloads/);
+  assert.match(csp, /sandbox allow-scripts allow-popups/);
+  assert.doesNotMatch(csp, /allow-downloads/);
   assert.doesNotMatch(csp, /allow-popups-to-escape-sandbox/);
   assert.ok(csp.includes(cspHash(adapterScript)));
   assert.doesNotMatch(csp, /allow-same-origin/);
@@ -552,7 +561,118 @@ test('dashboard adapter turns a legacy writable noopener popup into one Blob nav
   assert.deepEqual(revokedUrls, ['blob:null/office-screen']);
 });
 
-test('dashboard frames permit sandboxed downloads and popups and explicitly delegate fullscreen', () => {
+test('dashboard download protocol accepts only safe supported files', () => {
+  const blob = new Blob(['workbook']);
+  const message = {
+    marker: TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER,
+    type: 'download-request',
+    name: 'Поставки 2026-09-01.xlsx',
+    blob,
+  };
+
+  assert.equal(normalizeTopDashboardDownloadName(message.name), message.name);
+  assert.equal(normalizeTopDashboardDownloadName('данные.csv'), 'данные.csv');
+  assert.equal(normalizeTopDashboardDownloadName('снимок.json.gz'), 'снимок.json.gz');
+  assert.equal(normalizeTopDashboardDownloadName('отчёт.html'), 'отчёт.html');
+  assert.equal(normalizeTopDashboardDownloadName('../отчёт.xlsx'), null);
+  assert.equal(normalizeTopDashboardDownloadName('папка/отчёт.xlsx'), null);
+  assert.equal(normalizeTopDashboardDownloadName('папка\\отчёт.xlsx'), null);
+  assert.equal(normalizeTopDashboardDownloadName('отчёт\u202exlsx.csv'), null);
+  assert.equal(normalizeTopDashboardDownloadName('вирус.exe'), null);
+  assert.deepEqual(readTopDashboardDownloadMessage(message), message);
+  assert.equal(readTopDashboardDownloadMessage({ ...message, marker: 'spoofed' }), null);
+  assert.equal(readTopDashboardDownloadMessage({ ...message, blob: new Blob([]) }), null);
+  assert.equal(readTopDashboardDownloadMessage({ ...message, name: 'вирус.exe' }), null);
+  assert.equal(TOP_DASHBOARD_DOWNLOAD_MAX_BYTES, 100 * 1024 * 1024);
+  assert.equal(
+    getTopDashboardDownloadMimeType(message.name),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  );
+  assert.equal(getTopDashboardDownloadMimeType('данные.csv'), 'text/csv;charset=utf-8');
+});
+
+test('dashboard adapter relays detached Blob-anchor downloads instead of navigating the sandbox', () => {
+  const adapter = getTopDashboardDataAdapterScript();
+  const postedMessages: unknown[] = [];
+  const revokedUrls: string[] = [];
+  const nativeClicks: FakeAnchor[] = [];
+  const listeners = new Map<string, EventListener>();
+
+  class FakeAnchor {
+    href = '';
+    download = '';
+
+    click() {
+      nativeClicks.push(this);
+    }
+  }
+
+  const fakeWindow = {
+    open: () => null,
+    HTMLAnchorElement: FakeAnchor,
+    parent: { postMessage: (message: unknown) => postedMessages.push(message) },
+    addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
+  } as unknown as Window;
+  const fakeDocument = { readyState: 'complete' } as unknown as Document;
+  let urlSequence = 0;
+  const fakeUrl = {
+    createObjectURL: (blob: Blob) => {
+      assert.ok(blob instanceof Blob);
+      return `blob:null/export-${++urlSequence}`;
+    },
+    revokeObjectURL: (url: string) => revokedUrls.push(url),
+  };
+  const execute = new Function('window', 'document', 'URL', 'Blob', adapter);
+
+  execute(fakeWindow, fakeDocument, fakeUrl, Blob);
+  postedMessages.length = 0;
+
+  const excelBlob = new Blob(['xlsx']);
+  const excelUrl = fakeUrl.createObjectURL(excelBlob);
+  const excelAnchor = new FakeAnchor();
+  excelAnchor.href = excelUrl;
+  excelAnchor.download = 'Поставки.xlsx';
+  excelAnchor.click();
+
+  assert.equal(nativeClicks.length, 0);
+  assert.equal(postedMessages.length, 1);
+  assert.deepEqual(postedMessages[0], {
+    marker: TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER,
+    type: 'download-request',
+    name: 'Поставки.xlsx',
+    blob: excelBlob,
+  });
+
+  const csvBlob = new Blob(['a,b']);
+  const csvUrl = fakeUrl.createObjectURL(csvBlob);
+  const csvAnchor = new FakeAnchor();
+  csvAnchor.href = csvUrl;
+  csvAnchor.download = 'Поставки.csv';
+  csvAnchor.click();
+  assert.equal(postedMessages.length, 2);
+
+  const invalidUrl = fakeUrl.createObjectURL(new Blob(['bad']));
+  const invalidAnchor = new FakeAnchor();
+  invalidAnchor.href = invalidUrl;
+  invalidAnchor.download = '../bad.exe';
+  invalidAnchor.click();
+  assert.equal(nativeClicks.length, 0);
+  assert.deepEqual(postedMessages[2], {
+    marker: 'kts-top-dashboard-data-v1',
+    type: 'adapter-error',
+    code: 'DOWNLOAD_INVALID',
+  });
+
+  const regularAnchor = new FakeAnchor();
+  regularAnchor.href = 'https://kts-impex.ru/catalog';
+  regularAnchor.click();
+  assert.deepEqual(nativeClicks, [regularAnchor]);
+
+  assert.deepEqual(revokedUrls, [excelUrl, csvUrl, invalidUrl]);
+  listeners.get('pagehide')?.(new Event('pagehide'));
+});
+
+test('dashboard frames keep downloads inside the trusted bridge and explicitly delegate fullscreen', () => {
   const sources = [
     readFileSync(new URL(
       '../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx',
@@ -572,9 +692,9 @@ test('dashboard frames permit sandboxed downloads and popups and explicitly dele
     ), 'utf8'),
   ];
 
-  assert.match(sources[0], /sandbox="allow-scripts allow-same-origin allow-popups allow-downloads"/);
-  assert.match(sources[1], /sandbox="allow-scripts allow-same-origin allow-popups allow-downloads"/);
-  assert.match(sources[2], /sandbox="allow-scripts allow-popups allow-downloads"/);
+  assert.match(sources[0], /sandbox="allow-scripts allow-same-origin allow-popups"/);
+  assert.match(sources[1], /sandbox="allow-scripts allow-same-origin allow-popups"/);
+  assert.match(sources[2], /sandbox="allow-scripts allow-popups"/);
   assert.match(sources[0], /fullscreen \*"/);
   assert.match(sources[1], /fullscreen \*"/);
   assert.match(sources[2], /fullscreen \*"/);
@@ -584,6 +704,7 @@ test('dashboard frames permit sandboxed downloads and popups and explicitly dele
   assert.match(sources[2], /fullscreen=\*/);
   assert.match(sources[3], /fullscreen=\*/);
   sources.forEach((source) => {
+    assert.doesNotMatch(source, /allow-downloads/);
     assert.doesNotMatch(source, /allow-popups-to-escape-sandbox/);
     assert.doesNotMatch(source, /fullscreen 'none'/);
   });
@@ -624,6 +745,13 @@ test('trusted dashboard frame bridge is read-only and has one exact script hash'
   assert.doesNotMatch(scriptDirective, /'unsafe-inline'/);
   assert.doesNotMatch(scriptDirective, /'unsafe-eval'/);
   assert.match(bridge, /event\.source !== iframe\.contentWindow/);
+  assert.match(bridge, /event\.origin !== 'null'/);
+  assert.match(bridge, /navigator\.userActivation\.isActive/);
+  assert.ok(bridge.includes(`DOWNLOAD_MARKER = '${TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER}'`));
+  assert.match(bridge, /window\.parent\.postMessage/);
+  assert.match(bridge, /window\.location\.origin/);
+  assert.match(bridge, /validDownloadBlob\(data\.blob\)/);
+  assert.match(bridge, /normalizeDownloadName\(data\.name\)/);
   assert.match(bridge, /value instanceof ArrayBuffer/);
   assert.match(bridge, /X-Top-Dashboard-Data-Version-Id/);
   assert.match(bridge, /X-Top-Dashboard-Data-Original-Name/);
@@ -635,6 +763,38 @@ test('trusted dashboard frame bridge is read-only and has one exact script hash'
   assert.doesNotMatch(bridge, /snapshot-selected/);
   assert.doesNotMatch(bridge, /method: 'PUT'/);
   assert.ok(bridge.includes('/api/admin/top-dashboard/blocks/7/data'));
+});
+
+test('top-level dashboard download hook accepts messages only from its exact frame', () => {
+  const hookSource = readFileSync(new URL(
+    '../src/features/admin/top-dashboard/useTopDashboardDownloadBridge.ts',
+    import.meta.url,
+  ), 'utf8');
+  const components = [
+    readFileSync(new URL(
+      '../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx',
+      import.meta.url,
+    ), 'utf8'),
+    readFileSync(new URL(
+      '../src/features/admin/top-dashboard/TopDashboardViewer.tsx',
+      import.meta.url,
+    ), 'utf8'),
+  ];
+
+  assert.match(hookSource, /event\.source !== frameWindow/);
+  assert.match(hookSource, /event\.origin !== window\.location\.origin/);
+  assert.match(hookSource, /navigator\.userActivation\.isActive/);
+  assert.match(hookSource, /readTopDashboardDownloadMessage\(event\.data\)/);
+  assert.match(hookSource, /document\.body\.appendChild\(anchor\)/);
+  assert.match(hookSource, /anchor\.download = message\.name/);
+  assert.match(hookSource, /URL\.revokeObjectURL\(activeObjectUrl\)/);
+  assert.match(hookSource, /releaseObjectUrl\(\)/);
+  assert.match(hookSource, /Не удалось скачать файл/);
+  assert.match(hookSource, /DOWNLOAD_THROTTLE_MS = 750/);
+  components.forEach((source) => {
+    assert.match(source, /useTopDashboardDownloadBridge\(showStatus\)/);
+    assert.match(source, /ref=\{previewFrameRef\}/);
+  });
 });
 
 test('dashboard content is accepted only from its same-origin frame shell', () => {

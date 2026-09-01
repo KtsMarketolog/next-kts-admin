@@ -4,6 +4,13 @@ import type {
   TopDashboardProfile,
   TopDashboardSnapshotFormat,
 } from './db/topDashboardDomain';
+import {
+  TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE,
+  TOP_DASHBOARD_DOWNLOAD_MAX_BYTES,
+  TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH,
+  TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER,
+  TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE,
+} from './topDashboardDownloadBridge';
 import { TOP_DASHBOARD_DATA_MAX_BYTES } from './topDashboardLimits';
 
 const INLINE_SCRIPT_PATTERN = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi;
@@ -90,9 +97,17 @@ export function getTopDashboardDataAdapterScript(
   const EXPECTED_FORMAT = ${expectedFormatJson};
   const EXPECTED_PROFILE = ${expectedProfileJson};
   const READ_ONLY = ${readOnlyJson};
+  const DOWNLOAD_MARKER = '${TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER}';
+  const DOWNLOAD_MAX_BYTES = ${TOP_DASHBOARD_DOWNLOAD_MAX_BYTES};
+  const DOWNLOAD_MAX_NAME_LENGTH = ${TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH};
+  const DOWNLOAD_NAME = new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE)}, 'i');
+  const DOWNLOAD_INVALID_NAME = new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE)}, 'i');
   const SNAPSHOT_NAME = /\.json(?:\.gz)?$/i;
   const nativeOpen = window.open.bind(window);
+  const nativeCreateObjectURL = URL.createObjectURL.bind(URL);
+  const nativeRevokeObjectURL = URL.revokeObjectURL.bind(URL);
   const popupObjectUrls = new Set();
+  const downloadableObjectUrls = new Map();
   let pendingSnapshot = null;
   let inputObserver = null;
   let inputTimeout = 0;
@@ -141,9 +156,21 @@ export function getTopDashboardDataAdapterScript(
     };
   };
 
+  URL.createObjectURL = function createTrackedObjectURL(value) {
+    const objectUrl = nativeCreateObjectURL(value);
+    if (value instanceof Blob) downloadableObjectUrls.set(objectUrl, value);
+    return objectUrl;
+  };
+
+  URL.revokeObjectURL = function revokeTrackedObjectURL(value) {
+    downloadableObjectUrls.delete(String(value));
+    return nativeRevokeObjectURL(value);
+  };
+
   window.addEventListener('pagehide', () => {
     popupObjectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
     popupObjectUrls.clear();
+    downloadableObjectUrls.clear();
   }, { once: true });
 
   function validName(value) {
@@ -162,6 +189,48 @@ export function getTopDashboardDataAdapterScript(
   function send(type, extra, transfer) {
     const message = Object.assign({ marker: MARKER, type }, extra || {});
     window.parent.postMessage(message, '*', transfer || []);
+  }
+
+  function normalizeDownloadName(value) {
+    if (typeof value !== 'string') return '';
+    const name = value.normalize('NFC').trim();
+    if (
+      !name
+      || name.length > DOWNLOAD_MAX_NAME_LENGTH
+      || name === '.'
+      || name === '..'
+      || DOWNLOAD_INVALID_NAME.test(name)
+      || !DOWNLOAD_NAME.test(name)
+    ) return '';
+    return name;
+  }
+
+  function validDownloadBlob(value) {
+    return value instanceof Blob
+      && value.size > 0
+      && value.size <= DOWNLOAD_MAX_BYTES;
+  }
+
+  const anchorPrototype = window.HTMLAnchorElement && window.HTMLAnchorElement.prototype;
+  const nativeAnchorClick = anchorPrototype && anchorPrototype.click;
+  if (anchorPrototype && typeof nativeAnchorClick === 'function') {
+    anchorPrototype.click = function clickSandboxedDownload() {
+      const blob = downloadableObjectUrls.get(this.href);
+      if (!blob) return nativeAnchorClick.call(this);
+      const name = normalizeDownloadName(this.download);
+      if (!name || !validDownloadBlob(blob)) {
+        downloadableObjectUrls.delete(this.href);
+        nativeRevokeObjectURL(this.href);
+        report('DOWNLOAD_INVALID');
+        return;
+      }
+      window.parent.postMessage(
+        { marker: DOWNLOAD_MARKER, type: 'download-request', name, blob },
+        '*',
+      );
+      downloadableObjectUrls.delete(this.href);
+      nativeRevokeObjectURL(this.href);
+    };
   }
 
   function report(code) {
@@ -337,6 +406,11 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
   const CONFIG = ${config};
   const MARKER = '${TOP_DASHBOARD_DATA_MESSAGE_MARKER}';
   const MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES};
+  const DOWNLOAD_MARKER = '${TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER}';
+  const DOWNLOAD_MAX_BYTES = ${TOP_DASHBOARD_DOWNLOAD_MAX_BYTES};
+  const DOWNLOAD_MAX_NAME_LENGTH = ${TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH};
+  const DOWNLOAD_NAME = new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE)}, 'i');
+  const DOWNLOAD_INVALID_NAME = new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE)}, 'i');
   const SNAPSHOT_NAME = /\.json(?:\.gz)?$/i;
   const iframe = document.querySelector('#dashboard-frame');
   const notice = document.querySelector('#data-notice');
@@ -369,6 +443,26 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
     return value instanceof ArrayBuffer
       && value.byteLength > 0
       && value.byteLength <= MAX_BYTES;
+  }
+
+  function normalizeDownloadName(value) {
+    if (typeof value !== 'string') return '';
+    const name = value.normalize('NFC').trim();
+    if (
+      !name
+      || name.length > DOWNLOAD_MAX_NAME_LENGTH
+      || name === '.'
+      || name === '..'
+      || DOWNLOAD_INVALID_NAME.test(name)
+      || !DOWNLOAD_NAME.test(name)
+    ) return '';
+    return name;
+  }
+
+  function validDownloadBlob(value) {
+    return value instanceof Blob
+      && value.size > 0
+      && value.size <= DOWNLOAD_MAX_BYTES;
   }
 
   function decodeName(value) {
@@ -493,12 +587,34 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
     SNAPSHOT_INPUT_NOT_FOUND: 'В HTML не найдено поле для файла данных',
     SNAPSHOT_INSTALL_FAILED: 'Не удалось подставить сохранённые данные в HTML',
     SNAPSHOT_INVALID: 'Сохранённый файл данных имеет неверный формат',
+    DOWNLOAD_INVALID: 'HTML подготовил файл недопустимого формата или размера',
   };
 
   window.addEventListener('message', (event) => {
-    if (!(iframe instanceof HTMLIFrameElement) || event.source !== iframe.contentWindow) return;
+    if (
+      !(iframe instanceof HTMLIFrameElement)
+      || event.source !== iframe.contentWindow
+      || event.origin !== 'null'
+    ) return;
     const data = event.data;
-    if (!data || typeof data !== 'object' || data.marker !== MARKER) return;
+    if (!data || typeof data !== 'object') return;
+    if (data.marker === DOWNLOAD_MARKER && data.type === 'download-request') {
+      if (!navigator.userActivation || !navigator.userActivation.isActive) {
+        showNotice('error', 'Скачивание разрешено только после нажатия кнопки', false);
+        return;
+      }
+      const name = normalizeDownloadName(data.name);
+      if (!name || !validDownloadBlob(data.blob)) {
+        showNotice('error', 'HTML подготовил файл недопустимого формата или размера', false);
+        return;
+      }
+      window.parent.postMessage(
+        { marker: DOWNLOAD_MARKER, type: 'download-request', name, blob: data.blob },
+        window.location.origin,
+      );
+      return;
+    }
+    if (data.marker !== MARKER) return;
     if (data.type === 'adapter-ready') {
       if (!initialLoadStarted) {
         adapterExpectedFormat = data.expectedFormat === 'kts-bundle-v1'
@@ -576,7 +692,7 @@ export function buildTopDashboardContentSecurityPolicy(htmlContent: string) {
     'media-src data: blob:',
     'worker-src blob:',
     "manifest-src 'none'",
-    'sandbox allow-scripts allow-popups allow-downloads',
+    'sandbox allow-scripts allow-popups',
   ].join('; ');
 }
 

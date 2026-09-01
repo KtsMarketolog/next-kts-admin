@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
 
+import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
+
 type TopDashboardPublishedOverview = {
   block: {
     id: number;
@@ -81,6 +83,7 @@ async function readError(response: Response, fallback: string) {
 
 export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerProps) {
   const router = useRouter();
+  const previewFrameRef = useTopDashboardDownloadBridge(showStatus);
   const [overview, setOverview] = useState<TopDashboardPublishedOverview | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -242,11 +245,12 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
         ) : overview ? (
           <div className={styles.topDashboardFrameShell}>
             <iframe
+              ref={previewFrameRef}
               key={`${blockId}:${overview.activeVersionId}:${previewRevision}`}
               className={styles.topDashboardFrame}
               src={`${apiBasePath}/versions/${overview.activeVersionId}/frame?revision=${previewRevision}`}
               title={`Отчёт ${overview.block.title}`}
-              sandbox="allow-scripts allow-same-origin allow-popups allow-downloads"
+              sandbox="allow-scripts allow-same-origin allow-popups"
               referrerPolicy="no-referrer"
               allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
               allowFullScreen

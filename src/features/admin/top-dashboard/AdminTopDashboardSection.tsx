@@ -11,6 +11,8 @@ import {
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
 } from '@/shared/lib/topDashboardLimits';
 
+import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
+
 type TopDashboardVersionStatus = 'active' | 'draft' | 'archived';
 
 type TopDashboardVersion = {
@@ -163,6 +165,7 @@ async function readError(response: Response, fallback: string) {
 
 export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashboardSectionProps) {
   const router = useRouter();
+  const previewFrameRef = useTopDashboardDownloadBridge(showStatus);
   const [overview, setOverview] = useState<TopDashboardOverview | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
@@ -975,11 +978,12 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         ) : selectedVersion ? (
           <div className={styles.topDashboardFrameShell}>
             <iframe
+              ref={previewFrameRef}
               key={`${blockId}:${selectedVersion.id}:${previewRevision}`}
               className={styles.topDashboardFrame}
               src={`${apiBasePath}/versions/${selectedVersion.id}/frame?revision=${previewRevision}`}
               title={`Предпросмотр ${selectedVersion.originalName}`}
-              sandbox="allow-scripts allow-same-origin allow-popups allow-downloads"
+              sandbox="allow-scripts allow-same-origin allow-popups"
               referrerPolicy="no-referrer"
               allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
               allowFullScreen
