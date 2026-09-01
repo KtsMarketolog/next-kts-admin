@@ -438,7 +438,7 @@ test('dashboard CSP permits only exact uploaded scripts and handlers', () => {
 
   assert.match(csp, /default-src 'none'/);
   assert.match(csp, /connect-src 'none'/);
-  assert.match(csp, /sandbox allow-scripts allow-popups/);
+  assert.match(csp, /sandbox allow-scripts allow-popups allow-downloads/);
   assert.doesNotMatch(csp, /allow-popups-to-escape-sandbox/);
   assert.match(csp, /'unsafe-hashes'/);
   assert.ok(csp.includes(cspHash(script)));
@@ -459,7 +459,7 @@ test('dashboard data adapter is injected before application scripts and receives
 
   const csp = buildTopDashboardContentSecurityPolicy(transformed);
   assert.match(csp, /connect-src 'none'/);
-  assert.match(csp, /sandbox allow-scripts allow-popups/);
+  assert.match(csp, /sandbox allow-scripts allow-popups allow-downloads/);
   assert.doesNotMatch(csp, /allow-popups-to-escape-sandbox/);
   assert.ok(csp.includes(cspHash(adapterScript)));
   assert.doesNotMatch(csp, /allow-same-origin/);
@@ -552,7 +552,7 @@ test('dashboard adapter turns a legacy writable noopener popup into one Blob nav
   assert.deepEqual(revokedUrls, ['blob:null/office-screen']);
 });
 
-test('dashboard frames permit sandboxed popups and explicitly delegate fullscreen', () => {
+test('dashboard frames permit sandboxed downloads and popups and explicitly delegate fullscreen', () => {
   const sources = [
     readFileSync(new URL(
       '../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx',
@@ -572,9 +572,9 @@ test('dashboard frames permit sandboxed popups and explicitly delegate fullscree
     ), 'utf8'),
   ];
 
-  assert.match(sources[0], /sandbox="allow-scripts allow-same-origin allow-popups"/);
-  assert.match(sources[1], /sandbox="allow-scripts allow-same-origin allow-popups"/);
-  assert.match(sources[2], /sandbox="allow-scripts allow-popups"/);
+  assert.match(sources[0], /sandbox="allow-scripts allow-same-origin allow-popups allow-downloads"/);
+  assert.match(sources[1], /sandbox="allow-scripts allow-same-origin allow-popups allow-downloads"/);
+  assert.match(sources[2], /sandbox="allow-scripts allow-popups allow-downloads"/);
   assert.match(sources[0], /fullscreen \*"/);
   assert.match(sources[1], /fullscreen \*"/);
   assert.match(sources[2], /fullscreen \*"/);

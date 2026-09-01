@@ -58,7 +58,7 @@ export async function GET(_request: Request, context: Context) {
     id="dashboard-frame"
     src="${contentPath}"
     title="HTML-дашборд"
-    sandbox="allow-scripts allow-popups"
+    sandbox="allow-scripts allow-popups allow-downloads"
     referrerpolicy="same-origin"
     allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
     allowfullscreen

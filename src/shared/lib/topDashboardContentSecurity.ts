@@ -576,7 +576,7 @@ export function buildTopDashboardContentSecurityPolicy(htmlContent: string) {
     'media-src data: blob:',
     'worker-src blob:',
     "manifest-src 'none'",
-    'sandbox allow-scripts allow-popups',
+    'sandbox allow-scripts allow-popups allow-downloads',
   ].join('; ');
 }
 
