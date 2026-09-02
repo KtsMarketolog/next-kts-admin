@@ -563,6 +563,27 @@ test('dashboard data adapter hydrates supported file inputs without granting ser
   assert.match(adapter, /dispatchEvent\(new Event\('change'/);
   assert.match(adapter, /window\.handleFiles/);
   assert.match(adapter, /snapshot-installed/);
+  assert.match(adapter, /kts-top-dashboard-restore-start/);
+  assert.match(adapter, /kts-top-dashboard-data-ready/);
+  assert.match(adapter, /LEGACY_READY_FUNCTION = null/);
+  assert.match(adapter, /waitForDashboardProcessing/);
+  assert.match(adapter, /new MutationObserver/);
+  assert.match(adapter, /RESTORE_DOM_QUIET_MS = 1000/);
+  assert.match(adapter, /RESTORE_TIMEOUT_MS = 120000/);
+  assert.match(adapter, /MULTI_INPUT_DISPATCH_GAP_MS = 150/);
+  assert.match(adapter, /type: 'files-processing'/);
+  assert.match(adapter, /type: confirmation \? 'files-installed' : 'files-delivered-unconfirmed'/);
+  assert.match(adapter, /detail\.restoreId !== restoreId/);
+  assert.doesNotMatch(adapter, /data-kts-dashboard-ready/);
+  assert.doesNotMatch(adapter, /body\.classList\.contains\('loaded'\)/);
+  assert.match(adapter, /complete\('event'\)/);
+  assert.match(adapter, /type: 'files-processing-unconfirmed'/);
+  assert.ok(
+    adapter.indexOf('await waitForDashboardProcessing')
+      < adapter.indexOf("type: confirmation ? 'files-installed' : 'files-delivered-unconfirmed'"),
+    'the adapter must await dashboard processing before reporting completion',
+  );
+  assert.doesNotMatch(adapter, /setTimeout\(resolve, 150\)/);
   assert.match(adapter, /data\.type === 'bridge-probe'/);
   assert.match(adapter, /window\.open = function openSandboxedWindow/);
   assert.match(adapter, /requestedUrl\.toLowerCase\(\) === 'about:blank'/);
@@ -572,6 +593,46 @@ test('dashboard data adapter hydrates supported file inputs without granting ser
   assert.doesNotMatch(adapter, /opened\.opener = null/);
   assert.doesNotMatch(adapter, /snapshot-selected/);
   assert.doesNotMatch(adapter, /method: 'PUT'/);
+});
+
+test('strategic overview receives an exact post-render compatibility ready hook', () => {
+  const strategicHtml = `<!doctype html>
+    <html><head></head><body>
+      <header>СТРАТЕГИЧЕСКИЙ ОБЗОР ГРУППЫ</header>
+      <input id="file" type="file">
+      <script>
+        function loadState(snapshot) {
+          window.state = snapshot;
+          render();
+        }
+        async function openFile(file) {
+          const unpacked = await file.arrayBuffer();
+          loadState(unpacked);
+        }
+      </script>
+    </body></html>`;
+  const transformed = injectTopDashboardDataAdapter(strategicHtml, { readOnly: true });
+
+  assert.match(transformed, /LEGACY_READY_FUNCTION = "loadState"/);
+  assert.match(transformed, /function installLegacyReadyHook/);
+  assert.match(transformed, /current\.apply\(this, arguments\)/);
+  assert.match(transformed, /dispatchDashboardReady\(legacyRestoreId\)/);
+  assert.match(transformed, /installLegacyReadyHook\(restoreId\)/);
+  assert.doesNotMatch(
+    injectTopDashboardDataAdapter(strategicHtml.replace('render();', 'queueMicrotask(render);')),
+    /LEGACY_READY_FUNCTION = "loadState"/,
+  );
+  assert.doesNotMatch(
+    injectTopDashboardDataAdapter(strategicHtml.replace('render();', 'if (false) render();')),
+    /LEGACY_READY_FUNCTION = "loadState"/,
+  );
+  assert.doesNotMatch(
+    injectTopDashboardDataAdapter(strategicHtml.replace(
+      'window.state = snapshot;\n          render();',
+      'queueMicrotask(() => finish(snapshot));\n        }\n        function unrelated() { render();',
+    )),
+    /LEGACY_READY_FUNCTION = "loadState"/,
+  );
 });
 
 test('dashboard adapter turns a legacy writable noopener popup into one Blob navigation', async () => {
@@ -821,6 +882,29 @@ test('trusted dashboard frame bridge persists generic files only with management
   assert.match(bridge, /CONFIG\.canManage/);
   assert.match(bridge, /multi-file-v1/);
   assert.match(bridge, /X-KTS-Top-Dashboard-Multi-File/);
+  assert.match(bridge, /restoreId/);
+  assert.match(bridge, /data\.restoreId === activeRestoreId/);
+  assert.match(bridge, /data\.confirmation === 'event'/);
+  assert.doesNotMatch(bridge, /data\.confirmation === 'marker'/);
+  assert.match(bridge, /Загружаем сохранённые данные…/);
+  assert.match(bridge, /Распаковываем сохранённые данные…/);
+  assert.match(bridge, /Строим отчёт…/);
+  assert.match(bridge, /await waitForNoticePaint\(\)/);
+  assert.match(bridge, /files-delivered-unconfirmed/);
+  assert.match(bridge, /files-processing-unconfirmed/);
+  assert.match(bridge, /дашборд завершает обработку/);
+  assert.match(bridge, /завершение обработки не подтверждено/);
+  assert.ok(
+    bridge.lastIndexOf('prefetchPromise = prefetchActiveData();')
+      < bridge.lastIndexOf('probeAdapter();'),
+    'active data prefetch must start before the iframe adapter probe',
+  );
+  const adapterReadyBranch = bridge.slice(
+    bridge.indexOf("if (data.type === 'adapter-ready')"),
+    bridge.indexOf("if (data.type === 'snapshot-installed')"),
+  );
+  assert.match(adapterReadyBranch, /Promise\.resolve\(prefetchPromise\)\.then\(installPrefetchedData\)/);
+  assert.doesNotMatch(adapterReadyBranch, /fetch\(/);
   assert.ok(bridge.includes('/api/admin/top-dashboard/blocks/7/data'));
 });
 

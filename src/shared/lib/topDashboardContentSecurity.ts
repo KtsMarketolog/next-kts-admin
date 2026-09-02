@@ -40,6 +40,128 @@ export type TopDashboardDataContract = {
   profile: TopDashboardProfile | null;
 };
 
+type TopDashboardLegacyReadyFunction = 'loadState';
+
+function extractClassicFunctionBody(source: string, functionName: string): string | null {
+  const declaration = new RegExp(`\\bfunction\\s+${functionName}\\s*\\(`, 'u').exec(source);
+  if (!declaration) return null;
+  const openingBrace = source.indexOf('{', declaration.index + declaration[0].length);
+  if (openingBrace === -1) return null;
+
+  let depth = 1;
+  let quote = '';
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = openingBrace + 1; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1] ?? '';
+    if (lineComment) {
+      if (character === '\n' || character === '\r') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (character === '*' && next === '/') {
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (character === '/' && next === '/') {
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      blockComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character;
+      continue;
+    }
+    if (character === '{') {
+      depth += 1;
+    } else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(openingBrace + 1, index);
+    }
+  }
+  return null;
+}
+
+function maskJavaScriptCommentsAndStrings(source: string): string {
+  let output = '';
+  let quote = '';
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1] ?? '';
+    const masked = character === '\n' || character === '\r' ? character : ' ';
+    if (lineComment) {
+      output += masked;
+      if (character === '\n' || character === '\r') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      output += masked;
+      if (character === '*' && next === '/') {
+        output += ' ';
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      output += masked;
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (character === '/' && next === '/') {
+      output += '  ';
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      output += '  ';
+      blockComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      output += ' ';
+      quote = character;
+      continue;
+    }
+    output += character;
+  }
+  return output;
+}
+
+function hasStandaloneFinalRenderCall(source: string): boolean {
+  return /(?:^|[;}])\s*render\s*\(\s*\)\s*;\s*$/u.test(source);
+}
+
 export function detectTopDashboardExpectedProfile(
   htmlContent: string,
 ): TopDashboardProfile | null {
@@ -113,6 +235,25 @@ export function detectTopDashboardDataContract(
     : { mode: 'disabled', snapshotFormat: null, profile: null };
 }
 
+function detectTopDashboardLegacyReadyFunction(
+  htmlContent: string,
+): TopDashboardLegacyReadyFunction | null {
+  const isStrategicOverview = /СТРАТЕГИЧЕСКИЙ\s+ОБЗОР\s+ГРУППЫ/iu.test(htmlContent);
+  const loadStateBody = extractClassicFunctionBody(htmlContent, 'loadState');
+  const openFileBody = extractClassicFunctionBody(htmlContent, 'openFile');
+  const loadStateCode = loadStateBody
+    ? maskJavaScriptCommentsAndStrings(loadStateBody).trim()
+    : '';
+  const openFileCode = openFileBody
+    ? maskJavaScriptCommentsAndStrings(openFileBody)
+    : '';
+  const hasSynchronousLoadState = hasStandaloneFinalRenderCall(loadStateCode);
+  const opensThroughLoadState = /\bloadState\s*\(\s*[A-Za-z_$][\w$]*\s*\)\s*;/u.test(openFileCode);
+  return isStrategicOverview && hasSynchronousLoadState && opensThroughLoadState
+    ? 'loadState'
+    : null;
+}
+
 function sha256Source(value: string) {
   return `'sha256-${createHash('sha256').update(value, 'utf8').digest('base64')}'`;
 }
@@ -128,10 +269,12 @@ export function getTopDashboardDataAdapterScript(
   expectedFormat: TopDashboardSnapshotFormat | null = null,
   expectedProfile: TopDashboardProfile | null = null,
   readOnly = false,
+  legacyReadyFunction: TopDashboardLegacyReadyFunction | null = null,
 ) {
   const expectedFormatJson = JSON.stringify(expectedFormat);
   const expectedProfileJson = JSON.stringify(expectedProfile);
   const readOnlyJson = JSON.stringify(readOnly);
+  const legacyReadyFunctionJson = JSON.stringify(legacyReadyFunction);
   return String.raw`(() => {
   'use strict';
   const MARKER = '${TOP_DASHBOARD_DATA_MESSAGE_MARKER}';
@@ -141,6 +284,12 @@ export function getTopDashboardDataAdapterScript(
   const EXPECTED_PROFILE = ${expectedProfileJson};
   const MULTI_FILE_MODE = EXPECTED_FORMAT === 'multi-file-v1' && EXPECTED_PROFILE === 'generic';
   const READ_ONLY = ${readOnlyJson};
+  const LEGACY_READY_FUNCTION = ${legacyReadyFunctionJson};
+  const RESTORE_START_EVENT = 'kts-top-dashboard-restore-start';
+  const RESTORE_READY_EVENT = 'kts-top-dashboard-data-ready';
+  const RESTORE_DOM_QUIET_MS = 1000;
+  const RESTORE_TIMEOUT_MS = 120000;
+  const MULTI_INPUT_DISPATCH_GAP_MS = 150;
   const DOWNLOAD_MARKER = '${TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER}';
   const DOWNLOAD_MAX_BYTES = ${TOP_DASHBOARD_DOWNLOAD_MAX_BYTES};
   const DOWNLOAD_MAX_NAME_LENGTH = ${TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH};
@@ -156,6 +305,34 @@ export function getTopDashboardDataAdapterScript(
   let inputObserver = null;
   let inputTimeout = 0;
   let multiFileRestorePending = false;
+  let legacyRestoreId = 0;
+
+  function dispatchDashboardReady(restoreId) {
+    if (!validRestoreId(restoreId)) return;
+    window.dispatchEvent(new CustomEvent(RESTORE_READY_EVENT, {
+      detail: { restoreId },
+    }));
+  }
+
+  function installLegacyReadyHook(restoreId) {
+    legacyRestoreId = restoreId;
+    if (!LEGACY_READY_FUNCTION) return;
+    const current = window[LEGACY_READY_FUNCTION];
+    if (typeof current !== 'function' || current.__ktsDashboardReadyHook === true) return;
+    const wrapped = function ktsDashboardReadyHook() {
+      const result = current.apply(this, arguments);
+      if (result && typeof result.then === 'function') {
+        return Promise.resolve(result).then((value) => {
+          dispatchDashboardReady(legacyRestoreId);
+          return value;
+        });
+      }
+      dispatchDashboardReady(legacyRestoreId);
+      return result;
+    };
+    Object.defineProperty(wrapped, '__ktsDashboardReadyHook', { value: true });
+    window[LEGACY_READY_FUNCTION] = wrapped;
+  }
 
   /*
    * Some dashboards open a blank page with noopener and then fill the returned
@@ -278,8 +455,8 @@ export function getTopDashboardDataAdapterScript(
     };
   }
 
-  function report(code) {
-    send('adapter-error', { code });
+  function report(code, extra) {
+    send('adapter-error', Object.assign({ code }, extra || {}));
   }
 
   function findSnapshotInput() {
@@ -424,14 +601,131 @@ export function getTopDashboardDataAdapterScript(
     } catch {}
   }
 
-  async function installMultiFileSnapshot(targets) {
+  function validRestoreId(value) {
+    return Number.isSafeInteger(value) && value > 0;
+  }
+
+  function waitForDashboardPaint() {
+    return new Promise((resolve) => {
+      let completed = false;
+      const finish = () => {
+        if (completed) return;
+        completed = true;
+        window.clearTimeout(fallbackTimer);
+        resolve();
+      };
+      const fallbackTimer = window.setTimeout(finish, 500);
+      try {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(finish));
+      } catch {
+        finish();
+      }
+    });
+  }
+
+  function waitForDashboardProcessing(trigger, restoreId, fileCount, onDomQuiet) {
+    return new Promise((resolve, reject) => {
+      const root = document.body || document.documentElement;
+      let completed = false;
+      let triggerCompleted = false;
+      let explicitReady = false;
+      let domQuiet = false;
+      let domQuietReported = false;
+      let quietTimer = 0;
+
+      const cleanup = () => {
+        observer.disconnect();
+        window.removeEventListener(RESTORE_READY_EVENT, handleExplicitReady);
+        if (quietTimer) window.clearTimeout(quietTimer);
+        window.clearTimeout(timeoutTimer);
+      };
+      const complete = (confirmation) => {
+        if (completed) return;
+        completed = true;
+        cleanup();
+        resolve(confirmation);
+      };
+      const confirmAfterPaint = () => {
+        void waitForDashboardPaint().then(() => {
+          if (completed) return;
+          complete('event');
+        });
+      };
+      const reportDomQuietIfReady = () => {
+        if (!triggerCompleted || !domQuiet || domQuietReported || completed) return;
+        domQuietReported = true;
+        try { onDomQuiet(); } catch {}
+      };
+      const confirmIfReady = () => {
+        if (!triggerCompleted || completed) return;
+        if (explicitReady) {
+          confirmAfterPaint();
+        }
+      };
+      const handleExplicitReady = (event) => {
+        const detail = event && event.detail;
+        if (!detail || detail.restoreId !== restoreId) return;
+        explicitReady = true;
+        confirmIfReady();
+      };
+      const observer = new MutationObserver(() => {
+        domQuiet = false;
+        if (quietTimer) window.clearTimeout(quietTimer);
+        quietTimer = window.setTimeout(() => {
+          domQuiet = true;
+          reportDomQuietIfReady();
+        }, RESTORE_DOM_QUIET_MS);
+      });
+      const timeoutTimer = window.setTimeout(() => complete(null), RESTORE_TIMEOUT_MS);
+
+      window.addEventListener(RESTORE_READY_EVENT, handleExplicitReady);
+      observer.observe(root, {
+        attributes: true,
+        characterData: true,
+        childList: true,
+        subtree: true,
+      });
+
+      try {
+        window.dispatchEvent(new CustomEvent(RESTORE_START_EVENT, {
+          detail: { restoreId, fileCount },
+        }));
+        installLegacyReadyHook(restoreId);
+        Promise.resolve(trigger()).then(() => {
+          triggerCompleted = true;
+          confirmIfReady();
+          reportDomQuietIfReady();
+        }).catch((error) => {
+          if (!completed) {
+            completed = true;
+            cleanup();
+          }
+          reject(error);
+        });
+      } catch (error) {
+        if (!completed) {
+          completed = true;
+          cleanup();
+        }
+        reject(error);
+      }
+    });
+  }
+
+  async function installMultiFileSnapshot(targets, restoreId) {
     if (multiFileRestorePending) return;
     multiFileRestorePending = true;
     let installedFiles = 0;
     try {
-      if (!Array.isArray(targets) || targets.length === 0 || targets.length > ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS}) {
+      if (
+        !validRestoreId(restoreId)
+        || !Array.isArray(targets)
+        || targets.length === 0
+        || targets.length > ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS}
+      ) {
         throw new Error('invalid targets');
       }
+      const restoredInputs = [];
       for (const entry of targets) {
         if (!entry || typeof entry !== 'object' || !entry.target || !Array.isArray(entry.files)) {
           throw new Error('invalid target');
@@ -465,17 +759,51 @@ export function getTopDashboardDataAdapterScript(
             restoreRelativePath(installedFile, candidate.webkitRelativePath);
           }
         });
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        await new Promise((resolve) => window.setTimeout(resolve, 150));
+        restoredInputs.push(input);
       }
+      window.parent.postMessage(
+        {
+          marker: MULTI_FILE_MARKER,
+          type: 'files-processing',
+          restoreId,
+          fileCount: installedFiles,
+        },
+        '*',
+      );
+      const confirmation = await waitForDashboardProcessing(() => {
+        return restoredInputs.reduce((chain, input, index) => chain.then(async () => {
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          if (index + 1 < restoredInputs.length) {
+            await new Promise((resolve) => {
+              window.setTimeout(resolve, MULTI_INPUT_DISPATCH_GAP_MS);
+            });
+          }
+        }), Promise.resolve());
+      }, restoreId, installedFiles, () => {
+        window.parent.postMessage(
+          {
+            marker: MULTI_FILE_MARKER,
+            type: 'files-processing-unconfirmed',
+            restoreId,
+            fileCount: installedFiles,
+          },
+          '*',
+        );
+      });
       lockFileInputs();
       window.parent.postMessage(
-        { marker: MULTI_FILE_MARKER, type: 'files-installed', fileCount: installedFiles },
+        {
+          marker: MULTI_FILE_MARKER,
+          type: confirmation ? 'files-installed' : 'files-delivered-unconfirmed',
+          restoreId,
+          fileCount: installedFiles,
+          confirmation,
+        },
         '*',
       );
     } catch {
-      report('MULTI_FILE_INSTALL_FAILED');
+      report('MULTI_FILE_INSTALL_FAILED', { restoreId });
     } finally {
       multiFileRestorePending = false;
     }
@@ -591,7 +919,7 @@ export function getTopDashboardDataAdapterScript(
       && data.type === 'restore-files'
       && MULTI_FILE_MODE
     ) {
-      void installMultiFileSnapshot(data.targets);
+      void installMultiFileSnapshot(data.targets, data.restoreId);
       return;
     }
     if (data.marker !== MARKER) return;
@@ -629,7 +957,8 @@ export function injectTopDashboardDataAdapter(
   const contract = detectTopDashboardDataContract(htmlContent);
   const expectedFormat = contract.snapshotFormat;
   const expectedProfile = contract.profile;
-  const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, options.readOnly === true)}</script>`;
+  const legacyReadyFunction = detectTopDashboardLegacyReadyFunction(htmlContent);
+  const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, options.readOnly === true, legacyReadyFunction)}</script>`;
   const head = HEAD_OPEN_PATTERN.exec(htmlContent);
   if (head) {
     const index = head.index + head[0].length;
@@ -686,6 +1015,9 @@ export function createTopDashboardFrameBridgeScript(
   let activeDataVersionId = null;
   let multiFileTargets = new Map();
   let loadPromise = null;
+  let prefetchPromise = null;
+  let restoreSequence = 0;
+  let activeRestoreId = 0;
   let saveRequested = 0;
   let saveCompleted = 0;
   let saveLoopRunning = false;
@@ -699,6 +1031,31 @@ export function createTopDashboardFrameBridgeScript(
     if (autoHide) {
       noticeTimer = window.setTimeout(() => { notice.hidden = true; }, 3200);
     }
+  }
+
+  function hideNotice() {
+    if (!(notice instanceof HTMLElement)) return;
+    if (noticeTimer) window.clearTimeout(noticeTimer);
+    noticeTimer = 0;
+    notice.hidden = true;
+  }
+
+  function waitForNoticePaint() {
+    return new Promise((resolve) => {
+      let completed = false;
+      const finish = () => {
+        if (completed) return;
+        completed = true;
+        window.clearTimeout(fallbackTimer);
+        resolve();
+      };
+      const fallbackTimer = window.setTimeout(finish, 250);
+      try {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(finish));
+      } catch {
+        finish();
+      }
+    });
   }
 
   function validName(value) {
@@ -1084,10 +1441,10 @@ export function createTopDashboardFrameBridgeScript(
     return true;
   }
 
-  function postMultiFileSnapshot(targets) {
+  function postMultiFileSnapshot(targets, restoreId) {
     if (!(iframe instanceof HTMLIFrameElement) || !iframe.contentWindow) return false;
     iframe.contentWindow.postMessage(
-      { marker: MULTI_FILE_MARKER, type: 'restore-files', targets },
+      { marker: MULTI_FILE_MARKER, type: 'restore-files', restoreId, targets },
       '*',
     );
     return true;
@@ -1103,7 +1460,8 @@ export function createTopDashboardFrameBridgeScript(
     return fallback;
   }
 
-  async function loadActiveData(showLoadedNotice) {
+  async function prefetchActiveData() {
+    showNotice('pending', 'Загружаем сохранённые данные…', false);
     let response;
     try {
       response = await fetch(CONFIG.dataPath, {
@@ -1118,59 +1476,96 @@ export function createTopDashboardFrameBridgeScript(
     }
 
     if (response.status === 404) {
-      activeDataVersionId = null;
-      if (adapterExpectedFormat === 'multi-file-v1') multiFileTargets = new Map();
-      return true;
+      hideNotice();
+      return { kind: 'empty' };
     }
     if (!response.ok) {
       showNotice('error', await responseError(response, 'Не удалось загрузить сохранённые данные'), false);
-      return false;
+      return { kind: 'error' };
     }
 
     const versionId = responseVersion(response);
     const snapshotFormat = responseFormat(response);
     const snapshotProfile = responseProfile(response);
-    if (
-      (adapterExpectedFormat && snapshotFormat && adapterExpectedFormat !== snapshotFormat)
-      || (adapterExpectedProfile && snapshotProfile && adapterExpectedProfile !== snapshotProfile)
-    ) {
-      showNotice('error', 'Сохранённые данные не подходят для этой HTML-страницы', false);
-      return false;
-    }
     const buffer = await response.arrayBuffer().catch(() => null);
     if (!versionId || !snapshotFormat || !snapshotProfile || !validBuffer(buffer)) {
       showNotice('error', 'Сохранённый файл данных повреждён или слишком большой', false);
-      return false;
+      return { kind: 'error' };
     }
 
-    activeDataVersionId = Number(versionId);
     if (snapshotFormat === 'multi-file-v1' && snapshotProfile === 'generic') {
       if (responseBoundHtmlVersion(response) !== CONFIG.htmlVersionId) {
         showNotice('error', 'Сохранённые файлы относятся к другой версии HTML', false);
-        return false;
+        return { kind: 'error' };
       }
+      showNotice('pending', 'Распаковываем сохранённые данные…', false);
+      await waitForNoticePaint();
       let targets;
       try {
         targets = decodeMultiFileSnapshot(buffer);
       } catch {
         showNotice('error', 'Сохранённый набор файлов повреждён или слишком большой', false);
-        return false;
+        return { kind: 'error' };
       }
-      multiFileTargets = new Map(
-        targets.map((entry) => [multiFileTargetKey(entry.target), entry]),
-      );
-      postMultiFileSnapshot(targets);
-      if (showLoadedNotice) showNotice('pending', 'Восстанавливаем сохранённые файлы…', false);
-      return true;
+      return {
+        kind: 'generic',
+        versionId: Number(versionId),
+        snapshotFormat,
+        snapshotProfile,
+        targets,
+      };
     }
 
     const name = responseName(response);
     if (!name) {
       showNotice('error', 'Сохранённый файл данных повреждён или слишком большой', false);
+      return { kind: 'error' };
+    }
+    return {
+      kind: 'legacy',
+      versionId: Number(versionId),
+      snapshotFormat,
+      snapshotProfile,
+      name,
+      buffer,
+    };
+  }
+
+  async function installPrefetchedData(prefetched) {
+    if (!prefetched || prefetched.kind === 'error') return false;
+    if (prefetched.kind === 'empty') {
+      activeDataVersionId = null;
+      multiFileTargets = new Map();
+      return true;
+    }
+    if (
+      (adapterExpectedFormat && adapterExpectedFormat !== prefetched.snapshotFormat)
+      || (adapterExpectedProfile && adapterExpectedProfile !== prefetched.snapshotProfile)
+    ) {
+      showNotice('error', 'Сохранённые данные не подходят для этой HTML-страницы', false);
       return false;
     }
-    postSnapshot(name, buffer);
-    if (showLoadedNotice) showNotice('pending', 'Открываем сохранённые данные…', false);
+
+    activeDataVersionId = prefetched.versionId;
+    if (prefetched.kind === 'generic') {
+      multiFileTargets = new Map(
+        prefetched.targets.map((entry) => [multiFileTargetKey(entry.target), entry]),
+      );
+      restoreSequence += 1;
+      activeRestoreId = restoreSequence;
+      showNotice('pending', 'Строим отчёт…', false);
+      if (!postMultiFileSnapshot(prefetched.targets, activeRestoreId)) {
+        showNotice('error', 'Не удалось передать сохранённые файлы в HTML', false);
+        return false;
+      }
+      return true;
+    }
+
+    showNotice('pending', 'Открываем сохранённые данные…', false);
+    if (!postSnapshot(prefetched.name, prefetched.buffer)) {
+      showNotice('error', 'Не удалось передать сохранённые данные в HTML', false);
+      return false;
+    }
     return true;
   }
 
@@ -1353,7 +1748,20 @@ export function createTopDashboardFrameBridgeScript(
     if (data.marker === MULTI_FILE_MARKER) {
       if (data.type === 'files-selected') {
         void acceptMultiFileSelection(data);
-      } else if (data.type === 'files-installed') {
+      } else if (
+        Number.isSafeInteger(data.restoreId)
+        && data.restoreId > 0
+        && data.restoreId === activeRestoreId
+        && data.type === 'files-processing'
+      ) {
+        showNotice('pending', 'Строим отчёт…', false);
+      } else if (
+        Number.isSafeInteger(data.restoreId)
+        && data.restoreId > 0
+        && data.restoreId === activeRestoreId
+        && data.type === 'files-installed'
+        && data.confirmation === 'event'
+      ) {
         const fileCount = Number.isSafeInteger(data.fileCount) && data.fileCount > 0
           ? data.fileCount
           : 0;
@@ -1362,6 +1770,28 @@ export function createTopDashboardFrameBridgeScript(
           fileCount > 0
             ? 'Сохранённые файлы восстановлены: ' + fileCount
             : 'Сохранённые файлы восстановлены',
+          true,
+        );
+      } else if (
+        Number.isSafeInteger(data.restoreId)
+        && data.restoreId > 0
+        && data.restoreId === activeRestoreId
+        && data.type === 'files-processing-unconfirmed'
+      ) {
+        showNotice(
+          'pending',
+          'Данные переданы; дашборд завершает обработку…',
+          true,
+        );
+      } else if (
+        Number.isSafeInteger(data.restoreId)
+        && data.restoreId > 0
+        && data.restoreId === activeRestoreId
+        && data.type === 'files-delivered-unconfirmed'
+      ) {
+        showNotice(
+          'pending',
+          'Файлы переданы в дашборд, но завершение обработки не подтверждено',
           true,
         );
       }
@@ -1383,7 +1813,7 @@ export function createTopDashboardFrameBridgeScript(
           : '';
         initialLoadStarted = true;
         stopProbing();
-        loadPromise = loadActiveData(true);
+        loadPromise = Promise.resolve(prefetchPromise).then(installPrefetchedData);
       }
       return;
     }
@@ -1392,12 +1822,18 @@ export function createTopDashboardFrameBridgeScript(
       return;
     }
     if (data.type === 'adapter-error') {
+      if (
+        Number.isSafeInteger(data.restoreId)
+        && data.restoreId > 0
+        && data.restoreId !== activeRestoreId
+      ) return;
       const message = adapterErrors[data.code];
       if (message) showNotice('error', message, false);
       return;
     }
   });
 
+  prefetchPromise = prefetchActiveData();
   probeAdapter();
   probeTimer = window.setInterval(probeAdapter, 250);
 })();`;
