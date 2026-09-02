@@ -33,7 +33,11 @@ export async function GET(_request: Request, context: Context) {
   }
 
   const contentPath = `/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/content`;
-  const bridgeScript = createTopDashboardFrameBridgeScript(blockId);
+  const bridgeScript = createTopDashboardFrameBridgeScript(
+    blockId,
+    versionId,
+    isTopDashboardManagementSession(session),
+  );
   const html = `<!doctype html>
 <html lang="ru">
 <head>

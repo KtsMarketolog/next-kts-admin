@@ -28,7 +28,7 @@ type TopDashboardVersion = {
 };
 
 type TopDashboardDataVersionStatus = 'active' | 'previous' | 'archived';
-type TopDashboardSnapshotFormat = 'kts-bundle-v1' | 'purchases-v1';
+type TopDashboardSnapshotFormat = 'kts-bundle-v1' | 'purchases-v1' | 'multi-file-v1';
 
 type TopDashboardDataVersion = {
   id: number;
@@ -37,6 +37,7 @@ type TopDashboardDataVersion = {
   uncompressedSize: number;
   sha256: string;
   snapshotFormat: TopDashboardSnapshotFormat;
+  boundHtmlVersionId: number | null;
   status: TopDashboardDataVersionStatus;
   uploadedByName: string;
   createdAt: string;
@@ -142,7 +143,15 @@ function dataStatusLabel(status: TopDashboardDataVersionStatus) {
 }
 
 function snapshotFormatLabel(format: TopDashboardSnapshotFormat) {
-  return format === 'purchases-v1' ? 'Снимок закупок' : 'Снимок КТС';
+  if (format === 'purchases-v1') return 'Снимок закупок';
+  if (format === 'multi-file-v1') return 'Универсальный набор файлов';
+  return 'Снимок КТС';
+}
+
+function storedSizeLabel(version: TopDashboardDataVersion) {
+  return version.snapshotFormat === 'multi-file-v1'
+    ? `Данные в наборе: ${formatFileSize(version.uncompressedSize)}`
+    : `После распаковки: ${formatFileSize(version.uncompressedSize)}`;
 }
 
 function versionCountLabel(count: number) {
@@ -856,7 +865,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
               <div className={styles.topDashboardMeta}>
                 <span>{snapshotFormatLabel(activeDataVersion.snapshotFormat)}</span>
                 <span>Файл: {formatFileSize(activeDataVersion.fileSize)}</span>
-                <span>После распаковки: {formatFileSize(activeDataVersion.uncompressedSize)}</span>
+                <span>{storedSizeLabel(activeDataVersion)}</span>
                 <span>Загрузил: {activeDataVersion.uploadedByName || 'Администратор'}</span>
                 <span>{formatDate(activeDataVersion.createdAt)}</span>
                 <span>SHA-256: {activeDataVersion.sha256.slice(0, 12)}…</span>
@@ -892,7 +901,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                       <span>Версия данных #{version.id}</span>
                       <span>{snapshotFormatLabel(version.snapshotFormat)}</span>
                       <span>Файл: {formatFileSize(version.fileSize)}</span>
-                      <span>После распаковки: {formatFileSize(version.uncompressedSize)}</span>
+                      <span>{storedSizeLabel(version)}</span>
                       <span>Загрузил: {version.uploadedByName || 'Администратор'}</span>
                       <span>{formatDate(version.createdAt)}</span>
                     </div>

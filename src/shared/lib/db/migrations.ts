@@ -383,6 +383,83 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202609020001_top_dashboard_multi_file_snapshots',
+    description: 'Bind universal multi-file TOP snapshots to their exact HTML version',
+    apply: async (client) => {
+      await client.query(`
+        alter table top_dashboard_block_data_versions
+          add column bound_html_version_id bigint;
+
+        do $$
+        declare
+          contract_constraint_name text;
+        begin
+          for contract_constraint_name in
+            select constraint_name.conname
+            from pg_constraint constraint_name
+            where constraint_name.conrelid = 'top_dashboard_block_data_versions'::regclass
+              and constraint_name.contype = 'c'
+              and position(
+                'snapshot_format' in pg_get_constraintdef(constraint_name.oid)
+              ) > 0
+              and position(
+                'dashboard_profile' in pg_get_constraintdef(constraint_name.oid)
+              ) > 0
+          loop
+            execute format(
+              'alter table top_dashboard_block_data_versions drop constraint %I',
+              contract_constraint_name
+            );
+          end loop;
+        end $$;
+
+        alter table top_dashboard_block_data_versions
+          drop constraint if exists top_dashboard_block_data_versions_snapshot_format_check,
+          drop constraint if exists top_dashboard_block_data_versions_dashboard_profile_check,
+          drop constraint if exists top_dashboard_block_data_versions_check;
+
+        alter table top_dashboard_block_data_versions
+          add constraint top_dashboard_block_data_versions_snapshot_format_check check (
+            snapshot_format in ('kts-bundle-v1', 'purchases-v1', 'multi-file-v1')
+          ),
+          add constraint top_dashboard_block_data_versions_dashboard_profile_check check (
+            dashboard_profile in (
+              'sales-analytics',
+              'assortment-optimization',
+              'purchases',
+              'generic'
+            )
+          ),
+          add constraint top_dashboard_block_data_versions_contract_check check (
+            (
+              snapshot_format = 'purchases-v1'
+              and dashboard_profile = 'purchases'
+              and bound_html_version_id is null
+            )
+            or (
+              snapshot_format = 'kts-bundle-v1'
+              and dashboard_profile in ('sales-analytics', 'assortment-optimization')
+              and bound_html_version_id is null
+            )
+            or (
+              snapshot_format = 'multi-file-v1'
+              and dashboard_profile = 'generic'
+              and bound_html_version_id is not null
+              and uncompressed_size = file_size
+            )
+          ),
+          add constraint top_dashboard_block_data_versions_bound_html_fk
+            foreign key (block_id, bound_html_version_id)
+            references top_dashboard_block_versions(block_id, id)
+            on delete cascade;
+
+        create index top_dashboard_block_data_versions_bound_html_idx
+          on top_dashboard_block_data_versions(block_id, bound_html_version_id)
+          where bound_html_version_id is not null;
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

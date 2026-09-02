@@ -21,13 +21,17 @@ import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import {
-  detectTopDashboardExpectedProfile,
-  detectTopDashboardExpectedSnapshotFormat,
+  detectTopDashboardDataContract,
   getTopDashboardBlockDataFrameVersionId,
+  isTopDashboardBlockDataMutationFrameRequest,
 } from '@/shared/lib/topDashboardContentSecurity';
 import { acquireTopDashboardDataUploadSlot } from '@/shared/lib/topDashboardUploadConcurrency';
 
 import { readTopDashboardDataUpload } from '../../dataUpload';
+import {
+  isTopDashboardMultiFileUpload,
+  readTopDashboardMultiFileDataUpload,
+} from '../../multiFileDataUpload';
 import { parsePositiveId } from '../../routeUtils';
 
 export const runtime = 'nodejs';
@@ -36,11 +40,13 @@ type Context = {
   params: Promise<{ blockId: string }>;
 };
 
-function dataContentType(originalName: string) {
+function dataContentType(originalName: string, snapshotFormat: string) {
+  if (snapshotFormat === 'multi-file-v1') return 'application/octet-stream';
   return /\.gz$/i.test(originalName) ? 'application/gzip' : 'application/json; charset=utf-8';
 }
 
-function fallbackDownloadName(originalName: string) {
+function fallbackDownloadName(originalName: string, snapshotFormat: string) {
+  if (snapshotFormat === 'multi-file-v1') return 'dashboard-files.ktsmf';
   return /\.gz$/i.test(originalName) ? 'dashboard-data.json.gz' : 'dashboard-data.json';
 }
 
@@ -67,15 +73,15 @@ export async function GET(request: Request, context: Context) {
       }
     }
 
-    const snapshot = await getActiveTopDashboardBlockDataContent(blockId);
+    const snapshot = await getActiveTopDashboardBlockDataContent(blockId, frameVersionId);
     if (!snapshot) return Response.json({ error: 'Данные ещё не загружены' }, { status: 404 });
 
     const encodedOriginalName = encodeURIComponent(snapshot.originalName);
     return new Response(new Uint8Array(snapshot.content), {
       headers: {
-        'Content-Type': dataContentType(snapshot.originalName),
+        'Content-Type': dataContentType(snapshot.originalName, snapshot.snapshotFormat),
         'Content-Length': String(snapshot.content.length),
-        'Content-Disposition': `inline; filename="${fallbackDownloadName(snapshot.originalName)}"; filename*=UTF-8''${encodedOriginalName}`,
+        'Content-Disposition': `inline; filename="${fallbackDownloadName(snapshot.originalName, snapshot.snapshotFormat)}"; filename*=UTF-8''${encodedOriginalName}`,
         'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
         'X-Top-Dashboard-Data-Version-Id': String(snapshot.id),
         'X-Top-Dashboard-Data-Original-Name': encodedOriginalName,
@@ -84,7 +90,15 @@ export async function GET(request: Request, context: Context) {
         ...(snapshot.dashboardProfile
           ? { 'X-Top-Dashboard-Data-Profile': snapshot.dashboardProfile }
           : {}),
+        ...(snapshot.boundHtmlVersionId
+          ? {
+              'X-Top-Dashboard-Data-Bound-Html-Version-Id': String(
+                snapshot.boundHtmlVersionId,
+              ),
+            }
+          : {}),
         'X-Content-Type-Options': 'nosniff',
+        'X-Robots-Tag': 'noindex, nofollow, noarchive',
         'X-DNS-Prefetch-Control': 'off',
         'Referrer-Policy': 'no-referrer',
         'Cross-Origin-Resource-Policy': 'same-origin',
@@ -106,10 +120,11 @@ export async function PUT(request: Request, context: Context) {
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
 
+  const multiFileUpload = isTopDashboardMultiFileUpload(request);
   const limited = await enforceAdminActionRateLimit(
     session,
-    'top_dashboard_data_upload',
-    10,
+    multiFileUpload ? 'top_dashboard_multi_file_upload' : 'top_dashboard_data_upload',
+    multiFileUpload ? 30 : 10,
     30 * 60 * 1000,
   );
   if (limited) return limited;
@@ -134,7 +149,9 @@ export async function PUT(request: Request, context: Context) {
   }
 
   try {
-    const parsed = await readTopDashboardDataUpload(request);
+    const parsed = multiFileUpload
+      ? await readTopDashboardMultiFileDataUpload(request)
+      : await readTopDashboardDataUpload(request);
     if (parsed.error) return parsed.error;
 
     const overview = await getTopDashboardBlockOverview(blockId);
@@ -155,13 +172,40 @@ export async function PUT(request: Request, context: Context) {
         { status: 409 },
       );
     }
-    const expectedHtmlSnapshotFormat = detectTopDashboardExpectedSnapshotFormat(
-      activeHtml.htmlContent,
-    );
-    const expectedHtmlProfile = detectTopDashboardExpectedProfile(activeHtml.htmlContent);
-    if (!expectedHtmlSnapshotFormat || !expectedHtmlProfile) {
+    const contract = detectTopDashboardDataContract(activeHtml.htmlContent);
+    const expectedHtmlSnapshotFormat = contract.snapshotFormat;
+    const expectedHtmlProfile = contract.profile;
+    if (contract.mode === 'disabled' || !expectedHtmlSnapshotFormat || !expectedHtmlProfile) {
       return Response.json(
         { error: 'Для опубликованной HTML-страницы не удалось определить подходящий тип данных' },
+        { status: 422 },
+      );
+    }
+
+    if (multiFileUpload) {
+      if (contract.mode !== 'generic') {
+        return Response.json(
+          { error: 'Для этого HTML используется проверенный снимок данных, а не универсальные файлы' },
+          { status: 422 },
+        );
+      }
+      if (
+        !('expectedActiveHtmlVersionId' in parsed.parsed)
+        || parsed.parsed.expectedActiveHtmlVersionId !== expectedActiveHtmlVersionId
+        || !isTopDashboardBlockDataMutationFrameRequest(
+          request,
+          blockId,
+          expectedActiveHtmlVersionId,
+        )
+      ) {
+        return Response.json(
+          { error: 'Активная HTML-страница уже изменилась. Обновите страницу и повторите.' },
+          { status: 409 },
+        );
+      }
+    } else if (contract.mode !== 'legacy') {
+      return Response.json(
+        { error: 'Выберите файлы непосредственно внутри этого HTML-дашборда' },
         { status: 422 },
       );
     }
@@ -184,6 +228,7 @@ export async function PUT(request: Request, context: Context) {
       expectedHtmlProfile,
       ...parsed.parsed.upload,
       dashboardProfile: expectedHtmlProfile,
+      boundHtmlVersionId: multiFileUpload ? expectedActiveHtmlVersionId : null,
       uploadedByAdminUserId: actor.adminUserId,
       uploadedByManagerId: actor.managerId,
     });
@@ -207,6 +252,7 @@ export async function PUT(request: Request, context: Context) {
         sha256: result.version.sha256,
         snapshotFormat: result.version.snapshotFormat,
         dashboardProfile: result.version.dashboardProfile,
+        boundHtmlVersionId: result.version.boundHtmlVersionId,
         prunedVersionIds: result.prunedVersionIds,
       },
     });

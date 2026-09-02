@@ -1,11 +1,15 @@
 export type TopDashboardVersionStatus = 'active' | 'draft' | 'archived';
 
-export type TopDashboardSnapshotFormat = 'kts-bundle-v1' | 'purchases-v1';
+export type TopDashboardSnapshotFormat =
+  | 'kts-bundle-v1'
+  | 'purchases-v1'
+  | 'multi-file-v1';
 
 export type TopDashboardProfile =
   | 'sales-analytics'
   | 'assortment-optimization'
-  | 'purchases';
+  | 'purchases'
+  | 'generic';
 
 export type TopDashboardBlockDataVersionStatus = 'active' | 'previous' | 'archived';
 
@@ -17,6 +21,7 @@ export type TopDashboardBlockDataVersion = {
   sha256: string;
   snapshotFormat: TopDashboardSnapshotFormat;
   dashboardProfile: TopDashboardProfile;
+  boundHtmlVersionId: number | null;
   status: TopDashboardBlockDataVersionStatus;
   uploadedByName: string;
   createdAt: string;
@@ -38,6 +43,7 @@ export type TopDashboardBlockDataVersionContent = {
   sha256: string;
   snapshotFormat: TopDashboardSnapshotFormat;
   dashboardProfile: TopDashboardProfile;
+  boundHtmlVersionId: number | null;
   createdAt: string;
 };
 
@@ -54,6 +60,7 @@ export type CreateAndActivateTopDashboardBlockDataVersionInput = {
   sha256: string;
   snapshotFormat: TopDashboardSnapshotFormat;
   dashboardProfile: TopDashboardProfile;
+  boundHtmlVersionId: number | null;
   uploadedByAdminUserId: number | null;
   uploadedByManagerId: number | null;
 };

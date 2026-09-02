@@ -9,7 +9,9 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: __dirname,
   experimental: {
     optimizePackageImports: ["react-select", "@emotion/react"],
-    proxyClientMaxBodySize: "17mb",
+    // The domain parser still enforces a strict 100 MiB payload limit. The
+    // extra MiB is reserved only for multipart headers and field metadata.
+    proxyClientMaxBodySize: "101mb",
   },
   images: {
     formats: ["image/avif", "image/webp"],

@@ -12,6 +12,16 @@ import {
   TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE,
 } from './topDashboardDownloadBridge';
 import { TOP_DASHBOARD_DATA_MAX_BYTES } from './topDashboardLimits';
+import {
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAGIC,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_MIME_TYPE_BYTES,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_RELATIVE_PATH_BYTES,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION,
+} from './topDashboardMultiFileSnapshot';
 
 const INLINE_SCRIPT_PATTERN = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi;
 const INLINE_EVENT_HANDLER_PATTERN = /\son[a-z][\w:-]*\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
@@ -19,16 +29,27 @@ const HEAD_OPEN_PATTERN = /<head\b[^>]*>/i;
 const DOCTYPE_PATTERN = /<!doctype\b[^>]*>/i;
 
 export const TOP_DASHBOARD_DATA_MESSAGE_MARKER = 'kts-top-dashboard-data-v1';
+export const TOP_DASHBOARD_MULTI_FILE_MESSAGE_MARKER =
+  'kts-top-dashboard-multi-file-v1';
 export { TOP_DASHBOARD_DATA_MAX_BYTES } from './topDashboardLimits';
 export const TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE = 'data-kts-top-dashboard-data-adapter';
+
+export type TopDashboardDataContract = {
+  mode: 'legacy' | 'generic' | 'disabled';
+  snapshotFormat: TopDashboardSnapshotFormat | null;
+  profile: TopDashboardProfile | null;
+};
 
 export function detectTopDashboardExpectedProfile(
   htmlContent: string,
 ): TopDashboardProfile | null {
-  if (
+  const hasPurchasesInput =
     /\bid\s*=\s*(?:"snapInp"|'snapInp')/i.test(htmlContent)
-    || /\bgetElementById\(\s*(?:"snapInp"|'snapInp')\s*\)/i.test(htmlContent)
-  ) {
+    || /\bgetElementById\(\s*(?:"snapInp"|'snapInp')\s*\)/i.test(htmlContent);
+  const hasPurchasesSignature =
+    /\bPARSERS\s*\.\s*purchases\b/i.test(htmlContent)
+    || /(?:<title\b[^>]*>|Дашборд\s*[«"]?)\s*[^<\n]{0,80}Управление\s+закупками/iu.test(htmlContent);
+  if (hasPurchasesInput && hasPurchasesSignature) {
     return 'purchases';
   }
 
@@ -71,6 +92,27 @@ export function detectTopDashboardExpectedSnapshotFormat(
   return null;
 }
 
+export function detectTopDashboardDataContract(
+  htmlContent: string,
+): TopDashboardDataContract {
+  const profile = detectTopDashboardExpectedProfile(htmlContent);
+  const snapshotFormat = detectTopDashboardExpectedSnapshotFormat(htmlContent);
+  if (profile && snapshotFormat) {
+    return { mode: 'legacy', snapshotFormat, profile };
+  }
+  const hasStaticFileInput = /<input\b(?=[^>]*\btype\s*=\s*(?:"file"|'file'|file\b))[^>]*>/iu
+    .test(htmlContent);
+  const createsInputAtRuntime = /\b(?:document\s*\.\s*)?createElement\s*\(\s*(?:"input"|'input')\s*\)/iu
+    .test(htmlContent);
+  const assignsRuntimeFileType = /(?:\.\s*type\s*=\s*(?:"file"|'file')|\.\s*setAttribute\s*\(\s*(?:"type"|'type')\s*,\s*(?:"file"|'file')\s*\)|\btype\s*:\s*(?:"file"|'file'))/iu
+    .test(htmlContent);
+  const hasFileInput = hasStaticFileInput
+    || (createsInputAtRuntime && assignsRuntimeFileType);
+  return hasFileInput
+    ? { mode: 'generic', snapshotFormat: 'multi-file-v1', profile: 'generic' }
+    : { mode: 'disabled', snapshotFormat: null, profile: null };
+}
+
 function sha256Source(value: string) {
   return `'sha256-${createHash('sha256').update(value, 'utf8').digest('base64')}'`;
 }
@@ -93,9 +135,11 @@ export function getTopDashboardDataAdapterScript(
   return String.raw`(() => {
   'use strict';
   const MARKER = '${TOP_DASHBOARD_DATA_MESSAGE_MARKER}';
+  const MULTI_FILE_MARKER = '${TOP_DASHBOARD_MULTI_FILE_MESSAGE_MARKER}';
   const MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES};
   const EXPECTED_FORMAT = ${expectedFormatJson};
   const EXPECTED_PROFILE = ${expectedProfileJson};
+  const MULTI_FILE_MODE = EXPECTED_FORMAT === 'multi-file-v1' && EXPECTED_PROFILE === 'generic';
   const READ_ONLY = ${readOnlyJson};
   const DOWNLOAD_MARKER = '${TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER}';
   const DOWNLOAD_MAX_BYTES = ${TOP_DASHBOARD_DOWNLOAD_MAX_BYTES};
@@ -111,6 +155,7 @@ export function getTopDashboardDataAdapterScript(
   let pendingSnapshot = null;
   let inputObserver = null;
   let inputTimeout = 0;
+  let multiFileRestorePending = false;
 
   /*
    * Some dashboards open a blank page with noopener and then fill the returned
@@ -248,6 +293,199 @@ export function getTopDashboardDataAdapterScript(
     return value instanceof HTMLInputElement && value.type === 'file';
   }
 
+  function allFileInputs() {
+    return Array.from(document.querySelectorAll('input[type="file"]')).filter(isFileInput);
+  }
+
+  function uniqueInputText(inputs, input, property) {
+    const value = input[property];
+    if (typeof value !== 'string' || !value || value !== value.trim()) return null;
+    return inputs.filter((candidate) => candidate[property] === value).length === 1
+      ? value
+      : null;
+  }
+
+  function multiFileTarget(input) {
+    const inputs = allFileInputs();
+    const index = inputs.indexOf(input);
+    if (index < 0 || index > ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX}) return null;
+    return {
+      id: uniqueInputText(inputs, input, 'id'),
+      name: uniqueInputText(inputs, input, 'name'),
+      index,
+    };
+  }
+
+  function fileInputForDropTarget(value) {
+    if (isFileInput(value)) return value;
+    if (!(value instanceof Element)) return null;
+
+    const explicitOwner = value.closest('label[for],[data-file-input],[data-input],[aria-controls]');
+    if (explicitOwner) {
+      const reference = explicitOwner.getAttribute('for')
+        || explicitOwner.getAttribute('data-file-input')
+        || explicitOwner.getAttribute('data-input')
+        || explicitOwner.getAttribute('aria-controls');
+      const referencedInput = reference ? document.getElementById(reference) : null;
+      if (isFileInput(referencedInput)) return referencedInput;
+    }
+
+    let container = value;
+    while (container && container !== document.documentElement) {
+      const containedInputs = Array.from(container.querySelectorAll('input[type="file"]'))
+        .filter(isFileInput);
+      if (containedInputs.length === 1) return containedInputs[0];
+      if (containedInputs.length > 1) break;
+      container = container.parentElement;
+    }
+
+    const inputs = allFileInputs();
+    return inputs.length === 1 ? inputs[0] : null;
+  }
+
+  function captureMultiFiles(input, sourceFiles) {
+    const target = multiFileTarget(input);
+    const files = Array.from(sourceFiles || []);
+    const totalBytes = files.reduce((total, file) => total + file.size, 0);
+    if (
+      !target
+      || files.length === 0
+      || files.length > ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET}
+      || totalBytes <= 0
+      || totalBytes > MAX_BYTES
+    ) {
+      report('MULTI_FILE_SELECTION_INVALID');
+      return;
+    }
+    window.parent.postMessage(
+      {
+        marker: MULTI_FILE_MARKER,
+        type: 'files-selected',
+        target,
+        merge: input.multiple || input.hasAttribute('webkitdirectory'),
+        files: files.map((file) => ({
+          name: file.name,
+          type: file.type || '',
+          lastModified: file.lastModified,
+          webkitRelativePath: typeof file.webkitRelativePath === 'string'
+            ? file.webkitRelativePath
+            : '',
+          blob: file,
+        })),
+      },
+      '*',
+    );
+  }
+
+  function captureMultiFileSelection(event) {
+    if (!MULTI_FILE_MODE || READ_ONLY || !event.isTrusted || !isFileInput(event.target)) return;
+    captureMultiFiles(event.target, event.target.files);
+  }
+
+  function captureMultiFileDrop(event) {
+    if (!MULTI_FILE_MODE || READ_ONLY || !event.isTrusted) return;
+    const transfer = event.dataTransfer;
+    if (!transfer || transfer.files.length === 0) return;
+    const input = fileInputForDropTarget(event.target);
+    if (!input) {
+      report('MULTI_FILE_DROP_TARGET_NOT_FOUND');
+      return;
+    }
+    // Observe the trusted drop without cancelling it. The dashboard's own
+    // capture/bubble handlers still receive the original DataTransfer.
+    captureMultiFiles(input, transfer.files);
+  }
+
+  function matchesMultiFileTarget(input, target) {
+    const inputs = allFileInputs();
+    if (target.id && uniqueInputText(inputs, input, 'id') === target.id) return true;
+    if (target.name && uniqueInputText(inputs, input, 'name') === target.name) return true;
+    return inputs[target.index] === input;
+  }
+
+  async function waitForMultiFileInput(target) {
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const input = allFileInputs().find((candidate) => matchesMultiFileTarget(candidate, target));
+      if (input) return input;
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    }
+    return null;
+  }
+
+  function restoreRelativePath(file, value) {
+    if (!value) return;
+    try {
+      Object.defineProperty(file, 'webkitRelativePath', {
+        configurable: true,
+        enumerable: true,
+        value,
+      });
+    } catch {}
+  }
+
+  async function installMultiFileSnapshot(targets) {
+    if (multiFileRestorePending) return;
+    multiFileRestorePending = true;
+    let installedFiles = 0;
+    try {
+      if (!Array.isArray(targets) || targets.length === 0 || targets.length > ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS}) {
+        throw new Error('invalid targets');
+      }
+      for (const entry of targets) {
+        if (!entry || typeof entry !== 'object' || !entry.target || !Array.isArray(entry.files)) {
+          throw new Error('invalid target');
+        }
+        const input = await waitForMultiFileInput(entry.target);
+        if (!input) throw new Error('missing input');
+        const transfer = new DataTransfer();
+        for (const candidate of entry.files) {
+          const name = candidate && typeof candidate.name === 'string' ? candidate.name : '';
+          const blob = candidate && candidate.blob;
+          if (!name || !(blob instanceof Blob) || blob.size <= 0 || blob.size > MAX_BYTES) {
+            throw new Error('invalid file');
+          }
+          const type = candidate && typeof candidate.type === 'string' ? candidate.type : '';
+          const lastModified = candidate && Number.isSafeInteger(candidate.lastModified)
+            && candidate.lastModified >= 0
+            ? candidate.lastModified
+            : 0;
+          const relativePath = candidate && typeof candidate.webkitRelativePath === 'string'
+            ? candidate.webkitRelativePath
+            : '';
+          const restoredFile = new File([blob], name, { type, lastModified });
+          restoreRelativePath(restoredFile, relativePath);
+          transfer.items.add(restoredFile);
+          installedFiles += 1;
+        }
+        input.files = transfer.files;
+        entry.files.forEach((candidate, index) => {
+          const installedFile = input.files && input.files[index];
+          if (installedFile && candidate && typeof candidate.webkitRelativePath === 'string') {
+            restoreRelativePath(installedFile, candidate.webkitRelativePath);
+          }
+        });
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
+      }
+      lockFileInputs();
+      window.parent.postMessage(
+        { marker: MULTI_FILE_MARKER, type: 'files-installed', fileCount: installedFiles },
+        '*',
+      );
+    } catch {
+      report('MULTI_FILE_INSTALL_FAILED');
+    } finally {
+      multiFileRestorePending = false;
+    }
+  }
+
+  if (MULTI_FILE_MODE && !READ_ONLY) {
+    document.addEventListener('change', captureMultiFileSelection, true);
+    document.addEventListener('drop', captureMultiFileDrop, true);
+  }
+
   function lockFileInputs() {
     if (!READ_ONLY) return;
     document.querySelectorAll('input[type="file"]').forEach((input) => {
@@ -347,7 +585,16 @@ export function getTopDashboardDataAdapterScript(
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent) return;
     const data = event.data;
-    if (!data || typeof data !== 'object' || data.marker !== MARKER) return;
+    if (!data || typeof data !== 'object') return;
+    if (
+      data.marker === MULTI_FILE_MARKER
+      && data.type === 'restore-files'
+      && MULTI_FILE_MODE
+    ) {
+      void installMultiFileSnapshot(data.targets);
+      return;
+    }
+    if (data.marker !== MARKER) return;
     if (data.type === 'bridge-probe') {
       ready();
       return;
@@ -364,6 +611,7 @@ export function getTopDashboardDataAdapterScript(
     send('adapter-ready', {
       expectedFormat: EXPECTED_FORMAT,
       expectedProfile: EXPECTED_PROFILE,
+      multiFileMode: MULTI_FILE_MODE,
     });
   }
   if (document.readyState === 'loading') {
@@ -378,8 +626,9 @@ export function injectTopDashboardDataAdapter(
   htmlContent: string,
   options: { readOnly?: boolean } = {},
 ) {
-  const expectedFormat = detectTopDashboardExpectedSnapshotFormat(htmlContent);
-  const expectedProfile = detectTopDashboardExpectedProfile(htmlContent);
+  const contract = detectTopDashboardDataContract(htmlContent);
+  const expectedFormat = contract.snapshotFormat;
+  const expectedProfile = contract.profile;
   const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, options.readOnly === true)}</script>`;
   const head = HEAD_OPEN_PATTERN.exec(htmlContent);
   if (head) {
@@ -396,16 +645,30 @@ export function injectTopDashboardDataAdapter(
   return `${adapter}${htmlContent}`;
 }
 
-export function createTopDashboardFrameBridgeScript(blockId: number) {
+export function createTopDashboardFrameBridgeScript(
+  blockId: number,
+  htmlVersionId: number,
+  canManage: boolean,
+) {
   const config = JSON.stringify({
     dataPath: `/api/admin/top-dashboard/blocks/${blockId}/data`,
+    htmlVersionId,
+    canManage,
   });
 
   return String.raw`(() => {
   'use strict';
   const CONFIG = ${config};
   const MARKER = '${TOP_DASHBOARD_DATA_MESSAGE_MARKER}';
+  const MULTI_FILE_MARKER = '${TOP_DASHBOARD_MULTI_FILE_MESSAGE_MARKER}';
   const MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES};
+  const MULTI_FILE_MAGIC = ${JSON.stringify(TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAGIC)};
+  const MULTI_FILE_VERSION = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION};
+  const MULTI_FILE_MAX_TARGETS = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS};
+  const MULTI_FILE_MAX_FILES = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES};
+  const MULTI_FILE_MAX_FILES_PER_TARGET = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET};
+  const MULTI_FILE_MAX_MIME_BYTES = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_MIME_TYPE_BYTES};
+  const MULTI_FILE_MAX_PATH_BYTES = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_RELATIVE_PATH_BYTES};
   const DOWNLOAD_MARKER = '${TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER}';
   const DOWNLOAD_MAX_BYTES = ${TOP_DASHBOARD_DOWNLOAD_MAX_BYTES};
   const DOWNLOAD_MAX_NAME_LENGTH = ${TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH};
@@ -420,6 +683,12 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
   let probeAttempts = 0;
   let adapterExpectedFormat = '';
   let adapterExpectedProfile = '';
+  let activeDataVersionId = null;
+  let multiFileTargets = new Map();
+  let loadPromise = null;
+  let saveRequested = 0;
+  let saveCompleted = 0;
+  let saveLoopRunning = false;
 
   function showNotice(kind, message, autoHide) {
     if (!(notice instanceof HTMLElement)) return;
@@ -443,6 +712,299 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
     return value instanceof ArrayBuffer
       && value.byteLength > 0
       && value.byteLength <= MAX_BYTES;
+  }
+
+  const textEncoder = new TextEncoder();
+  const textDecoder = new TextDecoder('utf-8', { fatal: true });
+  const unsafeFileName = /[\/\\\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u;
+  const unsafeTargetText = /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u;
+  const unsafeRelativePath = /[\\\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u;
+  const mimeTypePattern = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u;
+
+  function safeFileName(value) {
+    if (typeof value !== 'string') return '';
+    let name;
+    try { name = value.normalize('NFC').trim(); } catch { return ''; }
+    if (!name || name === '.' || name === '..' || unsafeFileName.test(name)) return '';
+    return textEncoder.encode(name).byteLength <= 255 ? name : '';
+  }
+
+  function safeTargetText(value) {
+    if (value == null || value === '') return null;
+    if (typeof value !== 'string') return undefined;
+    let normalized;
+    try { normalized = value.normalize('NFC'); } catch { return undefined; }
+    if (
+      !normalized
+      || normalized !== normalized.trim()
+      || unsafeTargetText.test(normalized)
+      || textEncoder.encode(normalized).byteLength > 512
+    ) return undefined;
+    return normalized;
+  }
+
+  function safeMimeType(value) {
+    if (value == null || value === '') return '';
+    if (
+      typeof value !== 'string'
+      || value !== value.trim()
+      || !mimeTypePattern.test(value)
+      || textEncoder.encode(value).byteLength > MULTI_FILE_MAX_MIME_BYTES
+    ) return undefined;
+    return value;
+  }
+
+  function safeRelativePath(value, fileName) {
+    if (value == null || value === '') return '';
+    if (typeof value !== 'string') return undefined;
+    let normalized;
+    try { normalized = value.normalize('NFC'); } catch { return undefined; }
+    const segments = normalized.split('/');
+    if (
+      normalized !== normalized.trim()
+      || normalized.startsWith('/')
+      || normalized.endsWith('/')
+      || unsafeRelativePath.test(normalized)
+      || segments.some((segment) => !segment || segment === '.' || segment === '..')
+      || segments[segments.length - 1] !== fileName
+      || textEncoder.encode(normalized).byteLength > MULTI_FILE_MAX_PATH_BYTES
+    ) return undefined;
+    return normalized;
+  }
+
+  function normalizedMultiFileTarget(value) {
+    if (!value || typeof value !== 'object') return null;
+    const index = value.index;
+    const id = safeTargetText(value.id);
+    const name = safeTargetText(value.name);
+    if (
+      !Number.isInteger(index)
+      || index < 0
+      || index > ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX}
+      || id === undefined
+      || name === undefined
+    ) return null;
+    return { id, name, index };
+  }
+
+  function multiFileTargetKey(target) {
+    if (target.id) return 'id:' + target.id;
+    if (target.name) return 'name:' + target.name;
+    return 'index:' + target.index;
+  }
+
+  function normalizeSelectedFiles(value) {
+    if (!Array.isArray(value) || value.length === 0 || value.length > MULTI_FILE_MAX_FILES_PER_TARGET) {
+      return null;
+    }
+    const identities = new Set();
+    const files = [];
+    let total = 0;
+    for (const candidate of value) {
+      const blob = candidate instanceof Blob ? candidate : candidate && candidate.blob;
+      const name = safeFileName(candidate && candidate.name);
+      const type = safeMimeType(candidate && candidate.type);
+      const relativePath = safeRelativePath(candidate && candidate.webkitRelativePath, name);
+      const lastModified = candidate && Number.isSafeInteger(candidate.lastModified)
+        && candidate.lastModified >= 0
+        ? candidate.lastModified
+        : 0;
+      const identity = relativePath || name;
+      if (
+        !name
+        || type === undefined
+        || relativePath === undefined
+        || identities.has(identity)
+        || !(blob instanceof Blob)
+        || blob.size <= 0
+      ) return null;
+      identities.add(identity);
+      total += blob.size;
+      if (total > MAX_BYTES) return null;
+      files.push({ name, type, lastModified, webkitRelativePath: relativePath, blob });
+    }
+    return files;
+  }
+
+  function encodeMultiFileSnapshot(sourceTargets) {
+    const targets = Array.from((sourceTargets || multiFileTargets).values())
+      .sort((a, b) => a.target.index - b.target.index);
+    if (targets.length === 0 || targets.length > MULTI_FILE_MAX_TARGETS) throw new Error('invalid targets');
+    const prepared = [];
+    let totalLength = 24;
+    let totalFiles = 0;
+    for (const entry of targets) {
+      const target = normalizedMultiFileTarget(entry.target);
+      const files = normalizeSelectedFiles(entry.files);
+      if (!target || !files) throw new Error('invalid target');
+      const idBytes = target.id ? textEncoder.encode(target.id) : new Uint8Array(0);
+      const targetNameBytes = target.name ? textEncoder.encode(target.name) : new Uint8Array(0);
+      totalFiles += files.length;
+      if (totalFiles > MULTI_FILE_MAX_FILES) throw new Error('too many files');
+      totalLength += 12 + idBytes.byteLength + targetNameBytes.byteLength;
+      const preparedFiles = [];
+      for (const file of files) {
+        const fileNameBytes = textEncoder.encode(file.name);
+        const mimeTypeBytes = textEncoder.encode(file.type);
+        const relativePathBytes = textEncoder.encode(file.webkitRelativePath);
+        totalLength += 20
+          + fileNameBytes.byteLength
+          + mimeTypeBytes.byteLength
+          + relativePathBytes.byteLength
+          + file.blob.size;
+        if (totalLength > MAX_BYTES) throw new Error('too large');
+        preparedFiles.push({ ...file, fileNameBytes, mimeTypeBytes, relativePathBytes });
+      }
+      prepared.push({ target, idBytes, targetNameBytes, files: preparedFiles });
+    }
+
+    const header = new Uint8Array(24);
+    header.set(textEncoder.encode(MULTI_FILE_MAGIC), 0);
+    const headerView = new DataView(header.buffer);
+    headerView.setUint16(8, MULTI_FILE_VERSION, false);
+    headerView.setUint32(12, totalLength, false);
+    headerView.setUint16(16, prepared.length, false);
+    headerView.setUint32(20, totalFiles, false);
+    const parts = [header];
+    for (const entry of prepared) {
+      const targetHeader = new Uint8Array(12);
+      const targetView = new DataView(targetHeader.buffer);
+      targetView.setUint32(0, entry.target.index, false);
+      targetView.setUint16(4, entry.idBytes.byteLength, false);
+      targetView.setUint16(6, entry.targetNameBytes.byteLength, false);
+      targetView.setUint16(8, entry.files.length, false);
+      parts.push(targetHeader, entry.idBytes, entry.targetNameBytes);
+      for (const file of entry.files) {
+        const fileHeader = new Uint8Array(20);
+        const fileView = new DataView(fileHeader.buffer);
+        fileView.setUint16(0, file.fileNameBytes.byteLength, false);
+        fileView.setUint16(2, file.mimeTypeBytes.byteLength, false);
+        fileView.setUint16(4, file.relativePathBytes.byteLength, false);
+        fileView.setUint32(8, file.blob.size, false);
+        fileView.setUint32(12, Math.floor(file.lastModified / 0x100000000), false);
+        fileView.setUint32(16, file.lastModified % 0x100000000, false);
+        parts.push(
+          fileHeader,
+          file.fileNameBytes,
+          file.mimeTypeBytes,
+          file.relativePathBytes,
+          file.blob,
+        );
+      }
+    }
+    const blob = new Blob(parts, { type: 'application/octet-stream' });
+    if (blob.size !== totalLength) throw new Error('invalid length');
+    return blob;
+  }
+
+  function decodeMultiFileSnapshot(buffer) {
+    if (!validBuffer(buffer) || buffer.byteLength < 24) throw new Error('invalid buffer');
+    const bytes = new Uint8Array(buffer);
+    const view = new DataView(buffer);
+    if (textDecoder.decode(bytes.subarray(0, 8)) !== MULTI_FILE_MAGIC) throw new Error('invalid magic');
+    if (
+      view.getUint16(8, false) !== MULTI_FILE_VERSION
+      || view.getUint16(10, false) !== 0
+      || view.getUint32(12, false) !== buffer.byteLength
+      || view.getUint16(18, false) !== 0
+    ) throw new Error('invalid header');
+    const targetCount = view.getUint16(16, false);
+    const declaredFileCount = view.getUint32(20, false);
+    if (
+      targetCount <= 0
+      || targetCount > MULTI_FILE_MAX_TARGETS
+      || declaredFileCount <= 0
+      || declaredFileCount > MULTI_FILE_MAX_FILES
+    ) throw new Error('invalid count');
+
+    let offset = 24;
+    let fileCount = 0;
+    const targets = [];
+    const indexes = new Set();
+    const ids = new Set();
+    const readText = (length) => {
+      if (length < 0 || offset + length > bytes.byteLength) throw new Error('truncated');
+      const value = textDecoder.decode(bytes.subarray(offset, offset + length));
+      offset += length;
+      return value;
+    };
+    for (let targetNumber = 0; targetNumber < targetCount; targetNumber += 1) {
+      if (offset + 12 > bytes.byteLength) throw new Error('truncated');
+      const index = view.getUint32(offset, false);
+      const idLength = view.getUint16(offset + 4, false);
+      const nameLength = view.getUint16(offset + 6, false);
+      const perTargetFiles = view.getUint16(offset + 8, false);
+      const reserved = view.getUint16(offset + 10, false);
+      offset += 12;
+      if (
+        reserved !== 0
+        || index > ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX}
+        || indexes.has(index)
+        || idLength > 512
+        || nameLength > 512
+        || perTargetFiles <= 0
+        || perTargetFiles > MULTI_FILE_MAX_FILES_PER_TARGET
+      ) throw new Error('invalid target');
+      indexes.add(index);
+      const id = idLength ? safeTargetText(readText(idLength)) : null;
+      const name = nameLength ? safeTargetText(readText(nameLength)) : null;
+      if (id === undefined || name === undefined || (id && ids.has(id))) throw new Error('invalid target');
+      if (id) ids.add(id);
+      const files = [];
+      const fileIdentities = new Set();
+      for (let fileNumber = 0; fileNumber < perTargetFiles; fileNumber += 1) {
+        if (offset + 20 > bytes.byteLength) throw new Error('truncated');
+        const fileNameLength = view.getUint16(offset, false);
+        const mimeTypeLength = view.getUint16(offset + 2, false);
+        const relativePathLength = view.getUint16(offset + 4, false);
+        const fileReserved = view.getUint16(offset + 6, false);
+        const contentLength = view.getUint32(offset + 8, false);
+        const lastModified = view.getUint32(offset + 12, false) * 0x100000000
+          + view.getUint32(offset + 16, false);
+        offset += 20;
+        if (
+          fileReserved !== 0
+          || fileNameLength <= 0
+          || fileNameLength > 255
+          || mimeTypeLength > MULTI_FILE_MAX_MIME_BYTES
+          || relativePathLength > MULTI_FILE_MAX_PATH_BYTES
+          || contentLength <= 0
+          || !Number.isSafeInteger(lastModified)
+        ) {
+          throw new Error('invalid file');
+        }
+        const fileName = safeFileName(readText(fileNameLength));
+        const type = safeMimeType(mimeTypeLength ? readText(mimeTypeLength) : '');
+        const relativePath = safeRelativePath(
+          relativePathLength ? readText(relativePathLength) : '',
+          fileName,
+        );
+        const identity = relativePath || fileName;
+        if (
+          !fileName
+          || type === undefined
+          || relativePath === undefined
+          || fileIdentities.has(identity)
+          || offset + contentLength > bytes.byteLength
+        ) {
+          throw new Error('invalid file');
+        }
+        fileIdentities.add(identity);
+        const blob = new Blob([bytes.subarray(offset, offset + contentLength)], { type });
+        offset += contentLength;
+        files.push({
+          name: fileName,
+          type,
+          lastModified,
+          webkitRelativePath: relativePath,
+          blob,
+        });
+        fileCount += 1;
+      }
+      targets.push({ target: { id, name, index }, files });
+    }
+    if (fileCount !== declaredFileCount || offset !== bytes.byteLength) throw new Error('invalid length');
+    return targets;
   }
 
   function normalizeDownloadName(value) {
@@ -492,7 +1054,9 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
 
   function responseFormat(response) {
     const value = response.headers.get('X-Top-Dashboard-Data-Snapshot-Format') || '';
-    return value === 'kts-bundle-v1' || value === 'purchases-v1' ? value : '';
+    return value === 'kts-bundle-v1' || value === 'purchases-v1' || value === 'multi-file-v1'
+      ? value
+      : '';
   }
 
   function responseProfile(response) {
@@ -500,8 +1064,14 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
     return value === 'sales-analytics'
       || value === 'assortment-optimization'
       || value === 'purchases'
+      || value === 'generic'
       ? value
       : '';
+  }
+
+  function responseBoundHtmlVersion(response) {
+    const value = response.headers.get('X-Top-Dashboard-Data-Bound-Html-Version-Id') || '';
+    return /^[1-9]\d*$/.test(value) ? Number(value) : null;
   }
 
   function postSnapshot(name, buffer) {
@@ -510,6 +1080,15 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
       { marker: MARKER, type: 'snapshot-data', name, buffer },
       '*',
       [buffer],
+    );
+    return true;
+  }
+
+  function postMultiFileSnapshot(targets) {
+    if (!(iframe instanceof HTMLIFrameElement) || !iframe.contentWindow) return false;
+    iframe.contentWindow.postMessage(
+      { marker: MULTI_FILE_MARKER, type: 'restore-files', targets },
+      '*',
     );
     return true;
   }
@@ -539,6 +1118,8 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
     }
 
     if (response.status === 404) {
+      activeDataVersionId = null;
+      if (adapterExpectedFormat === 'multi-file-v1') multiFileTargets = new Map();
       return true;
     }
     if (!response.ok) {
@@ -546,7 +1127,6 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
       return false;
     }
 
-    const name = responseName(response);
     const versionId = responseVersion(response);
     const snapshotFormat = responseFormat(response);
     const snapshotProfile = responseProfile(response);
@@ -558,14 +1138,167 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
       return false;
     }
     const buffer = await response.arrayBuffer().catch(() => null);
-    if (!name || !versionId || !snapshotFormat || !snapshotProfile || !validBuffer(buffer)) {
+    if (!versionId || !snapshotFormat || !snapshotProfile || !validBuffer(buffer)) {
       showNotice('error', 'Сохранённый файл данных повреждён или слишком большой', false);
       return false;
     }
 
+    activeDataVersionId = Number(versionId);
+    if (snapshotFormat === 'multi-file-v1' && snapshotProfile === 'generic') {
+      if (responseBoundHtmlVersion(response) !== CONFIG.htmlVersionId) {
+        showNotice('error', 'Сохранённые файлы относятся к другой версии HTML', false);
+        return false;
+      }
+      let targets;
+      try {
+        targets = decodeMultiFileSnapshot(buffer);
+      } catch {
+        showNotice('error', 'Сохранённый набор файлов повреждён или слишком большой', false);
+        return false;
+      }
+      multiFileTargets = new Map(
+        targets.map((entry) => [multiFileTargetKey(entry.target), entry]),
+      );
+      postMultiFileSnapshot(targets);
+      if (showLoadedNotice) showNotice('pending', 'Восстанавливаем сохранённые файлы…', false);
+      return true;
+    }
+
+    const name = responseName(response);
+    if (!name) {
+      showNotice('error', 'Сохранённый файл данных повреждён или слишком большой', false);
+      return false;
+    }
     postSnapshot(name, buffer);
     if (showLoadedNotice) showNotice('pending', 'Открываем сохранённые данные…', false);
     return true;
+  }
+
+  async function saveCurrentMultiFileData() {
+    let blob;
+    try {
+      blob = encodeMultiFileSnapshot();
+    } catch {
+      showNotice('error', 'Выбранные файлы превышают допустимый размер или количество', false);
+      return false;
+    }
+
+    const formData = new FormData();
+    formData.set(
+      'expectedActiveVersionId',
+      activeDataVersionId === null ? '' : String(activeDataVersionId),
+    );
+    formData.set('expectedActiveHtmlVersionId', String(CONFIG.htmlVersionId));
+    formData.set('file', new File([blob], 'dashboard-files.ktsmf', {
+      type: 'application/octet-stream',
+    }));
+
+    let response;
+    try {
+      response = await fetch(CONFIG.dataPath, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          'X-KTS-Top-Dashboard-Multi-File': '1',
+        },
+        body: formData,
+      });
+    } catch {
+      showNotice('error', 'Файлы открыты, но не сохранены на сервере', false);
+      return false;
+    }
+
+    if (!response.ok) {
+      showNotice(
+        'error',
+        await responseError(response, 'Файлы открыты, но не сохранены на сервере'),
+        false,
+      );
+      return false;
+    }
+    let payload;
+    try { payload = await response.json(); } catch { payload = null; }
+    const nextVersionId = payload && payload.state && payload.state.activeVersionId;
+    if (!Number.isSafeInteger(nextVersionId) || nextVersionId <= 0) {
+      showNotice('error', 'Сервер сохранил файлы, но вернул некорректный ответ', false);
+      return false;
+    }
+    activeDataVersionId = nextVersionId;
+    return true;
+  }
+
+  async function runMultiFileSaveLoop() {
+    if (saveLoopRunning) return;
+    saveLoopRunning = true;
+    try {
+      while (saveCompleted < saveRequested) {
+        const requestedRevision = saveRequested;
+        showNotice('pending', 'Сохраняем выбранные файлы…', false);
+        const saved = await saveCurrentMultiFileData();
+        if (!saved) {
+          saveCompleted = saveRequested;
+          return;
+        }
+        saveCompleted = requestedRevision;
+      }
+      const fileCount = Array.from(multiFileTargets.values())
+        .reduce((total, entry) => total + entry.files.length, 0);
+      showNotice('success', fileCount + ' файл(ов) сохранено для всех пользователей', true);
+    } finally {
+      saveLoopRunning = false;
+      if (saveCompleted < saveRequested) void runMultiFileSaveLoop();
+    }
+  }
+
+  async function acceptMultiFileSelection(data) {
+    if (!CONFIG.canManage || adapterExpectedFormat !== 'multi-file-v1' || adapterExpectedProfile !== 'generic') {
+      return;
+    }
+    if (loadPromise && !(await loadPromise)) {
+      showNotice('error', 'Не удалось проверить текущую версию сохранённых файлов', false);
+      return;
+    }
+    const target = normalizedMultiFileTarget(data.target);
+    const files = normalizeSelectedFiles(data.files);
+    if (!target || !files) {
+      showNotice('error', 'HTML передал недопустимый набор файлов', false);
+      return;
+    }
+    const key = multiFileTargetKey(target);
+    const current = multiFileTargets.get(key);
+    const merge = data.merge === true;
+    if (data.merge !== true && data.merge !== false) {
+      showNotice('error', 'HTML передал некорректный режим выбора файлов', false);
+      return;
+    }
+    const mergedByIdentity = new Map();
+    const fileIdentity = (file) => file.webkitRelativePath || file.name;
+    if (merge) {
+      for (const file of current ? current.files : []) {
+        mergedByIdentity.set(fileIdentity(file), file);
+      }
+    }
+    // Single-file inputs replace their previous snapshot. Multiple/folder
+    // inputs merge sequential selections; a newer identical path replaces it.
+    for (const file of files) mergedByIdentity.set(fileIdentity(file), file);
+    const mergedFiles = normalizeSelectedFiles(Array.from(mergedByIdentity.values()));
+    if (!mergedFiles) {
+      showNotice('error', 'Для одного поля выбрано слишком много файлов', false);
+      return;
+    }
+    const nextTargets = new Map(multiFileTargets);
+    nextTargets.set(key, { target, files: mergedFiles });
+    try {
+      encodeMultiFileSnapshot(nextTargets);
+    } catch {
+      showNotice('error', 'Выбранные файлы превышают допустимый размер или количество', false);
+      return;
+    }
+    multiFileTargets = nextTargets;
+    saveRequested += 1;
+    void runMultiFileSaveLoop();
   }
 
   function stopProbing() {
@@ -587,6 +1320,9 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
     SNAPSHOT_INPUT_NOT_FOUND: 'В HTML не найдено поле для файла данных',
     SNAPSHOT_INSTALL_FAILED: 'Не удалось подставить сохранённые данные в HTML',
     SNAPSHOT_INVALID: 'Сохранённый файл данных имеет неверный формат',
+    MULTI_FILE_SELECTION_INVALID: 'Выбранный набор файлов превышает допустимые ограничения',
+    MULTI_FILE_DROP_TARGET_NOT_FOUND: 'Не удалось связать область перетаскивания с полем выбора файлов',
+    MULTI_FILE_INSTALL_FAILED: 'Не удалось восстановить файлы в HTML-дашборде',
     DOWNLOAD_INVALID: 'HTML подготовил файл недопустимого формата или размера',
   };
 
@@ -614,21 +1350,40 @@ export function createTopDashboardFrameBridgeScript(blockId: number) {
       );
       return;
     }
+    if (data.marker === MULTI_FILE_MARKER) {
+      if (data.type === 'files-selected') {
+        void acceptMultiFileSelection(data);
+      } else if (data.type === 'files-installed') {
+        const fileCount = Number.isSafeInteger(data.fileCount) && data.fileCount > 0
+          ? data.fileCount
+          : 0;
+        showNotice(
+          'success',
+          fileCount > 0
+            ? 'Сохранённые файлы восстановлены: ' + fileCount
+            : 'Сохранённые файлы восстановлены',
+          true,
+        );
+      }
+      return;
+    }
     if (data.marker !== MARKER) return;
     if (data.type === 'adapter-ready') {
       if (!initialLoadStarted) {
         adapterExpectedFormat = data.expectedFormat === 'kts-bundle-v1'
           || data.expectedFormat === 'purchases-v1'
+          || data.expectedFormat === 'multi-file-v1'
           ? data.expectedFormat
           : '';
         adapterExpectedProfile = data.expectedProfile === 'sales-analytics'
           || data.expectedProfile === 'assortment-optimization'
           || data.expectedProfile === 'purchases'
+          || data.expectedProfile === 'generic'
           ? data.expectedProfile
           : '';
         initialLoadStarted = true;
         stopProbing();
-        void loadActiveData(true);
+        loadPromise = loadActiveData(true);
       }
       return;
     }
@@ -712,6 +1467,22 @@ export function getTopDashboardBlockDataFrameVersionId(
   blockId: number,
 ): number | null {
   if (request.method !== 'GET') return null;
+  return getTopDashboardBlockDataRequestFrameVersionId(request, blockId);
+}
+
+export function isTopDashboardBlockDataMutationFrameRequest(
+  request: Request,
+  blockId: number,
+  htmlVersionId: number,
+) {
+  if (request.method !== 'PUT') return false;
+  return getTopDashboardBlockDataRequestFrameVersionId(request, blockId) === htmlVersionId;
+}
+
+function getTopDashboardBlockDataRequestFrameVersionId(
+  request: Request,
+  blockId: number,
+): number | null {
   if (request.headers.get('sec-fetch-dest') !== 'empty') return null;
   if (request.headers.get('sec-fetch-mode') !== 'cors') return null;
   if (request.headers.get('sec-fetch-site') !== 'same-origin') return null;

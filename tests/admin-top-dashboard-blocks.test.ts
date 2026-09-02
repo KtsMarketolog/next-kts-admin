@@ -6,6 +6,10 @@ import {
   inspectGzipJsonWithLimit,
   readTopDashboardDataUpload,
 } from '../src/app/api/admin/top-dashboard/blocks/dataUpload';
+import {
+  readTopDashboardMultiFileDataUpload,
+  TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER,
+} from '../src/app/api/admin/top-dashboard/blocks/multiFileDataUpload';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
 import type {
   ActivateTopDashboardBlockVersionInput,
@@ -24,6 +28,7 @@ import {
   type CreateAndActivateTopDashboardBlockDataVersionInput,
 } from '../src/shared/lib/db/topDashboardDomain';
 import { isTopDashboardBlockFrameRequest } from '../src/shared/lib/topDashboardContentSecurity';
+import { encodeTopDashboardMultiFileSnapshot } from '../src/shared/lib/topDashboardMultiFileSnapshot';
 import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
@@ -101,6 +106,7 @@ test('TOP data mutations are bound to one HTML version and exact dashboard contr
     sha256: '0'.repeat(64),
     snapshotFormat: 'kts-bundle-v1',
     dashboardProfile: 'sales-analytics',
+    boundHtmlVersionId: null,
     uploadedByAdminUserId: null,
     uploadedByManagerId: 5,
   } satisfies CreateAndActivateTopDashboardBlockDataVersionInput;
@@ -117,6 +123,29 @@ test('TOP data mutations are bound to one HTML version and exact dashboard contr
 
   assert.equal(upload.dashboardProfile, rollback.expectedHtmlProfile);
   assert.equal(rollback.expectedActiveHtmlVersionId, 13);
+});
+
+test('universal TOP multi-file snapshots are explicitly bound to one HTML version', () => {
+  const upload = {
+    blockId: 7,
+    expectedActiveVersionId: null,
+    expectedActiveHtmlVersionId: 29,
+    expectedHtmlSnapshotFormat: 'multi-file-v1',
+    expectedHtmlProfile: 'generic',
+    originalName: 'dashboard-files.ktsmf',
+    content: Buffer.from('bundle'),
+    fileSize: 6,
+    uncompressedSize: 6,
+    sha256: '0'.repeat(64),
+    snapshotFormat: 'multi-file-v1',
+    dashboardProfile: 'generic',
+    boundHtmlVersionId: 29,
+    uploadedByAdminUserId: 3,
+    uploadedByManagerId: null,
+  } satisfies CreateAndActivateTopDashboardBlockDataVersionInput;
+
+  assert.equal(upload.boundHtmlVersionId, upload.expectedActiveHtmlVersionId);
+  assert.equal(upload.uncompressedSize, upload.fileSize);
 });
 
 test('TOP data compatibility failures have dedicated safe errors', () => {
@@ -203,6 +232,72 @@ function dataUploadRequest(file: File, expectedActiveVersionId = '') {
     body,
   });
 }
+
+function multiFileUploadRequest(bytes: ArrayBuffer, htmlVersionId = 29) {
+  const body = new FormData();
+  body.set('file', new File([bytes], 'dashboard-files.ktsmf'));
+  body.set('expectedActiveVersionId', '18');
+  body.set('expectedActiveHtmlVersionId', String(htmlVersionId));
+  return new Request('https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data', {
+    method: 'PUT',
+    headers: { [TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER]: '1' },
+    body,
+  });
+}
+
+test('universal TOP upload accepts a validated multi-input envelope without parsing files', async () => {
+  const encoded = encodeTopDashboardMultiFileSnapshot({
+    targets: [
+      {
+        target: { id: 'files', name: 'sources', index: 0 },
+        files: [
+          { name: 'sales.json.gz', bytes: Uint8Array.of(0x1f, 0x8b, 0xff) },
+          { name: 'companies.xlsx', bytes: Uint8Array.of(0x50, 0x4b, 0x03, 0x04) },
+        ],
+      },
+      {
+        target: { id: 'extra', index: 1 },
+        files: [{ name: 'extra.csv', bytes: Buffer.from('a,b\n1,2') }],
+      },
+    ],
+  });
+  const result = await readTopDashboardMultiFileDataUpload(multiFileUploadRequest(encoded));
+
+  assert.equal(result.error, undefined);
+  if (!result.parsed) return assert.fail('Expected a parsed universal snapshot');
+  assert.equal(result.parsed.expectedActiveVersionId, 18);
+  assert.equal(result.parsed.expectedActiveHtmlVersionId, 29);
+  assert.equal(result.parsed.upload.snapshotFormat, 'multi-file-v1');
+  assert.equal(result.parsed.upload.dashboardProfile, 'generic');
+  assert.equal(result.parsed.upload.boundHtmlVersionId, 29);
+  assert.equal(result.parsed.upload.fileSize, encoded.byteLength);
+  assert.equal(result.parsed.upload.uncompressedSize, encoded.byteLength);
+  assert.match(result.parsed.upload.sha256, /^[0-9a-f]{64}$/);
+});
+
+test('universal TOP upload rejects malformed envelopes and missing HTML binding', async () => {
+  const malformed = await readTopDashboardMultiFileDataUpload(
+    multiFileUploadRequest(Uint8Array.of(1, 2, 3, 4).buffer),
+  );
+  assert.equal(malformed.error?.status, 400);
+  assert.match(await malformed.error!.text(), /повреждён/i);
+
+  const encoded = encodeTopDashboardMultiFileSnapshot({
+    targets: [{
+      target: { index: 0 },
+      files: [{ name: 'data.json', bytes: Uint8Array.of(1) }],
+    }],
+  });
+  const body = new FormData();
+  body.set('file', new File([encoded], 'dashboard-files.ktsmf'));
+  body.set('expectedActiveVersionId', '');
+  const missingBinding = await readTopDashboardMultiFileDataUpload(new Request(
+    'https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data',
+    { method: 'PUT', body },
+  ));
+  assert.equal(missingBinding.error?.status, 400);
+  assert.match(await missingBinding.error!.text(), /активная версия HTML/i);
+});
 
 test('TOP dashboard data limits allow 100 MiB while bounding unpacked data and history', () => {
   assert.equal(TOP_DASHBOARD_DATA_MAX_MEGABYTES, 100);

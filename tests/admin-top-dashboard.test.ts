@@ -29,12 +29,14 @@ import {
   buildTopDashboardFrameSecurityPolicy,
   buildTopDashboardContentSecurityPolicy,
   createTopDashboardFrameBridgeScript,
+  detectTopDashboardDataContract,
   detectTopDashboardExpectedProfile,
   detectTopDashboardExpectedSnapshotFormat,
   getTopDashboardBlockDataFrameVersionId,
   getTopDashboardDataAdapterScript,
   injectTopDashboardDataAdapter,
   isTopDashboardBlockDataFrameRequest,
+  isTopDashboardBlockDataMutationFrameRequest,
   isTopDashboardBlockFrameRequest,
   TOP_DASHBOARD_DATA_MAX_BYTES,
 } from '../src/shared/lib/topDashboardContentSecurity';
@@ -476,7 +478,11 @@ test('dashboard data adapter is injected before application scripts and receives
 
 test('dashboard HTML declares the compatible snapshot family without trusting its filename', () => {
   assert.equal(
-    detectTopDashboardExpectedSnapshotFormat('<input id="snapInp" type="file">'),
+    detectTopDashboardExpectedSnapshotFormat(`
+      <title>КТС · Управление закупками</title>
+      <input id="snapInp" type="file">
+      <script>PARSERS.purchases = function () {};</script>
+    `),
     'purchases-v1',
   );
   assert.equal(
@@ -492,7 +498,56 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
     detectTopDashboardExpectedProfile('const DASH_NAME = "оптимизация_ассортимента";'),
     'assortment-optimization',
   );
-  assert.equal(detectTopDashboardExpectedProfile('<input id="snapInp" type="file">'), 'purchases');
+  assert.equal(
+    detectTopDashboardExpectedProfile('<input id="snapInp" type="file">'),
+    null,
+    'a common input id alone must not force the purchases legacy parser',
+  );
+  assert.deepEqual(
+    detectTopDashboardDataContract('<input id="snapInp" type="file">'),
+    { mode: 'generic', snapshotFormat: 'multi-file-v1', profile: 'generic' },
+  );
+
+  assert.deepEqual(
+    detectTopDashboardDataContract(
+      '<input type="file" multiple><script>if (value.format !== "kts-bundle") return;</script>',
+    ),
+    { mode: 'generic', snapshotFormat: 'multi-file-v1', profile: 'generic' },
+  );
+  assert.deepEqual(
+    detectTopDashboardDataContract('<main>Готовый отчёт без файлов</main>'),
+    { mode: 'disabled', snapshotFormat: null, profile: null },
+  );
+  assert.deepEqual(
+    detectTopDashboardDataContract(`
+      <script>
+        const upload = document.createElement('input');
+        upload.type = 'file';
+        document.body.append(upload);
+      </script>
+    `),
+    { mode: 'generic', snapshotFormat: 'multi-file-v1', profile: 'generic' },
+  );
+  assert.deepEqual(
+    detectTopDashboardDataContract(`
+      <script>
+        const upload = document.createElement("input");
+        upload.setAttribute("type", "file");
+        const DASH_NAME = "аналитика_продаж";
+        return { format: "kts-bundle", version: 1 };
+      </script>
+    `),
+    { mode: 'legacy', snapshotFormat: 'kts-bundle-v1', profile: 'sales-analytics' },
+  );
+  assert.deepEqual(
+    detectTopDashboardDataContract(`
+      <script>
+        const upload = document.createElement('div');
+        upload.dataset.type = 'file';
+      </script>
+    `),
+    { mode: 'disabled', snapshotFormat: null, profile: null },
+  );
 });
 
 test('dashboard data adapter hydrates supported file inputs without granting server-write access', () => {
@@ -711,7 +766,7 @@ test('dashboard frames keep downloads inside the trusted bridge and explicitly d
 });
 
 test('TOP read-only adapter blocks local file replacement and hides upload controls', () => {
-  const adapter = getTopDashboardDataAdapterScript(null, null, true);
+  const adapter = getTopDashboardDataAdapterScript('multi-file-v1', 'generic', true);
   const transformed = injectTopDashboardDataAdapter(
     '<!doctype html><html><head></head><body><input id="file" type="file"></body></html>',
     { readOnly: true },
@@ -735,8 +790,8 @@ test('uploaded HTML cannot spoof the server adapter marker to bypass TOP read-on
   assert.ok(transformed.indexOf('const READ_ONLY = true') < transformed.indexOf('<!-- data-kts'));
 });
 
-test('trusted dashboard frame bridge is read-only and has one exact script hash', () => {
-  const bridge = createTopDashboardFrameBridgeScript(7);
+test('trusted dashboard frame bridge persists generic files only with management capability', () => {
+  const bridge = createTopDashboardFrameBridgeScript(7, 29, true);
   const csp = buildTopDashboardFrameSecurityPolicy(bridge);
   const scriptDirective = csp.split(';').find((directive) => directive.trim().startsWith('script-src')) ?? '';
 
@@ -761,8 +816,57 @@ test('trusted dashboard frame bridge is read-only and has one exact script hash'
   assert.match(bridge, /type: 'bridge-probe'/);
   assert.match(bridge, /setInterval\(probeAdapter, 250\)/);
   assert.doesNotMatch(bridge, /snapshot-selected/);
-  assert.doesNotMatch(bridge, /method: 'PUT'/);
+  assert.match(bridge, /method: 'PUT'/);
+  assert.match(bridge, /expectedActiveHtmlVersionId/);
+  assert.match(bridge, /CONFIG\.canManage/);
+  assert.match(bridge, /multi-file-v1/);
+  assert.match(bridge, /X-KTS-Top-Dashboard-Multi-File/);
   assert.ok(bridge.includes('/api/admin/top-dashboard/blocks/7/data'));
+});
+
+test('generic dashboard adapter observes trusted drops without consuming dashboard events', () => {
+  const adapter = getTopDashboardDataAdapterScript('multi-file-v1', 'generic', false);
+  const dropHandler = adapter.slice(
+    adapter.indexOf('function captureMultiFileDrop'),
+    adapter.indexOf('function matchesMultiFileTarget'),
+  );
+
+  assert.match(adapter, /document\.addEventListener\('drop', captureMultiFileDrop, true\)/);
+  assert.match(dropHandler, /event\.isTrusted/);
+  assert.match(dropHandler, /event\.dataTransfer/);
+  assert.match(dropHandler, /captureMultiFiles\(input, transfer\.files\)/);
+  assert.doesNotMatch(dropHandler, /preventDefault|stopPropagation|stopImmediatePropagation/);
+  assert.match(adapter, /new MutationObserver/);
+});
+
+test('generic dashboard replaces single selections and merges multiple selections by path', () => {
+  const adapter = getTopDashboardDataAdapterScript('multi-file-v1', 'generic', false);
+  const bridge = createTopDashboardFrameBridgeScript(7, 29, true);
+
+  assert.match(adapter, /merge: input\.multiple \|\| input\.hasAttribute\('webkitdirectory'\)/);
+  assert.match(bridge, /const merge = data\.merge === true/);
+  assert.match(bridge, /if \(data\.merge !== true && data\.merge !== false\)/);
+  assert.match(bridge, /const mergedByIdentity = new Map\(\)/);
+  assert.match(bridge, /current \? current\.files : \[\]/);
+  assert.match(bridge, /if \(merge\)/);
+  assert.match(bridge, /file\.webkitRelativePath \|\| file\.name/);
+  assert.match(bridge, /mergedByIdentity\.set\(fileIdentity\(file\), file\)/);
+  assert.match(bridge, /encodeMultiFileSnapshot\(nextTargets\)/);
+  assert.match(bridge, /multiFileTargets = nextTargets/);
+});
+
+test('generated dashboard adapters and trusted bridges are valid browser JavaScript', () => {
+  const generatedScripts = [
+    getTopDashboardDataAdapterScript('multi-file-v1', 'generic', false),
+    getTopDashboardDataAdapterScript('multi-file-v1', 'generic', true),
+    getTopDashboardDataAdapterScript('kts-bundle-v1', 'sales-analytics', false),
+    createTopDashboardFrameBridgeScript(7, 29, true),
+    createTopDashboardFrameBridgeScript(7, 29, false),
+  ];
+
+  for (const script of generatedScripts) {
+    assert.doesNotThrow(() => new Function(script));
+  }
 });
 
 test('top-level dashboard download hook accepts messages only from its exact frame', () => {
@@ -917,4 +1021,12 @@ test('dashboard data is readable only by the exact same-origin trusted frame', (
     },
   });
   assert.equal(isTopDashboardBlockDataFrameRequest(putFromFrame, blockId), false);
+  assert.equal(
+    isTopDashboardBlockDataMutationFrameRequest(putFromFrame, blockId, versionId),
+    true,
+  );
+  assert.equal(
+    isTopDashboardBlockDataMutationFrameRequest(putFromFrame, blockId, versionId + 1),
+    false,
+  );
 });

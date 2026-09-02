@@ -12,8 +12,7 @@ import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import {
-  detectTopDashboardExpectedProfile,
-  detectTopDashboardExpectedSnapshotFormat,
+  detectTopDashboardDataContract,
 } from '@/shared/lib/topDashboardContentSecurity';
 
 import { parsePositiveId } from '../../routeUtils';
@@ -70,10 +69,15 @@ export async function PUT(request: Request, context: Context) {
     if (!targetHtml) {
       return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
     }
-    const expectedSnapshotFormat = detectTopDashboardExpectedSnapshotFormat(
-      targetHtml.htmlContent,
-    );
-    const expectedProfile = detectTopDashboardExpectedProfile(targetHtml.htmlContent);
+    const contract = detectTopDashboardDataContract(targetHtml.htmlContent);
+    const expectedSnapshotFormat = contract.snapshotFormat;
+    const expectedProfile = contract.profile;
+    if (contract.mode === 'disabled' || !expectedSnapshotFormat || !expectedProfile) {
+      return Response.json(
+        { error: 'В HTML не найдено поддерживаемое поле выбора файлов' },
+        { status: 422 },
+      );
+    }
 
     const actor = getTopDashboardActor(session);
     const state = await activateTopDashboardBlockVersion({

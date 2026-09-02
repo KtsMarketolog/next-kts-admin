@@ -15,8 +15,7 @@ import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import {
-  detectTopDashboardExpectedProfile,
-  detectTopDashboardExpectedSnapshotFormat,
+  detectTopDashboardDataContract,
 } from '@/shared/lib/topDashboardContentSecurity';
 
 import { parsePositiveId } from '../../../routeUtils';
@@ -85,11 +84,10 @@ export async function PUT(request: Request, context: Context) {
         { status: 409 },
       );
     }
-    const expectedHtmlSnapshotFormat = detectTopDashboardExpectedSnapshotFormat(
-      activeHtml.htmlContent,
-    );
-    const expectedHtmlProfile = detectTopDashboardExpectedProfile(activeHtml.htmlContent);
-    if (!expectedHtmlSnapshotFormat || !expectedHtmlProfile) {
+    const contract = detectTopDashboardDataContract(activeHtml.htmlContent);
+    const expectedHtmlSnapshotFormat = contract.snapshotFormat;
+    const expectedHtmlProfile = contract.profile;
+    if (contract.mode === 'disabled' || !expectedHtmlSnapshotFormat || !expectedHtmlProfile) {
       return Response.json(
         { error: 'Для опубликованной HTML-страницы не удалось определить подходящий тип данных' },
         { status: 422 },

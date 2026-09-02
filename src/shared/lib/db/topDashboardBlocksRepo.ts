@@ -154,6 +154,7 @@ type TopDashboardBlockDataVersionRow = {
   sha256: string;
   snapshot_format: TopDashboardSnapshotFormat;
   dashboard_profile: TopDashboardProfile;
+  bound_html_version_id: string | null;
   uploaded_by_name: string | null;
   created_at: string;
 };
@@ -215,6 +216,7 @@ function mapDataVersion(
     sha256: row.sha256,
     snapshotFormat: row.snapshot_format,
     dashboardProfile: row.dashboard_profile,
+    boundHtmlVersionId: numericId(row.bound_html_version_id),
     status,
     uploadedByName: row.uploaded_by_name ?? '',
     createdAt: row.created_at,
@@ -222,10 +224,12 @@ function mapDataVersion(
 }
 
 function assertDashboardDataCompatibility(input: {
+  htmlVersionId: number;
   htmlSnapshotFormat: TopDashboardSnapshotFormat | null;
   htmlProfile: TopDashboardProfile | null;
   dataSnapshotFormat: TopDashboardSnapshotFormat;
   dataProfile: TopDashboardProfile;
+  dataBoundHtmlVersionId: number | null;
   action: 'html' | 'data';
 }) {
   if (!input.htmlSnapshotFormat || !input.htmlProfile) {
@@ -235,14 +239,60 @@ function assertDashboardDataCompatibility(input: {
         : 'Для опубликованной HTML-страницы не удалось определить подходящий тип данных',
     );
   }
+  assertValidDashboardDataContract(input.htmlSnapshotFormat, input.htmlProfile);
+  const htmlIsGeneric =
+    input.htmlSnapshotFormat === 'multi-file-v1' && input.htmlProfile === 'generic';
+  const dataIsGeneric =
+    input.dataSnapshotFormat === 'multi-file-v1' && input.dataProfile === 'generic';
+  const dataContractIsValid =
+    (input.dataSnapshotFormat === 'purchases-v1' && input.dataProfile === 'purchases')
+    || (
+      input.dataSnapshotFormat === 'kts-bundle-v1'
+      && (
+        input.dataProfile === 'sales-analytics'
+        || input.dataProfile === 'assortment-optimization'
+      )
+    )
+    || dataIsGeneric;
+
   if (
-    input.htmlSnapshotFormat !== input.dataSnapshotFormat
+    !dataContractIsValid
+    || input.htmlSnapshotFormat !== input.dataSnapshotFormat
     || input.htmlProfile !== input.dataProfile
+    || htmlIsGeneric !== dataIsGeneric
+    || (dataIsGeneric && input.dataBoundHtmlVersionId !== input.htmlVersionId)
+    || (!dataIsGeneric && input.dataBoundHtmlVersionId !== null)
   ) {
     throw new TopDashboardDataCompatibilityError(
       input.action === 'html'
         ? 'Нельзя опубликовать HTML: он не подходит к текущим данным'
         : 'Этот файл данных не подходит для опубликованной HTML-страницы',
+    );
+  }
+}
+
+function isGenericDashboardDataContract(
+  snapshotFormat: TopDashboardSnapshotFormat | null,
+  profile: TopDashboardProfile | null,
+) {
+  return snapshotFormat === 'multi-file-v1' && profile === 'generic';
+}
+
+function assertValidDashboardDataContract(
+  snapshotFormat: TopDashboardSnapshotFormat | null,
+  profile: TopDashboardProfile | null,
+) {
+  const valid =
+    (snapshotFormat === 'purchases-v1' && profile === 'purchases')
+    || (
+      snapshotFormat === 'kts-bundle-v1'
+      && (profile === 'sales-analytics' || profile === 'assortment-optimization')
+    )
+    || isGenericDashboardDataContract(snapshotFormat, profile);
+
+  if (!valid) {
+    throw new TopDashboardDataCompatibilityError(
+      'Для HTML-страницы не удалось определить поддерживаемый тип данных',
     );
   }
 }
@@ -367,6 +417,17 @@ export async function getPublishedTopDashboardBlocks(): Promise<TopDashboardPubl
     join top_dashboard_block_data_versions native_active_data
       on native_active_data.block_id = blocks.id
      and native_active_data.id = native_data_state.active_version_id
+     and (
+       (
+         native_active_data.snapshot_format = 'multi-file-v1'
+         and native_active_data.dashboard_profile = 'generic'
+         and native_active_data.bound_html_version_id = native_state.active_version_id
+       )
+       or (
+         native_active_data.snapshot_format <> 'multi-file-v1'
+         and native_active_data.bound_html_version_id is null
+       )
+     )
     order by blocks.created_at asc, blocks.id asc
   `);
 
@@ -403,6 +464,17 @@ export async function getPublishedTopDashboardBlockOverview(
      join top_dashboard_block_data_versions native_active_data
        on native_active_data.block_id = blocks.id
       and native_active_data.id = native_data_state.active_version_id
+      and (
+        (
+          native_active_data.snapshot_format = 'multi-file-v1'
+          and native_active_data.dashboard_profile = 'generic'
+          and native_active_data.bound_html_version_id = native_state.active_version_id
+        )
+        or (
+          native_active_data.snapshot_format <> 'multi-file-v1'
+          and native_active_data.bound_html_version_id is null
+        )
+      )
      where blocks.id = $1
      limit 1`,
     [blockId],
@@ -634,6 +706,7 @@ export async function getTopDashboardBlockOverview(
          versions.sha256,
          versions.snapshot_format,
          versions.dashboard_profile,
+         versions.bound_html_version_id::text,
          coalesce(admin_uploader.name, manager_uploader.name) as uploaded_by_name,
          versions.created_at::text
        from top_dashboard_block_data_versions versions
@@ -683,10 +756,12 @@ export async function createAndActivateTopDashboardBlockDataVersion(
     );
 
     assertDashboardDataCompatibility({
+      htmlVersionId: input.expectedActiveHtmlVersionId,
       htmlSnapshotFormat: input.expectedHtmlSnapshotFormat,
       htmlProfile: input.expectedHtmlProfile,
       dataSnapshotFormat: input.snapshotFormat,
       dataProfile: input.dashboardProfile,
+      dataBoundHtmlVersionId: input.boundHtmlVersionId,
       action: 'data',
     });
 
@@ -715,10 +790,11 @@ export async function createAndActivateTopDashboardBlockDataVersion(
          sha256,
          snapshot_format,
          dashboard_profile,
+         bound_html_version_id,
          uploaded_by_admin_user_id,
          uploaded_by_manager_id
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        returning
          id::text,
          original_name,
@@ -727,6 +803,7 @@ export async function createAndActivateTopDashboardBlockDataVersion(
          sha256,
          snapshot_format,
          dashboard_profile,
+         bound_html_version_id::text,
          coalesce(
            (select name from admin_users where id = uploaded_by_admin_user_id),
            (select name from wholesale_managers where id = uploaded_by_manager_id)
@@ -741,6 +818,7 @@ export async function createAndActivateTopDashboardBlockDataVersion(
         input.sha256,
         input.snapshotFormat,
         input.dashboardProfile,
+        input.boundHtmlVersionId,
         input.uploadedByAdminUserId,
         input.uploadedByManagerId,
       ],
@@ -852,8 +930,9 @@ export async function activateTopDashboardBlockDataVersion(
       id: string;
       snapshot_format: TopDashboardSnapshotFormat;
       dashboard_profile: TopDashboardProfile;
+      bound_html_version_id: string | null;
     }>(
-      `select id::text, snapshot_format, dashboard_profile
+      `select id::text, snapshot_format, dashboard_profile, bound_html_version_id::text
        from top_dashboard_block_data_versions
        where block_id = $1 and id = $2
        limit 1
@@ -864,10 +943,12 @@ export async function activateTopDashboardBlockDataVersion(
     if (!version) throw new TopDashboardBlockDataVersionNotFoundError();
 
     assertDashboardDataCompatibility({
+      htmlVersionId: input.expectedActiveHtmlVersionId,
       htmlSnapshotFormat: input.expectedHtmlSnapshotFormat,
       htmlProfile: input.expectedHtmlProfile,
       dataSnapshotFormat: version.snapshot_format,
       dataProfile: version.dashboard_profile,
+      dataBoundHtmlVersionId: numericId(version.bound_html_version_id),
       action: 'data',
     });
 
@@ -911,6 +992,7 @@ export async function activateTopDashboardBlockDataVersion(
 
 export async function getActiveTopDashboardBlockDataContent(
   blockId: number,
+  expectedHtmlVersionId?: number,
 ): Promise<TopDashboardBlockDataVersionContent | null> {
   await ensureSiteSchema();
 
@@ -918,6 +1000,7 @@ export async function getActiveTopDashboardBlockDataContent(
 
   const result = await query<{
     active_version_id: string | null;
+    active_html_version_id: string | null;
     id: string | null;
     original_name: string | null;
     compressed_payload: Buffer | null;
@@ -925,11 +1008,13 @@ export async function getActiveTopDashboardBlockDataContent(
     uncompressed_size: string | null;
     sha256: string | null;
     snapshot_format: TopDashboardSnapshotFormat | null;
-    dashboard_profile: TopDashboardProfile;
+    dashboard_profile: TopDashboardProfile | null;
+    bound_html_version_id: string | null;
     created_at: string | null;
   }>(
     `select
        state.active_version_id::text,
+       html_state.active_version_id::text as active_html_version_id,
        versions.id::text,
        versions.original_name,
        versions.compressed_payload,
@@ -938,8 +1023,11 @@ export async function getActiveTopDashboardBlockDataContent(
        versions.sha256,
        versions.snapshot_format,
        versions.dashboard_profile,
+       versions.bound_html_version_id::text,
        versions.created_at::text
      from top_dashboard_block_data_state state
+     join top_dashboard_block_state html_state
+       on html_state.block_id = state.block_id
      left join top_dashboard_block_data_versions versions
        on versions.block_id = state.block_id
       and versions.id = state.active_version_id
@@ -958,9 +1046,28 @@ export async function getActiveTopDashboardBlockDataContent(
     || row.uncompressed_size === null
     || row.sha256 === null
     || row.snapshot_format === null
+    || row.dashboard_profile === null
     || row.created_at === null
   ) {
     throw new TopDashboardBlockDataVersionNotFoundError();
+  }
+
+  const boundHtmlVersionId = numericId(row.bound_html_version_id);
+  if (row.snapshot_format === 'multi-file-v1') {
+    const activeHtmlVersionId = numericId(row.active_html_version_id);
+    if (
+      row.dashboard_profile !== 'generic'
+      || boundHtmlVersionId === null
+      || boundHtmlVersionId !== activeHtmlVersionId
+      || (
+        expectedHtmlVersionId !== undefined
+        && boundHtmlVersionId !== expectedHtmlVersionId
+      )
+    ) {
+      return null;
+    }
+  } else if (boundHtmlVersionId !== null) {
+    return null;
   }
 
   return {
@@ -972,6 +1079,7 @@ export async function getActiveTopDashboardBlockDataContent(
     sha256: row.sha256,
     snapshotFormat: row.snapshot_format,
     dashboardProfile: row.dashboard_profile,
+    boundHtmlVersionId,
     createdAt: row.created_at,
   };
 }
@@ -1027,7 +1135,7 @@ export async function createTopDashboardBlockVersion(
       ],
     );
 
-    await client.query(
+    const pruneCandidatesResult = await client.query<{ id: string }>(
       `with state as (
          select active_version_id, previous_version_id
          from top_dashboard_block_state
@@ -1057,16 +1165,48 @@ export async function createTopDashboardBlockVersion(
            and versions.id <> coalesce(state.active_version_id, 0)
            and versions.id <> coalesce(state.previous_version_id, 0)
        )
-       delete from top_dashboard_block_versions versions
-       using ranked
-       where versions.block_id = $3
-         and versions.id = ranked.id
-         and (
-           ranked.position + ranked.protected_version_count > $1
-           or ranked.running_bytes + ranked.protected_stored_bytes > $2
-         )`,
+       select ranked.id::text
+       from ranked
+       where ranked.position + ranked.protected_version_count > $1
+          or ranked.running_bytes + ranked.protected_stored_bytes > $2`,
       [TOP_DASHBOARD_VERSION_LIMIT, TOP_DASHBOARD_STORAGE_LIMIT_BYTES, input.blockId],
     );
+    const pruneCandidateIds = pruneCandidatesResult.rows.map((row) => Number(row.id));
+
+    if (pruneCandidateIds.length > 0) {
+      await client.query(
+        `with doomed_data_versions as (
+           select id
+           from top_dashboard_block_data_versions
+           where block_id = $1
+             and bound_html_version_id = any($2::bigint[])
+         )
+         update top_dashboard_block_data_state data_state
+         set active_version_id = case
+               when data_state.active_version_id in (select id from doomed_data_versions)
+                 then null
+               else data_state.active_version_id
+             end,
+             previous_version_id = case
+               when data_state.previous_version_id in (select id from doomed_data_versions)
+                 then null
+               else data_state.previous_version_id
+             end,
+             updated_at = now()
+         where data_state.block_id = $1
+           and (
+             data_state.active_version_id in (select id from doomed_data_versions)
+             or data_state.previous_version_id in (select id from doomed_data_versions)
+           )`,
+        [input.blockId, pruneCandidateIds],
+      );
+      await client.query(
+        `delete from top_dashboard_block_versions
+         where block_id = $1
+           and id = any($2::bigint[])`,
+        [input.blockId, pruneCandidateIds],
+      );
+    }
 
     await client.query(
       `update top_dashboard_blocks
@@ -1130,6 +1270,17 @@ export async function isPublishedTopDashboardBlockVersion(
      join top_dashboard_block_data_versions data_versions
        on data_versions.block_id = state.block_id
       and data_versions.id = data_state.active_version_id
+      and (
+        (
+          data_versions.snapshot_format = 'multi-file-v1'
+          and data_versions.dashboard_profile = 'generic'
+          and data_versions.bound_html_version_id = state.active_version_id
+        )
+        or (
+          data_versions.snapshot_format <> 'multi-file-v1'
+          and data_versions.bound_html_version_id is null
+        )
+      )
      where state.block_id = $1
        and state.active_version_id = $2
      limit 1`,
@@ -1167,6 +1318,17 @@ export async function getPublishedTopDashboardBlockVersionContent(
      join top_dashboard_block_data_versions data_versions
        on data_versions.block_id = state.block_id
       and data_versions.id = data_state.active_version_id
+      and (
+        (
+          data_versions.snapshot_format = 'multi-file-v1'
+          and data_versions.dashboard_profile = 'generic'
+          and data_versions.bound_html_version_id = state.active_version_id
+        )
+        or (
+          data_versions.snapshot_format <> 'multi-file-v1'
+          and data_versions.bound_html_version_id is null
+        )
+      )
      where state.block_id = $1
        and state.active_version_id = $2
      limit 1`,
@@ -1216,15 +1378,19 @@ export async function activateTopDashboardBlockVersion(
     const version = versionResult.rows[0];
     if (!version) throw new TopDashboardVersionNotFoundError();
 
+    assertValidDashboardDataContract(input.expectedSnapshotFormat, input.expectedProfile);
+
     const dataResult = await client.query<{
       active_version_id: string | null;
       snapshot_format: TopDashboardSnapshotFormat | null;
       dashboard_profile: TopDashboardProfile | null;
+      bound_html_version_id: string | null;
     }>(
       `select
          data_state.active_version_id::text,
          data_versions.snapshot_format,
-         data_versions.dashboard_profile
+         data_versions.dashboard_profile,
+         data_versions.bound_html_version_id::text
        from top_dashboard_block_data_state data_state
        left join top_dashboard_block_data_versions data_versions
          on data_versions.block_id = data_state.block_id
@@ -1236,17 +1402,62 @@ export async function activateTopDashboardBlockVersion(
     );
     const dataState = dataResult.rows[0];
     if (!dataState) throw new TopDashboardBlockDataStateNotFoundError();
+    let clearDataState = false;
     if (dataState.active_version_id !== null) {
       if (!dataState.snapshot_format || !dataState.dashboard_profile) {
         throw new TopDashboardBlockDataVersionNotFoundError();
       }
-      assertDashboardDataCompatibility({
-        htmlSnapshotFormat: input.expectedSnapshotFormat,
-        htmlProfile: input.expectedProfile,
-        dataSnapshotFormat: dataState.snapshot_format,
-        dataProfile: dataState.dashboard_profile,
-        action: 'html',
-      });
+      const targetIsGeneric = isGenericDashboardDataContract(
+        input.expectedSnapshotFormat,
+        input.expectedProfile,
+      );
+      const activeDataIsGeneric = isGenericDashboardDataContract(
+        dataState.snapshot_format,
+        dataState.dashboard_profile,
+      );
+      const activeDataBinding = numericId(dataState.bound_html_version_id);
+
+      if (targetIsGeneric || activeDataIsGeneric) {
+        clearDataState = !(
+          targetIsGeneric
+          && activeDataIsGeneric
+          && activeDataBinding === input.versionId
+        );
+        if (!clearDataState) {
+          assertDashboardDataCompatibility({
+            htmlVersionId: input.versionId,
+            htmlSnapshotFormat: input.expectedSnapshotFormat,
+            htmlProfile: input.expectedProfile,
+            dataSnapshotFormat: dataState.snapshot_format,
+            dataProfile: dataState.dashboard_profile,
+            dataBoundHtmlVersionId: activeDataBinding,
+            action: 'html',
+          });
+        }
+      } else {
+        assertDashboardDataCompatibility({
+          htmlVersionId: input.versionId,
+          htmlSnapshotFormat: input.expectedSnapshotFormat,
+          htmlProfile: input.expectedProfile,
+          dataSnapshotFormat: dataState.snapshot_format,
+          dataProfile: dataState.dashboard_profile,
+          dataBoundHtmlVersionId: activeDataBinding,
+          action: 'html',
+        });
+      }
+    }
+
+    if (clearDataState) {
+      await client.query(
+        `update top_dashboard_block_data_state
+         set active_version_id = null,
+             previous_version_id = null,
+             updated_by_admin_user_id = $2,
+             updated_by_manager_id = $3,
+             updated_at = now()
+         where block_id = $1`,
+        [input.blockId, input.adminUserId, input.managerId],
+      );
     }
 
     if (currentActiveVersionId === input.versionId) {
@@ -1378,6 +1589,35 @@ export async function deleteTopDashboardBlockVersion(input: {
       previousVersionId = numericId(updatedState?.previous_version_id);
       updatedAt = updatedState?.updated_at ?? updatedAt;
     }
+
+    await client.query(
+      `with bound_data_versions as (
+         select id
+         from top_dashboard_block_data_versions
+         where block_id = $1
+           and bound_html_version_id = $2
+       )
+       update top_dashboard_block_data_state data_state
+       set active_version_id = case
+             when data_state.active_version_id in (select id from bound_data_versions)
+               then null
+             else data_state.active_version_id
+           end,
+           previous_version_id = case
+             when data_state.previous_version_id in (select id from bound_data_versions)
+               then null
+             else data_state.previous_version_id
+           end,
+           updated_by_admin_user_id = $3,
+           updated_by_manager_id = $4,
+           updated_at = now()
+       where data_state.block_id = $1
+         and (
+           data_state.active_version_id in (select id from bound_data_versions)
+           or data_state.previous_version_id in (select id from bound_data_versions)
+         )`,
+      [input.blockId, input.versionId, input.adminUserId, input.managerId],
+    );
 
     await client.query(
       `delete from top_dashboard_block_versions
