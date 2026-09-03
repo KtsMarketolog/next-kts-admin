@@ -12,6 +12,8 @@ import {
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGET_TEXT_BYTES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION,
   TopDashboardMultiFileSnapshotError,
+  type TopDashboardMultiFileSnapshotInspectionResult,
+  type TopDashboardMultiFileSnapshotTargetSummary,
   type TopDashboardMultiFileSnapshotValidationResult,
 } from './topDashboardMultiFileSnapshot';
 
@@ -98,10 +100,10 @@ function validateRelativePath(value: string, encodedLength: number, fileName: st
   }
 }
 
-export async function validateTopDashboardMultiFileSnapshotFile(
+export async function inspectTopDashboardMultiFileSnapshotFile(
   filePath: string,
   fileSize: number,
-): Promise<TopDashboardMultiFileSnapshotValidationResult> {
+): Promise<TopDashboardMultiFileSnapshotInspectionResult> {
   const file = await open(filePath, 'r');
   try {
     const readAt = async (offset: number, length: number) => {
@@ -158,6 +160,7 @@ export async function validateTopDashboardMultiFileSnapshotFile(
 
     const targetIndexes = new Set<number>();
     const targetIds = new Set<string>();
+    const targets: TopDashboardMultiFileSnapshotTargetSummary[] = [];
     let offset = HEADER_BYTES;
     let actualFileCount = 0;
 
@@ -187,15 +190,17 @@ export async function validateTopDashboardMultiFileSnapshotFile(
         throw snapshotError('LIMIT_EXCEEDED', 'Описание целевого поля превышает лимит');
       }
 
+      let id: string | null = null;
       if (idLength > 0) {
-        const id = await readText(offset, idLength, 'ID целевого поля');
+        id = await readText(offset, idLength, 'ID целевого поля');
         validateTargetText(id, idLength, 'ID целевого поля');
         offset += idLength;
         if (targetIds.has(id)) throw snapshotError('DUPLICATE_TARGET', 'ID целевого поля повторяется');
         targetIds.add(id);
       }
+      let name: string | null = null;
       if (targetNameLength > 0) {
-        const name = await readText(offset, targetNameLength, 'Name целевого поля');
+        name = await readText(offset, targetNameLength, 'Name целевого поля');
         validateTargetText(name, targetNameLength, 'Name целевого поля');
         offset += targetNameLength;
       }
@@ -255,12 +260,19 @@ export async function validateTopDashboardMultiFileSnapshotFile(
         assertAvailable(offset, contentLength, fileSize);
         offset += contentLength;
       }
+      targets.push({ target: { id, name, index }, fileCount });
     }
 
     if (actualFileCount !== declaredFileCount || offset !== fileSize) {
       throw snapshotError('INVALID_LENGTH', 'Структура бинарного контейнера не совпадает с заголовком');
     }
-    return { ok: true, byteLength: fileSize, targetCount, fileCount: actualFileCount };
+    return {
+      ok: true,
+      byteLength: fileSize,
+      targetCount,
+      fileCount: actualFileCount,
+      targets,
+    };
   } catch (error) {
     if (error instanceof TopDashboardMultiFileSnapshotError) {
       return { ok: false, code: error.code, error: error.message };
@@ -269,4 +281,18 @@ export async function validateTopDashboardMultiFileSnapshotFile(
   } finally {
     await file.close();
   }
+}
+
+export async function validateTopDashboardMultiFileSnapshotFile(
+  filePath: string,
+  fileSize: number,
+): Promise<TopDashboardMultiFileSnapshotValidationResult> {
+  const inspected = await inspectTopDashboardMultiFileSnapshotFile(filePath, fileSize);
+  if (!inspected.ok) return inspected;
+  return {
+    ok: true,
+    byteLength: inspected.byteLength,
+    targetCount: inspected.targetCount,
+    fileCount: inspected.fileCount,
+  };
 }

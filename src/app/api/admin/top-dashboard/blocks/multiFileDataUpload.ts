@@ -10,8 +10,12 @@ import {
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
 } from '@/shared/lib/topDashboardLimits';
 import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
-import { validateTopDashboardMultiFileSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
-import { validateTopDashboardMultiFileSnapshotFile } from '@/shared/lib/topDashboardMultiFileSnapshotFile';
+import {
+  inspectTopDashboardMultiFileSnapshot,
+  type TopDashboardMultiFileSnapshotTarget,
+  type TopDashboardMultiFileSnapshotTargetSummary,
+} from '@/shared/lib/topDashboardMultiFileSnapshot';
+import { inspectTopDashboardMultiFileSnapshotFile } from '@/shared/lib/topDashboardMultiFileSnapshotFile';
 
 import { parsePositiveId } from './routeUtils';
 import {
@@ -21,10 +25,15 @@ import {
 } from './streamDataUpload';
 
 export const TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER = 'x-kts-top-dashboard-multi-file';
+export const TOP_DASHBOARD_DIRECT_SINGLE_FILE_UPLOAD_HEADER =
+  'x-kts-top-dashboard-direct-single-file';
 
 export type TopDashboardMultiFileDataUpload = {
   expectedActiveVersionId: number | null;
   expectedActiveHtmlVersionId: number;
+  targetCount: number;
+  fileCount: number;
+  targets: TopDashboardMultiFileSnapshotTargetSummary[];
   upload: {
     originalName: string;
     content: Buffer | null;
@@ -82,10 +91,34 @@ export function isTopDashboardMultiFileUpload(request: Request) {
   return request.headers.get(TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER) === '1';
 }
 
+export function isTopDashboardDirectSingleFileUpload(request: Request) {
+  return request.headers.get(TOP_DASHBOARD_DIRECT_SINGLE_FILE_UPLOAD_HEADER) === '1';
+}
+
+export function isTopDashboardDirectSingleFileUploadPayload(
+  upload: Pick<TopDashboardMultiFileDataUpload, 'targetCount' | 'fileCount' | 'targets'>,
+  expectedTarget: TopDashboardMultiFileSnapshotTarget | null,
+) {
+  if (
+    !expectedTarget
+    || upload.targetCount !== 1
+    || upload.fileCount !== 1
+    || upload.targets.length !== 1
+    || upload.targets[0]!.fileCount !== 1
+  ) {
+    return false;
+  }
+  const actualTarget = upload.targets[0]!.target;
+  return actualTarget.index === expectedTarget.index
+    && actualTarget.id === (expectedTarget.id ?? null)
+    && actualTarget.name === (expectedTarget.name ?? null);
+}
+
 /**
- * Reads the opaque multi-file envelope created by the trusted frame. The
- * embedded dashboard never talks to this endpoint directly. Individual files
- * remain byte-for-byte unchanged and are deliberately not parsed or unzipped.
+ * Reads the opaque envelope created by the trusted frame or the management
+ * page's direct single-file uploader. The embedded dashboard never talks to
+ * this endpoint directly. Individual files remain byte-for-byte unchanged and
+ * are deliberately not parsed or unzipped.
  */
 export async function readTopDashboardMultiFileDataUpload(
   request: Request,
@@ -134,7 +167,7 @@ export async function readTopDashboardMultiFileDataUpload(
   if (bytes.length !== file.size || bytes.length <= 0) {
     return { error: errorResponse('Набор файлов повреждён') };
   }
-  const validation = validateTopDashboardMultiFileSnapshot(bytes);
+  const validation = inspectTopDashboardMultiFileSnapshot(bytes);
   if (!validation.ok) {
     return { error: errorResponse(`Набор файлов повреждён: ${validation.error}`) };
   }
@@ -143,6 +176,9 @@ export async function readTopDashboardMultiFileDataUpload(
     parsed: {
       expectedActiveVersionId: expectedActive.value,
       expectedActiveHtmlVersionId,
+      targetCount: validation.targetCount,
+      fileCount: validation.fileCount,
+      targets: validation.targets,
       upload: {
         originalName: 'dashboard-files.ktsmf',
         content: bytes,
@@ -173,7 +209,7 @@ export async function readTopDashboardMultiFileDataStreamUpload(
   const received = await receiveTopDashboardDataStream(request, 'Набор файлов');
   if (received.error) return { error: received.error };
   const pending = received.pending;
-  const validation = await validateTopDashboardMultiFileSnapshotFile(
+  const validation = await inspectTopDashboardMultiFileSnapshotFile(
     pending.temporaryPath,
     pending.fileSize,
   );
@@ -186,6 +222,9 @@ export async function readTopDashboardMultiFileDataStreamUpload(
     parsed: {
       expectedActiveVersionId: expectedActive.value,
       expectedActiveHtmlVersionId,
+      targetCount: validation.targetCount,
+      fileCount: validation.fileCount,
+      targets: validation.targets,
       upload: {
         originalName: 'dashboard-files.ktsmf',
         content: null,

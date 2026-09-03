@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import sanitizeHtml from 'sanitize-html';
 
 import type {
   TopDashboardProfile,
@@ -19,8 +20,10 @@ import {
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_MIME_TYPE_BYTES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_RELATIVE_PATH_BYTES,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGET_TEXT_BYTES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION,
+  type TopDashboardMultiFileSnapshotTarget,
 } from './topDashboardMultiFileSnapshot';
 
 const INLINE_SCRIPT_PATTERN = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi;
@@ -38,6 +41,7 @@ export type TopDashboardDataContract = {
   mode: 'legacy' | 'generic' | 'disabled';
   snapshotFormat: TopDashboardSnapshotFormat | null;
   profile: TopDashboardProfile | null;
+  directUploadTarget: TopDashboardMultiFileSnapshotTarget | null;
 };
 
 type TopDashboardLegacyReadyFunction = 'loadState';
@@ -220,19 +224,172 @@ export function detectTopDashboardDataContract(
   const profile = detectTopDashboardExpectedProfile(htmlContent);
   const snapshotFormat = detectTopDashboardExpectedSnapshotFormat(htmlContent);
   if (profile && snapshotFormat) {
-    return { mode: 'legacy', snapshotFormat, profile };
+    return { mode: 'legacy', snapshotFormat, profile, directUploadTarget: null };
   }
-  const hasStaticFileInput = /<input\b(?=[^>]*\btype\s*=\s*(?:"file"|'file'|file\b))[^>]*>/iu
-    .test(htmlContent);
+  const staticFileInputs = collectTopDashboardStaticFileInputs(htmlContent);
+  // This broad source scan intentionally also sees literal markup embedded in
+  // scripts/templates. It preserves generic capture for dashboards that add
+  // their file input at runtime, but is never sufficient to authorize the
+  // direct management shortcut below.
+  const sourceFileInputs = scanTopDashboardSourceFileInputs(htmlContent);
   const createsInputAtRuntime = /\b(?:document\s*\.\s*)?createElement\s*\(\s*(?:"input"|'input')\s*\)/iu
     .test(htmlContent);
   const assignsRuntimeFileType = /(?:\.\s*type\s*=\s*(?:"file"|'file')|\.\s*setAttribute\s*\(\s*(?:"type"|'type')\s*,\s*(?:"file"|'file')\s*\)|\btype\s*:\s*(?:"file"|'file'))/iu
     .test(htmlContent);
-  const hasFileInput = hasStaticFileInput
-    || (createsInputAtRuntime && assignsRuntimeFileType);
+  const createsRuntimeFileInput = createsInputAtRuntime && assignsRuntimeFileType;
+  const mutatesFileMultiplicityAtRuntime = /(?:\.\s*(?:multiple|webkitdirectory|directory)\s*=|\.\s*(?:setAttribute|toggleAttribute)\s*\(\s*(?:"(?:multiple|webkitdirectory|directory)"|'(?:multiple|webkitdirectory|directory)'))/iu
+    .test(htmlContent);
+  const directUploadIsUncertain = createsRuntimeFileInput
+    || sourceFileInputs.uncertain
+    || sourceFileInputs.count > staticFileInputs.length
+    || mutatesFileMultiplicityAtRuntime;
+  const hasFileInput = staticFileInputs.length > 0
+    || sourceFileInputs.count > 0
+    || createsRuntimeFileInput;
+  const directUploadTarget = detectTopDashboardDirectUploadTarget(
+    staticFileInputs,
+    directUploadIsUncertain,
+  );
   return hasFileInput
-    ? { mode: 'generic', snapshotFormat: 'multi-file-v1', profile: 'generic' }
-    : { mode: 'disabled', snapshotFormat: null, profile: null };
+    ? {
+        mode: 'generic',
+        snapshotFormat: 'multi-file-v1',
+        profile: 'generic',
+        directUploadTarget,
+      }
+    : {
+        mode: 'disabled',
+        snapshotFormat: null,
+        profile: null,
+        directUploadTarget: null,
+      };
+}
+
+const DIRECT_TARGET_UNSAFE_TEXT_PATTERN =
+  /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u;
+
+type TopDashboardStaticFileInput = Record<string, string>;
+const TOP_DASHBOARD_SOURCE_INPUT_SCAN_LIMIT = 256;
+
+function collectTopDashboardStaticFileInputs(htmlContent: string) {
+  const inputs: TopDashboardStaticFileInput[] = [];
+  try {
+    sanitizeHtml(htmlContent, {
+      allowedTags: [],
+      allowedAttributes: {},
+      nonTextTags: ['script', 'style', 'textarea', 'option', 'title', 'noscript', 'template'],
+      transformTags: {
+        input: (tagName, attributes) => {
+          if (attributes.type?.toLowerCase() === 'file') inputs.push({ ...attributes });
+          return { tagName, attribs: attributes };
+        },
+      },
+    });
+  } catch {
+    return [];
+  }
+  return inputs;
+}
+
+function scanTopDashboardSourceFileInputs(htmlContent: string) {
+  const inputStartPattern = /<input/giu;
+  let count = 0;
+  let inputTags = 0;
+  let cursor = 0;
+
+  while (cursor < htmlContent.length) {
+    inputStartPattern.lastIndex = cursor;
+    const match = inputStartPattern.exec(htmlContent);
+    if (!match) break;
+    const start = match.index;
+    const boundary = htmlContent[start + 6] ?? '';
+    if (boundary && /[A-Za-z0-9:_-]/u.test(boundary)) {
+      cursor = start + 6;
+      continue;
+    }
+    inputTags += 1;
+    if (inputTags > TOP_DASHBOARD_SOURCE_INPUT_SCAN_LIMIT) {
+      return { count, uncertain: true };
+    }
+
+    let quote = '';
+    let end = -1;
+    for (let index = start + 6; index < htmlContent.length; index += 1) {
+      const character = htmlContent[index]!;
+      const next = htmlContent[index + 1] ?? '';
+      if (character === '\\' && (next === '"' || next === "'")) {
+        if (!quote) quote = next;
+        else if (quote === next) quote = '';
+        index += 1;
+        continue;
+      }
+      if (quote) {
+        if (character === quote) quote = '';
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        quote = character;
+        continue;
+      }
+      if (character === '>') {
+        end = index;
+        break;
+      }
+    }
+    if (end < 0) return { count, uncertain: true };
+
+    const candidate = htmlContent
+      .slice(start, end + 1)
+      .replace(/\\(["'])/gu, '$1');
+    if (collectTopDashboardStaticFileInputs(candidate).length > 0) count += 1;
+    cursor = end + 1;
+  }
+
+  return { count, uncertain: false };
+}
+
+function readDirectTargetAttribute(
+  attributes: TopDashboardStaticFileInput,
+  attribute: 'id' | 'name',
+) {
+  const rawValue = attributes[attribute] ?? '';
+  let value: string;
+  try {
+    value = rawValue.normalize('NFC');
+  } catch {
+    return { safe: false, value: null } as const;
+  }
+  if (!value || value !== value.trim()) return { safe: true, value: null } as const;
+  if (
+    DIRECT_TARGET_UNSAFE_TEXT_PATTERN.test(value)
+    || new TextEncoder().encode(value).byteLength
+      > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGET_TEXT_BYTES
+  ) {
+    return { safe: false, value: null } as const;
+  }
+  return { safe: true, value } as const;
+}
+
+function detectTopDashboardDirectUploadTarget(
+  staticFileInputs: TopDashboardStaticFileInput[],
+  directUploadIsUncertain: boolean,
+): TopDashboardMultiFileSnapshotTarget | null {
+  if (
+    directUploadIsUncertain
+    || staticFileInputs.length !== 1
+  ) return null;
+  const input = staticFileInputs[0]!;
+  if (
+    Object.hasOwn(input, 'multiple')
+    || Object.hasOwn(input, 'webkitdirectory')
+    || Object.hasOwn(input, 'directory')
+  ) {
+    return null;
+  }
+  const id = readDirectTargetAttribute(input, 'id');
+  const name = readDirectTargetAttribute(input, 'name');
+  if (!id.safe || !name.safe) return null;
+  return { id: id.value, name: name.value, index: 0 };
 }
 
 function detectTopDashboardLegacyReadyFunction(

@@ -9,6 +9,7 @@ import {
   deleteTopDashboardBlock,
   getPublishedTopDashboardBlockOverview,
   getTopDashboardBlockOverview,
+  getTopDashboardBlockVersionContent,
   normalizeTopDashboardBlockTitle,
   renameTopDashboardBlock,
   TopDashboardBlockNotFoundError,
@@ -17,6 +18,7 @@ import {
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { detectTopDashboardDataContract } from '@/shared/lib/topDashboardContentSecurity';
 import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
 
 import { parsePositiveId } from '../routeUtils';
@@ -42,7 +44,28 @@ export async function GET(_request: Request, context: Context) {
     if (!overview) {
       return Response.json({ error: 'Блок не найден' }, { status: 404 });
     }
-    return Response.json(overview, {
+    if (!isTopDashboardManagementSession(session)) {
+      return Response.json(overview, {
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
+    const activeHtml = overview.activeVersionId
+      ? await getTopDashboardBlockVersionContent(blockId, overview.activeVersionId)
+      : null;
+    const activeDataContract = activeHtml
+      ? {
+          ...detectTopDashboardDataContract(activeHtml.htmlContent),
+          htmlVersionId: overview.activeVersionId,
+        }
+      : {
+          mode: 'disabled',
+          snapshotFormat: null,
+          profile: null,
+          directUploadTarget: null,
+          htmlVersionId: null,
+        } as const;
+
+    return Response.json({ ...overview, activeDataContract }, {
       headers: { 'Cache-Control': 'private, no-store' },
     });
   } catch (error) {

@@ -7,6 +7,8 @@ import test from 'node:test';
 import {
   decodeTopDashboardMultiFileSnapshot,
   encodeTopDashboardMultiFileSnapshot,
+  encodeTopDashboardSingleFileBlobSnapshot,
+  inspectTopDashboardMultiFileSnapshot,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX,
@@ -16,7 +18,10 @@ import {
   type TopDashboardMultiFileSnapshotInput,
   validateTopDashboardMultiFileSnapshot,
 } from '../src/shared/lib/topDashboardMultiFileSnapshot';
-import { validateTopDashboardMultiFileSnapshotFile } from '../src/shared/lib/topDashboardMultiFileSnapshotFile';
+import {
+  inspectTopDashboardMultiFileSnapshotFile,
+  validateTopDashboardMultiFileSnapshotFile,
+} from '../src/shared/lib/topDashboardMultiFileSnapshotFile';
 
 function byteValues(value: ArrayBuffer) {
   return Array.from(new Uint8Array(value));
@@ -92,6 +97,14 @@ test('multi-file snapshot round-trips raw bytes, multiple targets and NFC metada
     targetCount: 2,
     fileCount: 3,
   });
+  const inspected = inspectTopDashboardMultiFileSnapshot(encoded);
+  assert.equal(inspected.ok, true);
+  if (inspected.ok) {
+    assert.deepEqual(inspected.targets, [
+      { target: { id: 'file-é', name: 'source-files', index: 0 }, fileCount: 2 },
+      { target: { id: null, name: 'folder-files', index: 2 }, fileCount: 1 },
+    ]);
+  }
 
   const paddedNodeBuffer = Buffer.alloc(encoded.byteLength + 6, 0xaa);
   Buffer.from(encoded).copy(paddedNodeBuffer, 3);
@@ -148,6 +161,32 @@ test('encoder copies payloads without parsing or decompressing them', () => {
   assert.deepEqual(
     byteValues(decoded.targets[0]!.files[0]!.bytes),
     [0x1f, 0x8b, 0xff, 0x00, 0xaa, 0x55],
+  );
+});
+
+test('single-file Blob encoder creates a zero-copy compatible generic envelope', async () => {
+  const payloadBytes = Uint8Array.of(0x1f, 0x8b, 0x08, 0x00, 0xaa, 0x55);
+  const payload = new Blob([payloadBytes], { type: 'application/gzip' });
+  const encoded = encodeTopDashboardSingleFileBlobSnapshot({
+    target: { index: 0 },
+    file: {
+      name: 'стратегическии\u0306_обзор.json.gz',
+      type: payload.type,
+      lastModified: 1_788_333_123_456,
+      blob: payload,
+    },
+  });
+
+  assert.ok(encoded instanceof Blob);
+  assert.equal(encoded.type, 'application/octet-stream');
+  const decoded = decodeTopDashboardMultiFileSnapshot(await encoded.arrayBuffer());
+  assert.deepEqual(decoded.targets[0]?.target, { id: null, name: null, index: 0 });
+  assert.equal(decoded.targets[0]?.files[0]?.name, 'стратегическ\u0438й_обзор.json.gz');
+  assert.equal(decoded.targets[0]?.files[0]?.type, 'application/gzip');
+  assert.equal(decoded.targets[0]?.files[0]?.lastModified, 1_788_333_123_456);
+  assert.deepEqual(
+    byteValues(decoded.targets[0]!.files[0]!.bytes),
+    [...payloadBytes],
   );
 });
 
@@ -494,6 +533,10 @@ test('file-backed validator checks metadata without loading snapshot payloads in
     assert.deepEqual(
       await validateTopDashboardMultiFileSnapshotFile(validPath, encoded.byteLength),
       validateTopDashboardMultiFileSnapshot(encoded),
+    );
+    assert.deepEqual(
+      await inspectTopDashboardMultiFileSnapshotFile(validPath, encoded.byteLength),
+      inspectTopDashboardMultiFileSnapshot(encoded),
     );
 
     const broken = Buffer.from(encoded);

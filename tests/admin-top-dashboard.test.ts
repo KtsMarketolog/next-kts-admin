@@ -439,6 +439,41 @@ test('TOP viewer component contains no dashboard mutation controls', () => {
   assert.match(source, /На весь экран/);
 });
 
+test('TOP admin wraps direct generic files before using the universal stream endpoint', () => {
+  const sectionSource = readFileSync(new URL(
+    '../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx',
+    import.meta.url,
+  ), 'utf8');
+  const dataRouteSource = readFileSync(new URL(
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/data/route.ts',
+    import.meta.url,
+  ), 'utf8');
+  const blockRouteSource = readFileSync(new URL(
+    '../src/app/api/admin/top-dashboard/blocks/[blockId]/route.ts',
+    import.meta.url,
+  ), 'utf8');
+
+  assert.match(sectionSource, /encodeTopDashboardSingleFileBlobSnapshot/);
+  assert.match(sectionSource, /X-KTS-Top-Dashboard-Multi-File/);
+  assert.match(sectionSource, /X-KTS-Top-Dashboard-Direct-Single-File/);
+  assert.match(sectionSource, /X-KTS-Top-HTML-Version/);
+  assert.match(sectionSource, /usesUniversalDataUpload\s*\?\s*undefined/);
+  assert.match(blockRouteSource, /activeDataContract/);
+  assert.match(blockRouteSource, /detectTopDashboardDataContract/);
+  assert.match(blockRouteSource, /htmlVersionId: overview\.activeVersionId/);
+  assert.match(blockRouteSource, /!isTopDashboardManagementSession\(session\)/);
+  assert.match(dataRouteSource, /isTopDashboardDirectSingleFileUpload/);
+  assert.ok(
+    dataRouteSource.indexOf('const contract = detectTopDashboardDataContract')
+      < dataRouteSource.indexOf('const parsed = multiFileUpload'),
+    'the active HTML contract must be checked before a potentially large body is parsed',
+  );
+  assert.match(dataRouteSource, /isTopDashboardDirectSingleFileUploadPayload/);
+  assert.match(dataRouteSource, /contract\.directUploadTarget/);
+  assert.match(sectionSource, /selectedDataHtmlVersionId !== overview\.activeVersionId/);
+  assert.match(sectionSource, /target: directDataUploadTarget/);
+});
+
 test('dashboard CSP permits only exact uploaded scripts and handlers', () => {
   const script = "document.body.dataset.ready = 'yes';";
   const handler = "document.querySelector('#file').click()";
@@ -505,18 +540,102 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
   );
   assert.deepEqual(
     detectTopDashboardDataContract('<input id="snapInp" type="file">'),
-    { mode: 'generic', snapshotFormat: 'multi-file-v1', profile: 'generic' },
+    {
+      mode: 'generic',
+      snapshotFormat: 'multi-file-v1',
+      profile: 'generic',
+      directUploadTarget: { id: 'snapInp', name: null, index: 0 },
+    },
   );
+  assert.deepEqual(
+    detectTopDashboardDataContract(`
+      <header>СТРАТЕГИЧЕСКИЙ ОБЗОР ГРУППЫ</header>
+      <input id="file" type="file" accept=".json,.gz,.json.gz">
+    `),
+    {
+      mode: 'generic',
+      snapshotFormat: 'multi-file-v1',
+      profile: 'generic',
+      directUploadTarget: { id: 'file', name: null, index: 0 },
+    },
+  );
+  for (const html of [
+    '<input data-type="file">',
+    '<input type="file-upload">',
+  ]) {
+    assert.deepEqual(
+      detectTopDashboardDataContract(html),
+      { mode: 'disabled', snapshotFormat: null, profile: null, directUploadTarget: null },
+    );
+  }
+  for (const html of [
+    '<input type="file" title="выберите > один" multiple>',
+    '<input type="file" webkitdirectory>',
+    '<input type="file"><input type="file">',
+    `<input id="main" type="file">
+      <script>
+        const extra = document.createElement('input');
+        extra.type = 'file';
+      </script>`,
+    `<script>root.innerHTML = '<input type="file">';</script>`,
+    `<script>root.innerHTML = '<input title="данные > отчёт" type="file">';</script>`,
+    `<script>root.innerHTML = '<input type="f&#x69;le">';</script>`,
+    `İ<script>root.innerHTML = '<input type="file">';</script>`,
+    `<input id="main" type="file">
+      <script>root.innerHTML += '<input title="данные > отчёт" type="file">';</script>`,
+    `<input id="main" type="file">İ
+      <script>root.innerHTML += '<input type="file">';</script>`,
+    `<input id="main" type="file">
+      <script>document.getElementById('main').multiple = true;</script>`,
+  ]) {
+    assert.deepEqual(detectTopDashboardDataContract(html), {
+      mode: 'generic',
+      snapshotFormat: 'multi-file-v1',
+      profile: 'generic',
+      directUploadTarget: null,
+    });
+  }
+  assert.deepEqual(
+    detectTopDashboardDataContract(
+      '<input name="source&amp;file" type="file" title="данные > снимок">',
+    ),
+    {
+      mode: 'generic',
+      snapshotFormat: 'multi-file-v1',
+      profile: 'generic',
+      directUploadTarget: { id: null, name: 'source&file', index: 0 },
+    },
+  );
+  assert.deepEqual(
+    detectTopDashboardDataContract(`
+      <script>const example = '<input type="file">';</script>
+      <template><input type="file"></template>
+      <iframe srcdoc="<input type='file'>"></iframe>
+      <input id="main" type="file">
+    `),
+    {
+      mode: 'generic',
+      snapshotFormat: 'multi-file-v1',
+      profile: 'generic',
+      directUploadTarget: null,
+    },
+  );
+  assert.doesNotThrow(() => detectTopDashboardDataContract('<input'.repeat(10_000)));
 
   assert.deepEqual(
     detectTopDashboardDataContract(
       '<input type="file" multiple><script>if (value.format !== "kts-bundle") return;</script>',
     ),
-    { mode: 'generic', snapshotFormat: 'multi-file-v1', profile: 'generic' },
+    {
+      mode: 'generic',
+      snapshotFormat: 'multi-file-v1',
+      profile: 'generic',
+      directUploadTarget: null,
+    },
   );
   assert.deepEqual(
     detectTopDashboardDataContract('<main>Готовый отчёт без файлов</main>'),
-    { mode: 'disabled', snapshotFormat: null, profile: null },
+    { mode: 'disabled', snapshotFormat: null, profile: null, directUploadTarget: null },
   );
   assert.deepEqual(
     detectTopDashboardDataContract(`
@@ -526,7 +645,12 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
         document.body.append(upload);
       </script>
     `),
-    { mode: 'generic', snapshotFormat: 'multi-file-v1', profile: 'generic' },
+    {
+      mode: 'generic',
+      snapshotFormat: 'multi-file-v1',
+      profile: 'generic',
+      directUploadTarget: null,
+    },
   );
   assert.deepEqual(
     detectTopDashboardDataContract(`
@@ -537,7 +661,12 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
         return { format: "kts-bundle", version: 1 };
       </script>
     `),
-    { mode: 'legacy', snapshotFormat: 'kts-bundle-v1', profile: 'sales-analytics' },
+    {
+      mode: 'legacy',
+      snapshotFormat: 'kts-bundle-v1',
+      profile: 'sales-analytics',
+      directUploadTarget: null,
+    },
   );
   assert.deepEqual(
     detectTopDashboardDataContract(`
@@ -546,7 +675,7 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
         upload.dataset.type = 'file';
       </script>
     `),
-    { mode: 'disabled', snapshotFormat: null, profile: null },
+    { mode: 'disabled', snapshotFormat: null, profile: null, directUploadTarget: null },
   );
 });
 

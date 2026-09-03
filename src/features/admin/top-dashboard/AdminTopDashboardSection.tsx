@@ -10,6 +10,7 @@ import {
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL,
 } from '@/shared/lib/topDashboardLimits';
+import { encodeTopDashboardSingleFileBlobSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
 
@@ -50,6 +51,18 @@ type TopDashboardDataOverview = {
   versions: TopDashboardDataVersion[];
 };
 
+type TopDashboardDataContract = {
+  htmlVersionId: number | null;
+  mode: 'legacy' | 'generic' | 'disabled';
+  snapshotFormat: TopDashboardSnapshotFormat | null;
+  profile: 'sales-analytics' | 'assortment-optimization' | 'purchases' | 'generic' | null;
+  directUploadTarget: {
+    id: string | null;
+    name: string | null;
+    index: number;
+  } | null;
+};
+
 type TopDashboardOverview = {
   block: {
     id: number;
@@ -61,6 +74,7 @@ type TopDashboardOverview = {
   updatedAt: string | null;
   versions: TopDashboardVersion[];
   data: TopDashboardDataOverview;
+  activeDataContract: TopDashboardDataContract;
 };
 
 type AdminTopDashboardSectionProps = {
@@ -172,6 +186,71 @@ async function readError(response: Response, fallback: string) {
   return typeof data.error === 'string' ? data.error : fallback;
 }
 
+function normalizeTopDashboardDataContract(value: unknown): TopDashboardDataContract {
+  const disabled: TopDashboardDataContract = {
+    htmlVersionId: null,
+    mode: 'disabled',
+    snapshotFormat: null,
+    profile: null,
+    directUploadTarget: null,
+  };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return disabled;
+  const source = value as Record<string, unknown>;
+  const htmlVersionId = Number.isSafeInteger(source.htmlVersionId)
+    && Number(source.htmlVersionId) > 0
+    ? Number(source.htmlVersionId)
+    : null;
+  if (source.mode === 'disabled') return { ...disabled, htmlVersionId };
+  if (
+    source.mode === 'legacy'
+    && (source.snapshotFormat === 'kts-bundle-v1' || source.snapshotFormat === 'purchases-v1')
+    && (
+      source.profile === 'sales-analytics'
+      || source.profile === 'assortment-optimization'
+      || source.profile === 'purchases'
+    )
+  ) {
+    return {
+      htmlVersionId,
+      mode: 'legacy',
+      snapshotFormat: source.snapshotFormat,
+      profile: source.profile,
+      directUploadTarget: null,
+    };
+  }
+  if (
+    source.mode !== 'generic'
+    || source.snapshotFormat !== 'multi-file-v1'
+    || source.profile !== 'generic'
+  ) {
+    return disabled;
+  }
+  const rawTarget = source.directUploadTarget;
+  const directUploadTarget = rawTarget
+    && typeof rawTarget === 'object'
+    && !Array.isArray(rawTarget)
+    && Number.isSafeInteger((rawTarget as Record<string, unknown>).index)
+    && Number((rawTarget as Record<string, unknown>).index) >= 0
+    && Number((rawTarget as Record<string, unknown>).index) <= 0xffff
+    && (typeof (rawTarget as Record<string, unknown>).id === 'string'
+      || (rawTarget as Record<string, unknown>).id === null)
+    && (typeof (rawTarget as Record<string, unknown>).name === 'string'
+      || (rawTarget as Record<string, unknown>).name === null)
+      ? {
+          id: (rawTarget as Record<string, unknown>).id as string | null,
+          name: (rawTarget as Record<string, unknown>).name as string | null,
+          index: Number((rawTarget as Record<string, unknown>).index),
+        }
+      : null;
+  return {
+    htmlVersionId,
+    mode: 'generic',
+    snapshotFormat: 'multi-file-v1',
+    profile: 'generic',
+    directUploadTarget,
+  };
+}
+
 export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashboardSectionProps) {
   const router = useRouter();
   const previewFrameRef = useTopDashboardDownloadBridge(showStatus);
@@ -180,6 +259,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedDataFile, setSelectedDataFile] = useState<File | null>(null);
+  const [selectedDataHtmlVersionId, setSelectedDataHtmlVersionId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -238,6 +318,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
           updatedAt: typeof data.data?.updatedAt === 'string' ? data.data.updatedAt : null,
           versions: Array.isArray(data.data?.versions) ? data.data.versions : [],
         },
+        activeDataContract: normalizeTopDashboardDataContract(data.activeDataContract),
       };
       setLoadError(null);
       setOverview(normalized);
@@ -267,6 +348,17 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       overviewRequestIdRef.current += 1;
     };
   }, [loadOverview]);
+
+  useEffect(() => {
+    if (
+      selectedDataFile
+      && selectedDataHtmlVersionId !== overview?.activeVersionId
+    ) {
+      setSelectedDataFile(null);
+      setSelectedDataHtmlVersionId(null);
+      if (dataFileInputRef.current) dataFileInputRef.current.value = '';
+    }
+  }, [overview?.activeVersionId, selectedDataFile, selectedDataHtmlVersionId]);
 
   useEffect(() => {
     const refreshVisibleOverview = () => {
@@ -312,6 +404,19 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     [overview],
   );
   const hasActiveHtml = Boolean(overview?.activeVersionId);
+  const activeDataContractMatches = overview !== null
+    && overview.activeDataContract.htmlVersionId === overview.activeVersionId;
+  const usesUniversalDataUpload = overview?.activeDataContract.mode === 'generic';
+  const directDataUploadTarget = activeDataContractMatches
+    && usesUniversalDataUpload
+    ? overview?.activeDataContract.directUploadTarget ?? null
+    : null;
+  const canUploadData = hasActiveHtml
+    && activeDataContractMatches
+    && (
+      overview?.activeDataContract.mode === 'legacy'
+      || directDataUploadTarget !== null
+    );
 
   const chooseFile = (file: File | null) => {
     if (!file) {
@@ -334,21 +439,35 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   const chooseDataFile = (file: File | null) => {
     if (!file) {
       setSelectedDataFile(null);
+      setSelectedDataHtmlVersionId(null);
       return;
     }
-    if (!/\.json(?:\.gz)?$/i.test(file.name)) {
+    if (!canUploadData) {
       setSelectedDataFile(null);
+      setSelectedDataHtmlVersionId(null);
+      showStatusRef.current(
+        usesUniversalDataUpload
+          ? 'Для этого HTML выберите файлы внутри предпросмотра'
+          : 'Для опубликованной HTML-страницы не удалось определить способ загрузки данных',
+      );
+      return;
+    }
+    if (!usesUniversalDataUpload && !/\.json(?:\.gz)?$/i.test(file.name)) {
+      setSelectedDataFile(null);
+      setSelectedDataHtmlVersionId(null);
       showStatusRef.current('Выберите файл с расширением .json или .json.gz');
       return;
     }
     if (file.size <= 0 || file.size > TOP_DASHBOARD_DATA_MAX_BYTES) {
       setSelectedDataFile(null);
+      setSelectedDataHtmlVersionId(null);
       showStatusRef.current(
         `Файл данных должен быть непустым и не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
       );
       return;
     }
     setSelectedDataFile(file);
+    setSelectedDataHtmlVersionId(overview?.activeVersionId ?? null);
   };
 
   const uploadVersion = async () => {
@@ -394,20 +513,67 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       showStatusRef.current('Сначала опубликуйте HTML-страницу');
       return;
     }
+    if (selectedDataHtmlVersionId !== overview.activeVersionId) {
+      setSelectedDataFile(null);
+      setSelectedDataHtmlVersionId(null);
+      if (dataFileInputRef.current) dataFileInputRef.current.value = '';
+      showStatusRef.current('HTML-страница изменилась. Выберите файл данных заново.');
+      return;
+    }
+    if (overview.activeDataContract.mode === 'disabled') {
+      showStatusRef.current('Для опубликованной HTML-страницы не удалось определить способ загрузки данных');
+      return;
+    }
+    if (overview.activeDataContract.htmlVersionId !== overview.activeVersionId) {
+      showStatusRef.current('Активная HTML-страница изменилась. Обновите страницу и повторите.');
+      await loadOverview(selectedVersionId);
+      return;
+    }
+    if (overview.activeDataContract.mode === 'generic' && !directDataUploadTarget) {
+      showStatusRef.current('Для этого HTML выберите файлы внутри предпросмотра');
+      return;
+    }
 
     setBusyAction('upload-data');
     try {
+      const headers: Record<string, string> = {
+        'X-KTS-TOP-Data-Upload': '1',
+        'X-KTS-Top-Data-Protocol': 'stream-v1',
+        'X-KTS-Top-Data-Expected-Version': overview.data.activeVersionId === null
+          ? 'none'
+          : String(overview.data.activeVersionId),
+      };
+      let body: BodyInit = selectedDataFile;
+
+      if (overview.activeDataContract.mode === 'generic') {
+        try {
+          body = encodeTopDashboardSingleFileBlobSnapshot({
+            target: directDataUploadTarget!,
+            file: {
+              name: selectedDataFile.name,
+              type: selectedDataFile.type,
+              lastModified: selectedDataFile.lastModified,
+              webkitRelativePath: selectedDataFile.webkitRelativePath,
+              blob: selectedDataFile,
+            },
+          });
+        } catch {
+          showStatusRef.current(
+            `Файл нельзя подготовить к загрузке или его размер с учётом служебных данных превышает ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+          );
+          return;
+        }
+        headers['X-KTS-Top-Dashboard-Multi-File'] = '1';
+        headers['X-KTS-Top-Dashboard-Direct-Single-File'] = '1';
+        headers['X-KTS-Top-HTML-Version'] = String(overview.activeVersionId);
+      } else {
+        headers['X-KTS-Top-Data-Name'] = encodeURIComponent(selectedDataFile.name);
+      }
+
       const response = await fetch(`${apiBasePath}/data`, {
         method: 'PUT',
-        headers: {
-          'X-KTS-TOP-Data-Upload': '1',
-          'X-KTS-Top-Data-Protocol': 'stream-v1',
-          'X-KTS-Top-Data-Name': encodeURIComponent(selectedDataFile.name),
-          'X-KTS-Top-Data-Expected-Version': overview.data.activeVersionId === null
-            ? 'none'
-            : String(overview.data.activeVersionId),
-        },
-        body: selectedDataFile,
+        headers,
+        body,
         credentials: 'same-origin',
       });
       if (!response.ok) {
@@ -418,6 +584,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       }
 
       setSelectedDataFile(null);
+      setSelectedDataHtmlVersionId(null);
       if (dataFileInputRef.current) dataFileInputRef.current.value = '';
       await loadOverview(selectedVersionId);
       setPreviewRevision((current) => current + 1);
@@ -812,11 +979,36 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         <div className={`${styles.topDashboardUploadCard} ${styles.topDashboardDataUploadCard}`}>
           <div>
             <h3>{activeDataVersion ? 'Обновить данные' : 'Загрузить данные'}</h3>
-            <p>
-              Поддерживаются снимки .json и .json.gz размером до{' '}
-              {TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ. Для .json.gz размер после распаковки — до{' '}
-              {TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL}. HTML-страницу повторно загружать не нужно.
-            </p>
+            {!hasActiveHtml ? (
+              <p>
+                Сначала опубликуйте HTML-страницу, затем здесь появится подходящий способ загрузки данных.
+              </p>
+            ) : overview && !activeDataContractMatches ? (
+              <p>
+                Данные о текущей HTML-странице устарели. Обновите страницу перед загрузкой файла.
+              </p>
+            ) : overview?.activeDataContract.mode === 'disabled' ? (
+              <p>
+                В опубликованной HTML-странице не найдено поле для загрузки данных.
+                Опубликуйте исправленную версию HTML, чтобы подключить общий файл.
+              </p>
+            ) : usesUniversalDataUpload && !directDataUploadTarget ? (
+              <p>
+                Этот HTML использует несколько файлов, папку или создаёт поле выбора динамически.
+                Выберите нужные файлы внутри предпросмотра — верхняя загрузка здесь отключена.
+              </p>
+            ) : usesUniversalDataUpload ? (
+              <p>
+                Поддерживается любой одиночный файл размером до{' '}
+                {TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ: он передаётся HTML-дашборду без изменения.
+              </p>
+            ) : (
+              <p>
+                Поддерживаются снимки .json и .json.gz размером до{' '}
+                {TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ. Для .json.gz размер после распаковки — до{' '}
+                {TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL}. HTML-страницу повторно загружать не нужно.
+              </p>
+            )}
           </div>
           <div className={styles.topDashboardUploadControls}>
             <label className={styles.topDashboardFilePicker}>
@@ -824,8 +1016,10 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
               <input
                 ref={dataFileInputRef}
                 type="file"
-                accept=".json,.json.gz,application/json,application/gzip"
-                disabled={busyAction !== null || !overview || !hasActiveHtml}
+                accept={usesUniversalDataUpload
+                  ? undefined
+                  : '.json,.json.gz,application/json,application/gzip'}
+                disabled={busyAction !== null || !overview || !canUploadData}
                 onChange={(event) => chooseDataFile(event.target.files?.[0] ?? null)}
               />
             </label>
@@ -841,7 +1035,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
             </div>
             <button
               type="button"
-              disabled={!selectedDataFile || busyAction !== null || !overview || !hasActiveHtml}
+              disabled={!selectedDataFile || busyAction !== null || !overview || !canUploadData}
               onClick={() => void uploadDataVersion()}
             >
               {busyAction === 'upload-data'

@@ -11,8 +11,11 @@ import {
   readTopDashboardDataUpload,
 } from '../src/app/api/admin/top-dashboard/blocks/dataUpload';
 import {
+  isTopDashboardDirectSingleFileUpload,
+  isTopDashboardDirectSingleFileUploadPayload,
   readTopDashboardMultiFileDataStreamUpload,
   readTopDashboardMultiFileDataUpload,
+  TOP_DASHBOARD_DIRECT_SINGLE_FILE_UPLOAD_HEADER,
   TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER,
 } from '../src/app/api/admin/top-dashboard/blocks/multiFileDataUpload';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
@@ -276,12 +279,76 @@ test('universal TOP upload accepts a validated multi-input envelope without pars
   if (!result.parsed) return assert.fail('Expected a parsed universal snapshot');
   assert.equal(result.parsed.expectedActiveVersionId, 18);
   assert.equal(result.parsed.expectedActiveHtmlVersionId, 29);
+  assert.equal(result.parsed.targetCount, 2);
+  assert.equal(result.parsed.fileCount, 3);
+  assert.deepEqual(result.parsed.targets, [
+    { target: { id: 'files', name: 'sources', index: 0 }, fileCount: 2 },
+    { target: { id: 'extra', name: null, index: 1 }, fileCount: 1 },
+  ]);
   assert.equal(result.parsed.upload.snapshotFormat, 'multi-file-v1');
   assert.equal(result.parsed.upload.dashboardProfile, 'generic');
   assert.equal(result.parsed.upload.boundHtmlVersionId, 29);
   assert.equal(result.parsed.upload.fileSize, encoded.byteLength);
   assert.equal(result.parsed.upload.uncompressedSize, encoded.byteLength);
   assert.match(result.parsed.upload.sha256, /^[0-9a-f]{64}$/);
+});
+
+test('direct generic upload mode is explicit and keeps one-file envelope metadata', async () => {
+  const encoded = encodeTopDashboardMultiFileSnapshot({
+    targets: [{
+      target: { index: 0 },
+      files: [{ name: 'anything.json.gz', bytes: Uint8Array.of(0x1f, 0x8b, 0x08) }],
+    }],
+  });
+  const request = multiFileUploadRequest(encoded);
+  request.headers.set(TOP_DASHBOARD_DIRECT_SINGLE_FILE_UPLOAD_HEADER, '1');
+
+  assert.equal(isTopDashboardDirectSingleFileUpload(request), true);
+  const result = await readTopDashboardMultiFileDataUpload(request);
+  assert.equal(result.error, undefined);
+  assert.equal(result.parsed?.targetCount, 1);
+  assert.equal(result.parsed?.fileCount, 1);
+  assert.deepEqual(result.parsed?.targets, [
+    { target: { id: null, name: null, index: 0 }, fileCount: 1 },
+  ]);
+});
+
+test('direct generic upload accepts only one file for the exact authorized HTML input', () => {
+  const valid = {
+    targetCount: 1,
+    fileCount: 1,
+    targets: [{
+      target: { id: 'file', name: null, index: 0 },
+      fileCount: 1,
+    }],
+  };
+  assert.equal(
+    isTopDashboardDirectSingleFileUploadPayload(valid, { id: 'file', index: 0 }),
+    true,
+  );
+  assert.equal(isTopDashboardDirectSingleFileUploadPayload(valid, null), false);
+  assert.equal(
+    isTopDashboardDirectSingleFileUploadPayload(valid, { id: 'other', index: 0 }),
+    false,
+  );
+  assert.equal(
+    isTopDashboardDirectSingleFileUploadPayload(valid, { id: 'file', index: 1 }),
+    false,
+  );
+  assert.equal(
+    isTopDashboardDirectSingleFileUploadPayload({ ...valid, fileCount: 2 }, {
+      id: 'file',
+      index: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    isTopDashboardDirectSingleFileUploadPayload({
+      ...valid,
+      targets: [{ ...valid.targets[0]!, fileCount: 2 }],
+    }, { id: 'file', index: 0 }),
+    false,
+  );
 });
 
 test('TOP uploads stream legacy JSON and multi-file snapshots into protected pending files', async () => {
@@ -333,6 +400,11 @@ test('TOP uploads stream legacy JSON and multi-file snapshots into protected pen
       },
     ));
     assert.equal(universal.error, undefined);
+    assert.equal(universal.parsed?.targetCount, 1);
+    assert.equal(universal.parsed?.fileCount, 1);
+    assert.deepEqual(universal.parsed?.targets, [
+      { target: { id: 'files', name: null, index: 0 }, fileCount: 1 },
+    ]);
     assert.equal(universal.parsed?.upload.content, null);
     assert.equal(universal.parsed?.upload.fileSize, encoded.byteLength);
     assert.equal(universal.parsed?.upload.pendingFile?.firstBytes.toString('ascii'), 'KT');

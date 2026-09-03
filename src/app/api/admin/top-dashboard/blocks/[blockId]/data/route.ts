@@ -39,6 +39,8 @@ import {
   readTopDashboardDataUpload,
 } from '../../dataUpload';
 import {
+  isTopDashboardDirectSingleFileUpload,
+  isTopDashboardDirectSingleFileUploadPayload,
   isTopDashboardMultiFileUpload,
   readTopDashboardMultiFileDataStreamUpload,
   readTopDashboardMultiFileDataUpload,
@@ -142,6 +144,14 @@ export async function PUT(request: Request, context: Context) {
   if (forbiddenOrigin) return forbiddenOrigin;
 
   const multiFileUpload = isTopDashboardMultiFileUpload(request);
+  const directSingleFileUpload = isTopDashboardDirectSingleFileUpload(request);
+  const streamUpload = isTopDashboardStreamUpload(request);
+  if (directSingleFileUpload && (!multiFileUpload || !streamUpload)) {
+    return Response.json(
+      { error: 'Некорректный режим прямой загрузки файла' },
+      { status: 400 },
+    );
+  }
   const limited = await enforceAdminActionRateLimit(
     session,
     multiFileUpload ? 'top_dashboard_multi_file_upload' : 'top_dashboard_data_upload',
@@ -171,17 +181,6 @@ export async function PUT(request: Request, context: Context) {
 
   let pendingFile: PendingTopDashboardDataFile | undefined;
   try {
-    const streamUpload = isTopDashboardStreamUpload(request);
-    const parsed = multiFileUpload
-      ? streamUpload
-        ? await readTopDashboardMultiFileDataStreamUpload(request)
-        : await readTopDashboardMultiFileDataUpload(request)
-      : streamUpload
-        ? await readTopDashboardDataStreamUpload(request)
-        : await readTopDashboardDataUpload(request);
-    if (parsed.error) return parsed.error;
-    pendingFile = parsed.parsed.upload.pendingFile;
-
     const overview = await getTopDashboardBlockOverview(blockId);
     const expectedActiveHtmlVersionId = overview.activeVersionId;
     if (!expectedActiveHtmlVersionId) {
@@ -210,17 +209,62 @@ export async function PUT(request: Request, context: Context) {
       );
     }
 
+    if (multiFileUpload && contract.mode !== 'generic') {
+      return Response.json(
+        { error: 'Для этого HTML используется проверенный снимок данных, а не универсальные файлы' },
+        { status: 422 },
+      );
+    }
+    if (!multiFileUpload && contract.mode !== 'legacy') {
+      return Response.json(
+        { error: 'Для этого HTML используйте универсальную загрузку файла' },
+        { status: 422 },
+      );
+    }
+    if (directSingleFileUpload && !contract.directUploadTarget) {
+      return Response.json(
+        {
+          error: 'Верхняя загрузка недоступна для структуры этого HTML. Выберите файлы внутри предпросмотра.',
+        },
+        { status: 422 },
+      );
+    }
+
+    const parsed = multiFileUpload
+      ? streamUpload
+        ? await readTopDashboardMultiFileDataStreamUpload(request)
+        : await readTopDashboardMultiFileDataUpload(request)
+      : streamUpload
+        ? await readTopDashboardDataStreamUpload(request)
+        : await readTopDashboardDataUpload(request);
+    if (parsed.error) return parsed.error;
+    pendingFile = parsed.parsed.upload.pendingFile;
+
     if (multiFileUpload) {
-      if (contract.mode !== 'generic') {
-        return Response.json(
-          { error: 'Для этого HTML используется проверенный снимок данных, а не универсальные файлы' },
-          { status: 422 },
-        );
-      }
       if (
         !('expectedActiveHtmlVersionId' in parsed.parsed)
         || parsed.parsed.expectedActiveHtmlVersionId !== expectedActiveHtmlVersionId
-        || !isTopDashboardBlockDataMutationFrameRequest(
+      ) {
+        return Response.json(
+          { error: 'Активная HTML-страница уже изменилась. Обновите страницу и повторите.' },
+          { status: 409 },
+        );
+      }
+      if (
+        directSingleFileUpload
+        && !isTopDashboardDirectSingleFileUploadPayload(
+          parsed.parsed,
+          contract.directUploadTarget,
+        )
+      ) {
+        return Response.json(
+          { error: 'Прямая универсальная загрузка содержит неверное поле или количество файлов' },
+          { status: 400 },
+        );
+      }
+      if (
+        !directSingleFileUpload
+        && !isTopDashboardBlockDataMutationFrameRequest(
           request,
           blockId,
           expectedActiveHtmlVersionId,
@@ -231,11 +275,6 @@ export async function PUT(request: Request, context: Context) {
           { status: 409 },
         );
       }
-    } else if (contract.mode !== 'legacy') {
-      return Response.json(
-        { error: 'Выберите файлы непосредственно внутри этого HTML-дашборда' },
-        { status: 422 },
-      );
     }
     if (
       expectedHtmlSnapshotFormat !== parsed.parsed.upload.snapshotFormat

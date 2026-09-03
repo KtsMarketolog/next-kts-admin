@@ -74,6 +74,17 @@ export type TopDashboardMultiFileSnapshotInput = {
   targets: readonly TopDashboardMultiFileSnapshotTargetInput[];
 };
 
+export type TopDashboardSingleFileBlobSnapshotInput = {
+  target?: TopDashboardMultiFileSnapshotTarget;
+  file: {
+    name: string;
+    type?: string | null;
+    lastModified?: number | null;
+    webkitRelativePath?: string | null;
+    blob: Blob;
+  };
+};
+
 export type DecodedTopDashboardMultiFileSnapshotFile = {
   name: string;
   type: string;
@@ -102,6 +113,29 @@ export type TopDashboardMultiFileSnapshotValidationResult =
       byteLength: number;
       targetCount: number;
       fileCount: number;
+    }
+  | {
+      ok: false;
+      code: TopDashboardMultiFileSnapshotErrorCode;
+      error: string;
+    };
+
+export type TopDashboardMultiFileSnapshotTargetSummary = {
+  target: {
+    id: string | null;
+    name: string | null;
+    index: number;
+  };
+  fileCount: number;
+};
+
+export type TopDashboardMultiFileSnapshotInspectionResult =
+  | {
+      ok: true;
+      byteLength: number;
+      targetCount: number;
+      fileCount: number;
+      targets: TopDashboardMultiFileSnapshotTargetSummary[];
     }
   | {
       ok: false;
@@ -491,6 +525,106 @@ export function encodeTopDashboardMultiFileSnapshot(
   return buffer;
 }
 
+/**
+ * Builds the same validated envelope around one browser Blob without first
+ * copying the full payload into an ArrayBuffer. This keeps the admin's generic
+ * single-file upload bounded even near the 100 MiB limit.
+ */
+export function encodeTopDashboardSingleFileBlobSnapshot(
+  input: TopDashboardSingleFileBlobSnapshotInput,
+): Blob {
+  if (!isRecord(input) || !isRecord(input.file)) {
+    throw snapshotError('INVALID_INPUT', 'Описание файла некорректно');
+  }
+
+  const rawTarget = input.target ?? { index: 0 };
+  if (!isRecord(rawTarget)) {
+    throw snapshotError('INVALID_TARGET', 'Описание целевого поля некорректно');
+  }
+  const index = rawTarget.index;
+  if (
+    typeof index !== 'number'
+    || !Number.isInteger(index)
+    || index < 0
+    || index > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX
+  ) {
+    throw snapshotError('INVALID_TARGET', 'Индекс целевого поля некорректен');
+  }
+
+  const id = normalizeTargetText(rawTarget.id, 'ID целевого поля');
+  const targetName = normalizeTargetText(rawTarget.name, 'Name целевого поля');
+  const fileName = normalizeFileName(input.file.name);
+  const mimeType = normalizeMimeType(input.file.type);
+  const relativePath = normalizeRelativePath(
+    input.file.webkitRelativePath,
+    fileName.value,
+  );
+  const lastModified = normalizeLastModified(input.file.lastModified);
+  const blob = input.file.blob;
+  if (
+    typeof Blob === 'undefined'
+    || !(blob instanceof Blob)
+    || !Number.isSafeInteger(blob.size)
+    || blob.size <= 0
+  ) {
+    throw snapshotError('INVALID_FILE', 'Содержимое файла недоступно или пусто');
+  }
+
+  let totalLength = HEADER_BYTES;
+  totalLength = checkedLength(
+    totalLength,
+    TARGET_HEADER_BYTES + id.encoded.byteLength + targetName.encoded.byteLength,
+  );
+  totalLength = checkedLength(
+    totalLength,
+    FILE_HEADER_BYTES
+      + fileName.encoded.byteLength
+      + mimeType.encoded.byteLength
+      + relativePath.encoded.byteLength
+      + blob.size,
+  );
+
+  const header = new Uint8Array(HEADER_BYTES);
+  header.set(MAGIC_BYTES, 0);
+  const headerView = new DataView(header.buffer);
+  headerView.setUint16(8, TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION, false);
+  headerView.setUint32(12, totalLength, false);
+  headerView.setUint16(16, 1, false);
+  headerView.setUint32(20, 1, false);
+
+  const targetHeader = new Uint8Array(TARGET_HEADER_BYTES);
+  const targetView = new DataView(targetHeader.buffer);
+  targetView.setUint32(0, index, false);
+  targetView.setUint16(4, id.encoded.byteLength, false);
+  targetView.setUint16(6, targetName.encoded.byteLength, false);
+  targetView.setUint16(8, 1, false);
+
+  const fileHeader = new Uint8Array(FILE_HEADER_BYTES);
+  const fileView = new DataView(fileHeader.buffer);
+  fileView.setUint16(0, fileName.encoded.byteLength, false);
+  fileView.setUint16(2, mimeType.encoded.byteLength, false);
+  fileView.setUint16(4, relativePath.encoded.byteLength, false);
+  fileView.setUint32(8, blob.size, false);
+  fileView.setUint32(12, Math.floor(lastModified / (UINT32_MAX + 1)), false);
+  fileView.setUint32(16, lastModified % (UINT32_MAX + 1), false);
+
+  const encoded = new Blob([
+    header,
+    targetHeader,
+    id.encoded,
+    targetName.encoded,
+    fileHeader,
+    fileName.encoded,
+    mimeType.encoded,
+    relativePath.encoded,
+    blob,
+  ], { type: 'application/octet-stream' });
+  if (encoded.size !== totalLength) {
+    throw snapshotError('INVALID_LENGTH', 'Не удалось собрать бинарный контейнер');
+  }
+  return encoded;
+}
+
 function assertAvailable(offset: number, length: number, total: number) {
   if (
     !Number.isInteger(length)
@@ -765,6 +899,24 @@ export function decodeTopDashboardMultiFileSnapshot(
 export function validateTopDashboardMultiFileSnapshot(
   source: unknown,
 ): TopDashboardMultiFileSnapshotValidationResult {
+  const inspected = inspectTopDashboardMultiFileSnapshot(source);
+  if (!inspected.ok) return inspected;
+  return {
+    ok: true,
+    byteLength: inspected.byteLength,
+    targetCount: inspected.targetCount,
+    fileCount: inspected.fileCount,
+  };
+}
+
+/**
+ * Validates an envelope while exposing only target metadata. File payloads are
+ * skipped rather than copied, so callers can authorize a direct upload target
+ * without materializing a second copy of the selected file.
+ */
+export function inspectTopDashboardMultiFileSnapshot(
+  source: unknown,
+): TopDashboardMultiFileSnapshotInspectionResult {
   try {
     const parsed = parseTopDashboardMultiFileSnapshot(source, false);
     return {
@@ -772,6 +924,10 @@ export function validateTopDashboardMultiFileSnapshot(
       byteLength: parsed.byteLength,
       targetCount: parsed.targets.length,
       fileCount: parsed.fileCount,
+      targets: parsed.targets.map((entry) => ({
+        target: entry.target,
+        fileCount: entry.files.length,
+      })),
     };
   } catch (error) {
     const normalizedError = error instanceof TopDashboardMultiFileSnapshotError
