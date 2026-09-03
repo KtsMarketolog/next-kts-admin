@@ -487,6 +487,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
             )
             or (
               compressed_payload is null
+              and storage_path is not null
               and storage_path ~ '^[0-9a-f]{2}/[0-9a-f]{64}-[0-9a-f-]{36}\\.bin$'
             )
           );
@@ -494,6 +495,29 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
         create unique index if not exists top_dashboard_block_data_versions_storage_path_idx
           on top_dashboard_block_data_versions(storage_path)
           where storage_path is not null;
+      `);
+    },
+  },
+  {
+    id: '202609030002_top_dashboard_storage_integrity',
+    description: 'Require exactly one persisted payload source for every TOP data version',
+    apply: async (client) => {
+      await client.query(`
+        alter table top_dashboard_block_data_versions
+          drop constraint if exists top_dashboard_block_data_versions_storage_check;
+
+        alter table top_dashboard_block_data_versions
+          add constraint top_dashboard_block_data_versions_storage_check check (
+            (
+              compressed_payload is not null
+              and storage_path is null
+            )
+            or (
+              compressed_payload is null
+              and storage_path is not null
+              and storage_path ~ '^[0-9a-f]{2}/[0-9a-f]{64}-[0-9a-f-]{36}\\.bin$'
+            )
+          );
       `);
     },
   },

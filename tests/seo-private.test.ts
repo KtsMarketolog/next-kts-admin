@@ -102,6 +102,13 @@ test("large TOP data upload bypasses proxy buffering without bypassing adjacent 
     false,
   );
   assert.equal(
+    matches("/api/admin/top-dashboard/blocks/7/data", {
+      "next-action": "invalid-probe",
+      "x-kts-top-data-upload": "1",
+    }),
+    true,
+  );
+  assert.equal(
     matches("/api/admin/top-dashboard/blocks/7/data/active", {
       "x-kts-top-data-upload": "1",
     }),

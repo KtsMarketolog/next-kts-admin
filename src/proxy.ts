@@ -88,6 +88,10 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
+      source: '/:path*',
+      has: [{ type: 'header', key: 'next-action' }],
+    },
+    {
       source: '/api/admin/top-dashboard/blocks/:blockId/data',
       missing: [{ type: 'header', key: 'x-kts-top-data-upload', value: '1' }],
     },
