@@ -521,6 +521,21 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202609030003_top_dashboard_2_gib_uncompressed_limit',
+    description: 'Allow TOP dashboard gzip snapshots to unpack to 2 GiB',
+    apply: async (client) => {
+      await client.query(`
+        alter table top_dashboard_block_data_versions
+          drop constraint if exists top_dashboard_block_data_versions_uncompressed_size_check;
+
+        alter table top_dashboard_block_data_versions
+          add constraint top_dashboard_block_data_versions_uncompressed_size_check check (
+            uncompressed_size between 1 and ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES}
+          );
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

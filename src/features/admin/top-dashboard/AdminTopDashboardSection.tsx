@@ -8,7 +8,7 @@ import styles from '@/app/admin/admin.module.scss';
 import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
-  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL,
 } from '@/shared/lib/topDashboardLimits';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
@@ -815,7 +815,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
             <p>
               Поддерживаются снимки .json и .json.gz размером до{' '}
               {TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ. Для .json.gz размер после распаковки — до{' '}
-              {TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES} МБ. HTML-страницу повторно загружать не нужно.
+              {TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL}. HTML-страницу повторно загружать не нужно.
             </p>
           </div>
           <div className={styles.topDashboardUploadControls}>

@@ -38,6 +38,7 @@ import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES,
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
   TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES,
@@ -367,11 +368,12 @@ test('universal TOP upload rejects malformed envelopes and missing HTML binding'
   assert.match(await missingBinding.error!.text(), /активная версия HTML/i);
 });
 
-test('TOP dashboard data limits allow 100 MiB while bounding unpacked data and history', () => {
+test('TOP dashboard data limits allow archives up to 100 MiB and unpacked data up to 2 GiB', () => {
   assert.equal(TOP_DASHBOARD_DATA_MAX_MEGABYTES, 100);
   assert.equal(TOP_DASHBOARD_DATA_MAX_BYTES, 100 * 1024 * 1024);
-  assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES, 256);
-  assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES, 256 * 1024 * 1024);
+  assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES, 2 * 1024);
+  assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES, 2 * 1024 * 1024 * 1024);
+  assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL, '2 ГБ');
   assert.ok(TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES >= TOP_DASHBOARD_DATA_MAX_BYTES * 3);
 });
 

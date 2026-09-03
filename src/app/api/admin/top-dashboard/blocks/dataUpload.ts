@@ -13,7 +13,7 @@ import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES,
-  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
+  TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL,
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
 } from '@/shared/lib/topDashboardLimits';
 import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
@@ -542,7 +542,7 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
       if (error instanceof Error && error.message === UNCOMPRESSED_TOO_LARGE) {
         return {
           error: errorResponse(
-            `Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES} МБ`,
+            `Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL}`,
             413,
           ),
         };
@@ -626,7 +626,7 @@ export async function readTopDashboardDataStreamUpload(request: Request): Promis
     if (error instanceof Error && error.message === UNCOMPRESSED_TOO_LARGE) {
       return {
         error: errorResponse(
-          `Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES} МБ`,
+          `Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL}`,
           413,
         ),
       };
