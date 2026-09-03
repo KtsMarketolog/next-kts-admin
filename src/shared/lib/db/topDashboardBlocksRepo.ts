@@ -81,6 +81,7 @@ export type DeleteTopDashboardBlockResult = {
     dataVersionCount: number;
     dataStoredBytes: number;
   };
+  deletedStoragePaths: string[];
 };
 
 export type CreateTopDashboardBlockVersionInput = CreateTopDashboardVersionInput & {
@@ -99,6 +100,12 @@ export type ActivateTopDashboardBlockVersionInput = {
 
 export type DeleteTopDashboardBlockVersionResult = DeleteTopDashboardVersionResult & {
   blockId: number;
+  deletedStoragePaths: string[];
+};
+
+export type CreateTopDashboardBlockVersionResult = {
+  version: TopDashboardVersion;
+  prunedStoragePaths: string[];
 };
 
 const TOP_DASHBOARD_VERSION_LIMIT = 50;
@@ -607,9 +614,11 @@ export async function deleteTopDashboardBlock(
     const dataVersionsResult = await client.query<{
       version_count: string;
       stored_bytes: string;
+      storage_paths: string[];
     }>(
       `select count(*)::text as version_count,
-              coalesce(sum(file_size), 0)::text as stored_bytes
+              coalesce(sum(file_size), 0)::text as stored_bytes,
+              array_remove(array_agg(storage_path), null) as storage_paths
        from top_dashboard_block_data_versions
        where block_id = $1`,
       [blockId],
@@ -647,6 +656,7 @@ export async function deleteTopDashboardBlock(
         dataVersionCount: Number(dataVersions?.version_count ?? 0),
         dataStoredBytes: Number(dataVersions?.stored_bytes ?? 0),
       },
+      deletedStoragePaths: dataVersions?.storage_paths ?? [],
     };
   });
 }
@@ -792,9 +802,10 @@ export async function createAndActivateTopDashboardBlockDataVersion(
          dashboard_profile,
          bound_html_version_id,
          uploaded_by_admin_user_id,
-         uploaded_by_manager_id
+         uploaded_by_manager_id,
+         storage_path
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        returning
          id::text,
          original_name,
@@ -821,6 +832,7 @@ export async function createAndActivateTopDashboardBlockDataVersion(
         input.boundHtmlVersionId,
         input.uploadedByAdminUserId,
         input.uploadedByManagerId,
+        input.storagePath,
       ],
     );
     const versionRow = versionResult.rows[0];
@@ -839,7 +851,7 @@ export async function createAndActivateTopDashboardBlockDataVersion(
     );
     const updatedState = updatedStateResult.rows[0];
 
-    const prunedResult = await client.query<{ id: string }>(
+    const prunedResult = await client.query<{ id: string; storage_path: string | null }>(
       `with state as (
          select active_version_id, previous_version_id
          from top_dashboard_block_data_state
@@ -877,7 +889,7 @@ export async function createAndActivateTopDashboardBlockDataVersion(
            ranked.position + ranked.protected_version_count > $1
            or ranked.running_bytes + ranked.protected_stored_bytes > $2
          )
-       returning versions.id::text`,
+       returning versions.id::text, versions.storage_path`,
       [TOP_DASHBOARD_DATA_VERSION_LIMIT, TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES, input.blockId],
     );
 
@@ -894,6 +906,9 @@ export async function createAndActivateTopDashboardBlockDataVersion(
       previousVersionId: numericId(updatedState.previous_version_id),
       updatedAt: updatedState.updated_at,
       prunedVersionIds: prunedResult.rows.map((row) => Number(row.id)),
+      prunedStoragePaths: prunedResult.rows.flatMap((row) => (
+        row.storage_path ? [row.storage_path] : []
+      )),
     };
   });
 }
@@ -1004,6 +1019,7 @@ export async function getActiveTopDashboardBlockDataContent(
     id: string | null;
     original_name: string | null;
     compressed_payload: Buffer | null;
+    storage_path: string | null;
     file_size: string | null;
     uncompressed_size: string | null;
     sha256: string | null;
@@ -1017,7 +1033,11 @@ export async function getActiveTopDashboardBlockDataContent(
        html_state.active_version_id::text as active_html_version_id,
        versions.id::text,
        versions.original_name,
-       versions.compressed_payload,
+       case
+         when versions.storage_path is null then versions.compressed_payload
+         else null
+       end as compressed_payload,
+       versions.storage_path,
        versions.file_size::text,
        versions.uncompressed_size::text,
        versions.sha256,
@@ -1041,7 +1061,6 @@ export async function getActiveTopDashboardBlockDataContent(
   if (
     row.id === null
     || row.original_name === null
-    || row.compressed_payload === null
     || row.file_size === null
     || row.uncompressed_size === null
     || row.sha256 === null
@@ -1049,6 +1068,9 @@ export async function getActiveTopDashboardBlockDataContent(
     || row.dashboard_profile === null
     || row.created_at === null
   ) {
+    throw new TopDashboardBlockDataVersionNotFoundError();
+  }
+  if ((row.compressed_payload === null) === (row.storage_path === null)) {
     throw new TopDashboardBlockDataVersionNotFoundError();
   }
 
@@ -1074,6 +1096,7 @@ export async function getActiveTopDashboardBlockDataContent(
     id: Number(row.id),
     originalName: row.original_name,
     content: row.compressed_payload,
+    storagePath: row.storage_path,
     fileSize: Number(row.file_size),
     uncompressedSize: Number(row.uncompressed_size),
     sha256: row.sha256,
@@ -1086,7 +1109,7 @@ export async function getActiveTopDashboardBlockDataContent(
 
 export async function createTopDashboardBlockVersion(
   input: CreateTopDashboardBlockVersionInput,
-): Promise<TopDashboardVersion> {
+): Promise<CreateTopDashboardBlockVersionResult> {
   await ensureSiteSchema();
 
   return withTransaction(async (client) => {
@@ -1172,8 +1195,19 @@ export async function createTopDashboardBlockVersion(
       [TOP_DASHBOARD_VERSION_LIMIT, TOP_DASHBOARD_STORAGE_LIMIT_BYTES, input.blockId],
     );
     const pruneCandidateIds = pruneCandidatesResult.rows.map((row) => Number(row.id));
+    let prunedStoragePaths: string[] = [];
 
     if (pruneCandidateIds.length > 0) {
+      const prunedDataFilesResult = await client.query<{ storage_path: string }>(
+        `select storage_path
+         from top_dashboard_block_data_versions
+         where block_id = $1
+           and bound_html_version_id = any($2::bigint[])
+           and storage_path is not null`,
+        [input.blockId, pruneCandidateIds],
+      );
+      prunedStoragePaths = prunedDataFilesResult.rows.map((row) => row.storage_path);
+
       await client.query(
         `with doomed_data_versions as (
            select id
@@ -1215,7 +1249,10 @@ export async function createTopDashboardBlockVersion(
       [input.blockId],
     );
 
-    return mapVersion(result.rows[0], null);
+    return {
+      version: mapVersion(result.rows[0], null),
+      prunedStoragePaths,
+    };
   });
 }
 
@@ -1560,6 +1597,15 @@ export async function deleteTopDashboardBlockVersion(input: {
     let updatedAt = state?.updated_at ?? new Date().toISOString();
     const replacedPreviousVersion = currentPreviousVersionId === input.versionId;
 
+    const boundDataFilesResult = await client.query<{ storage_path: string }>(
+      `select storage_path
+       from top_dashboard_block_data_versions
+       where block_id = $1
+         and bound_html_version_id = $2
+         and storage_path is not null`,
+      [input.blockId, input.versionId],
+    );
+
     if (replacedPreviousVersion) {
       const replacementResult = await client.query<{ id: string }>(
         `select id::text
@@ -1644,6 +1690,7 @@ export async function deleteTopDashboardBlockVersion(input: {
       previousVersionId,
       updatedAt,
       replacedPreviousVersion,
+      deletedStoragePaths: boundDataFilesResult.rows.map((row) => row.storage_path),
     };
   });
 }

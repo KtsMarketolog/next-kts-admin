@@ -17,6 +17,7 @@ import {
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
 
 import { parsePositiveId } from '../routeUtils';
 
@@ -164,6 +165,10 @@ export async function DELETE(request: Request, context: Context) {
         activeVersionId: deletedBlock.activeVersionId,
         previousVersionId: deletedBlock.previousVersionId,
       },
+    });
+
+    await deleteTopDashboardDataFiles(result.deletedStoragePaths).catch((error) => {
+      console.error('Failed to remove deleted TOP dashboard data files', error);
     });
 
     return Response.json(

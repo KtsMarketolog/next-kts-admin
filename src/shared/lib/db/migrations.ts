@@ -460,6 +460,43 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202609030001_top_dashboard_file_storage',
+    description: 'Allow large TOP snapshots to live in protected shared file storage',
+    apply: async (client) => {
+      await client.query(`
+        alter table top_dashboard_block_data_versions
+          add column if not exists storage_path text;
+
+        alter table top_dashboard_block_data_versions
+          alter column compressed_payload drop not null,
+          drop constraint if exists top_dashboard_block_data_versions_file_size_check;
+
+        alter table top_dashboard_block_data_versions
+          add constraint top_dashboard_block_data_versions_file_size_check check (
+            file_size between 1 and ${TOP_DASHBOARD_DATA_MAX_BYTES}
+            and (
+              compressed_payload is null
+              or file_size = octet_length(compressed_payload)
+            )
+          ),
+          add constraint top_dashboard_block_data_versions_storage_check check (
+            (
+              compressed_payload is not null
+              and storage_path is null
+            )
+            or (
+              compressed_payload is null
+              and storage_path ~ '^[0-9a-f]{2}/[0-9a-f]{64}-[0-9a-f-]{36}\\.bin$'
+            )
+          );
+
+        create unique index if not exists top_dashboard_block_data_versions_storage_path_idx
+          on top_dashboard_block_data_versions(storage_path)
+          where storage_path is not null;
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

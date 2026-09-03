@@ -1578,16 +1578,6 @@ export function createTopDashboardFrameBridgeScript(
       return false;
     }
 
-    const formData = new FormData();
-    formData.set(
-      'expectedActiveVersionId',
-      activeDataVersionId === null ? '' : String(activeDataVersionId),
-    );
-    formData.set('expectedActiveHtmlVersionId', String(CONFIG.htmlVersionId));
-    formData.set('file', new File([blob], 'dashboard-files.ktsmf', {
-      type: 'application/octet-stream',
-    }));
-
     let response;
     try {
       response = await fetch(CONFIG.dataPath, {
@@ -1597,8 +1587,14 @@ export function createTopDashboardFrameBridgeScript(
         headers: {
           Accept: 'application/json',
           'X-KTS-Top-Dashboard-Multi-File': '1',
+          'X-KTS-TOP-Data-Upload': '1',
+          'X-KTS-Top-Data-Protocol': 'stream-v1',
+          'X-KTS-Top-Data-Expected-Version': activeDataVersionId === null
+            ? 'none'
+            : String(activeDataVersionId),
+          'X-KTS-Top-HTML-Version': String(CONFIG.htmlVersionId),
         },
-        body: formData,
+        body: blob,
       });
     } catch {
       showNotice('error', 'Файлы открыты, но не сохранены на сервере', false);

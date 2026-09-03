@@ -60,6 +60,7 @@ export {
 } from './db/topDashboardBlocksRepo';
 export type {
   ActivateTopDashboardBlockVersionInput,
+  CreateTopDashboardBlockVersionResult,
   CreateTopDashboardBlockVersionInput,
   DeleteTopDashboardBlockResult,
   DeleteTopDashboardBlockVersionResult,

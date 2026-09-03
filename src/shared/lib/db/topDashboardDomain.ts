@@ -37,7 +37,8 @@ export type TopDashboardBlockDataOverview = {
 export type TopDashboardBlockDataVersionContent = {
   id: number;
   originalName: string;
-  content: Buffer;
+  content: Buffer | null;
+  storagePath: string | null;
   fileSize: number;
   uncompressedSize: number;
   sha256: string;
@@ -54,7 +55,8 @@ export type CreateAndActivateTopDashboardBlockDataVersionInput = {
   expectedHtmlSnapshotFormat: TopDashboardSnapshotFormat;
   expectedHtmlProfile: TopDashboardProfile;
   originalName: string;
-  content: Buffer;
+  content: Buffer | null;
+  storagePath: string | null;
   fileSize: number;
   uncompressedSize: number;
   sha256: string;
@@ -71,6 +73,7 @@ export type CreateAndActivateTopDashboardBlockDataVersionResult = {
   previousVersionId: number | null;
   updatedAt: string;
   prunedVersionIds: number[];
+  prunedStoragePaths: string[];
 };
 
 export type ActivateTopDashboardBlockDataVersionInput = {

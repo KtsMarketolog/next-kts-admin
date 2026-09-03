@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   compress: true,
   poweredByHeader: false,
   output: "standalone",
+  cacheMaxMemorySize: 0,
+  deploymentId: process.env.DEPLOYMENT_VERSION,
   serverExternalPackages: ["pdfkit"],
   outputFileTracingRoot: __dirname,
   experimental: {

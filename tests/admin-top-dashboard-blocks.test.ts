@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 
 import {
   inspectGzipJsonWithLimit,
+  readTopDashboardDataStreamUpload,
   readTopDashboardDataUpload,
 } from '../src/app/api/admin/top-dashboard/blocks/dataUpload';
 import {
+  readTopDashboardMultiFileDataStreamUpload,
   readTopDashboardMultiFileDataUpload,
   TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER,
 } from '../src/app/api/admin/top-dashboard/blocks/multiFileDataUpload';
@@ -101,6 +106,7 @@ test('TOP data mutations are bound to one HTML version and exact dashboard contr
     expectedHtmlProfile: 'sales-analytics',
     originalName: 'sales.json.gz',
     content: Buffer.from('gzip'),
+    storagePath: null,
     fileSize: 4,
     uncompressedSize: 128,
     sha256: '0'.repeat(64),
@@ -134,6 +140,7 @@ test('universal TOP multi-file snapshots are explicitly bound to one HTML versio
     expectedHtmlProfile: 'generic',
     originalName: 'dashboard-files.ktsmf',
     content: Buffer.from('bundle'),
+    storagePath: null,
     fileSize: 6,
     uncompressedSize: 6,
     sha256: '0'.repeat(64),
@@ -178,6 +185,7 @@ test('TOP block rename and deletion results keep block identity and deletion met
       dataVersionCount: 3,
       dataStoredBytes: 8_400_000,
     },
+    deletedStoragePaths: [],
   } satisfies DeleteTopDashboardBlockResult;
 
   assert.equal(renamed.block.id, deleted.deletedBlock.id);
@@ -273,6 +281,66 @@ test('universal TOP upload accepts a validated multi-input envelope without pars
   assert.equal(result.parsed.upload.fileSize, encoded.byteLength);
   assert.equal(result.parsed.upload.uncompressedSize, encoded.byteLength);
   assert.match(result.parsed.upload.sha256, /^[0-9a-f]{64}$/);
+});
+
+test('TOP uploads stream legacy JSON and multi-file snapshots into protected pending files', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'kts-top-stream-'));
+  const previousDirectory = process.env.TOP_DASHBOARD_DATA_DIR;
+  process.env.TOP_DASHBOARD_DATA_DIR = directory;
+  try {
+    const source = Buffer.from(JSON.stringify({
+      format: 'kts-bundle',
+      version: 1,
+      n: 1,
+      dict: {},
+      cols: {},
+      extra: { plan: {} },
+    }));
+    const legacy = await readTopDashboardDataStreamUpload(new Request(
+      'https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data',
+      {
+        method: 'PUT',
+        headers: {
+          'x-kts-top-data-name': encodeURIComponent('analytics.json'),
+          'x-kts-top-data-expected-version': '12',
+        },
+        body: source,
+      },
+    ));
+    assert.equal(legacy.error, undefined);
+    assert.equal(legacy.parsed?.upload.content, null);
+    assert.equal(legacy.parsed?.upload.storagePath, null);
+    assert.equal(legacy.parsed?.upload.fileSize, source.length);
+    assert.equal(legacy.parsed?.upload.dashboardProfile, 'sales-analytics');
+    await legacy.parsed?.upload.pendingFile?.discard();
+
+    const encoded = encodeTopDashboardMultiFileSnapshot({
+      targets: [{
+        target: { id: 'files', index: 0 },
+        files: [{ name: 'input.xlsx', bytes: Uint8Array.of(0x50, 0x4b, 0x03, 0x04) }],
+      }],
+    });
+    const universal = await readTopDashboardMultiFileDataStreamUpload(new Request(
+      'https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data',
+      {
+        method: 'PUT',
+        headers: {
+          'x-kts-top-data-expected-version': 'none',
+          'x-kts-top-html-version': '29',
+        },
+        body: encoded,
+      },
+    ));
+    assert.equal(universal.error, undefined);
+    assert.equal(universal.parsed?.upload.content, null);
+    assert.equal(universal.parsed?.upload.fileSize, encoded.byteLength);
+    assert.equal(universal.parsed?.upload.pendingFile?.firstBytes.toString('ascii'), 'KT');
+    await universal.parsed?.upload.pendingFile?.discard();
+  } finally {
+    if (previousDirectory === undefined) delete process.env.TOP_DASHBOARD_DATA_DIR;
+    else process.env.TOP_DASHBOARD_DATA_DIR = previousDirectory;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('universal TOP upload rejects malformed envelopes and missing HTML binding', async () => {

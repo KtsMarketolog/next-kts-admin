@@ -7,6 +7,7 @@ import {
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
 
 import {
   errorResponse,
@@ -44,12 +45,18 @@ export async function POST(request: Request, context: Context) {
     if (parsed.error) return parsed.error;
 
     const actor = getTopDashboardActor(session);
-    const version = await createTopDashboardBlockVersion({
+    const result = await createTopDashboardBlockVersion({
       blockId,
       ...parsed.upload,
       uploadedByAdminUserId: actor.adminUserId,
       uploadedByManagerId: actor.managerId,
     });
+    const version = result.version;
+    if (result.prunedStoragePaths.length > 0) {
+      await deleteTopDashboardDataFiles(result.prunedStoragePaths).catch((error) => {
+        console.error('Failed to remove pruned TOP dashboard data files', error);
+      });
+    }
 
     await recordSecurityEvent({
       eventType: 'top_dashboard_version_uploaded',

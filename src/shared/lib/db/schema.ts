@@ -2,15 +2,21 @@ import { query } from './client';
 import { applySchemaMigrations } from './migrations';
 import { seedBrandPortfolio, seedGroupCompanies, seedHeroSlides, seedNewsItems, seedSiteSettings } from './schemaSeeds';
 
-export async function ensureSiteSchema() {
-  siteSchemaReady ??= ensureSiteSchemaInternal().catch((error) => {
-    siteSchemaReady = null;
-    throw error;
-  });
-  return siteSchemaReady;
+declare global {
+  var __ktsSiteSchemaReady: Promise<void> | undefined;
 }
 
-let siteSchemaReady: Promise<void> | null = null;
+export async function ensureSiteSchema() {
+  globalThis.__ktsSiteSchemaReady ??= ensureSiteSchemaInternal().catch((error) => {
+    globalThis.__ktsSiteSchemaReady = undefined;
+    throw error;
+  });
+  return globalThis.__ktsSiteSchemaReady;
+}
+
+export function markSiteSchemaReady() {
+  globalThis.__ktsSiteSchemaReady = Promise.resolve();
+}
 
 async function ensureSiteSchemaInternal() {
   await query(`

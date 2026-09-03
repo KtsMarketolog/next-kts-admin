@@ -1,0 +1,40 @@
+name: Production health
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kts-production-health
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  probe:
+    name: Probe production
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check liveness, readiness, and public HTML
+        run: |
+          set -euo pipefail
+          for path in /api/health/live /api/health/ready /; do
+            echo "Checking https://kts-impex.ru${path}"
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --max-time 15 \
+              --retry 2 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              "https://kts-impex.ru${path}" \
+              >/dev/null
+          done

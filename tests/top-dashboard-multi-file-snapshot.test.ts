@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -13,6 +16,7 @@ import {
   type TopDashboardMultiFileSnapshotInput,
   validateTopDashboardMultiFileSnapshot,
 } from '../src/shared/lib/topDashboardMultiFileSnapshot';
+import { validateTopDashboardMultiFileSnapshotFile } from '../src/shared/lib/topDashboardMultiFileSnapshotFile';
 
 function byteValues(value: ArrayBuffer) {
   return Array.from(new Uint8Array(value));
@@ -479,4 +483,30 @@ test('non-throwing validator reports a stable error code for invalid input', () 
   const result = validateTopDashboardMultiFileSnapshot(broken);
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, 'INVALID_MAGIC');
+});
+
+test('file-backed validator checks metadata without loading snapshot payloads into memory', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'kts-multifile-validation-'));
+  try {
+    const encoded = encodeTopDashboardMultiFileSnapshot(oneFileInput());
+    const validPath = path.join(directory, 'valid.ktsmf');
+    await writeFile(validPath, Buffer.from(encoded));
+    assert.deepEqual(
+      await validateTopDashboardMultiFileSnapshotFile(validPath, encoded.byteLength),
+      validateTopDashboardMultiFileSnapshot(encoded),
+    );
+
+    const broken = Buffer.from(encoded);
+    broken[0] = 0;
+    const brokenPath = path.join(directory, 'broken.ktsmf');
+    await writeFile(brokenPath, broken);
+    const validation = await validateTopDashboardMultiFileSnapshotFile(
+      brokenPath,
+      broken.byteLength,
+    );
+    assert.equal(validation.ok, false);
+    if (!validation.ok) assert.equal(validation.code, 'INVALID_MAGIC');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

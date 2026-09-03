@@ -67,6 +67,7 @@ jobs:
 
       - name: Build application
         env:
+          DEPLOYMENT_VERSION: ${{ github.sha }}
           SITE_URL: https://kts-impex.ru
           YANDEX_SITE_VERIFICATION: ${{ secrets.YANDEX_SITE_VERIFICATION }}
         run: |
@@ -88,6 +89,7 @@ jobs:
           rsync -a --exclude='uploads/' public/ deploy-artifact/public/
           cp ecosystem.config.cjs deploy-artifact/ecosystem.config.cjs
           cp scripts/verify-production-seo.mjs deploy-artifact/scripts/verify-production-seo.mjs
+          printf '%s\n' "$RELEASE_ID" > deploy-artifact/.release-id
 
           tar -czf "kts-release-${RELEASE_ID}.tar.gz" -C deploy-artifact .
 
@@ -121,15 +123,57 @@ jobs:
           ROLLBACK_TARGET=""
           ACTIVATION_STARTED=0
 
+          wait_for_url() {
+            url="$1"
+            label="$2"
+            attempts="${3:-120}"
+            for attempt in $(seq 1 "$attempts"); do
+              if curl --fail --silent --show-error --max-time 4 "$url" >/dev/null 2>&1; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo "$label did not become ready after ${attempts}s: $url"
+            return 1
+          }
+
+          main_app_mode() {
+            pm2 jlist | node -e '
+              let input = "";
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                const app = JSON.parse(input).find((entry) => entry.name === "kts-next-admin");
+                if (app) process.stdout.write(app.pm2_env.exec_mode || "unknown");
+              });
+            '
+          }
+
+          main_app_pids() {
+            pm2 jlist | node -e '
+              let input = "";
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                JSON.parse(input)
+                  .filter((entry) => entry.name === "kts-next-admin" && entry.pm2_env.status === "online")
+                  .forEach((entry) => console.log(entry.pid));
+              });
+            '
+          }
+
           rollback_on_exit() {
             status=$?
             trap - EXIT
 
-            if [ "$status" -eq 0 ] || [ "$ACTIVATION_STARTED" != "1" ]; then
+            if [ "$status" -eq 0 ]; then
               exit "$status"
             fi
 
             set +e
+            pm2 delete kts-next-admin-canary >/dev/null 2>&1 || true
+            if [ "$ACTIVATION_STARTED" != "1" ]; then
+              exit "$status"
+            fi
+
             echo "Release activation failed; rolling back to the previous release."
             echo "Failed release logs:"
             pm2 logs kts-next-admin --lines 120 --nostream || true
@@ -138,8 +182,7 @@ jobs:
             if [ -n "$ROLLBACK_TARGET" ] && [ -d "$ROLLBACK_TARGET" ]; then
               ln -sfn "$ROLLBACK_TARGET" "$CURRENT"
               pm2 start "$CURRENT/ecosystem.config.cjs" --update-env
-              sleep 2
-              curl -fsS "http://127.0.0.1:3000/" >/dev/null
+              wait_for_url "http://127.0.0.1:3000/" "Rollback application" 120
               pm2 save
               echo "Rollback completed: $ROLLBACK_TARGET"
             else
@@ -160,7 +203,12 @@ jobs:
 
           FIRMWARE_PUBLIC_PATH="klimatika/prog/firmware/update"
 
-          mkdir -p "$RELEASES" "$SHARED/public/uploads" "$SHARED/public/$FIRMWARE_PUBLIC_PATH"
+          mkdir -p \
+            "$RELEASES" \
+            "$SHARED/public/uploads" \
+            "$SHARED/public/$FIRMWARE_PUBLIC_PATH" \
+            "$SHARED/runtime-data/top-dashboard"
+          chmod 700 "$SHARED/runtime-data" "$SHARED/runtime-data/top-dashboard"
 
           if [ -d "$BASE/public/uploads" ] && [ ! -e "$SHARED/public/uploads/.migrated-from-legacy" ]; then
             cp -a "$BASE/public/uploads/." "$SHARED/public/uploads/" 2>/dev/null || true
@@ -189,6 +237,8 @@ jobs:
           mkdir -p "$(dirname "$RELEASE/public/$FIRMWARE_PUBLIC_PATH")"
           rm -rf "$RELEASE/public/$FIRMWARE_PUBLIC_PATH"
           ln -sfn "$SHARED/public/$FIRMWARE_PUBLIC_PATH" "$RELEASE/public/$FIRMWARE_PUBLIC_PATH"
+          rm -rf "$RELEASE/runtime-data"
+          ln -sfn "$SHARED/runtime-data" "$RELEASE/runtime-data"
 
           if [ -L "$CURRENT" ] || [ -e "$CURRENT" ]; then
             CURRENT_TARGET="$(readlink -f "$CURRENT" || true)"
@@ -198,63 +248,75 @@ jobs:
             fi
           fi
 
+          EXISTING_MODE="$(main_app_mode)"
+          pm2 delete kts-next-admin-canary >/dev/null 2>&1 || true
+          KTS_PM2_CANARY=1 KTS_PM2_PORT=3001 \
+            pm2 start "$RELEASE/ecosystem.config.cjs" --only kts-next-admin-canary --update-env
+          CANARY_PID="$(pm2 pid kts-next-admin-canary | awk '$1 ~ /^[0-9]+$/ && $1 != 0 { print $1; exit }')"
+          if [ -n "$CANARY_PID" ]; then
+            renice 10 -p "$CANARY_PID" >/dev/null
+          fi
+          wait_for_url \
+            "http://127.0.0.1:3001/api/health/ready" \
+            "Release canary" \
+            120
+          env \
+            SEO_REQUIRE_YANDEX_VERIFICATION=1 \
+            SEO_REQUIRE_CATALOG_ENTITIES=1 \
+            SEO_SMOKE_CONCURRENCY=2 \
+            nice -n 10 node \
+              "$RELEASE/scripts/verify-production-seo.mjs" \
+              "http://127.0.0.1:3001" \
+              "https://kts-impex.ru"
+          pm2 delete kts-next-admin-canary
+
+          if [ -z "$EXISTING_MODE" ] && ss -ltn 'sport = :3000' 2>/dev/null | grep -q LISTEN; then
+            echo "Port 3000 is occupied by a process not managed as kts-next-admin; refusing to kill it."
+            exit 1
+          fi
+
           ACTIVATION_STARTED=1
           ln -sfn "$RELEASE" "$CURRENT"
 
-          (pm2 delete kts-next-admin >/dev/null 2>&1 || true)
+          if [ "$EXISTING_MODE" = "cluster_mode" ]; then
+            echo "Reloading the existing PM2 cluster one worker at a time."
+            pm2 startOrReload "$CURRENT/ecosystem.config.cjs" --only kts-next-admin --update-env
+          elif [ -n "$EXISTING_MODE" ]; then
+            echo "Performing the one-time cutover from PM2 fork mode to cluster mode."
+            pm2 delete kts-next-admin
+            pm2 start "$CURRENT/ecosystem.config.cjs" --only kts-next-admin --update-env
+          else
+            pm2 start "$CURRENT/ecosystem.config.cjs" --only kts-next-admin --update-env
+          fi
 
-          PORT_PIDS="$(ss -ltnp 'sport = :3000' 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u || true)"
-          if [ -n "$PORT_PIDS" ]; then
-            PORT_TREE_PIDS="$(
-              for pid in $PORT_PIDS; do
-                current="$pid"
-                for _ in 1 2 3 4; do
-                  [ -n "$current" ] || break
-                  [ "$current" = "1" ] && break
-                  echo "$current"
-                  current="$(ps -o ppid= -p "$current" 2>/dev/null | tr -d ' ' || true)"
-                done
-              done | sort -u
-            )"
+          wait_for_url \
+            "http://127.0.0.1:3000/api/health/ready" \
+            "Production application" \
+            120
 
-            echo "Stopping listeners on port 3000 before starting new release: $PORT_TREE_PIDS"
-            kill $PORT_TREE_PIDS 2>/dev/null || true
-            sleep 2
+          FINAL_MODE="$(main_app_mode)"
+          if [ "$FINAL_MODE" != "cluster_mode" ]; then
+            echo "PM2 application mode is $FINAL_MODE, expected cluster_mode."
+            pm2 logs kts-next-admin --lines 80 --nostream || true
+            exit 1
+          fi
 
-            PORT_PIDS="$(ss -ltnp 'sport = :3000' 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u || true)"
-            if [ -n "$PORT_PIDS" ]; then
-              PORT_TREE_PIDS="$(
-                for pid in $PORT_PIDS; do
-                  current="$pid"
-                  for _ in 1 2 3 4; do
-                    [ -n "$current" ] || break
-                    [ "$current" = "1" ] && break
-                    echo "$current"
-                    current="$(ps -o ppid= -p "$current" 2>/dev/null | tr -d ' ' || true)"
-                  done
-                done | sort -u
-              )"
-              echo "Force stopping listeners on port 3000: $PORT_TREE_PIDS"
-              kill -9 $PORT_TREE_PIDS 2>/dev/null || true
+          APP_PIDS="$(main_app_pids)"
+          PID_COUNT="$(printf '%s\n' "$APP_PIDS" | awk 'NF { count += 1 } END { print count + 0 }')"
+          if [ "$PID_COUNT" -ne 2 ]; then
+            echo "PM2 has $PID_COUNT online workers, expected 2."
+            pm2 logs kts-next-admin --lines 80 --nostream || true
+            exit 1
+          fi
+          for APP_PID in $APP_PIDS; do
+            APP_CWD="$(readlink -f "/proc/$APP_PID/cwd" 2>/dev/null || true)"
+            if [ "$APP_CWD" != "$RELEASE" ]; then
+              echo "PM2 worker $APP_PID started from unexpected cwd: $APP_CWD, expected: $RELEASE"
+              pm2 logs kts-next-admin --lines 80 --nostream || true
+              exit 1
             fi
-          fi
+          done
 
-          pm2 start "$CURRENT/ecosystem.config.cjs" --update-env
-          sleep 2
-          APP_PID="$(pm2 pid kts-next-admin || true)"
-          if [ -z "$APP_PID" ] || [ "$APP_PID" = "0" ]; then
-            pm2 logs kts-next-admin --lines 80 --nostream || true
-            exit 1
-          fi
-          APP_CWD="$(readlink "/proc/$APP_PID/cwd" 2>/dev/null || true)"
-          if [ "$APP_CWD" != "$RELEASE" ]; then
-            echo "PM2 started from unexpected cwd: $APP_CWD, expected: $RELEASE"
-            pm2 logs kts-next-admin --lines 80 --nostream || true
-            exit 1
-          fi
-          curl -fsS "http://127.0.0.1:3000/" >/dev/null
-          SEO_REQUIRE_YANDEX_VERIFICATION=1 SEO_REQUIRE_CATALOG_ENTITIES=1 \
-            node "$CURRENT/scripts/verify-production-seo.mjs" "http://127.0.0.1:3000" "https://kts-impex.ru"
           pm2 save
 
           ACTIVATION_STARTED=0

@@ -53,6 +53,16 @@ test("proxy keeps public HTML indexable", () => {
   }
 });
 
+test("proxy rejects Server Action probes before application routing", () => {
+  const response = proxy(new NextRequest("https://kts-impex.ru/", {
+    method: "POST",
+    headers: { "next-action": "stale-or-forged-action-id" },
+  }));
+
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+});
+
 test("proxy prevents private pages from being stored", () => {
   for (const pathname of [
     "/admin",

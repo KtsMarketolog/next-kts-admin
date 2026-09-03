@@ -878,7 +878,9 @@ test('trusted dashboard frame bridge persists generic files only with management
   assert.match(bridge, /setInterval\(probeAdapter, 250\)/);
   assert.doesNotMatch(bridge, /snapshot-selected/);
   assert.match(bridge, /method: 'PUT'/);
-  assert.match(bridge, /expectedActiveHtmlVersionId/);
+  assert.match(bridge, /X-KTS-Top-HTML-Version/);
+  assert.match(bridge, /X-KTS-Top-Data-Protocol/);
+  assert.doesNotMatch(bridge, /new FormData\(\)/);
   assert.match(bridge, /CONFIG\.canManage/);
   assert.match(bridge, /multi-file-v1/);
   assert.match(bridge, /X-KTS-Top-Dashboard-Multi-File/);

@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+
 import {
   getTopDashboardActor,
   isTopDashboardManagementSession,
@@ -21,18 +23,28 @@ import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import {
+  deleteTopDashboardDataFiles,
+  openTopDashboardDataFile,
+  type PendingTopDashboardDataFile,
+} from '@/shared/lib/topDashboardDataStorage';
+import {
   detectTopDashboardDataContract,
   getTopDashboardBlockDataFrameVersionId,
   isTopDashboardBlockDataMutationFrameRequest,
 } from '@/shared/lib/topDashboardContentSecurity';
-import { acquireTopDashboardDataUploadSlot } from '@/shared/lib/topDashboardUploadConcurrency';
+import { acquireDistributedTopDashboardDataUploadSlot } from '@/shared/lib/topDashboardUploadConcurrency';
 
-import { readTopDashboardDataUpload } from '../../dataUpload';
+import {
+  readTopDashboardDataStreamUpload,
+  readTopDashboardDataUpload,
+} from '../../dataUpload';
 import {
   isTopDashboardMultiFileUpload,
+  readTopDashboardMultiFileDataStreamUpload,
   readTopDashboardMultiFileDataUpload,
 } from '../../multiFileDataUpload';
 import { parsePositiveId } from '../../routeUtils';
+import { isTopDashboardStreamUpload } from '../../streamDataUpload';
 
 export const runtime = 'nodejs';
 
@@ -77,10 +89,18 @@ export async function GET(request: Request, context: Context) {
     if (!snapshot) return Response.json({ error: 'Данные ещё не загружены' }, { status: 404 });
 
     const encodedOriginalName = encodeURIComponent(snapshot.originalName);
-    return new Response(new Uint8Array(snapshot.content), {
+    const source = snapshot.storagePath
+      ? await openTopDashboardDataFile(snapshot.storagePath, snapshot.fileSize)
+      : snapshot.content
+        ? Readable.from([snapshot.content])
+        : null;
+    if (!source) throw new Error('TOP dashboard data payload is unavailable');
+    const body = Readable.toWeb(source) as ReadableStream<Uint8Array>;
+
+    return new Response(body, {
       headers: {
         'Content-Type': dataContentType(snapshot.originalName, snapshot.snapshotFormat),
-        'Content-Length': String(snapshot.content.length),
+        'Content-Length': String(snapshot.fileSize),
         'Content-Disposition': `inline; filename="${fallbackDownloadName(snapshot.originalName, snapshot.snapshotFormat)}"; filename*=UTF-8''${encodedOriginalName}`,
         'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
         'X-Top-Dashboard-Data-Version-Id': String(snapshot.id),
@@ -102,6 +122,7 @@ export async function GET(request: Request, context: Context) {
         'X-DNS-Prefetch-Control': 'off',
         'Referrer-Policy': 'no-referrer',
         'Cross-Origin-Resource-Policy': 'same-origin',
+        'X-Accel-Buffering': 'no',
       },
     });
   } catch (error) {
@@ -133,7 +154,7 @@ export async function PUT(request: Request, context: Context) {
   const blockId = parsePositiveId(rawBlockId);
   if (!blockId) return Response.json({ error: 'Некорректный блок' }, { status: 400 });
 
-  const releaseUploadSlot = acquireTopDashboardDataUploadSlot();
+  const releaseUploadSlot = await acquireDistributedTopDashboardDataUploadSlot();
   if (!releaseUploadSlot) {
     return Response.json(
       { error: 'Уже выполняется другая загрузка данных. Дождитесь её завершения и повторите.' },
@@ -148,11 +169,18 @@ export async function PUT(request: Request, context: Context) {
     );
   }
 
+  let pendingFile: PendingTopDashboardDataFile | undefined;
   try {
+    const streamUpload = isTopDashboardStreamUpload(request);
     const parsed = multiFileUpload
-      ? await readTopDashboardMultiFileDataUpload(request)
-      : await readTopDashboardDataUpload(request);
+      ? streamUpload
+        ? await readTopDashboardMultiFileDataStreamUpload(request)
+        : await readTopDashboardMultiFileDataUpload(request)
+      : streamUpload
+        ? await readTopDashboardDataStreamUpload(request)
+        : await readTopDashboardDataUpload(request);
     if (parsed.error) return parsed.error;
+    pendingFile = parsed.parsed.upload.pendingFile;
 
     const overview = await getTopDashboardBlockOverview(blockId);
     const expectedActiveHtmlVersionId = overview.activeVersionId;
@@ -219,6 +247,11 @@ export async function PUT(request: Request, context: Context) {
       );
     }
 
+    if (pendingFile) {
+      parsed.parsed.upload.storagePath = await pendingFile.commit();
+    }
+    const persistedUpload = { ...parsed.parsed.upload };
+    delete persistedUpload.pendingFile;
     const actor = getTopDashboardActor(session);
     const result = await createAndActivateTopDashboardBlockDataVersion({
       blockId,
@@ -226,12 +259,18 @@ export async function PUT(request: Request, context: Context) {
       expectedActiveHtmlVersionId,
       expectedHtmlSnapshotFormat,
       expectedHtmlProfile,
-      ...parsed.parsed.upload,
+      ...persistedUpload,
       dashboardProfile: expectedHtmlProfile,
       boundHtmlVersionId: multiFileUpload ? expectedActiveHtmlVersionId : null,
       uploadedByAdminUserId: actor.adminUserId,
       uploadedByManagerId: actor.managerId,
     });
+    pendingFile?.preserve();
+    if (result.prunedStoragePaths.length > 0) {
+      await deleteTopDashboardDataFiles(result.prunedStoragePaths).catch((error) => {
+        console.error('Failed to remove pruned TOP dashboard data files', error);
+      });
+    }
 
     await recordSecurityEvent({
       eventType: 'top_dashboard_data_uploaded',
@@ -302,6 +341,9 @@ export async function PUT(request: Request, context: Context) {
     console.error('Failed to upload TOP dashboard data', error);
     return Response.json({ error: 'Не удалось сохранить данные дашборда' }, { status: 500 });
   } finally {
-    releaseUploadSlot();
+    await pendingFile?.discard().catch((error) => {
+      console.error('Failed to discard temporary TOP dashboard data file', error);
+    });
+    await releaseUploadSlot();
   }
 }

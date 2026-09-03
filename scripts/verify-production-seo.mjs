@@ -4,6 +4,10 @@ const expectedRobotsTokens = ["noindex", "nofollow", "nocache"];
 const expectedHeaderTokens = ["noindex", "nofollow", "noarchive"];
 const requireYandexVerification = process.env.SEO_REQUIRE_YANDEX_VERIFICATION === "1";
 const requireCatalogEntities = process.env.SEO_REQUIRE_CATALOG_ENTITIES === "1";
+const configuredConcurrency = Number.parseInt(process.env.SEO_SMOKE_CONCURRENCY || "2", 10);
+const smokeConcurrency = Number.isSafeInteger(configuredConcurrency) && configuredConcurrency > 0
+  ? Math.min(configuredConcurrency, 8)
+  : 2;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -170,24 +174,24 @@ async function verify() {
     privatePriceApi,
     adminApi,
     clientApi,
-  ] = await Promise.all([
-    get("/"),
-    get("/catalog"),
-    get("/catalog?utm_source=seo-smoke"),
-    get("/login"),
-    get("/robots.txt"),
-    get("/sitemap.xml"),
-    get("/api/site-settings"),
-    get("/data/cities.json"),
-    get("/catalog/__seo-smoke-missing-category-404__"),
-    get("/__seo-smoke-missing-page-404__"),
-    get("/price/__seo-smoke-missing-private-price-404__"),
-    get("/admin"),
-    get("/cabinet"),
-    get("/api/price/__seo-smoke-missing-private-price-404__/pdf"),
-    get("/api/admin/session"),
-    get("/api/client/documents"),
-  ]);
+  ] = await mapInBatches([
+    "/",
+    "/catalog",
+    "/catalog?utm_source=seo-smoke",
+    "/login",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/api/site-settings",
+    "/data/cities.json",
+    "/catalog/__seo-smoke-missing-category-404__",
+    "/__seo-smoke-missing-page-404__",
+    "/price/__seo-smoke-missing-private-price-404__",
+    "/admin",
+    "/cabinet",
+    "/api/price/__seo-smoke-missing-private-price-404__/pdf",
+    "/api/admin/session",
+    "/api/client/documents",
+  ], smokeConcurrency, get);
 
   for (const [pathname, result] of [
     ["/", home],
@@ -374,7 +378,7 @@ async function verify() {
   for (const location of uniqueImageLocations) {
     assert(new URL(location).protocol === "https:", `sitemap image is not HTTPS: ${location}`);
   }
-  const imageResponses = await mapInBatches(uniqueImageLocations, 6, async (location) => ({
+  const imageResponses = await mapInBatches(uniqueImageLocations, smokeConcurrency, async (location) => ({
     location,
     response: await probeImage(location),
   }));
@@ -386,7 +390,7 @@ async function verify() {
     );
   }
 
-  const sitemapPages = await mapInBatches(locations, 8, async (location) => {
+  const sitemapPages = await mapInBatches(locations, smokeConcurrency, async (location) => {
     const target = new URL(location);
     const result = await get(`${target.pathname}${target.search}`);
     return { location, result };

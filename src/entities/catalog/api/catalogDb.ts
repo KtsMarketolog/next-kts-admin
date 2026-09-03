@@ -147,3 +147,7 @@ export function ensureCatalogSchema() {
 
   return globalThis.__ktsCatalogSchemaReady;
 }
+
+export function markCatalogSchemaReady() {
+  globalThis.__ktsCatalogSchemaReady = Promise.resolve();
+}

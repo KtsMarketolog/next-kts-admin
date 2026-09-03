@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { createReadStream } from 'node:fs';
 import { createGunzip } from 'zlib';
 import {
   JSONParser,
@@ -15,8 +16,14 @@ import {
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
 } from '@/shared/lib/topDashboardLimits';
+import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
 
 import { parsePositiveId } from './routeUtils';
+import {
+  readStreamExpectedActiveVersionId,
+  readStreamOriginalName,
+  receiveTopDashboardDataStream,
+} from './streamDataUpload';
 
 export const MAX_TOP_DASHBOARD_DATA_BYTES = TOP_DASHBOARD_DATA_MAX_BYTES;
 export const MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES =
@@ -35,7 +42,9 @@ export type TopDashboardDataProfile =
 
 export type TopDashboardDataUpload = {
   originalName: string;
-  content: Buffer;
+  content: Buffer | null;
+  storagePath: string | null;
+  pendingFile?: PendingTopDashboardDataFile;
   fileSize: number;
   uncompressedSize: number;
   sha256: string;
@@ -347,6 +356,25 @@ function inspectJsonBuffer(bytes: Buffer) {
   return finishJsonInspection(inspector);
 }
 
+async function inspectJsonReadable(
+  readable: NodeJS.ReadableStream,
+  maxUncompressedBytes = MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES,
+) {
+  const inspector = createJsonStreamInspector();
+  for await (const chunk of readable) {
+    const bytes = Buffer.isBuffer(chunk)
+      ? chunk
+      : typeof chunk === 'string'
+        ? Buffer.from(chunk)
+        : Buffer.from(chunk as Uint8Array);
+    if (inspector.size + bytes.length > maxUncompressedBytes) {
+      throw new Error(UNCOMPRESSED_TOO_LARGE);
+    }
+    writeJsonInspectionChunk(inspector, bytes);
+  }
+  return finishJsonInspection(inspector);
+}
+
 export async function inspectGzipJsonWithLimit(
   bytes: Buffer,
   maxUncompressedBytes = MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES,
@@ -552,9 +580,90 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
       upload: {
         originalName: normalizeOriginalName(file.name),
         content: bytes,
+        storagePath: null,
         fileSize: bytes.length,
         uncompressedSize: inspection.size,
         sha256: createHash('sha256').update(bytes).digest('hex'),
+        snapshotFormat,
+        dashboardProfile,
+      },
+    },
+  };
+}
+
+export async function readTopDashboardDataStreamUpload(request: Request): Promise<UploadResult> {
+  const originalName = readStreamOriginalName(request);
+  if (!originalName || !/\.json(?:\.gz)?$/i.test(originalName)) {
+    return { error: errorResponse('Загрузите файл с расширением .json или .json.gz') };
+  }
+  const expected = readStreamExpectedActiveVersionId(request);
+  if (typeof expected.error === 'string') return { error: errorResponse(expected.error) };
+
+  const received = await receiveTopDashboardDataStream(request, 'Файл данных');
+  if (received.error) return { error: received.error };
+  const pending = received.pending;
+  const isGzip = pending.firstBytes.length >= 2
+    && pending.firstBytes[0] === 0x1f
+    && pending.firstBytes[1] === 0x8b;
+  const hasGzipExtension = /\.json\.gz$/i.test(originalName);
+  if (isGzip !== hasGzipExtension) {
+    await pending.discard();
+    return {
+      error: errorResponse(
+        isGzip
+          ? 'Сжатый файл должен иметь расширение .json.gz'
+          : 'Файл .json.gz не является корректным gzip-архивом',
+      ),
+    };
+  }
+
+  let inspection: JsonInspection;
+  try {
+    const source = createReadStream(pending.temporaryPath);
+    inspection = await inspectJsonReadable(isGzip ? source.pipe(createGunzip()) : source);
+  } catch (error) {
+    await pending.discard();
+    if (error instanceof Error && error.message === UNCOMPRESSED_TOO_LARGE) {
+      return {
+        error: errorResponse(
+          `Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES} МБ`,
+          413,
+        ),
+      };
+    }
+    if (error instanceof Error && error.message === INVALID_UTF8) {
+      return { error: errorResponse('Файл данных должен быть сохранён в кодировке UTF-8') };
+    }
+    if (!isGzip && (error instanceof TokenizerError || error instanceof TokenParserError)) {
+      return { error: errorResponse('В файле данных содержится некорректный JSON') };
+    }
+    return {
+      error: errorResponse(
+        isGzip
+          ? 'Файл .json.gz повреждён или не является корректным gzip-архивом'
+          : 'В файле данных содержится некорректный JSON',
+      ),
+    };
+  }
+
+  const snapshotFormat = detectSnapshotFormat(inspection.signature);
+  if (!snapshotFormat) {
+    await pending.discard();
+    return { error: errorResponse('Файл не похож на поддерживаемый снимок данных КТС') };
+  }
+  const dashboardProfile = detectDashboardProfile(snapshotFormat, inspection.signature);
+
+  return {
+    parsed: {
+      expectedActiveVersionId: expected.value,
+      upload: {
+        originalName: normalizeOriginalName(originalName),
+        content: null,
+        storagePath: null,
+        pendingFile: pending,
+        fileSize: pending.fileSize,
+        uncompressedSize: inspection.size,
+        sha256: pending.sha256,
         snapshotFormat,
         dashboardProfile,
       },

@@ -397,16 +397,17 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
 
     setBusyAction('upload-data');
     try {
-      const body = new FormData();
-      body.set('file', selectedDataFile);
-      body.set(
-        'expectedActiveVersionId',
-        overview.data.activeVersionId === null ? '' : String(overview.data.activeVersionId),
-      );
       const response = await fetch(`${apiBasePath}/data`, {
         method: 'PUT',
-        headers: { 'X-KTS-TOP-Data-Upload': '1' },
-        body,
+        headers: {
+          'X-KTS-TOP-Data-Upload': '1',
+          'X-KTS-Top-Data-Protocol': 'stream-v1',
+          'X-KTS-Top-Data-Name': encodeURIComponent(selectedDataFile.name),
+          'X-KTS-Top-Data-Expected-Version': overview.data.activeVersionId === null
+            ? 'none'
+            : String(overview.data.activeVersionId),
+        },
+        body: selectedDataFile,
         credentials: 'same-origin',
       });
       if (!response.ok) {

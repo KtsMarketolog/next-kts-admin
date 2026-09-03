@@ -9,9 +9,16 @@ import {
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
 } from '@/shared/lib/topDashboardLimits';
+import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
 import { validateTopDashboardMultiFileSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
+import { validateTopDashboardMultiFileSnapshotFile } from '@/shared/lib/topDashboardMultiFileSnapshotFile';
 
 import { parsePositiveId } from './routeUtils';
+import {
+  readStreamExpectedActiveVersionId,
+  readStreamExpectedHtmlVersionId,
+  receiveTopDashboardDataStream,
+} from './streamDataUpload';
 
 export const TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER = 'x-kts-top-dashboard-multi-file';
 
@@ -20,7 +27,9 @@ export type TopDashboardMultiFileDataUpload = {
   expectedActiveHtmlVersionId: number;
   upload: {
     originalName: string;
-    content: Buffer;
+    content: Buffer | null;
+    storagePath: string | null;
+    pendingFile?: PendingTopDashboardDataFile;
     fileSize: number;
     uncompressedSize: number;
     sha256: string;
@@ -137,9 +146,54 @@ export async function readTopDashboardMultiFileDataUpload(
       upload: {
         originalName: 'dashboard-files.ktsmf',
         content: bytes,
+        storagePath: null,
         fileSize: bytes.length,
         uncompressedSize: bytes.length,
         sha256: createHash('sha256').update(bytes).digest('hex'),
+        snapshotFormat: 'multi-file-v1',
+        dashboardProfile: 'generic',
+        boundHtmlVersionId: expectedActiveHtmlVersionId,
+      },
+    },
+  };
+}
+
+export async function readTopDashboardMultiFileDataStreamUpload(
+  request: Request,
+): Promise<UploadResult> {
+  const expectedActive = readStreamExpectedActiveVersionId(request);
+  if (typeof expectedActive.error === 'string') {
+    return { error: errorResponse(expectedActive.error) };
+  }
+  const expectedActiveHtmlVersionId = readStreamExpectedHtmlVersionId(request);
+  if (!expectedActiveHtmlVersionId) {
+    return { error: errorResponse('Некорректная активная версия HTML') };
+  }
+
+  const received = await receiveTopDashboardDataStream(request, 'Набор файлов');
+  if (received.error) return { error: received.error };
+  const pending = received.pending;
+  const validation = await validateTopDashboardMultiFileSnapshotFile(
+    pending.temporaryPath,
+    pending.fileSize,
+  );
+  if (!validation.ok) {
+    await pending.discard();
+    return { error: errorResponse(`Набор файлов повреждён: ${validation.error}`) };
+  }
+
+  return {
+    parsed: {
+      expectedActiveVersionId: expectedActive.value,
+      expectedActiveHtmlVersionId,
+      upload: {
+        originalName: 'dashboard-files.ktsmf',
+        content: null,
+        storagePath: null,
+        pendingFile: pending,
+        fileSize: pending.fileSize,
+        uncompressedSize: pending.fileSize,
+        sha256: pending.sha256,
         snapshotFormat: 'multi-file-v1',
         dashboardProfile: 'generic',
         boundHtmlVersionId: expectedActiveHtmlVersionId,

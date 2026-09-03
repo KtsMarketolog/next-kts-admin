@@ -51,6 +51,19 @@ function isSameOrigin(request: NextRequest) {
 }
 
 export function proxy(request: NextRequest) {
+  // This application does not expose Server Actions. Rejecting the header in
+  // the lightweight proxy prevents stale clients and automated probes from
+  // reaching React's comparatively expensive action decoder.
+  if (request.headers.has('next-action')) {
+    return new NextResponse(null, {
+      status: 404,
+      headers: {
+        'Cache-Control': 'private, no-store',
+        'X-Robots-Tag': X_ROBOTS_TAG_PRIVATE,
+      },
+    });
+  }
+
   if (
     (request.nextUrl.pathname.startsWith('/api/admin/') || request.nextUrl.pathname.startsWith('/api/client/')) &&
     MUTATING_METHODS.has(request.method) &&
