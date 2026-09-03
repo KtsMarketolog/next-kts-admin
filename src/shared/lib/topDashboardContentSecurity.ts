@@ -15,6 +15,7 @@ import {
 import { TOP_DASHBOARD_DATA_MAX_BYTES } from './topDashboardLimits';
 import {
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAGIC,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_MIME_TYPE_BYTES,
@@ -1148,6 +1149,7 @@ export function createTopDashboardFrameBridgeScript(
   const MARKER = '${TOP_DASHBOARD_DATA_MESSAGE_MARKER}';
   const MULTI_FILE_MARKER = '${TOP_DASHBOARD_MULTI_FILE_MESSAGE_MARKER}';
   const MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES};
+  const MULTI_FILE_MAX_BYTES = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES};
   const MULTI_FILE_MAGIC = ${JSON.stringify(TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAGIC)};
   const MULTI_FILE_VERSION = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION};
   const MULTI_FILE_MAX_TARGETS = ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS};
@@ -1222,10 +1224,10 @@ export function createTopDashboardFrameBridgeScript(
       && SNAPSHOT_NAME.test(value);
   }
 
-  function validBuffer(value) {
+  function validBuffer(value, maxBytes = MAX_BYTES) {
     return value instanceof ArrayBuffer
       && value.byteLength > 0
-      && value.byteLength <= MAX_BYTES;
+      && value.byteLength <= maxBytes;
   }
 
   const textEncoder = new TextEncoder();
@@ -1346,6 +1348,7 @@ export function createTopDashboardFrameBridgeScript(
     if (targets.length === 0 || targets.length > MULTI_FILE_MAX_TARGETS) throw new Error('invalid targets');
     const prepared = [];
     let totalLength = 24;
+    let totalPayloadLength = 0;
     let totalFiles = 0;
     for (const entry of targets) {
       const target = normalizedMultiFileTarget(entry.target);
@@ -1358,6 +1361,8 @@ export function createTopDashboardFrameBridgeScript(
       totalLength += 12 + idBytes.byteLength + targetNameBytes.byteLength;
       const preparedFiles = [];
       for (const file of files) {
+        totalPayloadLength += file.blob.size;
+        if (totalPayloadLength > MAX_BYTES) throw new Error('too large');
         const fileNameBytes = textEncoder.encode(file.name);
         const mimeTypeBytes = textEncoder.encode(file.type);
         const relativePathBytes = textEncoder.encode(file.webkitRelativePath);
@@ -1366,7 +1371,7 @@ export function createTopDashboardFrameBridgeScript(
           + mimeTypeBytes.byteLength
           + relativePathBytes.byteLength
           + file.blob.size;
-        if (totalLength > MAX_BYTES) throw new Error('too large');
+        if (totalLength > MULTI_FILE_MAX_BYTES) throw new Error('too large');
         preparedFiles.push({ ...file, fileNameBytes, mimeTypeBytes, relativePathBytes });
       }
       prepared.push({ target, idBytes, targetNameBytes, files: preparedFiles });
@@ -1412,7 +1417,9 @@ export function createTopDashboardFrameBridgeScript(
   }
 
   function decodeMultiFileSnapshot(buffer) {
-    if (!validBuffer(buffer) || buffer.byteLength < 24) throw new Error('invalid buffer');
+    if (!validBuffer(buffer, MULTI_FILE_MAX_BYTES) || buffer.byteLength < 24) {
+      throw new Error('invalid buffer');
+    }
     const bytes = new Uint8Array(buffer);
     const view = new DataView(buffer);
     if (textDecoder.decode(bytes.subarray(0, 8)) !== MULTI_FILE_MAGIC) throw new Error('invalid magic');
@@ -1433,6 +1440,7 @@ export function createTopDashboardFrameBridgeScript(
 
     let offset = 24;
     let fileCount = 0;
+    let payloadLength = 0;
     const targets = [];
     const indexes = new Set();
     const ids = new Set();
@@ -1476,6 +1484,7 @@ export function createTopDashboardFrameBridgeScript(
         const lastModified = view.getUint32(offset + 12, false) * 0x100000000
           + view.getUint32(offset + 16, false);
         offset += 20;
+        payloadLength += contentLength;
         if (
           fileReserved !== 0
           || fileNameLength <= 0
@@ -1483,6 +1492,7 @@ export function createTopDashboardFrameBridgeScript(
           || mimeTypeLength > MULTI_FILE_MAX_MIME_BYTES
           || relativePathLength > MULTI_FILE_MAX_PATH_BYTES
           || contentLength <= 0
+          || payloadLength > MAX_BYTES
           || !Number.isSafeInteger(lastModified)
         ) {
           throw new Error('invalid file');
@@ -1645,7 +1655,10 @@ export function createTopDashboardFrameBridgeScript(
     const snapshotFormat = responseFormat(response);
     const snapshotProfile = responseProfile(response);
     const buffer = await response.arrayBuffer().catch(() => null);
-    if (!versionId || !snapshotFormat || !snapshotProfile || !validBuffer(buffer)) {
+    const responseMaxBytes = snapshotFormat === 'multi-file-v1'
+      ? MULTI_FILE_MAX_BYTES
+      : MAX_BYTES;
+    if (!versionId || !snapshotFormat || !snapshotProfile || !validBuffer(buffer, responseMaxBytes)) {
       showNotice('error', 'Сохранённый файл данных повреждён или слишком большой', false);
       return { kind: 'error' };
     }

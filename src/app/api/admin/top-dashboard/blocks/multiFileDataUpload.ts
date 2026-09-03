@@ -5,9 +5,10 @@ import type {
   TopDashboardSnapshotFormat,
 } from '@/shared/lib/db';
 import {
-  TOP_DASHBOARD_DATA_MAX_BYTES,
-  TOP_DASHBOARD_DATA_MAX_MEGABYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
+  TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
 } from '@/shared/lib/topDashboardLimits';
 import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
 import {
@@ -70,7 +71,8 @@ function contentLengthTooLarge(request: Request) {
   if (!value) return false;
   const length = Number(value);
   return Number.isFinite(length)
-    && length > TOP_DASHBOARD_DATA_MAX_BYTES + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES;
+    && length > TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES
+      + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES;
 }
 
 function parseNullableVersion(value: FormDataEntryValue | null) {
@@ -126,7 +128,7 @@ export async function readTopDashboardMultiFileDataUpload(
   if (contentLengthTooLarge(request)) {
     return {
       error: errorResponse(
-        `Общий размер выбранных файлов должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+        `Общий размер выбранных файлов в этом режиме должен быть не больше ${TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES} МБ`,
         413,
       ),
     };
@@ -154,10 +156,10 @@ export async function readTopDashboardMultiFileDataUpload(
   const file = formData.get('file');
   if (!(file instanceof File)) return { error: errorResponse('Выберите файлы данных') };
   if (file.size <= 0) return { error: errorResponse('Набор файлов пустой') };
-  if (file.size > TOP_DASHBOARD_DATA_MAX_BYTES) {
+  if (file.size > TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES) {
     return {
       error: errorResponse(
-        `Общий размер выбранных файлов должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+        `Общий размер выбранных файлов в этом режиме должен быть не больше ${TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES} МБ`,
         413,
       ),
     };
@@ -206,7 +208,11 @@ export async function readTopDashboardMultiFileDataStreamUpload(
     return { error: errorResponse('Некорректная активная версия HTML') };
   }
 
-  const received = await receiveTopDashboardDataStream(request, 'Набор файлов');
+  const received = await receiveTopDashboardDataStream(
+    request,
+    'Набор файлов',
+    TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
+  );
   if (received.error) return { error: received.error };
   const pending = received.pending;
   const validation = await inspectTopDashboardMultiFileSnapshotFile(

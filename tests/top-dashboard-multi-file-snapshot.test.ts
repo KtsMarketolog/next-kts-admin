@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import {
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS,
   TopDashboardMultiFileSnapshotError,
   type TopDashboardMultiFileSnapshotErrorCode,
@@ -549,6 +550,38 @@ test('file-backed validator checks metadata without loading snapshot payloads in
     );
     assert.equal(validation.ok, false);
     if (!validation.ok) assert.equal(validation.code, 'INVALID_MAGIC');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file-backed validator accepts a sparse snapshot with exactly 500 MiB of payload', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'kts-multifile-boundary-'));
+  try {
+    const fileName = Buffer.from('a');
+    const metadataBytes = 24 + 12 + 20 + fileName.length;
+    const totalBytes = metadataBytes + TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES;
+    const header = Buffer.alloc(metadataBytes);
+    header.write('KTSMFILE', 0, 'ascii');
+    header.writeUInt16BE(2, 8);
+    header.writeUInt32BE(totalBytes, 12);
+    header.writeUInt16BE(1, 16);
+    header.writeUInt32BE(1, 20);
+    header.writeUInt16BE(1, 24 + 8);
+    header.writeUInt16BE(fileName.length, 24 + 12);
+    header.writeUInt32BE(TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES, 24 + 12 + 8);
+    fileName.copy(header, 24 + 12 + 20);
+
+    const snapshotPath = path.join(directory, 'boundary.ktsmf');
+    await writeFile(snapshotPath, header);
+    await truncate(snapshotPath, totalBytes);
+
+    const validation = await validateTopDashboardMultiFileSnapshotFile(snapshotPath, totalBytes);
+    assert.equal(validation.ok, true);
+    if (validation.ok) {
+      assert.equal(validation.byteLength, totalBytes);
+      assert.equal(validation.fileCount, 1);
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

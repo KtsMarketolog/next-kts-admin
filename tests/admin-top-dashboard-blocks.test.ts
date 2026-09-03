@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -19,6 +19,7 @@ import {
   TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER,
 } from '../src/app/api/admin/top-dashboard/blocks/multiFileDataUpload';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
+import { receiveTopDashboardDataStream } from '../src/app/api/admin/top-dashboard/blocks/streamDataUpload';
 import type {
   ActivateTopDashboardBlockVersionInput,
   CreateTopDashboardBlockVersionInput,
@@ -36,14 +37,25 @@ import {
   type CreateAndActivateTopDashboardBlockDataVersionInput,
 } from '../src/shared/lib/db/topDashboardDomain';
 import { isTopDashboardBlockFrameRequest } from '../src/shared/lib/topDashboardContentSecurity';
-import { encodeTopDashboardMultiFileSnapshot } from '../src/shared/lib/topDashboardMultiFileSnapshot';
+import {
+  TopDashboardDataStreamError,
+  writeTopDashboardRequestToPendingFile,
+} from '../src/shared/lib/topDashboardDataStorage';
+import {
+  encodeTopDashboardMultiFileSnapshot,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES,
+} from '../src/shared/lib/topDashboardMultiFileSnapshot';
 import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
+  TOP_DASHBOARD_DATA_ENVELOPE_OVERHEAD_BYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
+  TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
   TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES,
 } from '../src/shared/lib/topDashboardLimits';
 import { acquireTopDashboardDataUploadSlot } from '../src/shared/lib/topDashboardUploadConcurrency';
@@ -440,13 +452,27 @@ test('universal TOP upload rejects malformed envelopes and missing HTML binding'
   assert.match(await missingBinding.error!.text(), /активная версия HTML/i);
 });
 
-test('TOP dashboard data limits allow archives up to 100 MiB and unpacked data up to 2 GiB', () => {
-  assert.equal(TOP_DASHBOARD_DATA_MAX_MEGABYTES, 100);
-  assert.equal(TOP_DASHBOARD_DATA_MAX_BYTES, 100 * 1024 * 1024);
+test('TOP dashboard data limits allow streamed uploads up to 500 MiB and unpacked data up to 2 GiB', () => {
+  assert.equal(TOP_DASHBOARD_DATA_MAX_MEGABYTES, 500);
+  assert.equal(TOP_DASHBOARD_DATA_MAX_BYTES, 500 * 1024 * 1024);
+  assert.equal(TOP_DASHBOARD_DATA_ENVELOPE_OVERHEAD_BYTES, 512 * 1024);
+  assert.equal(
+    TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
+    TOP_DASHBOARD_DATA_MAX_BYTES + TOP_DASHBOARD_DATA_ENVELOPE_OVERHEAD_BYTES,
+  );
+  assert.equal(
+    TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES,
+    TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
+  );
+  assert.equal(TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES, 100);
+  assert.equal(TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES, 100 * 1024 * 1024);
   assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES, 2 * 1024);
   assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES, 2 * 1024 * 1024 * 1024);
   assert.equal(TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL, '2 ГБ');
-  assert.ok(TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES >= TOP_DASHBOARD_DATA_MAX_BYTES * 3);
+  assert.equal(
+    TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES,
+    TOP_DASHBOARD_DATA_STORED_MAX_BYTES * 3,
+  );
 });
 
 test('TOP dashboard rejects oversized multipart requests before parsing the body', async () => {
@@ -454,7 +480,9 @@ test('TOP dashboard rejects oversized multipart requests before parsing the body
     method: 'PUT',
     headers: {
       'content-length': String(
-        TOP_DASHBOARD_DATA_MAX_BYTES + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES + 1
+        TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES
+          + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES
+          + 1
       ),
     },
   });
@@ -462,6 +490,46 @@ test('TOP dashboard rejects oversized multipart requests before parsing the body
 
   assert.equal(result.error?.status, 413);
   assert.match(await result.error!.text(), /не больше 100 МБ/i);
+});
+
+test('TOP dashboard rejects streamed requests above 500 MiB before reading the body', async () => {
+  const result = await receiveTopDashboardDataStream(new Request(
+    'https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data',
+    {
+      method: 'PUT',
+      headers: {
+        'content-length': String(TOP_DASHBOARD_DATA_MAX_BYTES + 1),
+      },
+      body: Uint8Array.of(1),
+    },
+  ), 'Файл данных');
+
+  assert.equal(result.error?.status, 413);
+  assert.match(await result.error!.text(), /не больше 500 МБ/i);
+});
+
+test('TOP dashboard removes a partial pending file when a chunked stream exceeds its limit', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'kts-top-stream-limit-'));
+  const previousDirectory = process.env.TOP_DASHBOARD_DATA_DIR;
+  process.env.TOP_DASHBOARD_DATA_DIR = directory;
+  try {
+    await assert.rejects(
+      writeTopDashboardRequestToPendingFile(new Request(
+        'https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data',
+        { method: 'PUT', body: Uint8Array.of(1, 2, 3, 4, 5, 6) },
+      ), 5),
+      (error: unknown) => {
+        assert.ok(error instanceof TopDashboardDataStreamError);
+        assert.equal(error.code, 'TOO_LARGE');
+        return true;
+      },
+    );
+    assert.deepEqual(await readdir(path.join(directory, '.incoming')), []);
+  } finally {
+    if (previousDirectory === undefined) delete process.env.TOP_DASHBOARD_DATA_DIR;
+    else process.env.TOP_DASHBOARD_DATA_DIR = previousDirectory;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('TOP dashboard gzip inspection enforces its real unpacked-byte limit', async () => {

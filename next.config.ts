@@ -11,8 +11,9 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: __dirname,
   experimental: {
     optimizePackageImports: ["react-select", "@emotion/react"],
-    // The domain parser still enforces a strict 100 MiB payload limit. The
-    // extra MiB is reserved only for multipart headers and field metadata.
+    // Only the legacy multipart fallback passes through proxy and is capped at
+    // 100 MiB. Large TOP uploads bypass proxy and stream directly to disk.
+    // The extra MiB is reserved for multipart headers and field metadata.
     proxyClientMaxBodySize: "101mb",
   },
   images: {

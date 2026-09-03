@@ -43,14 +43,18 @@ export function readStreamExpectedHtmlVersionId(request: Request) {
   return value ? parsePositiveId(value) : null;
 }
 
-export async function receiveTopDashboardDataStream(request: Request, sizeLabel: string) {
+export async function receiveTopDashboardDataStream(
+  request: Request,
+  sizeLabel: string,
+  maxRequestBytes = TOP_DASHBOARD_DATA_MAX_BYTES,
+) {
   const contentLength = request.headers.get('content-length');
   if (contentLength) {
     const length = Number(contentLength);
     if (!Number.isSafeInteger(length) || length <= 0) {
       return { error: Response.json({ error: `${sizeLabel} пустой` }, { status: 400 }) };
     }
-    if (length > TOP_DASHBOARD_DATA_MAX_BYTES) {
+    if (length > maxRequestBytes) {
       return {
         error: Response.json(
           { error: `${sizeLabel} должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ` },
@@ -64,7 +68,7 @@ export async function receiveTopDashboardDataStream(request: Request, sizeLabel:
     return {
       pending: await writeTopDashboardRequestToPendingFile(
         request,
-        TOP_DASHBOARD_DATA_MAX_BYTES,
+        maxRequestBytes,
       ),
     };
   } catch (error) {

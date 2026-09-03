@@ -7,6 +7,7 @@ import {
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILE_NAME_BYTES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_MIME_TYPE_BYTES,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_RELATIVE_PATH_BYTES,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGET_TEXT_BYTES,
@@ -163,6 +164,7 @@ export async function inspectTopDashboardMultiFileSnapshotFile(
     const targets: TopDashboardMultiFileSnapshotTargetSummary[] = [];
     let offset = HEADER_BYTES;
     let actualFileCount = 0;
+    let actualPayloadLength = 0;
 
     for (let targetNumber = 0; targetNumber < targetCount; targetNumber += 1) {
       const targetHeader = await readAt(offset, TARGET_HEADER_BYTES);
@@ -227,9 +229,13 @@ export async function inspectTopDashboardMultiFileSnapshotFile(
           || mimeTypeLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_MIME_TYPE_BYTES
           || relativePathLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_RELATIVE_PATH_BYTES
           || contentLength === 0
-          || contentLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES
+          || contentLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES
         ) {
           throw snapshotError('LIMIT_EXCEEDED', 'Размер файла или его метаданных недопустим');
+        }
+        actualPayloadLength += contentLength;
+        if (actualPayloadLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES) {
+          throw snapshotError('LIMIT_EXCEEDED', 'Общий размер файлов слишком большой');
         }
 
         const fileName = await readText(offset, fileNameLength, 'Имя файла');

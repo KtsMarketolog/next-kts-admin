@@ -1,3 +1,8 @@
+import {
+  TOP_DASHBOARD_DATA_MAX_BYTES,
+  TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
+} from './topDashboardLimits';
+
 const MAGIC_TEXT = 'KTSMFILE';
 const MAGIC_BYTES = Uint8Array.of(0x4b, 0x54, 0x53, 0x4d, 0x46, 0x49, 0x4c, 0x45);
 const HEADER_BYTES = 24;
@@ -13,7 +18,10 @@ const UNSAFE_RELATIVE_PATH_PATTERN = /[\\\u0000-\u001f\u007f\u200b-\u200f\u202a-
 
 export const TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAGIC = MAGIC_TEXT;
 export const TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION = 2;
-export const TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES = 100 * 1024 * 1024;
+export const TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES =
+  TOP_DASHBOARD_DATA_STORED_MAX_BYTES;
+export const TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES =
+  TOP_DASHBOARD_DATA_MAX_BYTES;
 export const TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS = 32;
 export const TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES = 128;
 export const TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET = 64;
@@ -343,6 +351,7 @@ function normalizeSnapshotInput(input: TopDashboardMultiFileSnapshotInput) {
   const targetIds = new Set<string>();
   const normalizedTargets: NormalizedTarget[] = [];
   let totalFileCount = 0;
+  let totalPayloadLength = 0;
   let totalLength = HEADER_BYTES;
 
   for (const entry of input.targets) {
@@ -410,8 +419,12 @@ function normalizeSnapshotInput(input: TopDashboardMultiFileSnapshotInput) {
       if (bytes.byteLength === 0) {
         throw snapshotError('INVALID_FILE', 'Пустые файлы не поддерживаются');
       }
-      if (bytes.byteLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES) {
+      if (bytes.byteLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES) {
         throw snapshotError('LIMIT_EXCEEDED', 'Один из файлов слишком большой');
+      }
+      totalPayloadLength += bytes.byteLength;
+      if (totalPayloadLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES) {
+        throw snapshotError('LIMIT_EXCEEDED', 'Общий размер файлов слишком большой');
       }
       totalLength = checkedLength(
         totalLength,
@@ -528,7 +541,7 @@ export function encodeTopDashboardMultiFileSnapshot(
 /**
  * Builds the same validated envelope around one browser Blob without first
  * copying the full payload into an ArrayBuffer. This keeps the admin's generic
- * single-file upload bounded even near the 100 MiB limit.
+ * single-file upload bounded even near the configured stream limit.
  */
 export function encodeTopDashboardSingleFileBlobSnapshot(
   input: TopDashboardSingleFileBlobSnapshotInput,
@@ -566,6 +579,7 @@ export function encodeTopDashboardSingleFileBlobSnapshot(
     || !(blob instanceof Blob)
     || !Number.isSafeInteger(blob.size)
     || blob.size <= 0
+    || blob.size > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES
   ) {
     throw snapshotError('INVALID_FILE', 'Содержимое файла недоступно или пусто');
   }
@@ -738,6 +752,7 @@ function parseTopDashboardMultiFileSnapshot(
   const targets: DecodedTopDashboardMultiFileSnapshotTarget[] = [];
   let offset = HEADER_BYTES;
   let actualFileCount = 0;
+  let actualPayloadLength = 0;
 
   for (let targetNumber = 0; targetNumber < targetCount; targetNumber += 1) {
     assertAvailable(offset, TARGET_HEADER_BYTES, total);
@@ -821,8 +836,15 @@ function parseTopDashboardMultiFileSnapshot(
       ) {
         throw snapshotError('LIMIT_EXCEEDED', 'Длина метаданных файла недопустима');
       }
-      if (contentLength === 0 || contentLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES) {
+      if (
+        contentLength === 0
+        || contentLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES
+      ) {
         throw snapshotError('LIMIT_EXCEEDED', 'Размер файла недопустим');
+      }
+      actualPayloadLength += contentLength;
+      if (actualPayloadLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES) {
+        throw snapshotError('LIMIT_EXCEEDED', 'Общий размер файлов слишком большой');
       }
 
       const fileName = validateDecodedFileName(

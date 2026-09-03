@@ -11,9 +11,10 @@ import {
 
 import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
-  TOP_DASHBOARD_DATA_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL,
+  TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
 } from '@/shared/lib/topDashboardLimits';
 import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
@@ -81,7 +82,8 @@ function contentLengthTooLarge(request: Request) {
   if (!value) return false;
   const length = Number(value);
   return Number.isFinite(length)
-    && length > MAX_TOP_DASHBOARD_DATA_BYTES + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES;
+    && length > TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES
+      + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES;
 }
 
 function parseExpectedActiveVersionId(
@@ -480,7 +482,7 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
   if (contentLengthTooLarge(request)) {
     return {
       error: errorResponse(
-        `Файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+        `Файл данных в этом режиме должен быть не больше ${TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES} МБ`,
         413,
       ),
     };
@@ -499,10 +501,10 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
   const file = formData.get('file');
   if (!(file instanceof File)) return { error: errorResponse('Выберите файл данных') };
   if (file.size <= 0) return { error: errorResponse('Файл данных пустой') };
-  if (file.size > MAX_TOP_DASHBOARD_DATA_BYTES) {
+  if (file.size > TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES) {
     return {
       error: errorResponse(
-        `Файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+        `Файл данных в этом режиме должен быть не больше ${TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES} МБ`,
         413,
       ),
     };
@@ -513,10 +515,10 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
 
   const bytes = Buffer.from(await file.arrayBuffer());
   if (bytes.length <= 0) return { error: errorResponse('Файл данных пустой') };
-  if (bytes.length > MAX_TOP_DASHBOARD_DATA_BYTES) {
+  if (bytes.length > TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES) {
     return {
       error: errorResponse(
-        `Файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
+        `Файл данных в этом режиме должен быть не больше ${TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES} МБ`,
         413,
       ),
     };

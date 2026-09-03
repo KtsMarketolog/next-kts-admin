@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES,
+  TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
 } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
 
@@ -532,6 +533,25 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
         alter table top_dashboard_block_data_versions
           add constraint top_dashboard_block_data_versions_uncompressed_size_check check (
             uncompressed_size between 1 and ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES}
+          );
+      `);
+    },
+  },
+  {
+    id: '202609030004_top_dashboard_500_mib_upload_limit',
+    description: 'Allow streamed TOP dashboard data uploads up to 500 MiB',
+    apply: async (client) => {
+      await client.query(`
+        alter table top_dashboard_block_data_versions
+          drop constraint if exists top_dashboard_block_data_versions_file_size_check;
+
+        alter table top_dashboard_block_data_versions
+          add constraint top_dashboard_block_data_versions_file_size_check check (
+            file_size between 1 and ${TOP_DASHBOARD_DATA_STORED_MAX_BYTES}
+            and (
+              compressed_payload is null
+              or file_size = octet_length(compressed_payload)
+            )
           );
       `);
     },
