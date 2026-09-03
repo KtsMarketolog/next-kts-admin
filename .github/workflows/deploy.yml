@@ -137,6 +137,14 @@ jobs:
             return 1
           }
 
+          switch_current_to() {
+            target="$1"
+            temporary_link="$BASE/.current-$RELEASE_ID.next"
+            rm -f -- "$temporary_link"
+            ln -s "$target" "$temporary_link"
+            mv -Tf -- "$temporary_link" "$CURRENT"
+          }
+
           main_app_mode() {
             pm2 jlist | node -e '
               let input = "";
@@ -160,6 +168,92 @@ jobs:
             '
           }
 
+          main_app_script() {
+            pm2 jlist | node -e '
+              let input = "";
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                const app = JSON.parse(input).find((entry) => entry.name === "kts-next-admin");
+                if (app) process.stdout.write(app.pm2_env.pm_exec_path || "");
+              });
+            '
+          }
+
+          main_app_cwd() {
+            pm2 jlist | node -e '
+              let input = "";
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                const app = JSON.parse(input).find((entry) => entry.name === "kts-next-admin");
+                if (app) process.stdout.write(app.pm2_env.pm_cwd || "");
+              });
+            '
+          }
+
+          main_app_has_stable_layout() {
+            expected_cwd="$1"
+            expected_script="$2"
+            pm2 jlist | node -e '
+              let input = "";
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                const expectedCwd = process.argv[1];
+                const expectedScript = process.argv[2];
+                const apps = JSON.parse(input)
+                  .filter((entry) => entry.name === "kts-next-admin");
+                const valid = apps.length === 2 && apps.every((entry) => (
+                  entry.pm2_env.status === "online"
+                  && entry.pm2_env.exec_mode === "cluster_mode"
+                  && entry.pm2_env.pm_cwd === expectedCwd
+                  && entry.pm2_env.pm_exec_path === expectedScript
+                ));
+                process.exit(valid ? 0 : 1);
+              });
+            ' "$expected_cwd" "$expected_script"
+          }
+
+          wait_for_release_workers() {
+            expected_release="$1"
+            expected_cwd="$2"
+            expected_script="$3"
+            attempts="${4:-120}"
+
+            for attempt in $(seq 1 "$attempts"); do
+              app_pids="$(main_app_pids)"
+              pid_count="$(printf '%s\n' "$app_pids" | awk 'NF { count += 1 } END { print count + 0 }')"
+              workers_current=1
+
+              if [ "$pid_count" -ne 2 ]; then
+                workers_current=0
+              elif ! main_app_has_stable_layout "$expected_cwd" "$expected_script"; then
+                workers_current=0
+              else
+                for app_pid in $app_pids; do
+                  app_cwd="$(readlink -f "/proc/$app_pid/cwd" 2>/dev/null || true)"
+                  if [ "$app_cwd" != "$expected_release" ]; then
+                    workers_current=0
+                    break
+                  fi
+                done
+              fi
+
+              if [ "$workers_current" -eq 1 ]; then
+                return 0
+              fi
+
+              sleep 1
+            done
+
+            echo "PM2 workers did not converge on release $expected_release after ${attempts}s."
+            echo "PM2 cwd: $(main_app_cwd)"
+            echo "PM2 script: $(main_app_script)"
+            app_pids="$(main_app_pids)"
+            for app_pid in $app_pids; do
+              echo "PM2 worker $app_pid cwd: $(readlink -f "/proc/$app_pid/cwd" 2>/dev/null || true)"
+            done
+            return 1
+          }
+
           rollback_on_exit() {
             status=$?
             trap - EXIT
@@ -180,7 +274,7 @@ jobs:
             pm2 delete kts-next-admin >/dev/null 2>&1 || true
 
             if [ -n "$ROLLBACK_TARGET" ] && [ -d "$ROLLBACK_TARGET" ]; then
-              ln -sfn "$ROLLBACK_TARGET" "$CURRENT"
+              switch_current_to "$ROLLBACK_TARGET"
               pm2 start "$CURRENT/ecosystem.config.cjs" --update-env
               wait_for_url "http://127.0.0.1:3000/" "Rollback application" 120
               pm2 save
@@ -240,6 +334,9 @@ jobs:
           rm -rf "$RELEASE/runtime-data"
           ln -sfn "$SHARED/runtime-data" "$RELEASE/runtime-data"
 
+          EXPECTED_CWD="$CURRENT"
+          EXPECTED_SCRIPT="$CURRENT/server.js"
+
           if [ -L "$CURRENT" ] || [ -e "$CURRENT" ]; then
             CURRENT_TARGET="$(readlink -f "$CURRENT" || true)"
             if [ -n "$CURRENT_TARGET" ] && [ -d "$CURRENT_TARGET" ]; then
@@ -249,6 +346,10 @@ jobs:
           fi
 
           EXISTING_MODE="$(main_app_mode)"
+          EXISTING_LAYOUT_STABLE=0
+          if main_app_has_stable_layout "$EXPECTED_CWD" "$EXPECTED_SCRIPT"; then
+            EXISTING_LAYOUT_STABLE=1
+          fi
           pm2 delete kts-next-admin-canary >/dev/null 2>&1 || true
           KTS_PM2_CANARY=1 KTS_PM2_PORT=3001 \
             pm2 start "$RELEASE/ecosystem.config.cjs" --only kts-next-admin-canary --update-env
@@ -276,13 +377,13 @@ jobs:
           fi
 
           ACTIVATION_STARTED=1
-          ln -sfn "$RELEASE" "$CURRENT"
+          switch_current_to "$RELEASE"
 
-          if [ "$EXISTING_MODE" = "cluster_mode" ]; then
+          if [ "$EXISTING_MODE" = "cluster_mode" ] && [ "$EXISTING_LAYOUT_STABLE" = "1" ]; then
             echo "Reloading the existing PM2 cluster one worker at a time."
             pm2 startOrReload "$CURRENT/ecosystem.config.cjs" --only kts-next-admin --update-env
           elif [ -n "$EXISTING_MODE" ]; then
-            echo "Performing the one-time cutover from PM2 fork mode to cluster mode."
+            echo "Performing a one-time cutover to stable PM2 current paths."
             pm2 delete kts-next-admin
             pm2 start "$CURRENT/ecosystem.config.cjs" --only kts-next-admin --update-env
           else
@@ -301,27 +402,24 @@ jobs:
             exit 1
           fi
 
-          APP_PIDS="$(main_app_pids)"
-          PID_COUNT="$(printf '%s\n' "$APP_PIDS" | awk 'NF { count += 1 } END { print count + 0 }')"
-          if [ "$PID_COUNT" -ne 2 ]; then
-            echo "PM2 has $PID_COUNT online workers, expected 2."
+          if ! wait_for_release_workers "$RELEASE" "$EXPECTED_CWD" "$EXPECTED_SCRIPT" 120; then
             pm2 logs kts-next-admin --lines 80 --nostream || true
             exit 1
           fi
-          for APP_PID in $APP_PIDS; do
-            APP_CWD="$(readlink -f "/proc/$APP_PID/cwd" 2>/dev/null || true)"
-            if [ "$APP_CWD" != "$RELEASE" ]; then
-              echo "PM2 worker $APP_PID started from unexpected cwd: $APP_CWD, expected: $RELEASE"
-              pm2 logs kts-next-admin --lines 80 --nostream || true
-              exit 1
-            fi
-          done
 
           pm2 save
 
           ACTIVATION_STARTED=0
           trap - EXIT
 
-          cd "$RELEASES"
-          ls -1dt */ | tail -n +3 | xargs -r rm -rf
+          CURRENT_REAL="$(readlink -f "$CURRENT" || true)"
+          PREVIOUS_REAL="$(readlink -f "$PREVIOUS" || true)"
+          for RELEASE_CANDIDATE in "$RELEASES"/*; do
+            [ -d "$RELEASE_CANDIDATE" ] || continue
+            RELEASE_CANDIDATE_REAL="$(readlink -f "$RELEASE_CANDIDATE" || true)"
+            if [ "$RELEASE_CANDIDATE_REAL" = "$CURRENT_REAL" ] || [ "$RELEASE_CANDIDATE_REAL" = "$PREVIOUS_REAL" ]; then
+              continue
+            fi
+            rm -rf -- "$RELEASE_CANDIDATE"
+          done
           EOF

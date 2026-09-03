@@ -27,12 +27,17 @@ function loadReleaseId() {
 }
 
 const canary = process.env.KTS_PM2_CANARY === "1";
+const releaseParent = path.dirname(__dirname);
+const usesReleaseLayout = path.basename(releaseParent) === "releases";
+const appCwd = canary || !usesReleaseLayout
+  ? __dirname
+  : path.resolve(releaseParent, "..", "current");
 
 module.exports = {
   apps: [
     {
       name: canary ? "kts-next-admin-canary" : "kts-next-admin",
-      cwd: __dirname,
+      cwd: appCwd,
       script: "server.js",
       interpreter: "node",
       exec_mode: canary ? "fork" : "cluster",
