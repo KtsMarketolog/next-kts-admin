@@ -14,6 +14,13 @@ const eslintConfig = defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
+  {
+    files: ["ops/backup/**/*.cjs"],
+    rules: {
+      // The standalone backup runtime deliberately uses Node.js CommonJS.
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

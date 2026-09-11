@@ -1,0 +1,19 @@
+[Unit]
+Description=KTS database, files and configuration backup
+OnFailure=kts-backup-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/kts/.local/lib/kts-backup/run.sh daily
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+MemoryHigh=768M
+MemoryMax=1G
+CPUQuota=100%
+TimeoutStartSec=2h
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

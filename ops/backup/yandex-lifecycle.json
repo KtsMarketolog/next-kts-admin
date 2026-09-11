@@ -1,0 +1,11 @@
+{
+  "Rules": [
+    {
+      "ID": "kts-backups-5-days",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "Expiration": { "Days": 5 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

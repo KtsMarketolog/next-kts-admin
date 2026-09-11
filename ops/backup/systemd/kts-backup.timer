@@ -1,0 +1,11 @@
+[Unit]
+Description=KTS daily backup at 02:15 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=kts-backup.service
+
+[Install]
+WantedBy=timers.target

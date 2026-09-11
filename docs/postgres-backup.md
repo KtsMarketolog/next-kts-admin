@@ -1,24 +1,18 @@
-# Postgres Backup And Restore Check
+# KTS backup and restore
 
-Production backup:
+The current runbook is [ops/backup/README.md](../ops/backup/README.md).
+Independent monitoring and email setup are in [MONITORING.md](../ops/backup/MONITORING.md).
 
-```bash
-cd /home/deploy/apps/PROJECT/current
-export DATABASE_URL='postgres://...'
-BACKUP_DIR=/home/deploy/backups/kts ./scripts/db-backup.sh
-```
+Retention agreed on 2026-09-12: **14 days locally, 5 days in Yandex Object Storage**.
+This covers PostgreSQL, inventoried persistent files and recovery configuration,
+not a whole-server image.
 
-Restore check on a disposable test database:
+Do not install the former example cron or pass DATABASE_URL on the command line.
+The old generic `/home/deploy/...` paths did not describe the production KTS server.
+`scripts/db-backup.sh` delegates to the installed locked local-capture command.
+`scripts/db-restore-check.sh` no longer accepts a dump path or RESTORE_DATABASE_URL;
+it downloads from the configured cloud and invokes the isolated systemd restore.
+Both compatibility scripts run as `kts` on the audited server.
 
-```bash
-export RESTORE_DATABASE_URL='postgres://.../kts_restore_check'
-./scripts/db-restore-check.sh /home/deploy/backups/kts/kts-YYYYMMDD-HHMMSS.dump
-```
-
-Recommended cron cadence:
-
-```cron
-15 3 * * * cd /home/deploy/apps/PROJECT/current && BACKUP_DIR=/home/deploy/backups/kts ./scripts/db-backup.sh >> /home/deploy/backups/kts/backup.log 2>&1
-```
-
-Keep backup files outside the app directory and outside git. Periodically run the restore check; a backup that has never been restored is not proven useful.
+Cloud commissioning, GitHub SMTP secrets and activation remain subject to the
+acceptance checklist in the runbook. Never restore a test over production.

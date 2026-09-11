@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-if [[ $# -lt 1 ]]; then
-  echo "Usage: scripts/db-restore-check.sh path/to/backup.dump" >&2
-  exit 1
+set -Eeuo pipefail
+umask 077
+# An arbitrary restore URL could accidentally target production. Never accept it.
+readonly root=/home/kts/backups/kts-next-admin
+if [[ $# != 0 || -n "${RESTORE_DATABASE_URL:-}" || "$(id -un)" != kts ]]; then
+  echo 'Use no arguments and unset RESTORE_DATABASE_URL. This command performs an isolated Yandex restore on the configured KTS server.' >&2
+  exit 64
 fi
-
-if [[ -z "${RESTORE_DATABASE_URL:-}" ]]; then
-  echo "RESTORE_DATABASE_URL is required and must point to a disposable test database" >&2
-  exit 1
+if [[ ! -d "$root" || -L "$root" || "$(cat "$root/.kts-backup-root" 2>/dev/null)" != kts-next-admin ]]; then
+  echo 'Verified KTS backup installation is required.' >&2
+  exit 78
 fi
-
-backup_file="$1"
-if [[ ! -f "$backup_file" ]]; then
-  echo "Backup file not found: $backup_file" >&2
-  exit 1
-fi
-
-pg_restore --clean --if-exists --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL" "$backup_file"
-psql "$RESTORE_DATABASE_URL" -c "select count(*) as wholesale_price_lists from wholesale_price_lists;"
+# Same orchestration lock as the independent weekly monitor; each service also
+# takes the common operation lock through run.sh.
+exec 7>"$root/.monitor-restore.lock"
+/usr/bin/flock --exclusive --wait 60 7 || exit 75
+systemctl --user start kts-backup-fetch-restore.service
+systemctl --user start kts-backup-restore.service

@@ -43,7 +43,14 @@ jobs:
           chmod 700 ~/.ssh
           printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/kts_deploy
           chmod 600 ~/.ssh/kts_deploy
-          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+          # Public host key verified out of band; never trust first-use ssh-keyscan.
+          install -m 600 .github/kts_known_hosts ~/.ssh/known_hosts
+          printf '%s\n' \
+            'Host *' \
+            '  StrictHostKeyChecking yes' \
+            '  BatchMode yes' \
+            '  HostKeyAlgorithms ssh-ed25519' > ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
       - name: Check SSH connection
         run: |
@@ -62,6 +69,7 @@ jobs:
           set -euo pipefail
           npm run lint
           npm test
+          node --test ops/backup/tests/*.test.cjs
           npx tsc --noEmit --incremental false
           npm audit --omit=dev --audit-level=high
 
@@ -350,6 +358,19 @@ jobs:
           if main_app_has_stable_layout "$EXPECTED_CWD" "$EXPECTED_SCRIPT"; then
             EXISTING_LAYOUT_STABLE=1
           fi
+          # Canary startup runs migrations against production. A verified backup
+          # must exist BEFORE starting it, not just before switching current.
+          BACKUP_RUNNER=/home/kts/.local/lib/kts-backup/run.sh
+          if [ ! -x "$BACKUP_RUNNER" ]; then
+            echo 'Production backup gate is not installed; refusing migration.'
+            exit 1
+          fi
+          if ! "$BACKUP_RUNNER" predeploy; then
+            echo 'Pre-migration backup failed or cloud policy is not approved; deployment stopped.'
+            /usr/bin/node /home/kts/.local/lib/kts-backup/notify.cjs predeploy || true
+            exit 1
+          fi
+          # Rolling code back never rolls a migrated database schema back.
           pm2 delete kts-next-admin-canary >/dev/null 2>&1 || true
           KTS_PM2_CANARY=1 KTS_PM2_PORT=3001 \
             pm2 start "$RELEASE/ecosystem.config.cjs" --only kts-next-admin-canary --update-env

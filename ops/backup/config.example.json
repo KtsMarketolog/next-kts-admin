@@ -1,0 +1,37 @@
+{
+  "project": "kts-next-admin",
+  "root": "/home/kts/backups/kts-next-admin",
+  "appCurrent": "/home/kts/kts-next-admin/current",
+  "envFile": "/home/kts/kts-next-admin/.env.local",
+  "pgBin": "/usr/lib/postgresql/16/bin",
+  "restoreRoot": "/home/kts/backups/kts-next-admin/.restore",
+  "minFreeBytes": 3221225472,
+  "minRestoreMemoryBytes": 1073741824,
+  "retention": {"localDays": 14, "cloudDays": 5},
+  "cloudApproved": false,
+  "predeployCloudPolicy": "required",
+  "sources": [
+    {"name": "uploads", "path": "/var/www/kts-uploads"},
+    {"name": "shared-uploads", "path": "/home/kts/kts-next-admin/shared/public/uploads"},
+    {"name": "top-dashboard", "path": "/home/kts/kts-next-admin/shared/runtime-data/top-dashboard"},
+    {"name": "firmware", "path": "/home/kts/kts-next-admin/shared/public/klimatika/prog/firmware/update"}
+  ],
+  "configFiles": [
+    {"name": "app.env", "path": "/home/kts/kts-next-admin/.env.local"},
+    {"name": "nginx.conf", "path": "/etc/nginx/nginx.conf"},
+    {"name": "nginx-kts.conf", "path": "/etc/nginx/sites-available/kts-next-admin"},
+    {"name": "postgresql.conf", "path": "/etc/postgresql/16/main/postgresql.conf"},
+    {"name": "ecosystem.config.cjs", "path": "/home/kts/kts-next-admin/current/ecosystem.config.cjs"}
+  ],
+  "cloud": {
+    "bucket": "kts-next-admin-backups-202609",
+    "prefix": "",
+    "kmsKeyId": "abjgv0qpsa5cgg3p8nm2",
+    "profile": "kts-backup",
+    "awsBin": "/home/kts/.local/bin/aws",
+    "configFile": "/home/kts/.config/kts-backup/aws-config",
+    "credentialsFile": "/home/kts/.config/kts-backup/aws-credentials",
+    "endpoint": "https://storage.yandexcloud.net",
+    "region": "ru-central1"
+  }
+}

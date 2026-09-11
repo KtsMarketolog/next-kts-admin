@@ -1,0 +1,11 @@
+[Unit]
+Description=Email notification for failed KTS backup unit %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node /home/kts/.local/lib/kts-backup/notify.cjs %i
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal

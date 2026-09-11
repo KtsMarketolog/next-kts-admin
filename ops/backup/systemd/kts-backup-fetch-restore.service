@@ -1,0 +1,15 @@
+[Unit]
+Description=Download and verify KTS recovery set from Yandex
+OnFailure=kts-backup-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/kts/.local/lib/kts-backup/run.sh fetch-restore
+UMask=0077
+MemoryMax=768M
+CPUQuota=100%
+Nice=10
+TimeoutStartSec=90min
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
