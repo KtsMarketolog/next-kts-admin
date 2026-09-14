@@ -3,8 +3,13 @@ import type { Readable } from 'node:stream';
 
 import type { FetchMessageObject, ImapFlow, ImapFlowOptions, MessageStructureObject } from 'imapflow';
 
-export const MANAGER_DASHBOARD_MAIL_MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
+// Metadata-only limit: the whole encoded message is never downloaded into memory.
+export const MANAGER_DASHBOARD_MAIL_MAX_MESSAGE_BYTES = 256 * 1024 * 1024;
 export const MANAGER_DASHBOARD_MAIL_MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+// A server may return a full MIME-encoded part despite a small partial FETCH request.
+// Keep parser memory bounded while allowing an 8 MiB file with base64 or quoted-printable overhead.
+export const MANAGER_DASHBOARD_MAIL_MAX_LITERAL_BYTES = 26 * 1024 * 1024;
+export const MANAGER_DASHBOARD_MAIL_MAX_RESPONSE_BYTES = 28 * 1024 * 1024;
 const MAX_RESULT_DETAILS = 200;
 const MAX_MIME_NODES = 500;
 const MAILBOX = 'INBOX';
@@ -104,7 +109,7 @@ function outcomeMessage(status: string) {
     case 'ambiguous': return 'Email снимка соответствует нескольким менеджерам.';
     case 'conflict': return 'Снимок конфликтует с ранее загруженными данными.';
     case 'quota': return 'Превышен лимит хранилища снимков.';
-    case 'message_too_large': return 'Письмо превышает 64 МиБ.';
+    case 'message_too_large': return 'Письмо превышает 256 МиБ.';
     case 'attachment_too_large': return 'Файл превышает 8 МиБ.';
     case 'download_failed': return 'Не удалось прочитать вложение. Повторная проверка почты повторит попытку.';
     case 'import_unavailable': return 'Не удалось сохранить снимок. Повторная проверка почты повторит попытку.';
@@ -209,7 +214,9 @@ export async function importManagerDashboardFromEmail(options: {
       auth: { user: config.user, pass: config.password },
       logger: false, logRaw: false, disableAutoIdle: true,
       connectionTimeout: 30_000, greetingTimeout: 15_000, socketTimeout: 60_000,
-      maxLineLength: 1024 * 1024, maxLiteralSize: 1024 * 1024, maxResponseSize: 2 * 1024 * 1024,
+      maxLineLength: 1024 * 1024,
+      maxLiteralSize: MANAGER_DASHBOARD_MAIL_MAX_LITERAL_BYTES,
+      maxResponseSize: MANAGER_DASHBOARD_MAIL_MAX_RESPONSE_BYTES,
     });
     // ImapFlow also emits transport errors; the awaited operation reports failure below.
     client.on('error', () => {});

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { Readable } from 'node:stream';
+import { once } from 'node:events';
+import { createRequire } from 'node:module';
+import { Readable, type Transform } from 'node:stream';
 import test from 'node:test';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 
 import type { FetchMessageObject, ImapFlowOptions, MessageStructureObject } from 'imapflow';
 
@@ -8,7 +11,9 @@ import {
   getManagerDashboardMailStatus,
   importManagerDashboardFromEmail,
   MANAGER_DASHBOARD_MAIL_MAX_ATTACHMENT_BYTES,
+  MANAGER_DASHBOARD_MAIL_MAX_LITERAL_BYTES,
   MANAGER_DASHBOARD_MAIL_MAX_MESSAGE_BYTES,
+  MANAGER_DASHBOARD_MAIL_MAX_RESPONSE_BYTES,
   type ManagerDashboardMailClient,
   type ManagerDashboardMailDependencies,
 } from '../src/shared/lib/managerDashboardMail';
@@ -108,16 +113,23 @@ function harness(messages: FetchMessageObject[], overrides: Partial<ManagerDashb
   };
 }
 
-test('manager email imports all 11 attachments and repeats produce 11 durable duplicate outcomes without mailbox writes', async () => {
-  const names = Array.from({ length: 11 }, (_, i) => `Менеджер_${i + 1}.ktsp`);
+test('manager email imports all 15 attachments including a file over 1 MiB and repeats produce 15 durable duplicate outcomes without mailbox writes', async () => {
+  const names = Array.from({ length: 15 }, (_, i) => `Менеджер_${i + 1}.ktsp`);
   const h = harness([message(42, names)]);
+  const originalDownload = h.client.download.bind(h.client);
+  h.client.download = async (uid, part, options) => {
+    const download = await originalDownload(uid, part, options);
+    if (part === '2') download.content = Readable.from([Buffer.alloc(2 * 1024 * 1024, 0x61)]);
+    return download;
+  };
   const first = await h.run();
   assert.equal(first.status, 'completed');
-  assert.equal(first.imported, 11);
-  assert.equal(first.attachments, 11);
+  assert.equal(first.imported, 15);
+  assert.equal(first.attachments, 15);
   assert.equal(first.failed, 0);
   assert.deepEqual(h.calls.map((input) => input.filename), names);
-  assert.equal(new Set(h.calls.map((input) => input.sourceKey)).size, 11);
+  assert.equal(h.calls[1].bytes.length, 2 * 1024 * 1024);
+  assert.equal(new Set(h.calls.map((input) => input.sourceKey)).size, 15);
   assert.ok(h.calls.every((input) => input.sourceKey.length <= 512));
   assert.equal(h.calls[0].sender, 'reports@example.com');
   assert.equal(h.calls[0].messageId, '<42@example.com>');
@@ -125,8 +137,94 @@ test('manager email imports all 11 attachments and repeats produce 11 durable du
   assert.deepEqual(h.events, ['database-lock', 'connect', 'mailbox-lock', 'mailbox-release', 'logout', 'close', 'database-release']);
   const second = await h.run();
   assert.equal(second.imported, 0);
-  assert.equal(second.duplicates, 11);
+  assert.equal(second.duplicates, 15);
   assert.equal(second.failed, 0);
+});
+
+for (const count of [20, 50]) {
+  test(`manager email handles ${count} attachments sequentially above 64 MiB without retaining payloads or blocking on an invalid file`, async () => {
+    const names = Array.from({ length: count }, (_, i) => `synthetic-manager-${i + 1}.ktsp`);
+    const invalidName = count === 50 ? names[24] : undefined;
+    const importedMetadata: Array<{ filename: string; size: number }> = [];
+    let active = 0;
+    let maximumActive = 0;
+    const begin = () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      assert.equal(active, 1, 'downloads, stream consumption and imports must never overlap');
+    };
+    const end = () => { active -= 1; };
+    // The large number is server metadata only; fixtures contain a few synthetic bytes per file.
+    const h = harness([message(42, names, { size: count === 20 ? 65 * 1024 * 1024 : 256 * 1024 * 1024 })], {
+      async importSnapshot({ filename, bytes }) {
+        begin();
+        try {
+          await yieldToEventLoop();
+          assert.ok(bytes.length < 100);
+          importedMetadata.push({ filename, size: bytes.length });
+          return { status: filename === invalidName ? 'invalid' : 'imported', managerId: importedMetadata.length, code: filename === invalidName ? 'INVALID_ATTACHMENT' : 'imported' };
+        } finally {
+          end();
+        }
+      },
+    });
+    const originalDownload = h.client.download.bind(h.client);
+    h.client.download = async (uid, part, options) => {
+      begin();
+      await yieldToEventLoop();
+      const download = await originalDownload(uid, part, options);
+      download.content.destroy();
+      download.content = Readable.from((async function* () {
+        try {
+          await yieldToEventLoop();
+          yield Buffer.from(`synthetic-${part}`);
+          await yieldToEventLoop();
+        } finally {
+          end();
+        }
+      })());
+      return download;
+    };
+    const result = await h.run();
+    assert.equal(result.status, 'completed');
+    assert.equal(result.attachments, count);
+    assert.equal(result.imported, count - (invalidName ? 1 : 0));
+    assert.equal(result.failed, invalidName ? 1 : 0);
+    assert.equal(result.skipped.messageSize, 0);
+    assert.deepEqual(importedMetadata.map(({ filename }) => filename), names);
+    assert.equal(h.downloaded.length, count);
+    assert.equal(maximumActive, 1);
+    assert.equal(active, 0);
+    assert.equal(h.calls.length, 0, 'batch fixture must retain metadata only, not attachment buffers');
+    assert.equal(result.results.at(-1)?.originalName, names.at(-1));
+    assert.equal(result.results.at(-1)?.status, 'imported');
+  });
+}
+
+test('manager email transport budget accepts a full MIME literal above the former cap and still fails closed at its finite bound', async () => {
+  // Exercise the installed ImapFlow parser directly: no mail server, sockets or private data.
+  const { ImapStream } = createRequire(import.meta.url)('imapflow/lib/handler/imap-stream') as {
+    ImapStream: new (options: Pick<ImapFlowOptions, 'maxLineLength' | 'maxLiteralSize' | 'maxResponseSize'>) => Transform;
+  };
+  const parseLiteral = async (maxLiteralSize: number, declaredSize: number, body?: Buffer) => {
+    const parser = new ImapStream({ maxLineLength: 1024 * 1024, maxLiteralSize, maxResponseSize: MANAGER_DASHBOARD_MAIL_MAX_RESPONSE_BYTES });
+    const literals: Buffer[] = [];
+    parser.on('data', (response: { literals: Buffer[]; next: () => void }) => {
+      literals.push(...response.literals);
+      response.next();
+    });
+    const ended = once(parser, 'end');
+    parser.write(`* 1 FETCH (UID 42 BODY[2]<0> {${declaredSize}}\r\n`);
+    if (body) parser.write(body);
+    parser.end(')\r\n');
+    await ended;
+    return literals;
+  };
+  const body = Buffer.alloc(2 * 1024 * 1024, 0x61);
+  await assert.rejects(parseLiteral(1024 * 1024, body.length, body), { code: 'LiteralTooLarge' });
+  const accepted = await parseLiteral(MANAGER_DASHBOARD_MAIL_MAX_LITERAL_BYTES, body.length, body);
+  assert.deepEqual(accepted, [body]);
+  await assert.rejects(parseLiteral(MANAGER_DASHBOARD_MAIL_MAX_LITERAL_BYTES, MANAGER_DASHBOARD_MAIL_MAX_LITERAL_BYTES + 1), { code: 'LiteralTooLarge' });
 });
 
 test('manager email disabled and missing or invalid sender settings fail closed before DB or IMAP access', async () => {
@@ -191,6 +289,7 @@ test('manager email rejects oversized messages before downloading and ignores ol
   assert.equal(result.imported, 1);
   assert.deepEqual(h.downloaded, [{ uid: '3', part: '1' }]);
   assert.deepEqual(h.failures.map((entry) => entry.code), ['MESSAGE_TOO_LARGE']);
+  assert.equal(result.results.find((entry) => entry.code === 'MESSAGE_TOO_LARGE')?.message, 'Письмо превышает 256 МиБ.');
 });
 
 test('manager email bounds decoded streams to 8 MiB even with small reported MIME size and continues afterward', async () => {
@@ -270,6 +369,15 @@ test('manager email parses nested MIME parts and skips forwarded message attachm
   assert.deepEqual(h.downloaded, [{ uid: '1', part: '1.2' }]);
 });
 
+test('manager email retains the 500-node MIME complexity guard before any attachment download', async () => {
+  const h = harness([message(1, Array.from({ length: 500 }, (_, i) => `synthetic-${i}.ktsp`))]);
+  const result = await h.run();
+  assert.equal(result.failed, 1);
+  assert.equal(result.results[0].code, 'INVALID_MESSAGE');
+  assert.equal(h.downloaded.length, 0);
+  assert.equal(h.calls.length, 0);
+});
+
 test('manager email accepts a single root attachment and retries transport failures with independent durable keys', async () => {
   const h = harness([message(1, [], {
     bodyStructure: { type: 'application/octet-stream', parameters: { name: 'manager.ktsp' } },
@@ -313,4 +421,11 @@ test('manager email enforces scan bound, safe config fallback and mandatory STAR
   assert.equal(h.clientOptions?.auth?.user, 'inbox@example.com');
   assert.equal(h.clientOptions?.secure, false);
   assert.equal(h.clientOptions?.doSTARTTLS, true);
+  assert.equal(MANAGER_DASHBOARD_MAIL_MAX_MESSAGE_BYTES, 256 * 1024 * 1024);
+  assert.equal(MANAGER_DASHBOARD_MAIL_MAX_ATTACHMENT_BYTES, 8 * 1024 * 1024);
+  assert.equal(MANAGER_DASHBOARD_MAIL_MAX_LITERAL_BYTES, 26 * 1024 * 1024);
+  assert.equal(MANAGER_DASHBOARD_MAIL_MAX_RESPONSE_BYTES, 28 * 1024 * 1024);
+  assert.equal(h.clientOptions?.maxLineLength, 1024 * 1024);
+  assert.equal(h.clientOptions?.maxLiteralSize, MANAGER_DASHBOARD_MAIL_MAX_LITERAL_BYTES);
+  assert.equal(h.clientOptions?.maxResponseSize, MANAGER_DASHBOARD_MAIL_MAX_RESPONSE_BYTES);
 });
