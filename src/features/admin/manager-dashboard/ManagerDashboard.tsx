@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import adminStyles from '@/app/admin/admin.module.scss';
 
 import { ManagerDashboardManagement } from './ManagerDashboardManagement';
-import { ManagerDashboardViewer } from './ManagerDashboardViewer';
+import { ManagerDashboardViewer, managerDashboardViewIdentity } from './ManagerDashboardViewer';
 import type { ManagerDashboardMutationResult, ManagerDashboardOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
@@ -78,8 +78,8 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
         }
         const next = await readResponse(response) as ManagerDashboardOverview;
         if (!disposed && next.mode === 'view') {
-          if (next.email !== overview.email) {
-            // A different signed-in recipient must not keep the old account's report visible.
+          if (managerDashboardViewIdentity(next) !== managerDashboardViewIdentity(overview)) {
+            // A changed recipient or lost binding must immediately clear the decrypted report.
             setOverview(next);
             setUpdateAvailable(false);
             return;
@@ -159,7 +159,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}
       {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем дашборд…</p></section> : null}
       {overview?.mode === 'manage' ? <ManagerDashboardManagement overview={overview} busy={busy || loading} mutate={mutate} /> : null}
-      {overview?.mode === 'view' ? <ManagerDashboardViewer key={overview.email} overview={overview} loading={loading} onReload={refresh} /> : null}
+      {overview?.mode === 'view' ? <ManagerDashboardViewer key={managerDashboardViewIdentity(overview)} overview={overview} loading={loading} onReload={refresh} /> : null}
     </main>
   );
 }

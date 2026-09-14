@@ -28,6 +28,8 @@ const DOWNLOAD_MARKER = 'kts-top-dashboard-download-v1';
 const FRAME_PATH = '/api/admin/manager-dashboard/frame';
 const CONTENT_PATH = '/api/admin/manager-dashboard/content';
 const SNAPSHOT_PATH = '/api/admin/manager-dashboard/snapshots';
+const EMPTY_STATES = ['missing_email', 'ambiguous_email', 'no_snapshot', 'expired'] as const;
+type EmptyState = typeof EMPTY_STATES[number];
 
 // Declarations for variables in the provided browser document, used only in Playwright callbacks.
 declare const D: { rows: unknown[] } | null;
@@ -100,7 +102,7 @@ async function main() {
   const frame = buildPersonalDashboardFrame({ versionId: 1, snapshotId: 1, preview: false });
   const synthetic = syntheticSnapshot();
   const receivedPaths: string[] = [];
-  const shell = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}#shell{width:100%;height:100%;border:0}</style></head><body><div id="parent-secret" hidden>synthetic-parent-only</div><iframe id="shell" sandbox="allow-scripts allow-same-origin" src="${FRAME_PATH}?version=1&amp;snapshot=1"></iframe><script>
+  const shell = (emptyState?: EmptyState) => `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}#shell{width:100%;height:100%;border:0}</style></head><body><div id="parent-secret" hidden>synthetic-parent-only</div><iframe id="shell" sandbox="allow-scripts allow-same-origin" src="${FRAME_PATH}?version=1&amp;snapshot=1${emptyState ? `&amp;empty=${emptyState}` : ''}"></iframe><script>
     window.fixtureDownloads = [];
     window.fixtureMessages = [];
     window.addEventListener('message', async (event) => {
@@ -115,14 +117,18 @@ async function main() {
   </script></body></html>`;
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const emptyState = EMPTY_STATES.find((state) => state === url.searchParams.get('empty'));
     receivedPaths.push(url.pathname);
     const headers = { ...PERSONAL_PRIVATE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' };
     if (url.pathname === '/') {
-      response.writeHead(200, headers).end(shell);
+      response.writeHead(200, headers).end(shell(emptyState));
     } else if (url.pathname === '/standalone') {
       response.writeHead(200, headers).end(originalHtml);
     } else if (url.pathname === FRAME_PATH) {
-      response.writeHead(200, { ...headers, 'Content-Security-Policy': frame.csp }).end(frame.html);
+      // Deliberately include a snapshot ID in empty cases: emptyState must still suppress data access.
+      const options = { versionId: 1, snapshotId: 1, preview: false, emptyState };
+      const selectedFrame = emptyState ? buildPersonalDashboardFrame(options) : frame;
+      response.writeHead(200, { ...headers, 'Content-Security-Policy': selectedFrame.csp }).end(selectedFrame.html);
     } else if (url.pathname === CONTENT_PATH) {
       response.writeHead(200, {
         ...headers, 'Content-Security-Policy': personalHtmlCsp(adaptedHtml),
@@ -155,11 +161,63 @@ async function main() {
       const scriptErrors: string[] = [];
       try {
         const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, timezoneId: 'Europe/Moscow', acceptDownloads: false });
+        await context.addInitScript(`(() => {
+          window.fixtureIncomingPersonal = [];
+          window.fixtureDecryptCalls = 0;
+          window.addEventListener('message', (event) => {
+            const data = event.data;
+            if (data && data.marker === 'kts-personal-dashboard-v1') {
+              window.fixtureIncomingPersonal.push({type:data.type, reason:data.reason,
+                hasBytes:Object.prototype.hasOwnProperty.call(data, 'bytes')});
+            }
+          });
+          if (crypto.subtle) {
+            const decrypt = crypto.subtle.decrypt.bind(crypto.subtle);
+            crypto.subtle.decrypt = function(...args) {
+              window.fixtureDecryptCalls += 1;
+              return decrypt(...args);
+            };
+          }
+        })()`);
         await context.route('**/*', async (route: BrowserRoute) => {
           const url = route.request().url();
           if (new URL(url).origin === origin) await route.continue();
           else { externalRequests.push(new URL(url).origin); await route.abort(); }
         });
+        for (const emptyState of EMPTY_STATES) {
+          const emptyPage = await context.newPage();
+          emptyPage.setDefaultTimeout(7000);
+          emptyPage.on('pageerror', (error: Error) => scriptErrors.push(error.message));
+          const snapshotRequestsBefore = receivedPaths.filter((pathname) => pathname === SNAPSHOT_PATH).length;
+          try {
+            await emptyPage.goto(`${origin}/?empty=${emptyState}`);
+            await emptyPage.waitForFunction(() => document.querySelector<HTMLIFrameElement>('#shell')?.contentDocument?.querySelector('#personal'));
+            const emptyContent = emptyPage.frames().find((candidate: { url(): string }) => candidate.url().includes(CONTENT_PATH));
+            assert.ok(emptyContent, `${engineName}/${emptyState}: original HTML frame exists`);
+            await emptyContent.waitForFunction(() => document.querySelector<HTMLInputElement>('#pass')?.disabled === true);
+            assert.equal(await emptyContent.locator('header h1').isVisible(), true, 'original dashboard title is visible without data');
+            assert.equal((await emptyContent.locator('header h1').innerText()).toLocaleLowerCase('ru-RU'), 'личный дашборд продаж');
+            assert.equal(await emptyContent.locator('.gate').isVisible(), true, 'original HTML gate is rendered without preview mode');
+            for (const selector of ['#email', '#pass', '#fileInp', '#go']) {
+              assert.equal(await emptyContent.locator(selector).isDisabled(), true, `${emptyState}: ${selector} is disabled until an assigned snapshot exists`);
+            }
+            assert.equal(await emptyContent.locator('#pass').inputValue(), '');
+            assert.equal(await emptyContent.evaluate('FILE === null && D === null'), true, 'empty mode has neither file nor decrypted data');
+            assert.equal(await emptyContent.evaluate('window.fixtureDecryptCalls'), 0, 'empty mode never invokes decryption');
+            assert.deepEqual(await emptyContent.evaluate('window.fixtureIncomingPersonal'), [
+              { type: 'empty', reason: emptyState, hasBytes: false },
+            ], 'only an explicit empty-state message reaches the content iframe');
+            const gateText = await emptyContent.locator('.gate').innerText();
+            const expectedMessage: Record<EmptyState, RegExp> = {
+              missing_email: /email|почт/i,
+              ambiguous_email: /нескольк|неоднознач|совпад|дублир/i,
+              no_snapshot: /ожида|пока|не загруж|нет|поступ|ещ[её] не/i,
+              expired: /ист[её]к|просроч|срок/i,
+            };
+            assert.match(gateText, expectedMessage[emptyState], `${emptyState}: visible message explains why data is unavailable`);
+            assert.equal(receivedPaths.filter((pathname) => pathname === SNAPSHOT_PATH).length, snapshotRequestsBefore, 'empty mode does not fetch a snapshot even when a snapshot ID was supplied');
+          } finally { await emptyPage.close(); }
+        }
         const standalone = await context.newPage();
         const integrated = await context.newPage();
         for (const page of [standalone, integrated]) {
@@ -280,7 +338,7 @@ async function main() {
         assert.ok(messages.every((entry: { keys: string[] }) => !entry.keys.some((key) => /password|plaintext|payload|rows/i.test(key))));
         assert.deepEqual(externalRequests, [], 'original and integrated fixtures make no external requests');
         assert.deepEqual(scriptErrors, [], 'both original and integrated v12 execute without script errors');
-        console.log(`PASS ${engineName}: standalone parity, encrypted delivery/password, KPI/control, all tabs, month/goods/KP filters and resets, opaque sandbox, network/popup denial and gesture XLSX bridge.`);
+        console.log(`PASS ${engineName}: four HTML-only empty states without data fetch/decrypt; standalone parity, encrypted delivery/password, KPI/control, all tabs, month/goods/KP filters and resets, opaque sandbox, network/popup denial and gesture XLSX bridge.`);
       } catch (error) {
         failures.push(`${engineName}: ${error instanceof Error ? error.message : String(error)}`);
       } finally { await browser.close(); }

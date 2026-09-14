@@ -1,4 +1,5 @@
 import type { AdminSession } from './adminAuth';
+import type { PersonalDashboardEmptyState } from './managerDashboardHtml';
 
 export function personalDashboardMode(session: AdminSession | null): 'manage' | 'view' | null {
   // Do not accept the legacy signed-cookie fallback: persisted sessions recheck
@@ -19,6 +20,21 @@ export function personalDashboardFreshness(snapshot: { issued: string; expires: 
     expectedBy: '10:00 МСК',
     snapshotStatus: !snapshot ? 'missing' : snapshot.expires < todayMoscow ? 'expired' : snapshot.issued < todayMoscow ? 'stale' : 'current',
   } as const;
+}
+
+// Shared HTML does not depend on an email binding. Only a currently authorized,
+// unexpired personal snapshot may trigger the separate protected data request.
+export function personalDashboardFrameSelection(status: {
+  bindingStatus: 'matched' | 'missing_email' | 'ambiguous_email';
+  snapshot: { id: number; issued: string; expires: string } | null;
+  history: Array<{ id: number; issued: string; expires: string }>;
+}, requestedId?: number, now = new Date()): { snapshotId?: number; emptyState?: PersonalDashboardEmptyState; denied?: true } {
+  if (status.bindingStatus !== 'matched') return { emptyState: status.bindingStatus };
+  const selected = requestedId === undefined ? status.snapshot : status.history.find((snapshot) => snapshot.id === requestedId);
+  if (requestedId !== undefined && !selected) return { denied: true };
+  if (!selected) return { emptyState: 'no_snapshot' };
+  if (personalDashboardFreshness(selected, now).snapshotStatus === 'expired') return { emptyState: 'expired' };
+  return { snapshotId: selected.id };
 }
 
 export function parsePersonalDashboardId(value: string | null) {

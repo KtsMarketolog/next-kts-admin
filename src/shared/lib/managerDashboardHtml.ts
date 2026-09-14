@@ -5,6 +5,15 @@ import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_MAX_BYTES
 
 const MARKER = 'kts-personal-dashboard-v1';
 
+const EMPTY_STATE_MESSAGES = {
+  missing_email: 'HTML дашборда доступен. Для автоматической привязки личного снимка администратору нужно указать email в вашей карточке.',
+  ambiguous_email: 'HTML дашборда доступен. Этот email указан у нескольких менеджеров; администратору нужно уточнить привязку личных снимков.',
+  no_snapshot: 'HTML дашборда доступен. Личный снимок ещё не загружен; данные появятся после его получения.',
+  expired: 'HTML дашборда доступен. Срок действия выбранного снимка истёк; нужен актуальный личный снимок.',
+} as const;
+
+export type PersonalDashboardEmptyState = keyof typeof EMPTY_STATE_MESSAGES;
+
 // v12 renders these handlers from template expressions, so hashing only the
 // uploaded source cannot authorize their concrete runtime text. Keep this list
 // finite: no arbitrary handler text, eval, or changes to the supplied calculations.
@@ -33,26 +42,28 @@ export function getPersonalDashboardAdapterScript() {
   return `(() => {
   'use strict';
   const marker = '${MARKER}';
+  const emptyMessages = ${JSON.stringify(EMPTY_STATE_MESSAGES)};
   let binding = null;
+  let emptyReason = null;
   let loaded = false;
   let unlocked = false;
   const normalize = (email) => String(email || '').trim().toLowerCase();
   function updateGate() {
-    if (!binding) return;
+    if (!binding && !emptyReason) return;
     const email = document.getElementById('email');
-    if (email) { email.value = binding.email; email.readOnly = true; email.autocomplete = 'off'; }
+    if (email) { email.value = binding ? binding.email : ''; email.readOnly = true; email.disabled = !!emptyReason; email.autocomplete = 'off'; }
     const pass = document.getElementById('pass');
-    if (pass) { pass.autocomplete = 'off'; pass.placeholder = 'Пароль личного снимка (не от почты)'; }
+    if (pass) { pass.autocomplete = 'off'; pass.placeholder = 'Пароль личного снимка (не от почты)'; pass.disabled = !!emptyReason; if (emptyReason) pass.value = ''; }
     const input = document.getElementById('fileInp');
     if (input) input.disabled = true;
     const drop = document.getElementById('drop');
     if (drop) { drop.onclick = null; drop.ondrop = (event) => event.preventDefault(); drop.ondragover = (event) => event.preventDefault(); }
     const note = document.querySelector('.gate .note');
-    if (note) note.textContent = 'Снимок получен для вашего кабинета автоматически. Введите пароль снимка; пароль не отправляется на сервер и не сохраняется в браузере.';
+    if (note) note.textContent = emptyReason ? emptyMessages[emptyReason] : 'Снимок получен для вашего кабинета автоматически. Введите пароль снимка; пароль не отправляется на сервер и не сохраняется в браузере.';
     const intro = document.querySelector('.gate .p');
-    if (intro) intro.textContent = 'Личный снимок доставлен из почты и хранится на сервере в зашифрованном виде. Расшифровка выполняется здесь, в браузере.';
+    if (intro) intro.textContent = emptyReason ? 'Общая версия дашборда опубликована. Для отображения личных показателей нужен ваш действующий снимок.' : 'Личный снимок хранится на сервере в зашифрованном виде. Расшифровка выполняется здесь, в браузере.';
     const button = document.getElementById('go');
-    if (button && !binding.bytes) button.disabled = true;
+    if (button && (!binding || !binding.bytes)) button.disabled = true;
   }
   const originalGate = gate;
   gate = function(message) { originalGate(message); updateGate(); };
@@ -93,7 +104,17 @@ export function getPersonalDashboardAdapterScript() {
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent || !event.data || event.data.marker !== marker) return;
     const data = event.data;
-    if (data.type !== 'snapshot' || loaded || typeof data.email !== 'string' || typeof data.originalName !== 'string' || !(data.bytes instanceof ArrayBuffer) || data.bytes.byteLength > 8 * 1024 * 1024) return;
+    if (loaded) return;
+    if (data.type === 'empty' && typeof data.reason === 'string' && Object.prototype.hasOwnProperty.call(emptyMessages, data.reason)) {
+      loaded = true;
+      emptyReason = data.reason;
+      binding = null;
+      FILE = null;
+      if (typeof D !== 'undefined') D = null;
+      gate();
+      return;
+    }
+    if (data.type !== 'snapshot' || typeof data.email !== 'string' || typeof data.originalName !== 'string' || !(data.bytes instanceof ArrayBuffer) || data.bytes.byteLength > 8 * 1024 * 1024) return;
     loaded = true;
     binding = {email:normalize(data.email),bytes:data.bytes};
     FILE = new File([data.bytes], data.originalName, {type:'application/json'});
@@ -129,7 +150,7 @@ export function personalHtmlCsp(html: string) {
   }).join('; ');
 }
 
-export function buildPersonalDashboardFrame(input: { versionId: number; snapshotId?: number; preview: boolean }) {
+export function buildPersonalDashboardFrame(input: { versionId: number; snapshotId?: number; preview: boolean; emptyState?: PersonalDashboardEmptyState }) {
   const query = new URLSearchParams({version: String(input.versionId)});
   if (input.preview) query.set('preview', '1');
   const contentPath = '/api/admin/manager-dashboard/content?' + query.toString();
@@ -139,11 +160,18 @@ export function buildPersonalDashboardFrame(input: { versionId: number; snapshot
     const frame = document.getElementById('personal');
     const status = document.getElementById('status');
     const preview = ${input.preview};
+    const emptyState = ${JSON.stringify(input.emptyState ?? null)};
     let snapshot = null;
     let ready = false;
     let sent = false;
     function deliver() {
-      if (!ready || !snapshot || sent || !frame.contentWindow) return;
+      if (!ready || sent || !frame.contentWindow) return;
+      if (!preview && emptyState) {
+        sent = true;
+        frame.contentWindow.postMessage({marker:'${MARKER}',type:'empty',reason:emptyState}, '*');
+        return;
+      }
+      if (!snapshot) return;
       sent = true;
       frame.contentWindow.postMessage({marker:'${MARKER}',type:'snapshot',bytes:snapshot.bytes,email:snapshot.email,originalName:snapshot.originalName}, '*', [snapshot.bytes]);
       snapshot = null;
@@ -162,7 +190,9 @@ export function buildPersonalDashboardFrame(input: { versionId: number; snapshot
         window.parent.postMessage({marker:d.marker,type:'download-request',name:d.name,blob:d.blob}, window.location.origin);
       }
     });
-    if (!preview) {
+    if (preview) status.textContent = 'Предпросмотр HTML. Личные данные менеджеров сюда не передаются.';
+    else if (emptyState) status.textContent = ${JSON.stringify(input.emptyState ? EMPTY_STATE_MESSAGES[input.emptyState] : '')};
+    else {
       fetch(${JSON.stringify(dataPath)}, {credentials:'same-origin',cache:'no-store'}).then(async (res) => {
         if (!res.ok) throw new Error('Снимок недоступен. Обновите кабинет или обратитесь к администратору.');
         const email = res.headers.get('x-personal-email');
@@ -171,7 +201,7 @@ export function buildPersonalDashboardFrame(input: { versionId: number; snapshot
         if (!email || !name || bytes.byteLength > 8 * 1024 * 1024) throw new Error('Некорректный снимок.');
         snapshot = {email:decodeURIComponent(email),originalName:decodeURIComponent(name),bytes}; deliver();
       }).catch((error) => {status.textContent = error.message;});
-    } else status.textContent = 'Предпросмотр HTML. Личные данные менеджеров сюда не передаются.';
+    }
   })();`;
   const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Личный дашборд продаж</title><style>html,body{margin:0;height:100%;font-family:Arial,sans-serif}#status{padding:12px;background:#f5f3ff;color:#271078}iframe{border:0;width:100%;height:100%;display:block}</style></head><body><div id="status">Загрузка личного снимка…</div><iframe id="personal" title="Личный дашборд продаж" sandbox="allow-scripts" referrerpolicy="same-origin" src="${contentPath.replace(/&/g, '&amp;')}"></iframe><script>${script}</script></body></html>`;
   return { html, csp: buildTopDashboardFrameSecurityPolicy(script) };

@@ -11,10 +11,12 @@ import {
   injectPersonalDashboardAdapter,
   isPersonalDashboardHtml,
   personalHtmlCsp,
+  type PersonalDashboardEmptyState,
 } from '../src/shared/lib/managerDashboardHtml';
 import {
   parsePersonalDashboardId,
   personalDashboardFreshness,
+  personalDashboardFrameSelection,
   personalDashboardMode,
   readPersonalRequestBytes,
 } from '../src/shared/lib/managerDashboardSecurity';
@@ -54,6 +56,21 @@ test('snapshot freshness follows Moscow midnight and inclusive expiry dates', ()
   assert.equal(stale.snapshotStatus, 'stale');
   assert.equal(stale.todayMoscow, '2026-09-15');
   assert.equal(personalDashboardFreshness(null).snapshotStatus, 'missing');
+});
+
+test('shared HTML selection stays available without a usable binding or snapshot, but never selects another manager data', () => {
+  const now = new Date('2026-09-14T12:00:00Z');
+  const snapshot = { id: 23, issued: '2026-09-14', expires: '2026-09-14' };
+  const status = { bindingStatus: 'matched' as const, snapshot, history: [snapshot] };
+  assert.deepEqual(personalDashboardFrameSelection(status, undefined, now), { snapshotId: 23 });
+  assert.deepEqual(personalDashboardFrameSelection(status, 23, now), { snapshotId: 23 });
+  assert.deepEqual(personalDashboardFrameSelection(status, 99, now), { denied: true });
+  assert.deepEqual(personalDashboardFrameSelection({ ...status, snapshot: null, history: [] }, undefined, now), { emptyState: 'no_snapshot' });
+  assert.deepEqual(personalDashboardFrameSelection(status, 23, new Date('2026-09-14T21:00:00Z')), { emptyState: 'expired' });
+  for (const bindingStatus of ['missing_email', 'ambiguous_email'] as const) {
+    // Even stale metadata cannot make the frame fetch bytes without a binding.
+    assert.deepEqual(personalDashboardFrameSelection({ ...status, bindingStatus }, 23, now), { emptyState: bindingStatus });
+  }
 });
 
 function streamRequest(chunks: Uint8Array[], contentLength?: string) {
@@ -217,6 +234,33 @@ test('personal adapter only binds one snapshot from its parent and does not unlo
   assert.equal(runInContext('FILE.name', harness.context), 'synthetic.ktsp');
 });
 
+const EMPTY_REASONS: PersonalDashboardEmptyState[] = ['missing_email', 'ambiguous_email', 'no_snapshot', 'expired'];
+
+test('personal adapter displays the HTML gate without credentials or data in each empty state', async () => {
+  const fixture = encryptedFixture();
+  for (const reason of EMPTY_REASONS) {
+    const harness = adapterHarness();
+    const message = { marker: 'kts-personal-dashboard-v1', type: 'empty', reason };
+    harness.send(message, {});
+    harness.send({ ...message, reason: '__proto__' });
+    assert.equal(runInContext('calls.gate', harness.context), 1);
+    harness.elements.pass.value = PASSWORD;
+    harness.send(message);
+    assert.equal(runInContext('calls.gate', harness.context), 2);
+    for (const field of ['email', 'pass', 'fileInp', 'go']) assert.equal(harness.elements[field].disabled, true, `${reason}/${field}`);
+    assert.equal(harness.elements.pass.value, '');
+    assert.equal(harness.elements.email.value, '');
+    assert.match(harness.elements.note.textContent, /HTML дашборда доступен/);
+    bind(harness, fixture);
+    harness.send(message);
+    assert.equal(runInContext('calls.gate', harness.context), 2);
+    assert.equal(runInContext('FILE', harness.context), null);
+    assert.equal(runInContext('D', harness.context), null);
+    await assert.rejects(decrypt(harness.context, fixture.text), /недоступен/);
+    assert.equal(runInContext('calls.render', harness.context), 0);
+  }
+});
+
 test('personal adapter decrypts real AES-GCM/PBKDF2 gzip fixtures, preserves unpack/render and clears the entered password', async () => {
   for (const gzip of [true, false]) {
     const fixture = encryptedFixture({}, {}, gzip);
@@ -332,5 +376,39 @@ test('outer frame delivers once regardless of snapshot/iframe readiness order an
     assert.equal(delivered.length, 1);
     assert.equal(delivered[0].email, EMAIL);
     assert.equal(status.hidden, true);
+  }
+});
+
+test('HTML-only frames never request or deliver personal bytes, even with a snapshot ID in their input', () => {
+  for (const emptyState of EMPTY_REASONS) {
+    for (const snapshotId of [undefined, 23]) {
+      const output = buildPersonalDashboardFrame({ versionId: 7, snapshotId, preview: false, emptyState });
+      const source = [...output.html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)][0][1];
+      const listeners: Array<(event: Message) => void> = [];
+      const delivered: Array<Record<string, unknown>> = [];
+      const contentWindow = { postMessage: (value: Record<string, unknown>) => delivered.push(value) };
+      const status = { hidden: false, textContent: '' };
+      new Script(source).runInContext(createContext({
+        document: { getElementById: (id: string) => id === 'personal' ? { contentWindow } : status },
+        window: {
+          location: { origin: 'https://example.test' }, parent: { postMessage() {} },
+          addEventListener: (_type: string, callback: (event: Message) => void) => listeners.push(callback),
+        },
+        fetch: () => { assert.fail('Empty HTML frame must not fetch personal data'); },
+        Blob, navigator: { userActivation: { isActive: false } },
+      }));
+      assert.equal(delivered.length, 0);
+      assert.match(status.textContent, /HTML дашборда доступен/);
+      const ready = { marker: 'kts-personal-dashboard-v1', type: 'ready' };
+      for (const listener of listeners) {
+        listener({ source: {}, origin: 'null', data: ready });
+        listener({ source: contentWindow, origin: 'https://other.test', data: ready });
+      }
+      assert.equal(delivered.length, 0);
+      for (let i = 0; i < 2; i++) for (const listener of listeners) listener({ source: contentWindow, origin: 'null', data: ready });
+      assert.equal(delivered.length, 1);
+      assert.equal(JSON.stringify(delivered[0]), JSON.stringify({ marker: 'kts-personal-dashboard-v1', type: 'empty', reason: emptyState }));
+      assert.equal(status.hidden, false);
+    }
   }
 });

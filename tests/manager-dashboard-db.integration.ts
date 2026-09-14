@@ -168,6 +168,52 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal((await getPersonalDashboardStatus(recipient.id)).snapshot?.id, good.snapshotId);
     });
 
+    await t.test('published HTML stays available when an active manager has no snapshot or no unique email binding', async () => {
+      const published = await getPersonalDashboardHtml();
+      assert.ok(published, 'The previous test published a shared HTML version');
+      const noSnapshot = await manager('empty-dashboard');
+      assert.deepEqual(await getPersonalDashboardStatus(noSnapshot.id), {
+        snapshot: null, history: [], bindingStatus: 'matched',
+      });
+      assert.equal((await getPersonalDashboardHtml())?.id, published.id);
+      assert.equal(await getPersonalDashboardSnapshot(noSnapshot.id), null);
+
+      const owner = await manager('binding-overview-owner');
+      const imported = await importFile(bytes(owner.email));
+      assert.ok(imported.snapshotId);
+      const snapshotId = imported.snapshotId;
+      for (const blankEmail of ['', ' \t\u00a0\n']) {
+        await query(`update wholesale_managers set email=$2 where id=$1`, [owner.id, blankEmail]);
+        assert.deepEqual(await getPersonalDashboardStatus(owner.id), {
+          snapshot: null, history: [], bindingStatus: 'missing_email',
+        });
+        assert.equal((await getPersonalDashboardHtml())?.id, published.id);
+        await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'NOT_FOUND' });
+        await assert.rejects(() => getPersonalDashboardSnapshot(owner.id), { code: 'NOT_FOUND' });
+      }
+
+      await query(`update wholesale_managers set email=$2 where id=$1`, [owner.id, owner.email]);
+      const duplicate = await manager('binding-overview-duplicate', 'manager', true, owner.email.toUpperCase());
+      for (const recipient of [owner, duplicate]) {
+        assert.deepEqual(await getPersonalDashboardStatus(recipient.id), {
+          snapshot: null, history: [], bindingStatus: 'ambiguous_email',
+        });
+        assert.equal((await getPersonalDashboardHtml())?.id, published.id);
+        await assert.rejects(() => getPersonalDashboardSnapshot(recipient.id, snapshotId), { code: 'AMBIGUOUS_EMAIL' });
+        await assert.rejects(() => getPersonalDashboardSnapshot(recipient.id), { code: 'AMBIGUOUS_EMAIL' });
+      }
+
+      await query(`update wholesale_managers set is_active=false where id=$1`, [duplicate.id]);
+      const restored = await getPersonalDashboardStatus(owner.id);
+      assert.equal(restored.bindingStatus, 'matched');
+      assert.equal(restored.snapshot?.id, snapshotId);
+      assert.ok(await getPersonalDashboardSnapshot(owner.id, snapshotId));
+      await assert.rejects(() => getPersonalDashboardStatus(duplicate.id), { code: 'NOT_FOUND' });
+      await query(`update wholesale_managers set email='',role='support_manager' where id=$1`, [owner.id]);
+      await assert.rejects(() => getPersonalDashboardStatus(owner.id), { code: 'NOT_FOUND' });
+      await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'NOT_FOUND' });
+    });
+
     await t.test('fourteen-day cleanup preserves the newest two and is atomic with accepted import', async () => {
       const recipient = await manager('retention');
       for (const offset of [-3, -2, -1]) assert.equal((await importFile(bytes(recipient.email, offset))).status, 'imported');

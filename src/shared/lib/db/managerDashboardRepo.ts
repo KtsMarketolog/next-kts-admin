@@ -24,6 +24,11 @@ export type PersonalDashboardSnapshot = PersonalSnapshotMetadata & {
   status: 'active' | 'previous' | 'archived';
   expired: boolean;
 };
+export type PersonalDashboardStatus = {
+  snapshot: PersonalDashboardSnapshot | null;
+  history: PersonalDashboardSnapshot[];
+  bindingStatus: 'matched' | 'missing_email' | 'ambiguous_email';
+};
 export type PersonalDashboardHtmlVersion = {
   id: number;
   originalName: string;
@@ -149,29 +154,43 @@ async function currentManagers(client: PoolClient): Promise<ManagerRow[]> {
     from wholesale_managers order by id for share`);
   return result.rows;
 }
-async function authorizeBinding(client: PoolClient, managerId: number) {
+async function authorizeManagerAccount(client: PoolClient, managerId: number) {
   positiveId(managerId);
   const managers = await currentManagers(client);
   const manager = managers.find((row) => Number(row.id) === managerId);
-  if (!manager?.is_active || (manager.role && manager.role !== 'manager') || !manager.email.trim()) {
+  if (!manager?.is_active || (manager.role && manager.role !== 'manager')) {
     throw new PersonalDashboardError('NOT_FOUND', 'Личный дашборд недоступен');
   }
+  return { manager, managers };
+}
+async function accountSnapshotBinding(client: PoolClient, managerId: number) {
+  const { manager, managers } = await authorizeManagerAccount(client, managerId);
+  // Access to the shared published HTML requires a valid development-manager account,
+  // not a working snapshot email. Snapshot identity is a separate, stricter condition.
+  if (!manager.email.trim()) return { status: 'missing_email' as const, emailHash: null };
   const emailHash = getManagerEmailHash(manager.email);
   const binding = resolvePersonalDashboardManager(bindings(managers), emailHash);
-  if (binding.managerId !== managerId) throw new PersonalDashboardError('AMBIGUOUS_EMAIL', 'Email менеджера не уникален; обратитесь к администратору');
-  return emailHash;
+  if (binding.managerId !== managerId) return { status: 'ambiguous_email' as const, emailHash: null };
+  return { status: 'matched' as const, emailHash };
+}
+async function authorizeBinding(client: PoolClient, managerId: number) {
+  const binding = await accountSnapshotBinding(client, managerId);
+  if (binding.status === 'missing_email') throw new PersonalDashboardError('NOT_FOUND', 'Личный снимок недоступен без email менеджера');
+  if (binding.status === 'ambiguous_email') throw new PersonalDashboardError('AMBIGUOUS_EMAIL', 'Email менеджера не уникален; обратитесь к администратору');
+  return binding.emailHash;
 }
 
 /** Callers must obtain managerId from their verified session, never from a request parameter. */
-export async function getPersonalDashboardStatus(managerId: number) {
+export async function getPersonalDashboardStatus(managerId: number): Promise<PersonalDashboardStatus> {
   await ensureSiteSchema();
   return withTransaction(async (client) => {
-    const emailHash = await authorizeBinding(client, managerId);
+    const binding = await accountSnapshotBinding(client, managerId);
+    if (binding.status !== 'matched') return { snapshot: null, history: [], bindingStatus: binding.status };
     const result = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT}
       from personal_dashboard_snapshots s left join personal_dashboard_snapshot_state st on st.manager_id=s.manager_id
-      where s.manager_id=$1 and s.email_hash=$2 order by s.issued desc, s.id desc limit 32`, [managerId, emailHash]);
+      where s.manager_id=$1 and s.email_hash=$2 order by s.issued desc, s.id desc limit 32`, [managerId, binding.emailHash]);
     const history = result.rows.map(mapSnapshot);
-    return { snapshot: history.find((item) => item.status === 'active') ?? null, history };
+    return { snapshot: history.find((item) => item.status === 'active') ?? null, history, bindingStatus: 'matched' };
   });
 }
 

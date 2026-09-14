@@ -24,6 +24,7 @@ export type ManagerDashboardImport = {
 };
 
 export type ManagerDashboardSnapshotStatus = 'current' | 'stale' | 'expired' | 'missing';
+export type ManagerDashboardBindingStatus = 'matched' | 'missing_email' | 'ambiguous_email';
 
 export type ManagerDashboardOverview = {
   mode: 'manage';
@@ -45,6 +46,7 @@ export type ManagerDashboardOverview = {
   expectedBy?: string | null;
 } | {
   mode: 'view';
+  bindingStatus: ManagerDashboardBindingStatus;
   snapshot: ManagerDashboardSnapshot | null;
   snapshotStatus?: ManagerDashboardSnapshotStatus;
   history: ManagerDashboardSnapshot[];
