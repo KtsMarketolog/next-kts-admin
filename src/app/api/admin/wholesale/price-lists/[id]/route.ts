@@ -19,38 +19,16 @@ import {
   normalizeOptionalDate,
   normalizePositiveIntegerId,
   normalizeTextField,
-  normalizeWholesaleDiscountPercent,
-  normalizeWholesalePrice,
 } from '@/shared/lib/wholesaleSecurity';
+import {
+  parseWholesalePriceItems,
+  readWholesalePriceSaveBody,
+  WholesalePriceSaveValidationError,
+} from '@/shared/lib/wholesalePriceSave';
 
 type Context = {
   params: Promise<{ id: string }>;
 };
-
-const MAX_PRICE_ITEMS = 5000;
-
-function itemsFromBody(items: unknown): WholesalePriceListItemInput[] {
-  if (!Array.isArray(items)) return [];
-  return items
-    .slice(0, MAX_PRICE_ITEMS)
-    .map((item, index) => {
-      if (!item || typeof item !== 'object') return null;
-      const source = item as Record<string, unknown>;
-      const productId = Number(source.productId);
-      if (!Number.isInteger(productId) || productId <= 0) return null;
-      const parsedVariantId = source.variantId === null || source.variantId === undefined ? null : Number(source.variantId);
-      return {
-        productId,
-        variantId: parsedVariantId !== null && Number.isInteger(parsedVariantId) && parsedVariantId > 0 ? parsedVariantId : null,
-        customWholesalePrice: normalizeWholesalePrice(source.customWholesalePrice),
-        discountPercent: normalizeWholesaleDiscountPercent(source.discountPercent),
-        priceManuallyChanged: Boolean(source.priceManuallyChanged),
-        visible: Boolean(source.visible),
-        sortOrder: Number.isInteger(Number(source.sortOrder)) ? Math.max(0, Number(source.sortOrder)) : index + 1,
-      };
-    })
-    .filter(Boolean) as WholesalePriceListItemInput[];
-}
 
 function priceGroupStockSettingsFromBody(settings: unknown): WholesalePriceGroupStockSettingInput[] {
   const rows = Array.isArray(settings)
@@ -102,7 +80,17 @@ export async function PUT(request: Request, context: Context) {
   const numericId = Number(id);
   if (!Number.isInteger(numericId)) return Response.json({ error: 'Invalid id' }, { status: 400 });
 
-  const body = await request.json().catch(() => ({}));
+  let body: Record<string, unknown>;
+  let items: WholesalePriceListItemInput[];
+  try {
+    body = await readWholesalePriceSaveBody(request);
+    items = parseWholesalePriceItems(body.items);
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof WholesalePriceSaveValidationError ? error.message : 'Не удалось прочитать данные прайса' },
+      { status: error instanceof WholesalePriceSaveValidationError ? error.status : 400 },
+    );
+  }
   const existing = await getWholesalePriceListEditor(numericId, session);
   if (!existing) return Response.json({ error: 'Not found' }, { status: 404 });
 
@@ -118,8 +106,8 @@ export async function PUT(request: Request, context: Context) {
   }
   const { managerId, supportManagerId } = resolveWholesalePriceListManagerAssignment(
     {
-      managerId: body.managerId,
-      supportManagerId: body.supportManagerId,
+      managerId: normalizePositiveIntegerId(body.managerId),
+      supportManagerId: normalizePositiveIntegerId(body.supportManagerId),
     },
     session,
   );
@@ -147,7 +135,7 @@ export async function PUT(request: Request, context: Context) {
         showStock: body.showStock !== false,
         showStockText: Boolean(body.showStockText),
         isActive: Boolean(body.isActive ?? true),
-        items: itemsFromBody(body.items),
+        items,
         priceGroupStockSettings: priceGroupStockSettingsFromBody(body.priceGroupStockSettings),
       },
       session,

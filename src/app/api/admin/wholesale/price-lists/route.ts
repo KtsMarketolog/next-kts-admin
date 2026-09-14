@@ -20,37 +20,15 @@ import {
   normalizePositiveIntegerId,
   normalizePublicPriceToken,
   normalizeTextField,
-  normalizeWholesaleDiscountPercent,
-  normalizeWholesalePrice,
 } from '@/shared/lib/wholesaleSecurity';
-
-const MAX_PRICE_ITEMS = 5000;
+import {
+  parseWholesalePriceItems,
+  readWholesalePriceSaveBody,
+  WholesalePriceSaveValidationError,
+} from '@/shared/lib/wholesalePriceSave';
 
 function token() {
   return randomBytes(12).toString('hex');
-}
-
-function itemsFromBody(items: unknown): WholesalePriceListItemInput[] {
-  if (!Array.isArray(items)) return [];
-  return items
-    .slice(0, MAX_PRICE_ITEMS)
-    .map((item, index) => {
-      if (!item || typeof item !== 'object') return null;
-      const source = item as Record<string, unknown>;
-      const productId = Number(source.productId);
-      if (!Number.isInteger(productId) || productId <= 0) return null;
-      const parsedVariantId = source.variantId === null || source.variantId === undefined ? null : Number(source.variantId);
-      return {
-        productId,
-        variantId: parsedVariantId !== null && Number.isInteger(parsedVariantId) && parsedVariantId > 0 ? parsedVariantId : null,
-        customWholesalePrice: normalizeWholesalePrice(source.customWholesalePrice),
-        discountPercent: normalizeWholesaleDiscountPercent(source.discountPercent),
-        priceManuallyChanged: Boolean(source.priceManuallyChanged),
-        visible: Boolean(source.visible),
-        sortOrder: Number.isInteger(Number(source.sortOrder)) ? Math.max(0, Number(source.sortOrder)) : index + 1,
-      };
-    })
-    .filter(Boolean) as WholesalePriceListItemInput[];
 }
 
 function priceGroupStockSettingsFromBody(settings: unknown): WholesalePriceGroupStockSettingInput[] {
@@ -92,7 +70,17 @@ export async function POST(request: Request) {
   const limited = await enforceAdminActionRateLimit(session, 'price_list_create', 80);
   if (limited) return limited;
 
-  const body = await request.json().catch(() => ({}));
+  let body: Record<string, unknown>;
+  let items: WholesalePriceListItemInput[];
+  try {
+    body = await readWholesalePriceSaveBody(request);
+    items = parseWholesalePriceItems(body.items);
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof WholesalePriceSaveValidationError ? error.message : 'Не удалось прочитать данные прайса' },
+      { status: error instanceof WholesalePriceSaveValidationError ? error.status : 400 },
+    );
+  }
   const title = normalizeTextField(body.title, 160);
   if (!title) return Response.json({ error: 'Title is required' }, { status: 400 });
   const nextToken = normalizePublicPriceToken(body.token) || token();
@@ -109,8 +97,8 @@ export async function POST(request: Request) {
   }
   const { managerId, supportManagerId } = resolveWholesalePriceListManagerAssignment(
     {
-      managerId: body.managerId,
-      supportManagerId: body.supportManagerId,
+      managerId: normalizePositiveIntegerId(body.managerId),
+      supportManagerId: normalizePositiveIntegerId(body.supportManagerId),
     },
     session,
   );
@@ -138,7 +126,7 @@ export async function POST(request: Request) {
         showStock: body.showStock !== false,
         showStockText: Boolean(body.showStockText),
         isActive: Boolean(body.isActive ?? true),
-        items: itemsFromBody(body.items),
+        items,
         priceGroupStockSettings: priceGroupStockSettingsFromBody(body.priceGroupStockSettings),
       },
       session,

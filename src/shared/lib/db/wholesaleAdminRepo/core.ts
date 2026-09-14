@@ -11,7 +11,7 @@ import {
 } from '@/shared/lib/wholesalePriceWorkflowStatus';
 
 import { trackAnalyticsEvent } from '../analyticsRepo';
-import { query } from '../client';
+import { query, withTransaction } from '../client';
 import { assertClientCompanyVisible } from '../clientCompaniesRepo';
 import { ensureSiteSchema } from '../schema';
 import {
@@ -24,6 +24,11 @@ import {
   resolveWholesaleClientCompany,
 } from './analyticsHelpers';
 import { normalizeWholesaleSupportManagerId } from './managerHelpers';
+import {
+  replaceWholesalePriceListGroupStockSettings,
+  replaceWholesalePriceListItems,
+  type PriceListWriteQuery,
+} from './priceListWrite';
 
 export type {
   WholesalePriceListSummary,
@@ -60,8 +65,6 @@ import type {
   WholesalePriceListSummary,
   WholesaleCatalogProduct,
   WholesaleCatalogCategory,
-  WholesalePriceListItemInput,
-  WholesalePriceGroupStockSettingInput,
   WholesalePriceListEditor,
 } from './types';
 
@@ -98,8 +101,8 @@ type PriceListEventInput = {
   details?: string;
 };
 
-async function insertPriceListEvent(input: PriceListEventInput) {
-  await query(
+async function writePriceListEventRow(input: PriceListEventInput, execute: PriceListWriteQuery = query) {
+  await execute(
     `insert into wholesale_price_list_events (
        price_list_id, manager_id, owner_manager_id, action, title_snapshot, actor_role, actor_label, details
      )
@@ -127,7 +130,10 @@ async function insertPriceListEvent(input: PriceListEventInput) {
       input.details ?? '',
     ],
   );
-  await trackAnalyticsEvent({
+}
+
+function priceListEventAnalytics(input: PriceListEventInput) {
+  return {
     eventType: actionEventType(input.action),
     actorType: actorTypeFromRole(input.actorRole),
     actorUserId: input.actorManagerId,
@@ -138,7 +144,12 @@ async function insertPriceListEvent(input: PriceListEventInput) {
       action: input.action,
       details: input.details ?? '',
     },
-  });
+  };
+}
+
+async function insertPriceListEvent(input: PriceListEventInput) {
+  await writePriceListEventRow(input);
+  await trackAnalyticsEvent(priceListEventAnalytics(input));
 }
 
 function mapPriceList(row: PriceListRow): WholesalePriceListSummary {
@@ -468,41 +479,38 @@ export async function createWholesalePriceList(
   const managerId = assignment.managerId;
   const supportManagerId = await normalizeWholesaleSupportManagerId(assignment.supportManagerId);
   const clientCompany = await resolveWholesaleClientCompany(input.clientCompanyId, session);
-  const result = await query<{ id: string }>(
-    `insert into wholesale_price_lists (
-       title, client_company_id, client_name, manager_id, support_manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, show_stock_text, is_active
-     )
-     values ($1, $2, $3, $4, $5, nullif($6, '')::date, $7, $8, $9, $10, $11, $12, $13)
-     returning id`,
-    [
-      input.title,
-      clientCompany.id,
-      clientCompany.title,
-      managerId,
-      supportManagerId,
-      input.validUntil ?? '',
-      input.token,
-      input.comment,
-      input.workflowStatus,
-      input.showRetailPrices,
-      input.showStock,
-      input.showStockText,
-      input.isActive,
-    ],
-  );
-  const id = Number(result.rows[0].id);
-  await replaceWholesalePriceListItems(id, input.items);
-  await replaceWholesalePriceListGroupStockSettings(id, input.priceGroupStockSettings);
   const actor = actorMeta(session);
-  await insertPriceListEvent({
-    priceListId: id,
-    ownerManagerId: managerId,
-    actorManagerId: actor.actorManagerId,
-    actorRole: actor.actorRole,
-    title: input.title,
-    action: 'create',
-    details: 'Прайс создан',
+  const { id, event } = await withTransaction(async (client) => {
+    const execute: PriceListWriteQuery = (text, params) => client.query(text, params);
+    const result = await client.query<{ id: string }>(
+      `insert into wholesale_price_lists (
+         title, client_company_id, client_name, manager_id, support_manager_id, valid_until, token, comment, workflow_status, show_retail_prices, show_stock, show_stock_text, is_active
+       )
+       values ($1, $2, $3, $4, $5, nullif($6, '')::date, $7, $8, $9, $10, $11, $12, $13)
+       returning id`,
+      [
+        input.title, clientCompany.id, clientCompany.title, managerId, supportManagerId,
+        input.validUntil ?? '', input.token, input.comment, input.workflowStatus,
+        input.showRetailPrices, input.showStock, input.showStockText, input.isActive,
+      ],
+    );
+    const id = Number(result.rows[0].id);
+    await replaceWholesalePriceListItems(execute, id, input.items);
+    await replaceWholesalePriceListGroupStockSettings(execute, id, input.priceGroupStockSettings);
+    const event: PriceListEventInput = {
+      priceListId: id,
+      ownerManagerId: managerId,
+      actorManagerId: actor.actorManagerId,
+      actorRole: actor.actorRole,
+      title: input.title,
+      action: 'create',
+      details: 'Прайс создан',
+    };
+    await writePriceListEventRow(event, execute);
+    return { id, event };
   });
+  // Analytics uses the global pool and must run only after the parent price list commits.
+  await trackAnalyticsEvent(priceListEventAnalytics(event));
   await trackAnalyticsEvent({
     eventType: 'price_public_link_created',
     actorType: actorTypeFromRole(actor.actorRole),
@@ -529,91 +537,84 @@ export async function updateWholesalePriceList(
   const assignment = resolveWholesalePriceListManagerAssignment(input, session);
   const managerId = assignment.managerId;
   const supportManagerId = await normalizeWholesaleSupportManagerId(assignment.supportManagerId);
-  const previous = await query<{
-    title: string;
-    client_name: string;
-    manager_id: string | null;
-    valid_until: string | null;
-    workflow_status: string | null;
-    is_active: boolean;
-  }>(
-    `select title, client_name, manager_id::text, valid_until::text, workflow_status, is_active
-     from wholesale_price_lists
-     where id = $1
-       and (
-         $2::bigint is null
-         or ($3::text = 'manager' and manager_id = $2)
-         or ($3::text = 'support_manager' and (support_manager_id = $2 or manager_id = $2))
-       )
-     limit 1`,
-    [id, scope.managerId, scope.role],
-  );
-  const previousRow = previous.rows[0];
-  if (!previousRow) return;
   const clientCompany = await resolveWholesaleClientCompany(input.clientCompanyId, session);
   const nextInput = { ...input, clientCompanyId: clientCompany.id, clientName: clientCompany.title };
-  const previousItems = await query<{ count: string }>(
-    `select count(*)::text as count
-     from wholesale_price_list_items
-     where price_list_id = $1 and visible = true`,
-    [id],
-  );
-  const previousVisibleItems = Number(previousItems.rows[0]?.count ?? 0);
-  const nextVisibleItems = nextInput.items.filter((item) => item.visible).length;
-
-  await query(
-    `update wholesale_price_lists
-     set title = $2,
-         client_company_id = $3,
-         client_name = $4,
-         manager_id = $5,
-         support_manager_id = $6,
-         valid_until = nullif($7, '')::date,
-         token = $8,
-         comment = $9,
-         workflow_status = $10,
-         show_retail_prices = $11,
-         show_stock = $12,
-         show_stock_text = $13,
-         is_active = $14,
-         updated_at = now()
-     where id = $1
-       and (
-         $15::bigint is null
-         or ($16::text = 'manager' and manager_id = $15)
-         or ($16::text = 'support_manager' and (support_manager_id = $15 or manager_id = $15))
-       )`,
-    [
-      id,
-      nextInput.title,
-      clientCompany.id,
-      clientCompany.title,
-      managerId,
-      supportManagerId,
-      nextInput.validUntil ?? '',
-      nextInput.token,
-      nextInput.comment,
-      nextInput.workflowStatus,
-      nextInput.showRetailPrices,
-      nextInput.showStock,
-      nextInput.showStockText,
-      nextInput.isActive,
-      scope.managerId,
-      scope.role,
-    ],
-  );
-  await replaceWholesalePriceListItems(id, nextInput.items);
-  await replaceWholesalePriceListGroupStockSettings(id, nextInput.priceGroupStockSettings);
   const actor = actorMeta(session);
-  await insertPriceListEvent({
-    priceListId: id,
-    ownerManagerId: managerId,
-    actorManagerId: actor.actorManagerId,
-    actorRole: actor.actorRole,
-    title: nextInput.title,
-    action: priceListAction(previousRow, nextInput),
-    details: priceListDetails(previousRow, nextInput),
+  const { previousRow, previousVisibleItems, nextVisibleItems, event } = await withTransaction(async (client) => {
+    const execute: PriceListWriteQuery = (text, params) => client.query(text, params);
+    const previous = await client.query<{
+      title: string;
+      client_name: string;
+      manager_id: string | null;
+      valid_until: string | null;
+      workflow_status: string | null;
+      is_active: boolean;
+    }>(
+      `select title, client_name, manager_id::text, valid_until::text, workflow_status, is_active
+       from wholesale_price_lists
+       where id = $1
+         and (
+           $2::bigint is null
+           or ($3::text = 'manager' and manager_id = $2)
+           or ($3::text = 'support_manager' and (support_manager_id = $2 or manager_id = $2))
+         )
+       limit 1
+       for update`,
+      [id, scope.managerId, scope.role],
+    );
+    const previousRow = previous.rows[0];
+    if (!previousRow) throw new Error('Прайс не найден или недоступен. Обновите страницу.');
+    const previousItems = await client.query<{ count: string }>(
+      `select count(*)::text as count from wholesale_price_list_items where price_list_id = $1 and visible = true`,
+      [id],
+    );
+    const previousVisibleItems = Number(previousItems.rows[0]?.count ?? 0);
+    const nextVisibleItems = nextInput.items.filter((item) => item.visible).length;
+    const updated = await client.query(
+      `update wholesale_price_lists
+       set title = $2,
+           client_company_id = $3,
+           client_name = $4,
+           manager_id = $5,
+           support_manager_id = $6,
+           valid_until = nullif($7, '')::date,
+           token = $8,
+           comment = $9,
+           workflow_status = $10,
+           show_retail_prices = $11,
+           show_stock = $12,
+           show_stock_text = $13,
+           is_active = $14,
+           updated_at = now()
+       where id = $1
+         and (
+           $15::bigint is null
+           or ($16::text = 'manager' and manager_id = $15)
+           or ($16::text = 'support_manager' and (support_manager_id = $15 or manager_id = $15))
+         )`,
+      [
+        id, nextInput.title, clientCompany.id, clientCompany.title, managerId, supportManagerId,
+        nextInput.validUntil ?? '', nextInput.token, nextInput.comment, nextInput.workflowStatus,
+        nextInput.showRetailPrices, nextInput.showStock, nextInput.showStockText, nextInput.isActive,
+        scope.managerId, scope.role,
+      ],
+    );
+    if (updated.rowCount !== 1) throw new Error('Прайс не найден или недоступен. Обновите страницу.');
+    await replaceWholesalePriceListItems(execute, id, nextInput.items);
+    await replaceWholesalePriceListGroupStockSettings(execute, id, nextInput.priceGroupStockSettings);
+    const event: PriceListEventInput = {
+      priceListId: id,
+      ownerManagerId: managerId,
+      actorManagerId: actor.actorManagerId,
+      actorRole: actor.actorRole,
+      title: nextInput.title,
+      action: priceListAction(previousRow, nextInput),
+      details: priceListDetails(previousRow, nextInput),
+    };
+    await writePriceListEventRow(event, execute);
+    return { previousRow, previousVisibleItems, nextVisibleItems, event };
   });
+  await trackAnalyticsEvent(priceListEventAnalytics(event));
   const baseEvent = {
     actorType: actorTypeFromRole(actor.actorRole),
     actorUserId: actor.actorManagerId,
@@ -798,53 +799,4 @@ export async function recordWholesalePriceView(
       clientName: input.clientName ?? '',
     },
   });
-}
-
-async function replaceWholesalePriceListItems(id: number, items: WholesalePriceListItemInput[]) {
-  await query(`delete from wholesale_price_list_items where price_list_id = $1`, [id]);
-
-  for (const item of items) {
-    const customWholesalePrice = item.priceManuallyChanged || item.discountPercent ? item.customWholesalePrice : null;
-    await query(
-      `insert into wholesale_price_list_items (
-         price_list_id, wholesale_product_id, wholesale_variant_id, custom_wholesale_price, discount_percent, price_manually_changed, visible, sort_order
-       )
-       select $1, p.id, v.id, nullif($4, '')::numeric, nullif($5, '')::numeric, $6, $7, $8
-       from wholesale_products p
-       left join wholesale_product_variants v on v.id = $3 and v.product_id = p.id
-       where p.id = $2
-         and ($3::bigint is null or v.id is not null)`,
-      [
-        id,
-        item.productId,
-        item.variantId,
-        customWholesalePrice ?? '',
-        item.discountPercent ?? '',
-        item.priceManuallyChanged,
-        item.visible,
-        item.sortOrder,
-      ],
-    );
-  }
-}
-
-async function replaceWholesalePriceListGroupStockSettings(id: number, settings: WholesalePriceGroupStockSettingInput[]) {
-  await query(`delete from wholesale_price_list_group_stock_settings where price_list_id = $1`, [id]);
-
-  for (const setting of settings) {
-    const priceGroup = setting.priceGroup.trim().slice(0, 180);
-    if (!priceGroup || (!setting.showStock && !setting.showStockText)) continue;
-
-    await query(
-      `insert into wholesale_price_list_group_stock_settings (
-         price_list_id, price_group, show_stock_numbers, show_stock_text
-       )
-       values ($1, $2, $3, $4)
-       on conflict (price_list_id, price_group) do update
-       set show_stock_numbers = excluded.show_stock_numbers,
-           show_stock_text = excluded.show_stock_text,
-           updated_at = now()`,
-      [id, priceGroup, setting.showStock, setting.showStockText],
-    );
-  }
 }
