@@ -556,6 +556,80 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202609140001_personal_manager_dashboards',
+    description: 'Separate shared personal HTML publications from email-bound encrypted manager snapshots',
+    apply: async (client) => {
+      await client.query(`
+        create table personal_dashboard_html_versions (
+          id bigserial primary key,
+          original_name text not null check (char_length(original_name) between 1 and 255),
+          html_content text not null,
+          file_size bigint not null check (file_size between 1 and 5242880),
+          sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+          uploaded_by text not null,
+          first_published_at timestamptz,
+          first_published_by text,
+          created_at timestamptz not null default now(),
+          check (file_size = octet_length(html_content))
+        );
+        create table personal_dashboard_html_state (
+          id smallint primary key check (id = 1),
+          active_version_id bigint references personal_dashboard_html_versions(id) on delete restrict,
+          previous_version_id bigint references personal_dashboard_html_versions(id) on delete restrict,
+          updated_by text,
+          updated_at timestamptz not null default now(),
+          check (active_version_id is null or previous_version_id is null or active_version_id <> previous_version_id)
+        );
+        insert into personal_dashboard_html_state (id) values (1);
+        create table personal_dashboard_snapshots (
+          id bigserial primary key,
+          manager_id bigint not null references wholesale_managers(id) on delete cascade,
+          original_name text not null check (char_length(original_name) between 1 and 255),
+          encrypted_payload bytea not null,
+          file_size bigint not null check (file_size between 1 and 8388608),
+          sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+          email_hash text not null check (char_length(email_hash) = 44),
+          person_name text not null check (char_length(person_name) between 1 and 240),
+          person_role text not null check (char_length(person_role) between 1 and 160),
+          issued date not null,
+          expires date not null,
+          source_key text not null check (char_length(source_key) between 1 and 512),
+          received_at timestamptz not null default now(),
+          check (expires >= issued),
+          check (file_size = octet_length(encrypted_payload)),
+          unique (manager_id, sha256),
+          unique (manager_id, id)
+        );
+        create table personal_dashboard_snapshot_state (
+          manager_id bigint primary key references wholesale_managers(id) on delete cascade,
+          active_snapshot_id bigint,
+          previous_snapshot_id bigint,
+          updated_at timestamptz not null default now(),
+          foreign key (manager_id, active_snapshot_id) references personal_dashboard_snapshots(manager_id, id) on delete no action deferrable initially deferred,
+          foreign key (manager_id, previous_snapshot_id) references personal_dashboard_snapshots(manager_id, id) on delete no action deferrable initially deferred,
+          check (active_snapshot_id is null or previous_snapshot_id is null or active_snapshot_id <> previous_snapshot_id)
+        );
+        create table personal_dashboard_imports (
+          id bigserial primary key,
+          source_key text not null unique check (char_length(source_key) between 1 and 512),
+          original_name text not null check (char_length(original_name) between 1 and 255),
+          sender text not null default '',
+          message_id text not null default '',
+          status text not null check (status in ('imported', 'duplicate', 'unknown', 'ambiguous', 'stale', 'expired', 'conflict', 'invalid', 'quota')),
+          code text not null,
+          manager_id bigint references wholesale_managers(id) on delete set null,
+          snapshot_id bigint references personal_dashboard_snapshots(id) on delete set null,
+          email_hash text,
+          sha256 text check (sha256 is null or sha256 ~ '^[0-9a-f]{64}$'),
+          issued date,
+          received_at timestamptz not null default now()
+        );
+        create index personal_dashboard_snapshots_manager_date_idx on personal_dashboard_snapshots(manager_id, issued desc, id desc);
+        create index personal_dashboard_imports_received_idx on personal_dashboard_imports(received_at desc, id desc);
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

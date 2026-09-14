@@ -109,6 +109,8 @@ public/        статические файлы и загружаемые ре�
 
 Потоковая загрузка данных TOP-дашбордов и связанная конфигурация Nginx описаны в [docs/top-dashboard-uploads.md](docs/top-dashboard-uploads.md).
 
+Личный дашборд менеджера, публикация общего HTML и распределение зашифрованных `.ktsp` по `emailHash` описаны в [docs/personal-manager-dashboard.md](docs/personal-manager-dashboard.md). Почтовый импорт по умолчанию выключен до согласования отправителя и установки расписания.
+
 Нормализованная база аналогов хранится в `src/shared/data/analogs.generated.json`. Исходные Excel-файлы не нужно коммитить: для обновления укажите папку через `--source-dir` или `ANALOGS_SOURCE_DIR`, проверьте diff сгенерированного JSON и запустите тесты.
 
 ## Деплой

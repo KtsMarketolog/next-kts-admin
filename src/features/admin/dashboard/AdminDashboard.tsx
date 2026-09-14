@@ -9,6 +9,7 @@ const interactiveCardClassName = `${styles.dashboardCard} ${styles.dashboardCard
 type AdminDashboardProps = {
   canAccessSite: boolean;
   topDashboardMode: 'manage' | 'view' | null;
+  managerDashboardMode: 'manage' | 'view' | null;
   isTopAreaOnlyUser: boolean;
   wholesaleHref: '/admin/wholesale/admin' | '/admin/wholesale/manager';
 };
@@ -16,15 +17,27 @@ type AdminDashboardProps = {
 export function AdminDashboard({
   canAccessSite,
   topDashboardMode,
+  managerDashboardMode,
   isTopAreaOnlyUser,
   wholesaleHref,
 }: AdminDashboardProps) {
   const isTopDashboardManager = topDashboardMode === 'manage';
+  const managerDashboardCard = managerDashboardMode ? (
+    <Link className={interactiveCardClassName} href="/admin/manager-dashboard" replace scroll={false}>
+      <div>
+        <h2>{managerDashboardMode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h2>
+        <p>{managerDashboardMode === 'manage'
+          ? 'Общая HTML-страница, личные снимки менеджеров и журнал загрузки данных.'
+          : 'Ваш персональный отчёт с автоматически загруженными данными.'}</p>
+      </div>
+      <span className={styles.dashboardCardLink}>Открыть</span>
+    </Link>
+  ) : null;
 
   if (isTopAreaOnlyUser) {
     return (
       <section
-        className={`${styles.dashboardGrid} ${styles.dashboardGridSingle}`}
+        className={`${styles.dashboardGrid} ${managerDashboardMode ? '' : styles.dashboardGridSingle}`}
         aria-label="Разделы панели управления"
       >
         <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
@@ -38,6 +51,7 @@ export function AdminDashboard({
           </div>
           <span className={styles.dashboardCardLink}>Открыть</span>
         </Link>
+        {managerDashboardCard}
       </section>
     );
   }
@@ -91,6 +105,7 @@ export function AdminDashboard({
         </div>
         <span className={styles.dashboardCardLink}>Открыть</span>
       </Link>
+      {managerDashboardCard}
     </section>
   );
 }

@@ -11,7 +11,9 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "analogs:generate": "node scripts/generate-analogs-data.mjs",
     "cleanup": "node scripts/cleanup-maintenance.mjs",
-    "stock:import-email": "tsx scripts/import-stock-from-email.ts"
+    "stock:import-email": "tsx scripts/import-stock-from-email.ts",
+    "manager-dashboard:import-email": "tsx scripts/import-manager-snapshots.ts",
+    "manager-dashboard:test-postgres": "bash scripts/test-personal-dashboard-postgres.sh"
   },
   "dependencies": {
     "@streamparser/json": "0.0.26",
