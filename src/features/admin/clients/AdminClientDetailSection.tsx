@@ -12,6 +12,7 @@ import { resolveClientTab, tabs } from './AdminClientDetail.types';
 import type { AdminClientDetailSectionProps, ClientCompany, ClientTab } from './AdminClientDetail.types';
 import { ClientPriceRequestList } from '@/features/client-requests/ClientPriceRequestList';
 import type { ClientCompanyPriceList, ClientDocument, ClientPriceRequest } from '@/shared/lib/db';
+import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 
 export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetailSectionProps) {
   const router = useRouter();
@@ -37,54 +38,42 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     setActiveTab(resolveClientTab(tabParam));
   }, [tabParam]);
 
-  const loadUnreadCount = useCallback(async () => {
-    const response = await fetch(`/api/admin/clients/${clientId}/chat/unread`, { cache: 'no-store' });
+  const loadUnreadCount = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch(`/api/admin/clients/${clientId}/chat/unread`, { cache: 'no-store', signal });
     if (!response.ok) return;
     const data = await response.json().catch(() => ({}));
+    if (signal?.aborted) return;
     setChatUnreadCount(Number(data.unreadCount ?? 0));
   }, [clientId]);
 
-  const loadDocuments = useCallback(async () => {
-    const response = await fetch(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store' });
+  const loadDocuments = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store', signal });
     if (!response.ok) return;
     const data = await response.json().catch(() => ({}));
+    if (signal?.aborted) return;
     setDocuments(Array.isArray(data.documents) ? data.documents : []);
   }, [clientId]);
 
   useEffect(() => {
     if (activeTab === 'chat') return undefined;
 
-    void loadUnreadCount();
-    if (activeTab === 'documents') void loadDocuments();
-
-    const events = new EventSource(`/api/admin/clients/${clientId}/events`);
-    events.addEventListener('chat.updated', () => {
-      void loadUnreadCount();
+    return startClientRealtimeSync({
+      eventsEndpoint: `/api/admin/clients/${clientId}/events`,
+      eventTypes: ['chat.updated', 'documents.updated', 'client.updated'],
+      refresh: async (signal) => {
+        await Promise.all([
+          loadUnreadCount(signal),
+          activeTab === 'documents' ? loadDocuments(signal) : undefined,
+          fetch('/api/admin/clients', { cache: 'no-store', signal })
+            .then((response) => response.ok ? response.json() : null)
+            .then((data) => {
+              if (signal.aborted || !Array.isArray(data?.companies)) return;
+              const nextClient = (data.companies as ClientCompany[]).find((company) => company.id === clientId);
+              if (nextClient) setClient(nextClient);
+            }),
+        ]);
+      },
     });
-    events.addEventListener('documents.updated', () => {
-      if (activeTab === 'documents') void loadDocuments();
-    });
-    events.addEventListener('client.updated', (event) => {
-      let payload: { companyId?: number } = {};
-      try {
-        payload = JSON.parse((event as MessageEvent).data || '{}') as { companyId?: number };
-      } catch {
-        return;
-      }
-      if (Number(payload.companyId) !== clientId) return;
-      void fetch('/api/admin/clients', { cache: 'no-store' })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((data) => {
-          const companies = Array.isArray(data?.companies) ? (data.companies as ClientCompany[]) : [];
-          const nextClient = companies.find((company) => company.id === clientId) ?? null;
-          if (nextClient) setClient(nextClient);
-        })
-        .catch(() => {});
-    });
-
-    return () => {
-      events.close();
-    };
   }, [activeTab, clientId, loadDocuments, loadUnreadCount]);
 
   const selectTab = (tab: ClientTab) => {
@@ -265,6 +254,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     if (activeTab === 'chat') {
       return (
         <ClientChatPanel
+          key={client.id}
           endpoint={`/api/admin/clients/${client.id}/chat`}
           eventsEndpoint={`/api/admin/clients/${client.id}/events`}
           currentAuthorType="employee"

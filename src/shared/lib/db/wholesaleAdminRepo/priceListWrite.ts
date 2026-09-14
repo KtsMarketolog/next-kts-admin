@@ -16,8 +16,15 @@ export async function replaceWholesalePriceListItems(
     if (keys.has(key)) throw new Error('В прайсе есть повторяющиеся позиции. Обновите страницу и повторите сохранение.');
     keys.add(key);
   }
-  await execute('delete from wholesale_price_list_items where price_list_id = $1', [id]);
-
+  // Legacy databases have no unique constraint on nullable variant keys. Fail
+  // closed instead of merging/deleting historical duplicates or allowing their
+  // extra UPDATE rows to mask a missing catalogue item in the batch row count.
+  const legacyDuplicates = await execute(
+    `select wholesale_product_id from wholesale_price_list_items
+     where price_list_id = $1
+     group by wholesale_product_id, wholesale_variant_id having count(*) > 1 limit 1`, [id],
+  );
+  if (legacyDuplicates.rowCount !== 0) throw new Error('В сохранённом прайсе есть повторяющиеся позиции. Прайс сохранён без изменений; требуется проверка администратором.');
   for (let offset = 0; offset < items.length; offset += WHOLESALE_PRICE_WRITE_BATCH_SIZE) {
     const batch = items.slice(offset, offset + WHOLESALE_PRICE_WRITE_BATCH_SIZE).map((item, index) => ({
       product_id: item.productId,
@@ -31,25 +38,63 @@ export async function replaceWholesalePriceListItems(
       input_order: index,
     }));
     const result = await execute(
-      `insert into wholesale_price_list_items (
+      `with incoming as materialized (
+         select p.id as product_id, v.id as variant_id,
+                nullif(item.custom_wholesale_price, '')::numeric as custom_wholesale_price,
+                nullif(item.discount_percent, '')::numeric as discount_percent,
+                item.price_manually_changed, item.visible, item.sort_order, item.input_order
+         from jsonb_to_recordset($2::jsonb) as item(
+           product_id bigint, variant_id bigint, custom_wholesale_price text,
+           discount_percent text, price_manually_changed boolean, visible boolean, sort_order integer, input_order integer
+         )
+         join wholesale_products p on p.id = item.product_id
+         left join wholesale_product_variants v on v.id = item.variant_id and v.product_id = p.id
+         where item.variant_id is null or v.id is not null
+       ), updated as (
+         update wholesale_price_list_items existing
+         set custom_wholesale_price = item.custom_wholesale_price,
+             discount_percent = item.discount_percent,
+             price_manually_changed = item.price_manually_changed,
+             visible = item.visible, sort_order = item.sort_order, updated_at = now()
+         from incoming item
+         where existing.price_list_id = $1
+           and existing.wholesale_product_id = item.product_id
+           and existing.wholesale_variant_id is not distinct from item.variant_id
+         returning existing.id
+       ), inserted as (
+       insert into wholesale_price_list_items (
          price_list_id, wholesale_product_id, wholesale_variant_id, custom_wholesale_price,
          discount_percent, price_manually_changed, visible, sort_order
        )
-       select $1, p.id, v.id, nullif(item.custom_wholesale_price, '')::numeric,
-              nullif(item.discount_percent, '')::numeric, item.price_manually_changed, item.visible, item.sort_order
-       from jsonb_to_recordset($2::jsonb) as item(
-         product_id bigint, variant_id bigint, custom_wholesale_price text,
-         discount_percent text, price_manually_changed boolean, visible boolean, sort_order integer, input_order integer
+       select $1, item.product_id, item.variant_id, item.custom_wholesale_price,
+              item.discount_percent, item.price_manually_changed, item.visible, item.sort_order
+       from incoming item
+       where not exists (
+         select 1 from wholesale_price_list_items existing
+         where existing.price_list_id = $1 and existing.wholesale_product_id = item.product_id
+           and existing.wholesale_variant_id is not distinct from item.variant_id
        )
-       join wholesale_products p on p.id = item.product_id
-       left join wholesale_product_variants v on v.id = item.variant_id and v.product_id = p.id
-       where item.variant_id is null or v.id is not null
-       order by item.input_order`,
+       order by item.input_order
+       returning id
+       )
+       select id from updated union all select id from inserted`,
       [id, JSON.stringify(batch)],
     );
     // A disappeared product or foreign/disappeared variant must roll back the whole price list.
     if (result.rowCount !== batch.length) throw new Error('Некоторые позиции каталога изменились. Обновите страницу и повторите сохранение прайса.');
   }
+  // Only deliberately omitted logical positions are removed. Unchanged positions keep
+  // their IDs, created_at and snapshot fields, so existing public baskets remain valid.
+  // The enclosing transaction locks the price-list header for the entire reconciliation.
+  await execute(
+    `delete from wholesale_price_list_items existing
+     where existing.price_list_id = $1 and not exists (
+       select 1 from jsonb_to_recordset($2::jsonb) as item(product_id bigint, variant_id bigint)
+       where existing.wholesale_product_id = item.product_id
+         and existing.wholesale_variant_id is not distinct from item.variant_id
+     )`,
+    [id, JSON.stringify(items.map((item) => ({ product_id: item.productId, variant_id: item.variantId })))],
+  );
 }
 
 export async function replaceWholesalePriceListGroupStockSettings(

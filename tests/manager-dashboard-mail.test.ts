@@ -52,6 +52,7 @@ function harness(messages: FetchMessageObject[], overrides: Partial<ManagerDashb
   let activeFetch = false;
   let uidValidity = BigInt(100);
   const seen = new Set<string>();
+  const receipts = new Map<string, { managerId: number }>();
   const client = {
     get mailbox() { return { exists: 1200, uidValidity, readOnly: true }; },
     on() { return this; },
@@ -101,6 +102,9 @@ function harness(messages: FetchMessageObject[], overrides: Partial<ManagerDashb
       failures.push(input);
       return { status: 'invalid', managerId: null, code: input.code };
     },
+    async getReceipt(key) { return receipts.get(key) ?? null; },
+    async recordReceipt(key) { receipts.set(key, { managerId: 1 }); },
+    async pruneReceipts() {},
     now: () => currentDate,
     ...overrides,
   };
@@ -139,6 +143,54 @@ test('manager email imports all 15 attachments including a file over 1 MiB and r
   assert.equal(second.imported, 0);
   assert.equal(second.duplicates, 15);
   assert.equal(second.failed, 0);
+  assert.equal(h.downloaded.length, 15, 'successful parts are skipped before DOWNLOAD, not after hashing');
+  assert.equal(h.calls.length, 15, 'checkpointed parts do not repeat snapshot imports');
+});
+
+test('manager email checkpoints are scoped to mailbox identity and survive another importer instance', async () => {
+  const receipts = new Map<string, { managerId: number }>();
+  const dependencies = {
+    async getReceipt(key: string) { return receipts.get(key) ?? null; },
+    async recordReceipt(key: string) { receipts.set(key, { managerId: 7 }); },
+  };
+  const h = harness([message(1, ['manager.ktsp'])], dependencies);
+  await h.run();
+  const anotherWorker = harness([message(1, ['manager.ktsp'])], dependencies);
+  assert.equal((await anotherWorker.run()).duplicates, 1);
+  assert.equal(anotherWorker.downloaded.length, 0);
+  assert.equal(anotherWorker.calls.length, 0);
+  await anotherWorker.run({ ...enabledEnv, STOCK_MAIL_USER: 'another@example.com' });
+  assert.equal(anotherWorker.downloaded.length, 1);
+  anotherWorker.setUidValidity(BigInt(101));
+  await anotherWorker.run();
+  assert.equal(anotherWorker.downloaded.length, 2);
+});
+
+for (const status of ['unknown', 'ambiguous', 'quota', 'conflict', 'stale', 'invalid', 'expired']) {
+  test(`manager email does not checkpoint ${status} outcomes and retries them`, async () => {
+    let checkpoints = 0;
+    const h = harness([message(1, ['manager.ktsp'])], {
+      async importSnapshot() { return { status, managerId: null, code: status }; },
+      async recordReceipt() { checkpoints += 1; },
+    });
+    await h.run(); await h.run();
+    assert.equal(checkpoints, 0);
+    assert.equal(h.downloaded.length, 2);
+  });
+}
+
+test('manager email retries after checkpoint persistence fails without treating the part as completed', async () => {
+  let fail = true;
+  const h = harness([message(1, ['manager.ktsp'])], {
+    async recordReceipt() { if (fail) throw new Error('private DB details'); },
+  });
+  const first = await h.run();
+  assert.equal(first.failed, 1);
+  assert.doesNotMatch(JSON.stringify(first), /private DB/);
+  fail = false;
+  const retry = await h.run();
+  assert.equal(retry.duplicates, 1);
+  assert.equal(h.downloaded.length, 2);
 });
 
 for (const count of [20, 50]) {

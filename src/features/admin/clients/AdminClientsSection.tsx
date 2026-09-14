@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
+import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 
 import { AdminClientCompanyCard } from './AdminClientCompanyCard';
 import { AdminClientCreateForm } from './AdminClientCreateForm';
@@ -20,6 +21,7 @@ import {
 
 export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const [companies, setCompanies] = useState<ClientCompany[]>([]);
+  const companiesRef = useRef<ClientCompany[]>([]);
   const [managers, setManagers] = useState<Manager[]>([]);
   const [draft, setDraft] = useState<ClientDraft>(emptyDraft);
   const [companyDrafts, setCompanyDrafts] = useState<Record<number, ClientDraft>>({});
@@ -46,14 +48,21 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     }, 2200);
   };
 
-  const loadClients = async () => {
-    const response = await fetch('/api/admin/clients', { cache: 'no-store' });
+  const loadClients = useCallback(async (preserveDrafts = false, signal?: AbortSignal) => {
+    const response = await fetch('/api/admin/clients', { cache: 'no-store', signal });
     if (!response.ok) throw new Error(await readApiError(response, 'Не удалось загрузить клиентов'));
     const data = await response.json();
+    if (signal?.aborted) return;
     const nextCompanies = Array.isArray(data.companies) ? data.companies : [];
+    const previousCompanies = new Map(companiesRef.current.map((company) => [company.id, company]));
+    companiesRef.current = nextCompanies;
     setCompanies(nextCompanies);
-    setCompanyDrafts(Object.fromEntries(nextCompanies.map((company: ClientCompany) => [company.id, toDraft(company)])));
-  };
+    setCompanyDrafts((current) => Object.fromEntries(nextCompanies.map((company: ClientCompany) => {
+      const previous = previousCompanies.get(company.id);
+      const dirty = current[company.id] && (!previous || JSON.stringify(current[company.id]) !== JSON.stringify(toDraft(previous)));
+      return [company.id, preserveDrafts && dirty ? current[company.id] : toDraft(company)];
+    })));
+  }, []);
 
   const loadManagers = async () => {
     const response = await fetch('/api/admin/wholesale/managers', { cache: 'no-store' });
@@ -62,45 +71,20 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     setManagers(Array.isArray(data.managers) ? data.managers : []);
   };
 
-  const loadUnreadCounts = useCallback(async () => {
-    const response = await fetch('/api/admin/clients/chat-unread', { cache: 'no-store' });
-    if (!response.ok) return;
-    const data = await response.json().catch(() => ({}));
-    const counts = new Map<number, number>(
-      Array.isArray(data.clients)
-        ? data.clients.map((client: { companyId: number; unreadCount: number }) => [client.companyId, Number(client.unreadCount || 0)])
-        : [],
-    );
-    setCompanies((current) =>
-      current.map((company) => ({
-        ...company,
-        chatUnreadCount: counts.get(company.id) ?? 0,
-      })),
-    );
-  }, []);
-
   useEffect(() => {
-    void Promise.all([loadClients(), loadManagers()]).catch((error) => {
+    void loadManagers().catch((error) => {
       showStatus(readApiErrorFallback(error, 'Не удалось загрузить клиентов'));
     });
   }, []);
 
   useEffect(() => {
-    void loadUnreadCounts();
-    const events = new EventSource('/api/admin/clients/events');
-    events.addEventListener('chat.updated', () => {
-      void loadUnreadCounts();
+    return startClientRealtimeSync({
+      eventsEndpoint: '/api/admin/clients/events',
+      eventTypes: ['chat.updated', 'client.updated'],
+      refresh: async (signal) => { await loadClients(true, signal); },
+      onError: (error) => { setStatus(readApiErrorFallback(error, 'Не удалось обновить клиентов')); },
     });
-    events.addEventListener('client.updated', () => {
-      void loadClients().catch(() => {
-        showStatus('Не удалось обновить клиентов');
-      });
-    });
-
-    return () => {
-      events.close();
-    };
-  }, [loadUnreadCounts]);
+  }, [loadClients]);
 
   const validateClientPassword = (password: string) => {
     const passwordPolicy = validatePasswordPolicy(password);

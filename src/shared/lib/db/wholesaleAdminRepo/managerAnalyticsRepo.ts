@@ -72,7 +72,7 @@ export async function getWholesaleManagerAnalytics(
          pl.valid_until,
          pl.is_active,
          pl.created_at,
-         count(i.id)::integer as item_count
+         count(i.id) filter (where i.visible = true)::integer as item_count
        from wholesale_price_lists pl
        left join wholesale_price_list_items i on i.price_list_id = pl.id
        where pl.manager_id = $1
@@ -173,7 +173,7 @@ export async function getWholesaleManagerAnalytics(
          pl.valid_until::text as valid_until,
          pl.valid_until as valid_until_date,
          pl.created_at::text,
-         count(i.id)::text as item_count
+         count(i.id) filter (where i.visible = true)::text as item_count
        from wholesale_price_lists pl
        left join wholesale_price_list_items i on i.price_list_id = pl.id
        where pl.manager_id = $1

@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 
 import styles from '@/app/admin/admin.module.scss';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
@@ -43,6 +44,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [currentManager, setCurrentManager] = useState<CurrentManager | null>(null);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [clientCompanies, setClientCompanies] = useState<ClientCompanyOption[]>([]);
+  const editorCompaniesRef = useRef<ClientCompanyOption[] | null>(null);
   const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
   const [editor, setEditor] = useState<PriceEditor>(() => emptyEditor());
   const [editorLoading, setEditorLoading] = useState(startsInEditor);
@@ -149,13 +151,15 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     return nextCatalog as CatalogCategory[];
   };
 
-  const loadClientCompanies = useCallback(async (): Promise<ClientCompanyOption[]> => {
-    const res = await fetch('/api/admin/clients', { cache: 'no-store' });
+  const loadClientCompanies = useCallback(async (signal?: AbortSignal): Promise<ClientCompanyOption[]> => {
+    const res = await fetch('/api/admin/clients', { cache: 'no-store', signal });
     if (!res.ok) {
+      if (signal) throw new Error('Не удалось обновить клиентов');
       setClientCompanies([]);
       return [];
     }
     const data = await res.json().catch(() => ({}));
+    if (signal?.aborted) return [];
     const nextClientCompanies = normalizeClientCompanyOptions(data);
     setClientCompanies(nextClientCompanies);
     return nextClientCompanies;
@@ -187,10 +191,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     let isActive = true;
 
     async function loadEditorData() {
+      editorCompaniesRef.current = null;
       setEditorLoading(true);
       const [nextCatalog, nextClientCompanies] = await Promise.all([loadCatalog(), loadClientCompanies()]);
       if (!isActive) return;
       if (screen === 'create') {
+        editorCompaniesRef.current = nextClientCompanies;
         setEditor({
           ...emptyEditor(),
           managerId: canManageWholesale ? createManagerId : null,
@@ -214,6 +220,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       }
       const data = await res.json();
       if (!isActive) return;
+      editorCompaniesRef.current = nextClientCompanies;
       setEditor(buildPriceEditorFromPayload(data.priceList, nextCatalog, nextClientCompanies));
       setEditorLoading(false);
     }
@@ -230,39 +237,32 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   }, [canManageWholesale, createManagerId, editId, loadClientCompanies, screen, showStatus]);
 
   useEffect(() => {
-    if (screen !== 'create' && screen !== 'edit') return undefined;
+    if ((screen !== 'create' && screen !== 'edit') || editorLoading || !editorCompaniesRef.current) return undefined;
 
-    const events = new EventSource('/api/admin/clients/events');
-    events.addEventListener('client.updated', (event) => {
-      let payload: { companyId?: number } = {};
-      try {
-        payload = JSON.parse((event as MessageEvent).data || '{}') as { companyId?: number };
-      } catch {
-        return;
-      }
-      const companyId = Number(payload.companyId);
-      if (!Number.isInteger(companyId) || companyId <= 0) return;
-
-      void loadClientCompanies().then((nextCompanies) => {
-        const company = nextCompanies.find((item) => item.id === companyId) ?? null;
-        if (!company) return;
-        setEditor((current) => (
-          current.clientCompanyId === companyId
-            ? {
-                ...current,
-                clientName: company.title,
-                managerId: company.managerId,
-                supportManagerId: company.supportManagerId,
-              }
-            : current
-        ));
-      });
+    let previousCompanies = editorCompaniesRef.current;
+    return startClientRealtimeSync({
+      eventsEndpoint: '/api/admin/clients/events',
+      eventTypes: ['client.updated'],
+      refresh: async (signal) => {
+        const nextCompanies = await loadClientCompanies(signal);
+        if (signal.aborted) return;
+        const previous = previousCompanies;
+        previousCompanies = nextCompanies;
+        setEditor((current) => {
+          const company = nextCompanies.find((item) => item.id === current.clientCompanyId);
+          const before = previous.find((item) => item.id === current.clientCompanyId);
+          if (!company || !before) return current;
+          // Only synchronize changed server assignments, preserving local unsaved choices.
+          return {
+            ...current,
+            clientName: current.clientName === before.title ? company.title : current.clientName,
+            managerId: current.managerId === before.managerId ? company.managerId : current.managerId,
+            supportManagerId: current.supportManagerId === before.supportManagerId ? company.supportManagerId : current.supportManagerId,
+          };
+        });
+      },
     });
-
-    return () => {
-      events.close();
-    };
-  }, [loadClientCompanies, screen]);
+  }, [editorLoading, loadClientCompanies, screen]);
 
   const savePriceList = async () => {
     if (!editor.title.trim()) {

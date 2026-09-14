@@ -21,7 +21,7 @@ function recordingQuery(shortBatch?: number) {
   let batch = 0;
   const execute: PriceListWriteQuery = async (sql, params) => {
     calls.push({ sql, params });
-    if (sql.startsWith('delete ')) return { rowCount: 0 };
+    if (sql.startsWith('delete ') || sql.startsWith('select ')) return { rowCount: 0 };
     const rows = JSON.parse(String(params[1])) as unknown[];
     batch += 1;
     return { rowCount: rows.length - (batch === shortBatch ? 1 : 0) };
@@ -35,12 +35,15 @@ for (const count of [7475, 20001]) {
     input[count - 1] = { ...input[count - 1], visible: true, discountPercent: '10', customWholesalePrice: '90' };
     const { calls, execute } = recordingQuery();
     await replaceWholesalePriceListItems(execute, 45, input);
-    assert.equal(calls.length, 1 + Math.ceil(count / WHOLESALE_PRICE_WRITE_BATCH_SIZE));
-    assert.match(calls[0].sql, /^delete from wholesale_price_list_items/);
-    const written = calls.slice(1).flatMap(({ sql, params }) => {
+    assert.equal(calls.length, 2 + Math.ceil(count / WHOLESALE_PRICE_WRITE_BATCH_SIZE));
+    assert.match(calls.at(-1)!.sql, /^delete from wholesale_price_list_items existing/);
+    assert.match(calls.at(-1)!.sql, /not exists/);
+    const written = calls.slice(1, -1).flatMap(({ sql, params }) => {
       assert.equal(params.length, 2);
       assert.equal(params[0], 45);
       assert.match(sql, /order by item\.input_order/);
+      assert.match(sql, /update wholesale_price_list_items existing/);
+      assert.match(sql, /wholesale_variant_id is not distinct from item.variant_id/);
       const batch = JSON.parse(String(params[1]));
       assert.ok(batch.length <= WHOLESALE_PRICE_WRITE_BATCH_SIZE);
       assert.deepEqual(batch.map((row: { input_order: number }) => row.input_order), batch.map((_: unknown, index: number) => index));
@@ -78,7 +81,7 @@ test('bulk writer preserves variant, manual-price, zero-discount and sort-order 
 test('short insert row count fails immediately rather than silently skipping stale catalog IDs', async () => {
   const { calls, execute } = recordingQuery(2);
   await assert.rejects(replaceWholesalePriceListItems(execute, 1, items(3001)), /позиции каталога изменились/);
-  assert.equal(calls.length, 3, 'delete and two batches only; transaction owner receives error to roll back');
+  assert.equal(calls.length, 3, 'duplicate check and two batches only; no pruning before all batches succeed');
 });
 
 test('duplicate keys across batches reject before deleting any existing items', async () => {
@@ -89,10 +92,23 @@ test('duplicate keys across batches reject before deleting any existing items', 
   assert.equal(calls.length, 0);
 });
 
-test('empty item replacement deletes the old rows without an invalid empty recordset insert', async () => {
+test('legacy duplicate rows fail closed before writes and cannot mask invalid input references', async () => {
+  let queries = 0;
+  const execute: PriceListWriteQuery = async (sql) => {
+    queries += 1;
+    assert.match(sql, /having count\(\*\) > 1/);
+    return { rowCount: 1 };
+  };
+  await assert.rejects(replaceWholesalePriceListItems(execute, 45, items(2)), /требуется проверка администратором/);
+  assert.equal(queries, 1);
+});
+
+test('empty item replacement prunes only this price list without deleting any price-list header', async () => {
   const { calls, execute } = recordingQuery();
   await replaceWholesalePriceListItems(execute, 1, []);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].sql, /existing.price_list_id = \$1 and not exists/);
+  assert.deepEqual(calls[1].params, [1, '[]']);
 });
 
 test('group settings preserve trimming, empty-entry skipping and last-enabled duplicate upsert semantics', async () => {

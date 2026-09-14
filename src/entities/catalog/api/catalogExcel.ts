@@ -139,6 +139,11 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
   if (!sheetName) throw new Error('В Excel-файле нет листов');
 
   const sheet = workbook.Sheets[sheetName];
+  // SheetJS records the original range when sheetRows clipped the sheet. Counting
+  // nonblank rows afterward cannot detect a late product beyond a sparse gap.
+  if (sheet['!fullref']) {
+    throw new Error('Excel-файл превышает допустимое число строк и был обрезан при чтении. Каталог не изменён.');
+  }
   const matrixProducts = parseCatalogMatrix(sheet);
   if (matrixProducts) {
     if (matrixProducts.length === 0) {

@@ -630,6 +630,22 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       `);
     },
   },
+  {
+    id: '202609140002_personal_dashboard_mail_receipts',
+    description: 'Remember successful IMAP parts before downloading again; preserve all existing business data',
+    apply: async (client) => {
+      await client.query(`
+        create table personal_dashboard_mail_receipts (
+          transport_key text primary key check (transport_key ~ '^imap-part:v1:[a-f0-9]{64}$'),
+          source_key text not null check (char_length(source_key) between 1 and 512),
+          manager_id bigint not null references wholesale_managers(id) on delete cascade,
+          email_hash text not null,
+          completed_at timestamptz not null default now()
+        );
+        create index personal_dashboard_mail_receipts_completed_idx on personal_dashboard_mail_receipts(completed_at);
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

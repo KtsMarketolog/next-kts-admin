@@ -184,6 +184,7 @@ export async function importStockFromExcelBuffer(input: {
     let notFoundRows = 0;
     let failedRows = 0;
     const stockByArticle = new Map<string, AggregatedStock>();
+    const invalidArticles = new Set<string>();
 
     for (const { rowNumber, row, location } of rows) {
       const rawArticle = readCellByAliases(row, HEADER_ARTICLE_ALIASES);
@@ -196,13 +197,18 @@ export async function importStockFromExcelBuffer(input: {
         continue;
       }
       totalRows += 1;
+      const articleKey = article.toLowerCase();
       if (stock === null) {
         failedRows += 1;
-        pushError(errors, { row: rowNumber, name: article, error: 'Сейчас не является целым неотрицательным числом' });
+        // A partial warehouse aggregate is not a complete replacement snapshot.
+        // Keep every prior stock field for this SKU, regardless of row ordering.
+        invalidArticles.add(articleKey);
+        stockByArticle.delete(articleKey);
+        pushError(errors, { row: rowNumber, name: article, error: 'Сейчас не является целым неотрицательным числом. Остатки по этому артикулу не изменены.' });
         continue;
       }
+      if (invalidArticles.has(articleKey)) continue;
 
-      const articleKey = article.toLowerCase();
       const aggregated = stockByArticle.get(articleKey) ?? createAggregatedStock(article, rowNumber);
       if (location) {
         aggregated.stockByLocation[location] += stock;

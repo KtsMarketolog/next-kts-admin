@@ -8,6 +8,7 @@ import { ClientChatPanel } from '@/features/client-chat/ClientChatPanel';
 import { ClientPriceRequestList } from '@/features/client-requests/ClientPriceRequestList';
 import type { ClientCompanyPriceList, ClientDocument, ClientPortalProfile, ClientPriceRequest } from '@/shared/lib/db';
 import { formatFileSize } from '@/shared/lib/formatFileSize';
+import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 import { CabinetDashboard, type CabinetDashboardItem } from '@/shared/ui/CabinetDashboard/CabinetDashboard';
 import dataStyles from './ClientCabinetData.module.scss';
 import documentStyles from './ClientCabinetDocuments.module.scss';
@@ -178,37 +179,32 @@ export function ClientCabinetShell({ documents, profile, requests }: ClientCabin
     setClientDocuments(documents);
   }, [documents]);
 
-  const loadUnreadCount = useCallback(async () => {
-    const response = await fetch('/api/client/chat/unread', { cache: 'no-store' });
+  const loadUnreadCount = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch('/api/client/chat/unread', { cache: 'no-store', signal });
     if (!response.ok) return;
     const data = await response.json().catch(() => ({}));
+    if (signal?.aborted) return;
     setChatUnreadCount(Number(data.unreadCount ?? 0));
   }, []);
 
-  const loadDocuments = useCallback(async () => {
-    const response = await fetch('/api/client/documents', { cache: 'no-store' });
+  const loadDocuments = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch('/api/client/documents', { cache: 'no-store', signal });
     if (!response.ok) return;
     const data = await response.json().catch(() => ({}));
+    if (signal?.aborted) return;
     setClientDocuments(Array.isArray(data.documents) ? data.documents : []);
   }, []);
 
   useEffect(() => {
     if (activeTab === 'chat') return undefined;
 
-    void loadUnreadCount();
-    if (activeTab === 'documents') void loadDocuments();
-
-    const events = new EventSource('/api/client/events');
-    events.addEventListener('chat.updated', () => {
-      void loadUnreadCount();
+    return startClientRealtimeSync({
+      eventsEndpoint: '/api/client/events',
+      eventTypes: ['chat.updated', 'documents.updated'],
+      refresh: async (signal) => {
+        await Promise.all([loadUnreadCount(signal), activeTab === 'documents' ? loadDocuments(signal) : undefined]);
+      },
     });
-    events.addEventListener('documents.updated', () => {
-      if (activeTab === 'documents') void loadDocuments();
-    });
-
-    return () => {
-      events.close();
-    };
   }, [activeTab, loadDocuments, loadUnreadCount]);
 
   const selectTab = (tab: Tab) => {

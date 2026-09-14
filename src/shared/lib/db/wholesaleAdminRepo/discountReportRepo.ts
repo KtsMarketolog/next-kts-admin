@@ -19,11 +19,11 @@ type WholesaleDiscountReportSourceRow = {
   price_cny: string | null;
 };
 
-function parseDiscountReportAmount(value: string | null | undefined) {
-  if (!value) return null;
+function parseDiscountReportAmount(value: string | null | undefined, allowZero = false) {
+  if (!value?.trim()) return null;
   const normalized = String(value).replace(/\s+/g, '').replace(',', '.');
   const parsed = Number(normalized);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  return Number.isFinite(parsed) && (allowZero ? parsed >= 0 : parsed > 0) ? parsed : null;
 }
 
 function formatDiscountReportPercent(value: number) {
@@ -53,14 +53,13 @@ function resolveDiscountReportValue(rows: WholesaleDiscountReportSourceRow[]) {
     const actualPrice = discountPercent !== null && basePrice
       ? basePrice * (1 - discountPercent / 100)
       : row.price_manually_changed
-        ? parseDiscountReportAmount(row.custom_wholesale_price) ?? parseDiscountReportAmount(row.effective_wholesale_price)
+        ? parseDiscountReportAmount(row.custom_wholesale_price, true) ?? parseDiscountReportAmount(row.effective_wholesale_price, true)
         : basePrice;
 
-    if (!basePrice || !actualPrice) continue;
+    if (basePrice === null || actualPrice === null) continue;
     const discount = (1 - actualPrice / basePrice) * 100;
-    if (discount <= 0.05) continue;
     if (discount > 100) return 'Разная';
-    discounts.push(discount);
+    discounts.push(discount <= 0.05 ? 0 : discount);
   }
 
   if (!discounts.length) return '0%';

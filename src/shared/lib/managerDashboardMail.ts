@@ -38,6 +38,9 @@ export type ManagerDashboardMailDependencies = {
   acquireLock: (name: string) => Promise<(() => Promise<void>) | null>;
   importSnapshot: (input: SnapshotInput) => Promise<SnapshotResult>;
   recordFailure: (input: Omit<SnapshotInput, 'bytes'> & { code: string }) => Promise<SnapshotResult>;
+  getReceipt: (transportKey: string) => Promise<{ managerId: number } | null>;
+  recordReceipt: (transportKey: string, sourceKey: string) => Promise<void>;
+  pruneReceipts: () => Promise<void>;
   now: () => Date;
 };
 
@@ -186,6 +189,18 @@ const defaultDependencies: ManagerDashboardMailDependencies = {
     const { recordPersonalDashboardImportFailure } = await import('./db/managerDashboardRepo');
     return recordPersonalDashboardImportFailure(input);
   },
+  async getReceipt(key) {
+    const { getPersonalDashboardMailReceipt } = await import('./db/managerDashboardMailReceipts');
+    return getPersonalDashboardMailReceipt(key);
+  },
+  async recordReceipt(key, sourceKey) {
+    const { recordPersonalDashboardMailReceipt } = await import('./db/managerDashboardMailReceipts');
+    return recordPersonalDashboardMailReceipt(key, sourceKey);
+  },
+  async pruneReceipts() {
+    const { prunePersonalDashboardMailReceipts } = await import('./db/managerDashboardMailReceipts');
+    return prunePersonalDashboardMailReceipts();
+  },
   now: () => new Date(),
 };
 
@@ -207,6 +222,7 @@ export async function importManagerDashboardFromEmail(options: {
   if (!release) return { ...result, status: 'busy', reason: 'import_in_progress' };
   let client: ManagerDashboardMailClient | undefined;
   try {
+    await deps.pruneReceipts();
     client = await deps.createClient({
       host: config.host, port: config.port, secure: config.secure,
       // On port 143 require STARTTLS, rather than sending the password over plaintext.
@@ -287,6 +303,15 @@ export async function importManagerDashboardFromEmail(options: {
           continue;
         }
         for (const { part, filename } of parts) {
+          // IMAP UIDs/parts are immutable within UIDVALIDITY. Account and mailbox
+          // are included so another account or a mailbox rebuild cannot collide.
+          const transportKey = `imap-part:v1:${createHash('sha256')
+            .update(JSON.stringify([accountHash, uidValidity, message.uid, part])).digest('hex')}`;
+          const receipt = await deps.getReceipt(transportKey);
+          if (receipt) {
+            addOutcome(result, message.uid, filename, { status: 'duplicate', managerId: receipt.managerId, code: 'ALREADY_IMPORTED_PART' });
+            continue;
+          }
           let bytes: Buffer;
           try {
             const download = await client.download(String(message.uid), part, {
@@ -306,6 +331,9 @@ export async function importManagerDashboardFromEmail(options: {
             const imported = await deps.importSnapshot({
               filename, bytes, sourceKey, sender, messageId: message.envelope?.messageId?.slice(0, 500),
             });
+            if (imported.status === 'imported' || imported.status === 'duplicate') {
+              await deps.recordReceipt(transportKey, sourceKey);
+            }
             addOutcome(result, message.uid, filename, imported);
           } catch {
             addOutcome(result, message.uid, filename, { status: 'import_unavailable', managerId: null, code: 'import_unavailable' });

@@ -14,6 +14,7 @@ import {
   listPersonalDashboardAdmin, recordPersonalDashboardImportFailure,
 } from '../src/shared/lib/db/managerDashboardRepo';
 import { getManagerEmailHash, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
+import { getPersonalDashboardMailReceipt, recordPersonalDashboardMailReceipt, prunePersonalDashboardMailReceipts } from '../src/shared/lib/db/managerDashboardMailReceipts';
 
 function guard() {
   assert.equal(process.env.KTS_PERSONAL_TEST, '1', 'Isolated integration tests require KTS_PERSONAL_TEST=1');
@@ -246,6 +247,27 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.ok(overview.imports.some((item) => item.id === result.id && item.code === 'ATTACHMENT_FAILED'));
       assert.equal(overview.managers.some((item) => 'bytes' in item), false);
       assert.ok(overview.htmlVersions.every((item) => !('htmlContent' in item)));
+    });
+
+    await t.test('durable mail receipts require committed success and preserve data while expiring metadata', async () => {
+      const recipient = await manager('mail-checkpoint');
+      const key = `imap-part:v1:${createHash('sha256').update(randomUUID()).digest('hex')}`;
+      const source = randomUUID();
+      await recordPersonalDashboardMailReceipt(key, source);
+      assert.equal(await getPersonalDashboardMailReceipt(key), null, 'no speculative checkpoint before successful import');
+      const imported = await importFile(bytes(recipient.email), source);
+      assert.equal(imported.status, 'imported');
+      await recordPersonalDashboardMailReceipt(key, source);
+      assert.deepEqual(await getPersonalDashboardMailReceipt(key), { managerId: recipient.id });
+      const collision = await manager('mail-collision', 'manager', true, recipient.email);
+      assert.equal(await getPersonalDashboardMailReceipt(key), null, 'ambiguous binding must not be skipped');
+      await query(`update wholesale_managers set is_active=false where id=$1`, [collision.id]);
+      assert.deepEqual(await getPersonalDashboardMailReceipt(key), { managerId: recipient.id });
+      await query(`update personal_dashboard_mail_receipts set completed_at=now()-interval '31 days' where transport_key=$1`, [key]);
+      await prunePersonalDashboardMailReceipts();
+      assert.equal(await getPersonalDashboardMailReceipt(key), null);
+      const preserved = await getPersonalDashboardStatus(recipient.id);
+      assert.equal(preserved.snapshot?.id, imported.snapshotId, 'receipt cleanup never removes the saved snapshot');
     });
 
     await t.test('existing manager deletion safely cascades only that manager personal state', async () => {

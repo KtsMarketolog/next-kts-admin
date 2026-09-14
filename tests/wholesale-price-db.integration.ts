@@ -8,7 +8,7 @@ import { query } from '../src/shared/lib/db/client';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import { createWholesalePriceList, getWholesalePriceListEditor, updateWholesalePriceList } from '../src/shared/lib/db/wholesaleAdminRepo/core';
 import type { WholesalePriceListEditor, WholesalePriceListItemInput } from '../src/shared/lib/db/wholesaleAdminRepo/types';
-import { getPublicWholesalePriceList } from '../src/shared/lib/db/wholesaleRepo';
+import { getPublicWholesalePriceList, getPublicWholesaleRequestItems } from '../src/shared/lib/db/wholesaleRepo';
 import { parseWholesalePriceItems, readWholesalePriceSaveBody } from '../src/shared/lib/wholesalePriceSave';
 
 function guard() {
@@ -147,6 +147,31 @@ test('wholesale full-catalogue saves in isolated PostgreSQL', { timeout: 180_000
       await updateWholesalePriceList(priceId, { ...before, items: await normalized(before.items) }, admin);
       const after = await getWholesalePriceListEditor(priceId, admin);
       assert.deepEqual(after, before);
+    });
+
+    await t.test('resaving preserves old prices, tokens, item IDs, snapshots and an already open basket', async () => {
+      const historical = input(makeItems(2), 'Historical price must survive');
+      historical.items[0] = { ...historical.items[0], visible: true, discountPercent: '25', customWholesalePrice: '150.00' };
+      const historicalId = await createWholesalePriceList(historical, admin);
+      const historicalBefore = await stableState(historicalId);
+      await query(`update wholesale_price_list_items set snapshot_product_title='Retained snapshot'
+        where price_list_id=$1 and wholesale_product_id=$2`, [priceId, productIds[7474]]);
+      const identities = async () => (await query(`select id::text, wholesale_product_id::text,
+        wholesale_variant_id::text, created_at::text, snapshot_product_title
+        from wholesale_price_list_items where price_list_id=$1 order by id`, [priceId])).rows;
+      const oldIdentities = await identities();
+      const basketIds = (await query<{ id: string }>(`select id::text from wholesale_price_list_items
+        where price_list_id=$1 and visible=true order by id`, [priceId])).rows.map((row) => Number(row.id));
+      const oldBasket = await getPublicWholesaleRequestItems(savedInput.token, basketIds);
+      assert.equal(oldBasket.length, basketIds.length);
+      const editor = await getWholesalePriceListEditor(priceId, admin);
+      assert.ok(editor);
+      await updateWholesalePriceList(priceId, { ...editor, comment: 'Only changed a comment' }, admin);
+      assert.deepEqual(await identities(), oldIdentities, 'public item identity and historical snapshots must not change');
+      assert.deepEqual(await getPublicWholesaleRequestItems(savedInput.token, basketIds), oldBasket);
+      assert.deepEqual(await stableState(historicalId), historicalBefore, 'another existing price is byte-for-byte untouched');
+      assert.equal((await getWholesalePriceListEditor(priceId, admin))!.token, savedInput.token);
+      assert.equal((await query(`select count(*)::text as n from wholesale_price_lists`)).rows[0].n, '2');
     });
 
     await t.test('invalid product in the final batch rolls back header/items/groups/events on update', async () => {

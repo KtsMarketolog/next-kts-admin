@@ -111,15 +111,6 @@ function detectStockLocationMarker(row: unknown[]): StockLocationKey | null {
   return null;
 }
 
-function isLegacyStockHeaderRow(row: unknown[]) {
-  const normalized = row.map(normalizeHeader);
-  const aliases = (values: string[]) => values.map(normalizeHeader);
-  return (
-    aliases(HEADER_ARTICLE_ALIASES).some((header) => normalized.includes(header)) &&
-    aliases(HEADER_STOCK_ALIASES).some((header) => normalized.includes(header))
-  );
-}
-
 export function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
   if (buffer.byteLength > MAX_STOCK_WORKBOOK_BYTES) throw new Error('Excel-файл с остатками слишком большой');
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, sheetRows: MAX_STOCK_WORKBOOK_ROWS + 5 });
@@ -145,6 +136,13 @@ export function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
       headers = headerCandidate;
       continue;
     }
+    const containsArticleHeader = row.some((cell) => stockHeaderAliases(HEADER_ARTICLE_ALIASES).includes(normalizeHeader(cell)));
+    if (containsArticleHeader) {
+      // A two-row header may supply the quantity label on the next line. An
+      // unknown header in any later warehouse must not reuse earlier columns.
+      if (isStockHeaderValues(buildStockHeaders(rows[rowIndex + 1] ?? [], row))) continue;
+      throw new Error('Не распознана колонка количества остатков: ожидается «Сейчас», «Сейчас Доступно», «Остаток» или «Остатки». Остатки не изменены.');
+    }
 
     if (!headers) continue;
     parsedRows.push({
@@ -154,19 +152,8 @@ export function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
     });
   }
 
-  if (parsedRows.length > 0) return parsedRows;
-
-  const headerIndex = rows.findIndex(isLegacyStockHeaderRow);
-  if (headerIndex === -1) {
-    return XLSX.utils
-      .sheet_to_json<RawRow>(sheet, { defval: null, raw: true })
-      .map((row, index) => ({ rowNumber: index + 2, row, location: null }));
+  if (!headers) {
+    throw new Error('В Excel-файле не найдены обязательные колонки артикула и количества остатков. Остатки не изменены.');
   }
-
-  const legacyHeaders = rows[headerIndex] ?? [];
-  return rows.slice(headerIndex + 1).map((row, index) => ({
-    rowNumber: headerIndex + index + 2,
-    row: buildRawRow(legacyHeaders, row),
-    location: null,
-  }));
+  return parsedRows;
 }

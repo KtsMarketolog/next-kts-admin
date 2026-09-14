@@ -381,6 +381,8 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
         if (response.status === 429) {
           const retryAfter = Number(response.headers.get('Retry-After'));
           setStatus(`Слишком много заявок. Попробуйте через ${formatRetryAfter(retryAfter)}.`);
+        } else if (response.status === 400 && (await response.json().catch(() => ({}))).error === 'INVALID_ITEMS') {
+          setStatus('Состав прайса изменился: некоторые выбранные товары больше недоступны. Обновите страницу и проверьте выбранные позиции.');
         } else {
           setStatus('Не удалось отправить заявку. Проверьте интернет и попробуйте еще раз.');
         }
