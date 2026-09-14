@@ -40,18 +40,34 @@ export function normalizeText(value: unknown, maxLength = 240) {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, maxLength) : '';
 }
 
-export function normalizeCatalogPrice(value: unknown) {
+export function normalizeCatalogPrice(value: unknown, field = 'Цена или скидка') {
   if (value === null || value === undefined) return null;
-  const text = String(value)
-    .trim()
-    .replace(/\s+/g, '')
-    .replace(',', '.')
-    .replace(/[^\d.]/g, '');
+  const invalid = () => new Error(`Некорректное значение поля «${field}». Введите неотрицательное число до 999999999 с максимум двумя знаками после запятой.`);
+  if (typeof value !== 'string' && typeof value !== 'number') throw invalid();
+  const text = String(value).trim();
   if (!text) return null;
-  if (!/^\d+(\.\d{1,2})?$/.test(text)) return null;
-  const amount = Number(text);
-  if (!Number.isFinite(amount) || amount < 0 || amount > 999999999) return null;
-  return text;
+  // Validate before removing separators: signs, labels, exponents and malformed
+  // groups must never become a different number (or silently clear a saved value).
+  if (!/^(?:\d+|\d{1,3}(?:[ \u00a0\u202f]\d{3})+)(?:[.,]\d{1,2})?$/.test(text)) throw invalid();
+  const normalized = text.replace(/[ \u00a0\u202f]/g, '').replace(',', '.');
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount < 0 || amount > 999999999) throw invalid();
+  return normalized;
+}
+
+const CATALOG_PRICE_FIELDS = {
+  priceEur: 'Цена EUR',
+  priceRub: 'Цена RUB',
+  priceCny: 'Цена CNY',
+  generalDiscount: 'Общая скидка',
+  manualDiscount: 'Ручная скидка',
+  manualDiscountRop: 'Ручная скидка РОП',
+} as const;
+
+export function normalizeCatalogPriceFields(input: Partial<Record<keyof typeof CATALOG_PRICE_FIELDS, unknown>>) {
+  return Object.fromEntries(Object.entries(CATALOG_PRICE_FIELDS).map(([key, label]) => [
+    key, normalizeCatalogPrice(input[key as keyof typeof CATALOG_PRICE_FIELDS], label),
+  ])) as Record<keyof typeof CATALOG_PRICE_FIELDS, string | null>;
 }
 
 export function normalizeStockValue(value: unknown) {

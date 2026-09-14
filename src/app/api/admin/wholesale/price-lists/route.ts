@@ -6,7 +6,6 @@ import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import {
   createWholesalePriceList,
   getWholesalePriceLists,
-  updateClientCompanyManagerAssignments,
   type WholesalePriceGroupStockSettingInput,
   type WholesalePriceListItemInput,
 } from '@/shared/lib/db';
@@ -131,11 +130,13 @@ export async function POST(request: Request) {
       },
       session,
     );
-    await updateClientCompanyManagerAssignments(clientCompanyId, { managerId, supportManagerId }, session);
-    publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId });
   } catch (error) {
     return Response.json({ error: getWholesalePriceSaveError(error) }, { status: 400 });
   }
+
+  // Notification failure must not turn a committed create into a retryable 400.
+  try { publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId }); }
+  catch { console.error('price_saved_realtime_notification_failed'); }
 
   return Response.json({ id });
 }

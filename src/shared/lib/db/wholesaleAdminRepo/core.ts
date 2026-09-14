@@ -21,9 +21,8 @@ import {
   clientIdFromName,
   priceListAction,
   priceListDetails,
-  resolveWholesaleClientCompany,
 } from './analyticsHelpers';
-import { normalizeWholesaleSupportManagerId } from './managerHelpers';
+import { lockPriceListCompany, writePriceListCompanyAssignment } from './priceListCompanyWrite';
 import {
   replaceWholesalePriceListGroupStockSettings,
   replaceWholesalePriceListItems,
@@ -477,10 +476,10 @@ export async function createWholesalePriceList(
   await ensureSiteSchema();
   const assignment = resolveWholesalePriceListManagerAssignment(input, session);
   const managerId = assignment.managerId;
-  const supportManagerId = await normalizeWholesaleSupportManagerId(assignment.supportManagerId);
-  const clientCompany = await resolveWholesaleClientCompany(input.clientCompanyId, session);
+  const supportManagerId = assignment.supportManagerId;
   const actor = actorMeta(session);
-  const { id, event } = await withTransaction(async (client) => {
+  const { id, event, clientCompany } = await withTransaction(async (client) => {
+    const clientCompany = await lockPriceListCompany(client, input.clientCompanyId, assignment, session);
     const execute: PriceListWriteQuery = (text, params) => client.query(text, params);
     const result = await client.query<{ id: string }>(
       `insert into wholesale_price_lists (
@@ -507,7 +506,8 @@ export async function createWholesalePriceList(
       details: 'Прайс создан',
     };
     await writePriceListEventRow(event, execute);
-    return { id, event };
+    await writePriceListCompanyAssignment(client, clientCompany.id, assignment);
+    return { id, event, clientCompany };
   });
   // Analytics uses the global pool and must run only after the parent price list commits.
   await trackAnalyticsEvent(priceListEventAnalytics(event));
@@ -536,11 +536,11 @@ export async function updateWholesalePriceList(
   const scope = getWholesalePriceListAccessScope(session);
   const assignment = resolveWholesalePriceListManagerAssignment(input, session);
   const managerId = assignment.managerId;
-  const supportManagerId = await normalizeWholesaleSupportManagerId(assignment.supportManagerId);
-  const clientCompany = await resolveWholesaleClientCompany(input.clientCompanyId, session);
-  const nextInput = { ...input, clientCompanyId: clientCompany.id, clientName: clientCompany.title };
+  const supportManagerId = assignment.supportManagerId;
   const actor = actorMeta(session);
-  const { previousRow, previousVisibleItems, nextVisibleItems, event } = await withTransaction(async (client) => {
+  const { previousRow, previousVisibleItems, nextVisibleItems, event, clientCompany, nextInput } = await withTransaction(async (client) => {
+    const clientCompany = await lockPriceListCompany(client, input.clientCompanyId, assignment, session);
+    const nextInput = { ...input, clientCompanyId: clientCompany.id, clientName: clientCompany.title };
     const execute: PriceListWriteQuery = (text, params) => client.query(text, params);
     const previous = await client.query<{
       title: string;
@@ -612,7 +612,8 @@ export async function updateWholesalePriceList(
       details: priceListDetails(previousRow, nextInput),
     };
     await writePriceListEventRow(event, execute);
-    return { previousRow, previousVisibleItems, nextVisibleItems, event };
+    await writePriceListCompanyAssignment(client, clientCompany.id, assignment);
+    return { previousRow, previousVisibleItems, nextVisibleItems, event, clientCompany, nextInput };
   });
   await trackAnalyticsEvent(priceListEventAnalytics(event));
   const baseEvent = {

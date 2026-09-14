@@ -40,6 +40,7 @@ export type StockEmailSkipSample = {
 };
 
 export type StockEmailImportResult = {
+  status: 'completed' | 'busy';
   processed: number;
   result: StockImportResult | null;
   checkedMessages: number;

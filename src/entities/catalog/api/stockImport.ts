@@ -1,5 +1,5 @@
 import { ensureSiteSchema } from '@/shared/lib/db';
-import { query, withTransaction } from '@/shared/lib/db/client';
+import { query, tryAcquireSessionAdvisoryLock, withTransaction } from '@/shared/lib/db/client';
 
 import { ensureCatalogSchema } from './catalogDb';
 import {
@@ -33,7 +33,10 @@ import type {
   StockEmailImportResult
 } from './stockImportTypes';
 
-const LOCK_KEY = 'email';
+// Inventory is shared across all mailboxes and manual Excel imports. A session
+// lock has no time-based expiry that could let a second worker steal a long run.
+const LOCK_KEY = 'kts-stock-import';
+const LEGACY_LOCK_KEY = 'email';
 const MAX_ERRORS = 200;
 const MAX_SKIP_SAMPLES = 5;
 const DEFAULT_MAIL_SCAN_LIMIT = 300;
@@ -119,22 +122,31 @@ async function saveImportLog(result: Omit<StockImportResult, 'logId'>) {
 }
 
 async function acquireImportLock() {
+  return tryAcquireSessionAdvisoryLock(LOCK_KEY);
+}
+
+// Keep the old workbook guard during a rolling upgrade. The session lock above
+// prevents TTL stealing between new workers; old workers still use this row.
+async function acquireLegacyImportLock() {
   await ensureStockImportSchema();
-  const result = await withTransaction(async (client) => {
-    await client.query(`delete from stock_import_locks where key = $1 and locked_at < now() - interval '30 minutes'`, [LOCK_KEY]);
+  return withTransaction(async (client) => {
+    await client.query(`delete from stock_import_locks where key = $1 and locked_at < now() - interval '30 minutes'`, [LEGACY_LOCK_KEY]);
     const inserted = await client.query(
       `insert into stock_import_locks (key, locked_at)
        values ($1, now())
        on conflict (key) do nothing`,
-      [LOCK_KEY],
+      [LEGACY_LOCK_KEY],
     );
     return inserted.rowCount === 1;
   });
-  return result;
 }
 
-async function releaseImportLock() {
-  await query(`delete from stock_import_locks where key = $1`, [LOCK_KEY]).catch(() => {});
+async function releaseLegacyImportLock() {
+  await query(`delete from stock_import_locks where key = $1`, [LEGACY_LOCK_KEY]).catch(() => {});
+}
+
+class StockImportBusyError extends Error {
+  constructor() { super('Импорт остатков уже выполняется'); }
 }
 
 type AggregatedStock = {
@@ -164,17 +176,29 @@ function totalAggregatedStock(stock: AggregatedStock) {
   return stock.stockByLocation.volzhsk + stock.stockByLocation.moscow + stock.stockWithoutLocation;
 }
 
-export async function importStockFromExcelBuffer(input: {
+type StockWorkbookInput = {
   buffer: Buffer;
   fileName: string;
   emailFrom?: string;
   emailSubject?: string;
-}): Promise<StockImportResult> {
-  const locked = await acquireImportLock();
-  if (!locked) {
-    throw new Error('Импорт остатков уже выполняется');
-  }
+};
 
+export async function importStockFromExcelBuffer(input: StockWorkbookInput): Promise<StockImportResult> {
+  const release = await acquireImportLock();
+  if (!release) {
+    throw new StockImportBusyError();
+  }
+  try {
+    return await importStockFromExcelBufferLocked(input);
+  } finally {
+    await release();
+  }
+}
+
+// Private: both public entry points acquire the same session lock first.
+async function importStockFromExcelBufferLocked(input: StockWorkbookInput): Promise<StockImportResult> {
+  const legacyLocked = await acquireLegacyImportLock();
+  if (!legacyLocked) throw new StockImportBusyError();
   try {
     await ensureStockImportSchema();
     const rows = parseStockWorkbook(input.buffer);
@@ -287,7 +311,7 @@ export async function importStockFromExcelBuffer(input: {
     const logId = await saveImportLog(withoutId);
     return { logId, ...withoutId };
   } finally {
-    await releaseImportLock();
+    await releaseLegacyImportLock();
   }
 }
 
@@ -324,6 +348,7 @@ function attachmentAllowed(fileName: string, prefix: string) {
 
 function createEmailResult(
   input: {
+    status?: StockEmailImportResult['status'];
     processed?: number;
     result?: StockImportResult | null;
     checkedMessages: number;
@@ -335,6 +360,7 @@ function createEmailResult(
   },
 ): StockEmailImportResult {
   return {
+    status: input.status ?? 'completed',
     processed: input.processed ?? 0,
     result: input.result ?? null,
     checkedMessages: input.checkedMessages,
@@ -381,17 +407,29 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
     throw new Error('Не настроены STOCK_MAIL_USER/STOCK_MAIL_PASSWORD или SMTP_USER/SMTP_PASSWORD для чтения почты');
   }
 
-  const [{ ImapFlow }, { simpleParser }] = await Promise.all([import('imapflow'), import('mailparser')]);
-  const client = new ImapFlow({
-    host,
-    port,
-    secure,
-    auth: { user, pass: password },
-    logger: false,
-  });
-
-  await client.connect();
+  const release = await acquireImportLock();
+  if (!release) {
+    return createEmailResult({
+      status: 'busy', checkedMessages: 0,
+      skipped: { sender: 0, subject: 0, attachment: 0, samples: [] },
+      allowedFrom, subjectPart, filePrefix, scanLimit,
+    });
+  }
+  let client: import('imapflow').ImapFlow | undefined;
   try {
+    const [{ ImapFlow }, { simpleParser }] = await Promise.all([import('imapflow'), import('mailparser')]);
+    client = new ImapFlow({
+      host,
+      port,
+      secure,
+      auth: { user, pass: password },
+      logger: false,
+    });
+    // Awaited operations report transport failures; emitted errors must not
+    // bypass the finally blocks that release our database and mailbox locks.
+    client.on('error', () => {});
+
+    await client.connect();
     const lock = await client.getMailboxLock('INBOX');
     try {
       const uidsResult = await client.search({ all: true }, { uid: true });
@@ -465,7 +503,7 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
 
       if (candidate) {
         try {
-          const result = await importStockFromExcelBuffer({
+          const result = await importStockFromExcelBufferLocked({
             buffer: candidate.buffer,
             fileName: candidate.fileName,
             emailFrom: candidate.emailFrom,
@@ -486,6 +524,14 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
             scanLimit,
           });
         } catch (error) {
+          // Contention with an old worker during rollout is not a bad file.
+          // In particular, neither this candidate nor superseded mail may move.
+          if (error instanceof StockImportBusyError) {
+            return createEmailResult({
+              status: 'busy', checkedMessages: uids.length, skipped,
+              allowedFrom, subjectPart, filePrefix, scanLimit,
+            });
+          }
           await moveMessage(client, candidate.uid, errorFolder);
           throw error;
         }
@@ -503,7 +549,14 @@ export async function importStockFromEmail(): Promise<StockEmailImportResult> {
       lock.release();
     }
   } finally {
-    await client.logout().catch(() => undefined);
+    try {
+      if (client) {
+        try { await client.logout().catch(() => undefined); }
+        finally { client.close(); }
+      }
+    } finally {
+      await release();
+    }
   }
 }
 

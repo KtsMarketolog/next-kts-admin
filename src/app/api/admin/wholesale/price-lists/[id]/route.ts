@@ -1,7 +1,6 @@
 import {
   deleteWholesalePriceList,
   getWholesalePriceListEditor,
-  updateClientCompanyManagerAssignments,
   updateWholesalePriceList,
   type WholesalePriceGroupStockSettingInput,
   type WholesalePriceListItemInput,
@@ -140,11 +139,12 @@ export async function PUT(request: Request, context: Context) {
       },
       session,
     );
-    await updateClientCompanyManagerAssignments(clientCompanyId, { managerId, supportManagerId }, session);
-    publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId });
   } catch (error) {
     return Response.json({ error: getWholesalePriceSaveError(error) }, { status: 400 });
   }
+
+  try { publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId }); }
+  catch { console.error('price_saved_realtime_notification_failed'); }
 
   return Response.json({ ok: true });
 }

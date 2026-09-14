@@ -4,7 +4,7 @@ import { ensureSiteSchema } from '@/shared/lib/db';
 import { query, withTransaction } from '@/shared/lib/db/client';
 
 import { ensureCatalogSchema } from '../catalogDb';
-import { cacheKey, normalizeCatalogPrice, normalizeStockValue, normalizeText, slugify, uniqueSlug } from './helpers';
+import { cacheKey, normalizeCatalogPrice, normalizeCatalogPriceFields, normalizeStockValue, normalizeText, slugify, uniqueSlug } from './helpers';
 import { getCatalogAdminProductById } from './productQueries';
 export { normalizeCatalogPrice } from './helpers';
 
@@ -325,12 +325,7 @@ function normalizeInput(input: CatalogProductInput): NormalizedCatalogProductInp
     subcategory: normalizeText(input.subcategory, 180),
     priceGroup: normalizeText(input.priceGroup, 180),
     unit: unit || null,
-    priceEur: normalizeCatalogPrice(input.priceEur),
-    priceRub: normalizeCatalogPrice(input.priceRub),
-    priceCny: normalizeCatalogPrice(input.priceCny),
-    generalDiscount: normalizeCatalogPrice(input.generalDiscount),
-    manualDiscount: normalizeCatalogPrice(input.manualDiscount),
-    manualDiscountRop: normalizeCatalogPrice(input.manualDiscountRop),
+    ...normalizeCatalogPriceFields(input),
     stock: normalizeStockValue(input.stock),
     isExpected: input.isExpected === null || input.isExpected === undefined ? null : Boolean(input.isExpected),
     isActive: input.isActive ?? true,
@@ -540,10 +535,10 @@ export async function getCatalogAdminStats(): Promise<CatalogAdminStats> {
 }
 
 export async function createCatalogAdminProduct(input: CatalogProductInput) {
-  await ensureCatalogSchema();
-  await ensureSiteSchema();
   const normalized = normalizeInput(input);
   if (!normalized.article) throw new Error('Артикул товара обязателен');
+  await ensureCatalogSchema();
+  await ensureSiteSchema();
 
   const id = await withTransaction(async (client) => {
     const count = await client.query<{ count: string }>('select count(*)::text as count from catalog_products');
@@ -553,12 +548,12 @@ export async function createCatalogAdminProduct(input: CatalogProductInput) {
 }
 
 export async function updateCatalogAdminProduct(id: number, input: CatalogProductInput) {
-  await ensureCatalogSchema();
-  await ensureSiteSchema();
   const normalizedId = Number(id);
   if (!Number.isInteger(normalizedId) || normalizedId <= 0) throw new Error('Некорректный товар');
   const normalized = normalizeInput(input);
   if (!normalized.article) throw new Error('Артикул товара обязателен');
+  await ensureCatalogSchema();
+  await ensureSiteSchema();
 
   await withTransaction(async (client) => {
     const existing = await client.query<{ id: string; sort_order: string }>(
@@ -648,10 +643,10 @@ export async function deleteCatalogAdminProduct(id: number) {
 }
 
 export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promise<CatalogImportResult> {
-  await ensureCatalogSchema();
-  await ensureSiteSchema();
   const normalizedRows = rows.map(normalizeInput).filter((row) => row.article);
   if (normalizedRows.length === 0) throw new Error('В файле нет товаров с заполненным артикулом');
+  await ensureCatalogSchema();
+  await ensureSiteSchema();
 
   await withTransaction(async (client) => {
     const cache = createCache();

@@ -6,6 +6,7 @@ import {
   type CatalogProductInput,
 } from '@/entities/catalog/api/catalogAdmin';
 import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
+import { normalizeCatalogPriceFields } from '@/entities/catalog/api/catalogAdmin/helpers';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
@@ -22,12 +23,7 @@ function productInputFromBody(body: Record<string, unknown>): CatalogProductInpu
     subcategory: typeof body.subcategory === 'string' ? body.subcategory : '',
     priceGroup: typeof body.priceGroup === 'string' ? body.priceGroup : '',
     unit: typeof body.unit === 'string' ? body.unit : '',
-    priceEur: typeof body.priceEur === 'string' || typeof body.priceEur === 'number' ? body.priceEur : null,
-    priceRub: typeof body.priceRub === 'string' || typeof body.priceRub === 'number' ? body.priceRub : null,
-    priceCny: typeof body.priceCny === 'string' || typeof body.priceCny === 'number' ? body.priceCny : null,
-    generalDiscount: typeof body.generalDiscount === 'string' || typeof body.generalDiscount === 'number' ? body.generalDiscount : null,
-    manualDiscount: typeof body.manualDiscount === 'string' || typeof body.manualDiscount === 'number' ? body.manualDiscount : null,
-    manualDiscountRop: typeof body.manualDiscountRop === 'string' || typeof body.manualDiscountRop === 'number' ? body.manualDiscountRop : null,
+    ...normalizeCatalogPriceFields(body),
     stock: typeof body.stock === 'string' || typeof body.stock === 'number' ? body.stock : null,
     isExpected: typeof body.isExpected === 'boolean' ? body.isExpected : null,
     isActive: typeof body.isActive === 'boolean' ? body.isActive : true,

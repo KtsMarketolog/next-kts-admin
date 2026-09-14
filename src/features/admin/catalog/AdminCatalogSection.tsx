@@ -144,6 +144,10 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     }
 
     const data = await response.json();
+    if (data.status === 'busy') {
+      showStatus('Импорт остатков уже выполняется. Повторная проверка пропущена; письма не изменены.');
+      return;
+    }
     await loadStockLogs();
     if (!data.processed) {
       const skipped = data.skipped ?? {};

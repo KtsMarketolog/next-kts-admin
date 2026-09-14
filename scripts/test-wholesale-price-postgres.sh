@@ -19,7 +19,7 @@ trap 'exit 130' INT TERM
 mkdir "$test_root/socket"
 "$pg_bin/initdb" -D "$test_root/data" --username=wholesale_test_owner --auth-local=trust --auth-host=reject --no-locale --encoding=UTF8 >"$test_root/init.log"
 "$pg_bin/pg_ctl" -D "$test_root/data" -l "$test_root/postgres.log" -o "-k $test_root/socket -h '' -p 55474 -c shared_buffers=16MB -c max_connections=12 -c work_mem=1MB" -w start >/dev/null
-"$pg_bin/psql" -h "$test_root/socket" -p 55474 -U wholesale_test_owner -d postgres -v ON_ERROR_STOP=1 \
+"$pg_bin/psql" -X -h "$test_root/socket" -p 55474 -U wholesale_test_owner -d postgres -v ON_ERROR_STOP=1 \
   -c 'CREATE ROLE wholesale_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE' \
   -c 'CREATE DATABASE kts_wholesale_integration OWNER wholesale_app' >/dev/null
 

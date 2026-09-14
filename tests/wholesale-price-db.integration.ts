@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import { Client } from 'pg';
 
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import { query } from '../src/shared/lib/db/client';
@@ -94,6 +95,22 @@ test('wholesale full-catalogue saves in isolated PostgreSQL', { timeout: 180_000
     });
     let priceId = 0;
     let savedInput: SaveInput;
+    const companyId = Number(company.rows[0].id);
+    const companyState = async () => (await query(`select row_to_json(c.*) as company from client_companies c where id=$1`, [companyId])).rows[0];
+    const totals = async () => (await query(`select
+      (select count(*)::text from wholesale_price_lists) as prices,
+      (select count(*)::text from wholesale_price_list_items) as items,
+      (select count(*)::text from wholesale_price_list_events) as events,
+      (select count(*)::text from wholesale_analytics_events) as analytics`)).rows[0];
+    const waitForLock = async (fragment: string) => {
+      for (let attempt = 0; attempt < 120; attempt++) {
+        const blocked = await query<{ n: string }>(`select count(*)::text as n from pg_stat_activity
+          where datname=current_database() and wait_event_type='Lock' and query like $1`, [`%${fragment}%`]);
+        if (Number(blocked.rows[0].n) > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.fail('Expected the synthetic price save to wait for its row lock');
+    };
 
     await t.test('create stores 7475 rows including hidden rows and the last manual/discount/variant item', async () => {
       const rows = makeItems(7475);
@@ -227,6 +244,113 @@ test('wholesale full-catalogue saves in isolated PostgreSQL', { timeout: 180_000
       assert.ok(editor);
       assert.ok(['Concurrent A', 'Concurrent B'].includes(editor.title));
       assert.deepEqual(editor.items, canonical(editor.title === first.title ? first.items : second.items));
+    });
+
+    await t.test('wrong, missing and inactive manager assignments reject create/update without any partial price', async () => {
+      const beforePrice = await stableState(priceId), beforeCompany = await companyState(), beforeTotals = await totals();
+      const rejectBoth = async (changes: Partial<SaveInput>) => {
+        await assert.rejects(createWholesalePriceList({ ...input(makeItems(1)), ...changes }, admin));
+        await assert.rejects(updateWholesalePriceList(priceId, { ...savedInput, title: 'MUST NOT CHANGE', ...changes }, admin));
+        assert.deepEqual(await stableState(priceId), beforePrice);
+        assert.deepEqual(await companyState(), beforeCompany);
+        assert.deepEqual(await totals(), beforeTotals);
+      };
+      await rejectBoth({ managerId: supportManagerId });
+      await rejectBoth({ supportManagerId: managerId });
+      await rejectBoth({ managerId: 2_000_000_000 });
+      await rejectBoth({ managerId: null });
+      await rejectBoth({ supportManagerId: null });
+      for (const id of [managerId, supportManagerId]) {
+        await query('update wholesale_managers set is_active=false where id=$1', [id]);
+        try { await rejectBoth({}); }
+        finally { await query('update wholesale_managers set is_active=true where id=$1', [id]); }
+      }
+    });
+
+    await t.test('missing/inactive/inaccessible companies fail before changing prices or assignments', async () => {
+      const beforePrice = await stableState(priceId), beforeTotals = await totals();
+      for (const id of [null, 2_000_000_000]) {
+        await assert.rejects(createWholesalePriceList({ ...input(makeItems(1)), clientCompanyId: id }, admin));
+        await assert.rejects(updateWholesalePriceList(priceId, { ...savedInput, clientCompanyId: id }, admin));
+      }
+      await query('update client_companies set is_active=false where id=$1', [companyId]);
+      try {
+        await assert.rejects(createWholesalePriceList(input(makeItems(1)), admin));
+        await assert.rejects(updateWholesalePriceList(priceId, savedInput, admin));
+      } finally { await query('update client_companies set is_active=true where id=$1', [companyId]); }
+      await assert.rejects(createWholesalePriceList(input(makeItems(1)), { role: 'manager', managerId: otherManagerId }));
+      assert.deepEqual(await stableState(priceId), beforePrice);
+      assert.deepEqual(await totals(), beforeTotals);
+    });
+
+    await t.test('late company assignment write failure rolls back price header/items/events on POST and PUT', async () => {
+      const beforePrice = await stableState(priceId), beforeCompany = await companyState(), beforeTotals = await totals();
+      await query(`create function synthetic_reject_assignment() returns trigger language plpgsql as
+        $$ begin raise exception 'Synthetic assignment write failure'; end $$`);
+      await query(`create trigger synthetic_reject_assignment before update on client_companies
+        for each row execute function synthetic_reject_assignment()`);
+      try {
+        // Run twice: retrying a failed create cannot leave a partial duplicate.
+        for (let i=0; i<2; i++) await assert.rejects(createWholesalePriceList(input(makeItems(2)), admin));
+        await assert.rejects(updateWholesalePriceList(priceId, { ...savedInput, title: 'ROLL BACK LATE ASSIGNMENT', items: makeItems(2) }, admin));
+      } finally {
+        await query('drop trigger synthetic_reject_assignment on client_companies');
+        await query('drop function synthetic_reject_assignment()');
+      }
+      assert.deepEqual(await stableState(priceId), beforePrice);
+      assert.deepEqual(await companyState(), beforeCompany);
+      assert.deepEqual(await totals(), beforeTotals);
+    });
+
+    await t.test('a concurrently disabled manager is revalidated after waiting, not accepted from an old read', async () => {
+      const beforePrice = await stableState(priceId), beforeCompany = await companyState();
+      const blocker = new Client({ connectionString: process.env.DATABASE_URL });
+      await blocker.connect();
+      try {
+        await blocker.query('begin');
+        await blocker.query('update wholesale_managers set is_active=false where id=$1', [managerId]);
+        const saving = assert.rejects(updateWholesalePriceList(priceId, savedInput, admin), /Менеджер по развитию/);
+        try { await waitForLock('select id::text, role, is_active from wholesale_managers'); }
+        finally { await blocker.query('commit'); }
+        await saving;
+      } finally {
+        await blocker.end();
+        await query('update wholesale_managers set is_active=true where id=$1', [managerId]);
+      }
+      assert.deepEqual(await stableState(priceId), beforePrice);
+      assert.deepEqual(await companyState(), beforeCompany);
+    });
+
+    await t.test('company access revoked during save is rechecked under its lock', async () => {
+      const beforePrice = await stableState(priceId);
+      const blocker = new Client({ connectionString: process.env.DATABASE_URL });
+      await blocker.connect();
+      try {
+        await blocker.query('begin');
+        await blocker.query('update client_companies set manager_id=$2 where id=$1', [companyId, otherManagerId]);
+        const saving = assert.rejects(updateWholesalePriceList(priceId, savedInput, { role: 'manager', managerId }), /Клиент/);
+        try { await waitForLock('select id::text, title from client_companies'); }
+        finally { await blocker.query('commit'); }
+        await saving;
+        assert.equal((await query('select manager_id::text from client_companies where id=$1', [companyId])).rows[0].manager_id, String(otherManagerId));
+      } finally {
+        await blocker.end();
+        await query('update client_companies set manager_id=$2 where id=$1', [companyId, managerId]);
+      }
+      assert.deepEqual(await stableState(priceId), beforePrice);
+    });
+
+    await t.test('successful saves commit both assignments and leave all other existing price lists intact', async () => {
+      const priorPrices = await query('select id::text from wholesale_price_lists order by id');
+      const priorStates = await Promise.all(priorPrices.rows.map((row) => stableState(Number(row.id))));
+      const newInput = { ...input(makeItems(2), 'Atomic company assignment'), managerId: otherManagerId };
+      const newId = await createWholesalePriceList(newInput, admin);
+      assert.equal((await getWholesalePriceListEditor(newId, admin))!.managerId, otherManagerId);
+      assert.equal((await query('select manager_id::text from client_companies where id=$1', [companyId])).rows[0].manager_id, String(otherManagerId));
+      await updateWholesalePriceList(newId, { ...newInput, managerId }, admin);
+      assert.equal((await getWholesalePriceListEditor(newId, admin))!.managerId, managerId);
+      assert.equal((await query('select manager_id::text from client_companies where id=$1', [companyId])).rows[0].manager_id, String(managerId));
+      assert.deepEqual(await Promise.all(priorPrices.rows.map((row) => stableState(Number(row.id)))), priorStates);
     });
   } finally {
     await globalThis.__ktsPgPool?.end();

@@ -10,9 +10,10 @@ import * as workflow from '../src/shared/lib/wholesalePriceWorkflowStatus';
 
 // Execute the actual handlers. Stub only IO/auth, not the body parser or handler
 // control flow. No connection to an application database is possible here.
-function handler(method: 'POST' | 'PUT') {
+function handler(method: 'POST' | 'PUT', options: { saveError?: Error; notificationError?: boolean } = {}) {
   const writes: Array<{ items: unknown[] }> = [];
   let assignments = 0;
+  let notifications = 0;
   const filename = method === 'POST'
     ? '../src/app/api/admin/wholesale/price-lists/route.ts'
     : '../src/app/api/admin/wholesale/price-lists/[id]/route.ts';
@@ -28,13 +29,22 @@ function handler(method: 'POST' | 'PUT') {
     '@/shared/lib/adminAuth': { requireEmployee: async () => ({ session: { role: 'admin' } }) },
     '@/shared/lib/adminSecurity': { enforceAdminActionRateLimit: async () => null },
     '@/shared/lib/originProtection': { enforceSameOriginRequest: () => null },
-    '@/shared/lib/clientRealtime': { publishClientRealtimeEvent: () => {} },
+    '@/shared/lib/clientRealtime': { publishClientRealtimeEvent: () => {
+      notifications++;
+      if (options.notificationError) throw new Error('Synthetic notification failure');
+    } },
     '@/shared/lib/db/securityAuditRepo': {},
     '@/shared/lib/rateLimit': {},
     '@/shared/lib/db': {
       getWholesalePriceListEditor: async () => ({ token: 'existing-token-not-changed' }),
-      createWholesalePriceList: async (input: { items: unknown[] }) => { writes.push(input); return 45; },
-      updateWholesalePriceList: async (_id: number, input: { items: unknown[] }) => { writes.push(input); },
+      createWholesalePriceList: async (input: { items: unknown[] }) => {
+        if (options.saveError) throw options.saveError;
+        writes.push(input); return 45;
+      },
+      updateWholesalePriceList: async (_id: number, input: { items: unknown[] }) => {
+        if (options.saveError) throw options.saveError;
+        writes.push(input);
+      },
       updateClientCompanyManagerAssignments: async () => { assignments++; },
     },
   };
@@ -44,7 +54,7 @@ function handler(method: 'POST' | 'PUT') {
     return modules[name];
   }, stubModule, stubModule.exports);
   return { run: (request: Request) => stubModule.exports[method](request, { params: Promise.resolve({ id: '45' }) }),
-    writes, assignments: () => assignments };
+    writes, assignments: () => assignments, notifications: () => notifications };
 }
 
 function payload() {
@@ -65,7 +75,27 @@ for (const method of ['POST', 'PUT'] as const) {
     assert.equal(response.status, 200);
     assert.equal(h.writes.length, 1);
     assert.deepEqual(h.writes[0].items, body.items);
-    assert.equal(h.assignments(), 1);
+    assert.equal(h.assignments(), 0, 'company assignment belongs to the database transaction, not a second route write');
+    assert.equal(h.notifications(), 1);
+  });
+
+  test(`${method} rejected atomic save does not publish an event or run a second assignment write`, async () => {
+    const h = handler(method, { saveError: new Error('Менеджер по развитию не найден или отключен') });
+    const response = await h.run(new Request('https://example.test/api/price', { method, body: JSON.stringify(payload()) }));
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /Менеджер по развитию/);
+    assert.equal(h.writes.length, 0);
+    assert.equal(h.assignments(), 0);
+    assert.equal(h.notifications(), 0);
+  });
+
+  test(`${method} realtime failure after commit still reports a successful save`, async () => {
+    const h = handler(method, { notificationError: true });
+    const response = await h.run(new Request('https://example.test/api/price', { method, body: JSON.stringify(payload()) }));
+    assert.equal(response.status, 200);
+    assert.equal(h.writes.length, 1);
+    assert.equal(h.assignments(), 0);
+    assert.equal(h.notifications(), 1);
   });
 
   test(`${method} invalid late item or absent items rejects the whole save before any write`, async () => {

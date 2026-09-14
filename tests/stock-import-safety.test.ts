@@ -97,6 +97,7 @@ async function importerWithSyntheticDatabase(stocks = originalStocks) {
   };
   const database = {
     ensureSiteSchema: async () => {}, ensureCatalogSchema: async () => {}, query,
+    tryAcquireSessionAdvisoryLock: async () => async () => {},
     withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>) => callback({ query }),
   };
   const loaded = { exports: {} as { importStockFromExcelBuffer: (input: { buffer: Buffer; fileName: string }) => Promise<StockImportResult> } };
