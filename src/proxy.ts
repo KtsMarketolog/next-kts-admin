@@ -4,9 +4,41 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const PRIVATE_CACHE_PREFIXES = ['/admin', '/cabinet', '/login', '/price'];
 const PRIVATE_API_PREFIXES = ['/api/admin', '/api/client', '/api/price'];
 const X_ROBOTS_TAG_PRIVATE = 'noindex, nofollow, noarchive';
+const FIRMWARE_PUBLIC_ROOT = '/klimatika/prog/firmware/update';
+const FIRMWARE_DOWNLOAD_PATHS = new Set([
+  `${FIRMWARE_PUBLIC_ROOT}/hse/gen_1/hse_gen_1.c23`,
+  `${FIRMWARE_PUBLIC_ROOT}/hse/gen_1/hse_gen_1.ver`,
+]);
 
 function matchesPathPrefix(pathname: string, prefix: string) {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function normalizedPathSegments(pathname: string) {
+  const parts: string[] = [];
+  for (const part of pathname.replace(/\\/g, '/').split('/')) {
+    if (part === '..') parts.pop();
+    else if (part && part !== '.') parts.push(part);
+  }
+  return `/${parts.join('/')}`;
+}
+
+function blocksFirmwareStoragePath(pathname: string) {
+  if (FIRMWARE_DOWNLOAD_PATHS.has(pathname)) return false;
+  let decoded = pathname;
+  // Static lookup and upstream URL parsers can decode separators or dot segments.
+  // Decode ASCII escapes even beside malformed UTF-8; never let malformed suffixes
+  // hide an otherwise recognizable protected prefix. Work is strictly bounded.
+  for (let depth = 0; depth < 8; depth += 1) {
+    const slashes = decoded.replace(/\\/g, '/').replace(/\/{2,}/g, '/').toLowerCase();
+    if (matchesPathPrefix(slashes, FIRMWARE_PUBLIC_ROOT)
+      || matchesPathPrefix(normalizedPathSegments(slashes), FIRMWARE_PUBLIC_ROOT)) return true;
+    const next = decoded.replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    if (next === decoded) return false;
+    decoded = next;
+  }
+  // Excessively nested encodings are not canonical public paths.
+  return true;
 }
 
 function isPrivatePagePath(pathname: string) {
@@ -51,6 +83,17 @@ function isSameOrigin(request: NextRequest) {
 }
 
 export function proxy(request: NextRequest) {
+  // The firmware backup tree also contains private staging, history and state.
+  // Only the two canonical URLs may proceed to their beforeFiles rewrites.
+  if (blocksFirmwareStoragePath(request.nextUrl.pathname)) {
+    return new NextResponse(null, {
+      status: 404,
+      headers: {
+        'Cache-Control': 'private, no-store',
+        'X-Robots-Tag': X_ROBOTS_TAG_PRIVATE,
+      },
+    });
+  }
   // This application does not expose Server Actions. Rejecting the header in
   // the lightweight proxy prevents stale clients and automated probes from
   // reaching React's comparatively expensive action decoder.

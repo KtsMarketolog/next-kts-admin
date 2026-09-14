@@ -9,6 +9,22 @@ const nextConfig: NextConfig = {
   deploymentId: process.env.DEPLOYMENT_VERSION,
   serverExternalPackages: ["pdfkit"],
   outputFileTracingRoot: __dirname,
+  rewrites: async () => ({
+    // beforeFiles is essential: the preserved legacy files still exist in public.
+    // Only the descriptor-backed handlers may serve these stable download URLs.
+    beforeFiles: [
+      {
+        source: "/klimatika/prog/firmware/update/hse/gen_1/hse_gen_1\\.c23",
+        destination: "/api/firmware/download/c23",
+      },
+      {
+        source: "/klimatika/prog/firmware/update/hse/gen_1/hse_gen_1\\.ver",
+        destination: "/api/firmware/download/ver",
+      },
+    ],
+    afterFiles: [],
+    fallback: [],
+  }),
   experimental: {
     optimizePackageImports: ["react-select", "@emotion/react"],
     // Only the legacy multipart fallback passes through proxy and is capped at
