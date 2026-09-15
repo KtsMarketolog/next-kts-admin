@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import { PERSONAL_DASHBOARD_AUDIENCE_LABELS, type PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
@@ -19,23 +19,29 @@ type ManagementProps = {
 };
 
 export function ManagerDashboardManagement({ overview, busy: externalBusy, mutate: performMutation }: ManagementProps) {
-  const [audience, setAudience] = useState<PersonalDashboardAudience>('development');
   const [pending, setPending] = useState(false);
-  const [previewId, setPreviewId] = useState<number | null>(null);
-  const [fileError, setFileError] = useState('');
+  const [previewSelection, setPreviewSelection] = useState<{ audience: PersonalDashboardAudience; versionId: number } | null>(null);
+  const [fileErrors, setFileErrors] = useState<Partial<Record<PersonalDashboardAudience, string>>>({});
   const [results, setResults] = useState<ManagerDashboardImport[]>([]);
-  const htmlInput = useRef<HTMLInputElement>(null);
+  const developmentHtmlInput = useRef<HTMLInputElement>(null);
+  const supportHtmlInput = useRef<HTMLInputElement>(null);
+  const htmlInputs = { development: developmentHtmlInput, support: supportHtmlInput };
   const snapshotInput = useRef<HTMLInputElement>(null);
-  const tabRefs = useRef<Partial<Record<PersonalDashboardAudience, HTMLButtonElement | null>>>({});
+  const previewPanel = useRef<HTMLElement>(null);
   const mutationRef = useRef(false);
   const busy = externalBusy || pending;
-  const group = overview.groups.find((item) => item.audience === audience);
-  const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
-  const preview = group?.htmlVersions.find((version) => version.id === previewId);
+  const previewGroup = overview.groups.find((item) => item.audience === previewSelection?.audience);
+  const preview = previewGroup?.htmlVersions.find((version) => version.id === previewSelection?.versionId);
+
+  useEffect(() => {
+    if (!previewSelection) return;
+    previewPanel.current?.focus({ preventScroll: true });
+    previewPanel.current?.scrollIntoView({ block: 'start' });
+  }, [previewSelection, preview?.id]);
 
   async function mutate(path: string, init: RequestInit, successMessage: string) {
-    // The ref closes the event-to-render gap: a fast tab click must not move an
-    // in-flight upload/preview callback into a different audience.
+    // One shared guard covers both visible groups and the common file controls,
+    // including a second click before React has rendered the disabled buttons.
     if (busy || mutationRef.current) return null;
     mutationRef.current = true;
     setPending(true);
@@ -43,49 +49,42 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     finally { mutationRef.current = false; setPending(false); }
   }
 
-  function selectAudience(next: PersonalDashboardAudience) {
-    if (busy || mutationRef.current || next === audience) return;
-    setAudience(next);
-    setPreviewId(null);
-    setFileError('');
-    if (htmlInput.current) htmlInput.current.value = '';
-  }
-
-  function moveTab(event: KeyboardEvent<HTMLButtonElement>, current: PersonalDashboardAudience) {
+  function showPreview(audience: PersonalDashboardAudience, versionId: number) {
     if (busy || mutationRef.current) return;
-    const index = AUDIENCES.indexOf(current);
-    const next = event.key === 'Home' ? AUDIENCES[0] : event.key === 'End' ? AUDIENCES[AUDIENCES.length - 1]
-      : event.key === 'ArrowRight' ? AUDIENCES[(index + 1) % AUDIENCES.length]
-        : event.key === 'ArrowLeft' ? AUDIENCES[(index + AUDIENCES.length - 1) % AUDIENCES.length] : null;
-    if (!next) return;
-    event.preventDefault();
-    selectAudience(next);
-    tabRefs.current[next]?.focus();
+    const group = overview.groups.find((item) => item.audience === audience);
+    if (group?.htmlVersions.some((version) => version.id === versionId)) setPreviewSelection({ audience, versionId });
   }
 
-  async function uploadHtml(event: FormEvent<HTMLFormElement>) {
+  async function uploadHtml(event: FormEvent<HTMLFormElement>, audience: PersonalDashboardAudience) {
     event.preventDefault();
+    const group = overview.groups.find((item) => item.audience === audience);
     if (busy || mutationRef.current || !group) return;
-    const file = htmlInput.current?.files?.[0];
+    const input = htmlInputs[audience].current;
+    const file = input?.files?.[0];
     if (!file) return;
-    setFileError('');
+    const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
+    setFileErrors((previous) => ({ ...previous, [audience]: '' }));
     if (!/\.html?$/i.test(file.name) || file.size === 0 || file.size > MAX_HTML_BYTES) {
-      setFileError('Выберите непустой HTML-файл размером до 5 МБ.');
+      setFileErrors((previous) => ({ ...previous, [audience]: 'Выберите непустой HTML-файл размером до 5 МБ.' }));
       return;
     }
     const form = new FormData();
     form.append('file', file);
     const result = await mutate(`/html?audience=${audience}`, { method: 'POST', body: form }, `HTML для группы «${label}» загружен как черновик. Проверьте предпросмотр перед публикацией.`);
     if (result) {
-      if (htmlInput.current) htmlInput.current.value = '';
-      if (result.version?.audience === audience) setPreviewId(result.version.id);
+      // Never clear the other group's selection or infer a recipient from it.
+      if (input) input.value = '';
+      if (result.version?.audience === audience) setPreviewSelection({ audience, versionId: result.version.id });
     }
   }
 
-  async function publish(versionId: number) {
+  async function publish(audience: PersonalDashboardAudience, versionId: number) {
+    const group = overview.groups.find((item) => item.audience === audience);
     if (busy || mutationRef.current || !group) return;
+    if (previewSelection?.audience !== audience || previewSelection.versionId !== versionId) return;
     const version = group.htmlVersions.find((item) => item.id === versionId);
     if (!version) return;
+    const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
     const isRollback = versionId === group.previousHtmlVersionId;
     if (!window.confirm(`${isRollback ? 'Вернуть' : 'Опубликовать'} HTML «${version.originalName}», версия #${versionId}, для группы «${label}»?\n\nHTML другой группы и личные файлы данных менеджеров сохранятся.`)) return;
     await mutate('/publish', {
@@ -133,85 +132,83 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
 
   return (
     <div className={styles.stack}>
-      <div className={styles.audienceTabs} role="tablist" aria-label="Группа менеджеров" aria-orientation="horizontal">
-        {AUDIENCES.map((item) => <button
-          key={item}
-          ref={(node) => { tabRefs.current[item] = node; }}
-          id={`manager-dashboard-tab-${item}`}
-          className={styles.audienceTab}
-          type="button"
-          role="tab"
-          aria-selected={audience === item}
-          aria-controls="manager-dashboard-audience-panel"
-          tabIndex={audience === item ? 0 : -1}
-          disabled={busy}
-          onClick={() => selectAudience(item)}
-          onKeyDown={(event) => moveTab(event, item)}
-        >{PERSONAL_DASHBOARD_AUDIENCE_LABELS[item]}</button>)}
-      </div>
-      <div id="manager-dashboard-audience-panel" className={styles.stack} role="tabpanel" aria-labelledby={`manager-dashboard-tab-${audience}`} tabIndex={0}>
-      {!group ? <section className={styles.panel}><p className={styles.empty}>Не удалось получить настройки этой группы. Обновите страницу.</p></section> : <>
-      <section className={styles.panel}>
-        <div className={styles.sectionHeading}>
-          <div><h2>HTML дашборда группы</h2><p>{label}: собственная опубликованная версия. HTML другой группы и личные данные обновляются отдельно.</p></div>
-          <span className={styles.badge}>{group.activeHtmlVersionId ? `Опубликована версия #${group.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
-        </div>
-        <form className={styles.uploadForm} onSubmit={(event) => void uploadHtml(event)}>
-          <label htmlFor={`manager-dashboard-html-${audience}`}>Новая версия HTML · до 5 МБ</label>
-          <div className={styles.actions}>
-            <input key={audience} ref={htmlInput} id={`manager-dashboard-html-${audience}`} type="file" accept=".html,.htm,text/html" required disabled={busy} />
-            <button className={styles.primary} type="submit" disabled={busy}>Загрузить черновик</button>
-          </div>
-          {fileError ? <p className={styles.warning} role="alert">{fileError}</p> : null}
-        </form>
-        {group.htmlVersions.length === 0 ? <p className={styles.empty}>Для этой группы HTML ещё не загружен. Загрузите HTML, откройте предпросмотр и опубликуйте проверенную версию.</p> : (
-          <div className={styles.tableScroll}>
-            <table className={styles.table}>
-              <thead><tr><th scope="col">Версия</th><th scope="col">Загружена, МСК</th><th scope="col">Состояние</th><th scope="col">Действия</th></tr></thead>
-              <tbody>{group.htmlVersions.map((version) => (
-                <tr key={version.id}>
-                  <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ</small></td>
-                  <td>{formatDashboardDate(version.createdAt)}</td>
-                  <td>{version.id === group.activeHtmlVersionId ? 'Опубликована' : version.id === group.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
-                  <td><div className={styles.actions}>
-                    <button className={styles.secondary} type="button" disabled={busy} onClick={() => setPreviewId(version.id)}>Предпросмотр</button>
-                    {version.id !== group.activeHtmlVersionId ? (
-                      <button className={styles.primary} type="button" disabled={busy || previewId !== version.id} title={previewId !== version.id ? 'Сначала откройте предпросмотр этой версии' : undefined} onClick={() => void publish(version.id)}>{version.id === group.previousHtmlVersionId ? 'Вернуть группе' : 'Опубликовать группе'}</button>
-                    ) : null}
-                  </div></td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-        )}
-        {preview ? <div className={styles.preview}>
-          <div className={styles.sectionHeading}><div><h3>Предпросмотр: {preview.originalName}</h3><p>{label}. В предпросмотре HTML личные данные менеджеров не загружаются.</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => setPreviewId(null)}>Закрыть</button></div>
-          <DashboardFrame audience={audience} versionId={preview.id} preview />
-        </div> : null}
-      </section>
+      <div className={styles.audienceGrid}>
+        {AUDIENCES.map((audience) => {
+          const group = overview.groups.find((item) => item.audience === audience);
+          const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
+          return (
+            <section key={audience} id={`manager-dashboard-group-${audience}`} className={styles.audienceColumn} aria-labelledby={`manager-dashboard-heading-${audience}`}>
+              <h2 id={`manager-dashboard-heading-${audience}`} className={styles.audienceHeading}>{label}</h2>
+              {!group ? <div className={styles.panel}><p className={styles.empty}>Не удалось получить настройки этой группы. Обновите страницу.</p></div> : <>
+                <section className={styles.panel} aria-label={`HTML: ${label}`}>
+                  <div className={styles.sectionHeading}>
+                    <div><h3>HTML дашборда</h3><p>Собственный HTML этой группы. Публикация не меняет дашборд другой группы.</p></div>
+                    <span className={styles.badge}>{group.activeHtmlVersionId ? `Опубликована версия #${group.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
+                  </div>
+                  <form className={styles.uploadForm} onSubmit={(event) => void uploadHtml(event, audience)}>
+                    <label htmlFor={`manager-dashboard-html-${audience}`}>Новая версия HTML · до 5 МБ</label>
+                    <div className={styles.actions}>
+                      <input ref={htmlInputs[audience]} id={`manager-dashboard-html-${audience}`} type="file" accept=".html,.htm,text/html" required disabled={busy} aria-invalid={!!fileErrors[audience]} aria-describedby={fileErrors[audience] ? `manager-dashboard-html-error-${audience}` : undefined} />
+                      <button className={styles.primary} type="submit" disabled={busy}>Загрузить черновик</button>
+                    </div>
+                    {fileErrors[audience] ? <p id={`manager-dashboard-html-error-${audience}`} className={styles.warning} role="alert">{fileErrors[audience]}</p> : null}
+                  </form>
+                  {group.htmlVersions.length === 0 ? <p className={styles.empty}>Для этой группы HTML ещё не загружен. Загрузите HTML, откройте предпросмотр и опубликуйте проверенную версию.</p> : (
+                    <div className={styles.tableScroll}>
+                      <table className={`${styles.table} ${styles.groupTable} ${styles.versionsTable}`}>
+                        <thead><tr><th scope="col">Версия / загружена, МСК</th><th scope="col">Состояние</th><th scope="col">Действия</th></tr></thead>
+                        <tbody>{group.htmlVersions.map((version) => {
+                          const previewed = previewSelection?.audience === audience && previewSelection.versionId === version.id;
+                          return (
+                            <tr key={version.id}>
+                              <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ</small><small>{formatDashboardDate(version.createdAt)}</small></td>
+                              <td>{version.id === group.activeHtmlVersionId ? 'Опубликована' : version.id === group.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
+                              <td><div className={styles.actions}>
+                                <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewed} onClick={() => showPreview(audience, version.id)}>Предпросмотр</button>
+                                {version.id !== group.activeHtmlVersionId ? (
+                                  <button className={styles.primary} type="button" disabled={busy || !previewed} title={!previewed ? 'Сначала откройте предпросмотр этой версии' : undefined} onClick={() => void publish(audience, version.id)}>{version.id === group.previousHtmlVersionId ? 'Вернуть группе' : 'Опубликовать группе'}</button>
+                                ) : null}
+                              </div></td>
+                            </tr>
+                          );
+                        })}</tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
 
-      <section className={styles.panel}>
-        <div className={styles.sectionHeading}><div><h2>Личные файлы группы</h2><p>{label}. Снимки назначаются автоматически из общей почты или ручной загрузки ниже.</p></div></div>
-        <div className={styles.tableScroll}>
-          <table className={styles.table}>
-            <thead><tr><th scope="col">Менеджер</th><th scope="col">Email для сопоставления</th><th scope="col">Данные</th><th scope="col">Подготовлены / доступны до, МСК</th></tr></thead>
-            <tbody>{group.managers.map((manager) => (
-              <tr key={manager.id}>
-                <td><strong>{manager.name}</strong>{manager.isActive === false ? <small>Учётная запись отключена</small> : null}</td>
-                <td>{manager.email || 'Email не указан'}{manager.bindingStatus === 'ambiguous'
-                  ? <p className={styles.warning}>Email совпадает у нескольких менеджеров. Исправьте его в карточках, чтобы назначать файлы автоматически.</p>
-                  : manager.isActive !== false && (manager.bindingStatus === 'unknown' || !manager.email)
-                    ? <p className={styles.warning}>Для назначения файла нужен уникальный email в карточке менеджера.</p> : null}</td>
-                <td><SnapshotStatus snapshot={manager.snapshot} status={manager.snapshotStatus} expectedIssuedAfter={overview.expectedIssuedAfter} />{manager.snapshot ? <small>{manager.snapshot.originalName}</small> : null}</td>
-                <td>{manager.snapshot ? <>{formatDashboardDate(manager.snapshot.issued)}<small>до {formatDashboardDate(manager.snapshot.expires)}</small></> : '—'}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-          {group.managers.length === 0 ? <p className={styles.empty}>В этой группе менеджеры ещё не добавлены.</p> : null}
-        </div>
-      </section>
-      </>}
+                <section className={styles.panel} aria-label={`Личные файлы: ${label}`}>
+                  <div className={styles.sectionHeading}><div><h3>Личные файлы группы</h3><p>Снимки назначаются автоматически из общей почты или ручной загрузки ниже.</p></div><span className={styles.badge}>Менеджеров: {group.managers.length}</span></div>
+                  <div className={styles.tableScroll}>
+                    <table className={`${styles.table} ${styles.groupTable}`}>
+                      <thead><tr><th scope="col">Менеджер / email для сопоставления</th><th scope="col">Личный снимок</th></tr></thead>
+                      <tbody>{group.managers.map((manager) => (
+                        <tr key={manager.id}>
+                          <td><strong>{manager.name}</strong><small>{manager.email || 'Email не указан'}</small>{manager.isActive === false ? <small>Учётная запись отключена</small> : null}{manager.bindingStatus === 'ambiguous'
+                            ? <p className={styles.warning}>Email совпадает у нескольких менеджеров. Исправьте его в карточках, чтобы назначать файлы автоматически.</p>
+                            : manager.isActive !== false && (manager.bindingStatus === 'unknown' || !manager.email)
+                              ? <p className={styles.warning}>Для назначения файла нужен уникальный email в карточке менеджера.</p> : null}</td>
+                          <td><SnapshotStatus snapshot={manager.snapshot} status={manager.snapshotStatus} expectedIssuedAfter={overview.expectedIssuedAfter} />{manager.snapshot ? <><small>{manager.snapshot.originalName}</small><small>Подготовлен: {formatDashboardDate(manager.snapshot.issued)} · до {formatDashboardDate(manager.snapshot.expires)} (МСК)</small></> : null}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                    {group.managers.length === 0 ? <p className={styles.empty}>В этой группе менеджеры ещё не добавлены.</p> : null}
+                  </div>
+                </section>
+              </>}
+            </section>
+          );
+        })}
       </div>
+
+      {preview && previewGroup ? <section id="manager-dashboard-html-preview" ref={previewPanel} className={`${styles.panel} ${styles.fullWidthPreview}`} aria-labelledby="manager-dashboard-preview-heading" tabIndex={-1}>
+        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. Личные данные менеджеров не загружаются.</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
+          if (busy || mutationRef.current) return;
+          setPreviewSelection(null);
+          htmlInputs[previewGroup.audience].current?.focus();
+        }}>Закрыть</button></div>
+        <DashboardFrame key={`${previewGroup.audience}:${preview.id}`} audience={previewGroup.audience} versionId={preview.id} preview />
+      </section> : null}
 
       <section className={styles.panel}>
         <div className={styles.sectionHeading}>

@@ -168,6 +168,7 @@ function management(options: {
       if (!(index in slots)) slots[index] = { current: initial };
       return slots[index];
     },
+    useEffect() {},
   };
   const requests: Array<{ path: string; init: RequestInit }> = [];
   const confirmations: string[] = [];
@@ -182,8 +183,8 @@ function management(options: {
   new Function('require', 'module', 'exports', 'window', code)((name: string) => {
     assert.ok(name in modules, `Unexpected dependency: ${name}`); return modules[name];
   }, testModule, testModule.exports, { confirm: (message: string) => { confirmations.push(message); return true; } });
-  const inputs = new Map<string, { files: File[]; value: string }>();
-  let focused = '';
+  const inputs = new Map<string, { files: File[]; value: string; focus(): void }>();
+  let focusedInput = '';
   const render = () => {
     cursor = 0;
     const tree = testModule.exports.ManagerDashboardManagement({ overview, busy: options.busy ?? false, mutate: async (path: string, init: RequestInit) => {
@@ -193,11 +194,10 @@ function management(options: {
     for (const node of elements(tree)) {
       if (node.type === 'input' && typeof node.props.id === 'string') {
         const id = node.props.id;
-        if (!inputs.has(id)) inputs.set(id, { files: [], value: '' });
-        (node.props.ref as { current: unknown }).current = inputs.get(id);
-      }
-      if (node.type === 'button' && node.props.role === 'tab') {
-        (node.props.ref as (node: unknown) => void)({ focus() { focused = String(node.props.id); } });
+        if (!inputs.has(id)) inputs.set(id, { files: [], value: '', focus() { focusedInput = id; } });
+        const ref = node.props.ref;
+        if (typeof ref === 'function') ref(inputs.get(id));
+        else (ref as { current: unknown }).current = inputs.get(id);
       }
     }
     return tree;
@@ -206,9 +206,7 @@ function management(options: {
     const item = elements(render()).find((node) => node.type === type && predicate(node.props));
     assert.ok(item, `Missing ${String(type)}`); return item;
   };
-  const tab = (audience: audiences.PersonalDashboardAudience) => find('button', (props) => props.id === `manager-dashboard-tab-${audience}`);
-  const switchTo = (audience: audiences.PersonalDashboardAudience) => (tab(audience).props.onClick as () => void)();
-  const selected = () => String(find('div', (props) => props.role === 'tabpanel').props['aria-labelledby']);
+  const group = (audience: audiences.PersonalDashboardAudience) => find('section', (props) => props.id === `manager-dashboard-group-${audience}`);
   const selectFiles = (id: string, files: File[]) => {
     find('input', (props) => props.id === id);
     const input = inputs.get(id)!; input.files = files; input.value = 'synthetic-selection';
@@ -217,108 +215,204 @@ function management(options: {
     const form = find('form', (props) => elements(props.children).some((node) => node.type === 'input' && node.props.id === id));
     (form.props.onSubmit as (event: unknown) => void)({ preventDefault() {} });
   };
-  const preview = (id: number) => {
-    const row = find('tr', (props) => elements(props.children).some((node) => node.type === 'small'
+  const row = (audience: audiences.PersonalDashboardAudience, id: number) => {
+    const item = elements(group(audience)).find((node) => node.type === 'tr' && elements(node.props.children).some((node) => node.type === 'small'
       && Array.isArray(node.props.children) && node.props.children.includes(id)));
-    const button = elements(row).find((node) => node.type === 'button' && text(node.props.children) === 'Предпросмотр')!;
+    assert.ok(item, `Missing ${audience} version #${id}`); return item;
+  };
+  const versionButton = (audience: audiences.PersonalDashboardAudience, id: number, title: string) => {
+    const item = elements(row(audience, id)).find((node) => node.type === 'button' && text(node.props.children) === title);
+    assert.ok(item, `Missing ${audience} version #${id} button ${title}`); return item;
+  };
+  const preview = (audience: audiences.PersonalDashboardAudience, id: number) => {
+    const button = versionButton(audience, id, 'Предпросмотр');
     (button.props.onClick as () => void)();
   };
   const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); render(); };
   render();
-  return { render, find, tab, switchTo, selected, selectFiles, submit, preview, settle, requests, confirmations, inputs, focused: () => focused };
+  return { render, find, group, versionButton, selectFiles, submit, preview, settle, requests, confirmations, inputs, focusedInput: () => focusedInput };
 }
 
-test('management renders accessible group tabs while mixed-file controls and journal stay outside the group panel', () => {
+test('management shows both independently labelled groups together without tabs and keeps common controls below them', () => {
   const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview: managementOverview(), busy: false, mutate: async () => null }));
-  assert.match(html, /role="tablist"/);
+  assert.doesNotMatch(html, /role="tab(?:list|panel)?"|manager-dashboard-tab-/);
   assert.match(html, /Менеджеры по развитию/);
   assert.match(html, /Менеджеры по сопровождению/);
+  assert.match(html, /Only development manager/);
+  assert.match(html, /Only support manager/);
   const view = management();
-  const panel = view.find('div', (props) => props.role === 'tabpanel');
-  assert.match(text(panel), /Only development manager/);
-  assert.doesNotMatch(text(panel), /Only support manager|Общая загрузка|Журнал импорта|Проверить почту сейчас/);
-  assert.equal(elements(panel).some((node) => node.props.id === 'manager-dashboard-snapshots'), false);
-  view.switchTo('support');
-  const supportPanel = view.find('div', (props) => props.role === 'tabpanel');
-  assert.match(text(supportPanel), /Only support manager|support-11.html/);
-  assert.doesNotMatch(text(supportPanel), /Only development manager|development-11.html/);
-  assert.equal(view.tab('support').props['aria-selected'], true);
-  assert.equal(view.tab('support').props.tabIndex, 0);
-  assert.equal(view.tab('development').props.tabIndex, -1);
+  for (const audience of ['development', 'support'] as const) {
+    const group = view.group(audience);
+    const otherAudience = audience === 'development' ? 'support' : 'development';
+    assert.equal(group.props['aria-labelledby'], `manager-dashboard-heading-${audience}`);
+    assert.equal(elements(group).filter((node) => node.props.id === `manager-dashboard-heading-${audience}`).length, 1);
+    assert.match(text(group), new RegExp(`Only ${audience} manager`));
+    assert.match(text(group), new RegExp(`${audience}-11.html`));
+    assert.doesNotMatch(text(group), new RegExp(`Only ${otherAudience} manager|${otherAudience}-11.html|Общая загрузка|Журнал импорта|Проверить почту сейчас`));
+    assert.equal(elements(group).filter((node) => node.props.id === `manager-dashboard-html-${audience}`).length, 1);
+    assert.equal(elements(group).some((node) => node.props.id === 'manager-dashboard-snapshots'), false);
+  }
+  const tree = elements(view.render());
+  assert.equal(tree.filter((node) => node.props.id === 'manager-dashboard-snapshots').length, 1);
+  assert.equal(tree.filter((node) => node.type === 'button' && text(node.props.children) === 'Проверить почту сейчас').length, 1);
+  assert.equal(tree.filter((node) => node.type === 'h2' && text(node.props.children) === 'Журнал импорта').length, 1);
+  assert.equal(tree.filter((node) => node.type === parts.ImportResults && node.props.title === 'Последние файлы').length, 1);
+  const sharedInputIndex = tree.findIndex((node) => node.props.id === 'manager-dashboard-snapshots');
+  const sharedJournalIndex = tree.findIndex((node) => node.type === 'h2' && text(node.props.children) === 'Журнал импорта');
+  assert.ok(sharedInputIndex > tree.findIndex((node) => node.props.id === 'manager-dashboard-html-support'));
+  assert.ok(sharedJournalIndex > sharedInputIndex);
 });
 
-test('management tab keyboard navigation focuses and selects the matching panel; initial support HTML can be empty', () => {
+test('empty support HTML stays independent from existing development versions and both upload forms remain visible', () => {
   const overview = managementOverview();
   overview.groups[1] = { ...overview.groups[1], htmlVersions: [], activeHtmlVersionId: null, previousHtmlVersionId: null };
   const view = management({ overview });
-  let prevented = false;
-  (view.tab('development').props.onKeyDown as (event: unknown) => void)({ key: 'ArrowRight', preventDefault() { prevented = true; } });
-  assert.equal(prevented, true);
-  assert.equal(view.selected(), 'manager-dashboard-tab-support');
-  assert.equal(view.focused(), 'manager-dashboard-tab-support');
-  assert.match(text(view.render()), /Для этой группы HTML ещё не загружен/);
+  assert.match(text(view.group('support')), /Для этой группы HTML ещё не загружен/);
+  assert.doesNotMatch(text(view.group('development')), /Для этой группы HTML ещё не загружен/);
+  assert.match(text(view.group('development')), /development-11.html|Опубликована версия #11/);
+  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-html-development').props.disabled, false);
+  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-html-support').props.disabled, false);
   assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
-  (view.tab('support').props.onKeyDown as (event: unknown) => void)({ key: 'Home', preventDefault() {} });
-  assert.equal(view.selected(), 'manager-dashboard-tab-development');
 });
 
-test('management scopes preview/publication and rollback revisions to the selected group and clears previews on switch', async () => {
+test('one full-width preview stays outside both columns and publication or rollback targets its exact audience and revision', async () => {
   const view = management();
-  view.preview(12);
-  assert.equal(view.find(parts.DashboardFrame).props.audience, 'development');
-  (view.find('button', (props) => text(props.children) === 'Опубликовать группе').props.onClick as () => void)();
+  const rollback = () => view.versionButton('support', 22, 'Вернуть группе');
+  assert.equal(rollback().props.disabled, true);
+  (rollback().props.onClick as () => void)();
   await view.settle();
+  assert.equal(view.requests.length, 0, 'even a directly invoked handler must require a preview');
+  view.preview('development', 12);
+  assert.equal(view.find(parts.DashboardFrame).props.audience, 'development');
+  const panel = view.find('section', (props) => props.id === 'manager-dashboard-html-preview');
+  assert.equal(panel.props.tabIndex, -1);
+  assert.equal(elements(panel).filter((node) => node.type === parts.DashboardFrame).length, 1);
+  const grid = view.find('div', (props) => Array.isArray(props.children)
+    && props.children.some((node: Element) => node?.props?.id === 'manager-dashboard-group-development')
+    && props.children.some((node: Element) => node?.props?.id === 'manager-dashboard-group-support'));
+  assert.equal(elements(grid).some((node) => node.type === parts.DashboardFrame), false);
+  assert.equal(rollback().props.disabled, true, 'development preview cannot enable support rollback');
+  (rollback().props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests.length, 0);
+  (view.versionButton('development', 12, 'Опубликовать группе').props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests[0].path, '/publish');
   assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { audience: 'development', versionId: 12, expectedActiveVersionId: 11 });
-  view.switchTo('support');
-  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
-  assert.equal(view.find('button', (props) => text(props.children) === 'Вернуть группе').props.disabled, true);
-  view.preview(22);
+  view.preview('support', 22);
   const preview = view.find(parts.DashboardFrame);
+  assert.equal(elements(view.render()).filter((node) => node.type === parts.DashboardFrame).length, 1);
   assert.equal(preview.props.audience, 'support');
   assert.equal(preview.props.preview, true);
   assert.equal(preview.props.versionId, 22);
-  (view.find('button', (props) => text(props.children) === 'Вернуть группе').props.onClick as () => void)();
+  assert.equal(view.versionButton('development', 12, 'Опубликовать группе').props.disabled, true);
+  (rollback().props.onClick as () => void)();
   await view.settle();
   assert.deepEqual(JSON.parse(view.requests[1].init.body as string), { audience: 'support', versionId: 22, expectedActiveVersionId: 21 });
   assert.match(view.confirmations[0], /Менеджеры по развитию/);
   assert.match(view.confirmations[1], /Менеджеры по сопровождению/);
+  (view.find('button', (props) => text(props.children) === 'Закрыть').props.onClick as () => void)();
+  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
+  assert.equal(rollback().props.disabled, true);
+  assert.equal(view.focusedInput(), 'manager-dashboard-html-support');
 });
 
-test('management HTML upload fixes its audience and blocks immediate tab switches/duplicate operations until callback completes', async () => {
+test('publication preview gate checks audience as well as version ID', async () => {
+  const overview = managementOverview();
+  overview.groups[1].htmlVersions[1].id = 12;
+  overview.groups[1].previousHtmlVersionId = 12;
+  const view = management({ overview });
+  view.preview('development', 12);
+  const supportRollback = view.versionButton('support', 12, 'Вернуть группе');
+  assert.equal(supportRollback.props.disabled, true);
+  (supportRollback.props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests.length, 0);
+});
+
+test('independent HTML selections bind uploads to their caller group and serialize duplicate cross-group events', async () => {
   let finish!: (result: import('../src/features/admin/manager-dashboard/types').ManagerDashboardMutationResult) => void;
   const view = management({ mutate: () => new Promise((resolve) => { finish = resolve; }) });
-  view.switchTo('support');
-  const staleDevelopmentClick = view.tab('development').props.onClick as () => void;
-  const id = 'manager-dashboard-html-support';
-  view.selectFiles(id, [new File(['<html>synthetic</html>'], 'support-upload.html')]);
-  view.submit(id);
-  staleDevelopmentClick();
-  view.submit(id);
-  assert.equal(view.selected(), 'manager-dashboard-tab-support');
+  const developmentId = 'manager-dashboard-html-development';
+  const supportId = 'manager-dashboard-html-support';
+  view.selectFiles(developmentId, [new File(['<html>development</html>'], 'development-upload.html')]);
+  view.selectFiles(supportId, [new File(['<html>support</html>'], 'support-upload.html')]);
+  const stalePreview = view.versionButton('development', 12, 'Предпросмотр').props.onClick as () => void;
+  const staleDevelopmentForm = view.find('form', (props) => elements(props.children).some((node) => node.props.id === developmentId));
+  const staleSubmit = staleDevelopmentForm.props.onSubmit as (event: unknown) => void;
+  view.submit(supportId);
+  stalePreview();
+  staleSubmit({ preventDefault() {} });
+  view.submit(developmentId);
+  view.submit(supportId);
   assert.equal(view.requests.length, 1);
   assert.equal(view.requests[0].path, '/html?audience=support');
-  assert.equal(view.tab('development').props.disabled, true);
+  assert.equal((view.requests[0].init.body as FormData).get('file') instanceof File, true);
+  assert.equal(((view.requests[0].init.body as FormData).get('file') as File).name, 'support-upload.html');
+  assert.equal(view.find('input', (props) => props.id === developmentId).props.disabled, true);
+  assert.equal(view.find('input', (props) => props.id === supportId).props.disabled, true);
+  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
   finish({ version: managementOverview().groups[1].htmlVersions[1] });
   await view.settle();
   assert.equal(view.find(parts.DashboardFrame).props.audience, 'support');
   assert.equal(view.find(parts.DashboardFrame).props.versionId, 22);
-  view.switchTo('development');
-  assert.equal(view.selected(), 'manager-dashboard-tab-development');
-  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
+  assert.equal(view.inputs.get(supportId)!.value, '');
+  assert.equal(view.inputs.get(developmentId)!.value, 'synthetic-selection');
+  assert.equal(view.inputs.get(developmentId)!.files[0].name, 'development-upload.html');
+  view.submit(developmentId);
+  assert.equal(view.requests.length, 2);
+  assert.equal(view.requests[1].path, '/html?audience=development');
+  assert.equal(((view.requests[1].init.body as FormData).get('file') as File).name, 'development-upload.html');
+  finish({ version: managementOverview().groups[0].htmlVersions[1] });
+  await view.settle();
+  assert.equal(view.find(parts.DashboardFrame).props.audience, 'development');
+  assert.equal(view.inputs.get(developmentId)!.value, '');
 });
 
-test('mixed snapshot uploads and mailbox checks are common, without selected-audience parameters', async () => {
+test('invalid HTML errors remain in their own column and successful uploads do not clear another selection or error', async () => {
+  const view = management({ mutate: async () => ({ version: managementOverview().groups[1].htmlVersions[1] }) });
+  const developmentId = 'manager-dashboard-html-development';
+  const supportId = 'manager-dashboard-html-support';
+  view.selectFiles(developmentId, [new File(['not HTML'], 'bad.ktsp')]);
+  view.selectFiles(supportId, [new File(['<html>support</html>'], 'support-upload.html')]);
+  view.submit(developmentId);
+  await view.settle();
+  assert.equal(view.requests.length, 0);
+  assert.match(text(view.group('development')), /Выберите непустой HTML-файл размером до 5 МБ/);
+  assert.doesNotMatch(text(view.group('support')), /Выберите непустой HTML-файл размером до 5 МБ/);
+  view.submit(supportId);
+  await view.settle();
+  assert.equal(view.requests[0].path, '/html?audience=support');
+  assert.match(text(view.group('development')), /Выберите непустой HTML-файл размером до 5 МБ/);
+  assert.equal(view.inputs.get(developmentId)!.value, 'synthetic-selection');
+  assert.equal(view.inputs.get(supportId)!.value, '');
+});
+
+test('failed upload preserves both selected HTML files and releases the shared mutation lock for retry', async () => {
+  const view = management({ mutate: async () => null });
+  for (const audience of ['development', 'support'] as const) {
+    view.selectFiles(`manager-dashboard-html-${audience}`, [new File(['<html>synthetic</html>'], `${audience}.html`)]);
+  }
+  view.submit('manager-dashboard-html-support');
+  await view.settle();
+  assert.equal(view.inputs.get('manager-dashboard-html-support')!.value, 'synthetic-selection');
+  assert.equal(view.inputs.get('manager-dashboard-html-development')!.value, 'synthetic-selection');
+  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
+  view.submit('manager-dashboard-html-development');
+  await view.settle();
+  assert.deepEqual(view.requests.map((request) => request.path), ['/html?audience=support', '/html?audience=development']);
+});
+
+test('mixed snapshot uploads and mailbox checks are common and never carry an audience parameter', async () => {
   const view = management();
   const files = [new File(['synthetic-development'], 'development.ktsp'), new File(['synthetic-support'], 'support.ktsp')];
   view.selectFiles('manager-dashboard-snapshots', files);
-  view.switchTo('support');
   view.submit('manager-dashboard-snapshots');
   await view.settle();
   assert.equal(view.requests[0].path, '/snapshots');
   const form = view.requests[0].init.body as FormData;
   assert.deepEqual([...form.keys()], ['files', 'files']);
   assert.deepEqual(form.getAll('files').map((file) => (file as File).name), ['development.ktsp', 'support.ktsp']);
-  view.switchTo('development');
   (view.find('button', (props) => text(props.children) === 'Проверить почту сейчас').props.onClick as () => void)();
   await view.settle();
   assert.equal(view.requests[1].path, '/check-email');
@@ -327,11 +421,30 @@ test('mixed snapshot uploads and mailbox checks are common, without selected-aud
   assert.deepEqual(results.props.results, managementOverview().imports);
 });
 
-test('management external busy prevents tab navigation and support manager dashboard card uses the shared manager-role guard', () => {
+test('external busy blocks uploads, previews, publications and shared controls for both visible groups', () => {
   const view = management({ busy: true });
-  view.switchTo('support');
-  assert.equal(view.selected(), 'manager-dashboard-tab-development');
-  assert.equal(view.tab('support').props.disabled, true);
+  for (const [audience, versionId] of [['development', 12], ['support', 22]] as const) {
+    const id = `manager-dashboard-html-${audience}`;
+    view.selectFiles(id, [new File(['<html>synthetic</html>'], `${audience}.html`)]);
+    assert.equal(view.find('input', (props) => props.id === id).props.disabled, true);
+    assert.equal(view.versionButton(audience, versionId, 'Предпросмотр').props.disabled, true);
+    view.submit(id);
+    view.preview(audience, versionId);
+    const publish = view.versionButton(audience, versionId, audience === 'development' ? 'Опубликовать группе' : 'Вернуть группе');
+    assert.equal(publish.props.disabled, true);
+    (publish.props.onClick as () => void)();
+  }
+  view.selectFiles('manager-dashboard-snapshots', [new File(['synthetic'], 'support.ktsp')]);
+  view.submit('manager-dashboard-snapshots');
+  const check = view.find('button', (props) => text(props.children) === 'Проверить почту сейчас');
+  assert.equal(check.props.disabled, true);
+  (check.props.onClick as () => void)();
+  assert.equal(view.requests.length, 0);
+  assert.equal(view.confirmations.length, 0);
+  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
+});
+
+test('support manager dashboard card keeps the shared manager-role guard', () => {
   assert.equal(isManagerRole('manager'), true);
   assert.equal(isManagerRole('support_manager'), true);
   assert.equal(isManagerRole('wholesale_admin'), false);
