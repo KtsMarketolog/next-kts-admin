@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { PersonalDashboardAudience } from './managerDashboardAudience';
 
 import { buildTopDashboardContentSecurityPolicy, buildTopDashboardFrameSecurityPolicy, getTopDashboardDataAdapterScript } from './topDashboardContentSecurity';
 import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_MAX_BYTES, TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH, TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE, TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE } from './topDashboardDownloadBridge';
@@ -150,8 +151,8 @@ export function personalHtmlCsp(html: string) {
   }).join('; ');
 }
 
-export function buildPersonalDashboardFrame(input: { versionId: number; snapshotId?: number; preview: boolean; emptyState?: PersonalDashboardEmptyState }) {
-  const query = new URLSearchParams({version: String(input.versionId)});
+export function buildPersonalDashboardFrame(input: { versionId: number; snapshotId?: number; preview: boolean; audience?: PersonalDashboardAudience; emptyState?: PersonalDashboardEmptyState }) {
+  const query = new URLSearchParams({version: String(input.versionId), audience: input.audience ?? 'development'});
   if (input.preview) query.set('preview', '1');
   const contentPath = '/api/admin/manager-dashboard/content?' + query.toString();
   const dataPath = '/api/admin/manager-dashboard/snapshots' + (input.snapshotId ? '?snapshot=' + input.snapshotId : '');

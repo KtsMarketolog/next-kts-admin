@@ -1,3 +1,5 @@
+import type { PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
+
 export type ManagerDashboardSnapshot = {
   id: number;
   originalName: string;
@@ -8,6 +10,7 @@ export type ManagerDashboardSnapshot = {
 
 export type ManagerDashboardHtmlVersion = {
   id: number;
+  audience: PersonalDashboardAudience;
   originalName: string;
   fileSize: number;
   createdAt: string;
@@ -26,8 +29,8 @@ export type ManagerDashboardImport = {
 export type ManagerDashboardSnapshotStatus = 'current' | 'stale' | 'expired' | 'missing';
 export type ManagerDashboardBindingStatus = 'matched' | 'missing_email' | 'ambiguous_email';
 
-export type ManagerDashboardOverview = {
-  mode: 'manage';
+export type ManagerDashboardGroup = {
+  audience: PersonalDashboardAudience;
   htmlVersions: ManagerDashboardHtmlVersion[];
   activeHtmlVersionId: number | null;
   previousHtmlVersionId: number | null;
@@ -40,17 +43,23 @@ export type ManagerDashboardOverview = {
     snapshot: ManagerDashboardSnapshot | null;
     snapshotStatus?: ManagerDashboardSnapshotStatus;
   }>;
+};
+
+export type ManagerDashboardOverview = {
+  mode: 'manage';
+  groups: ManagerDashboardGroup[];
   imports: ManagerDashboardImport[];
   mail: { enabled: boolean; configured: boolean };
   expectedIssuedAfter?: string | null;
   expectedBy?: string | null;
 } | {
   mode: 'view';
+  audience: PersonalDashboardAudience;
   bindingStatus: ManagerDashboardBindingStatus;
   snapshot: ManagerDashboardSnapshot | null;
   snapshotStatus?: ManagerDashboardSnapshotStatus;
   history: ManagerDashboardSnapshot[];
-  htmlVersion: Pick<ManagerDashboardHtmlVersion, 'id' | 'originalName'> | null;
+  htmlVersion: Pick<ManagerDashboardHtmlVersion, 'id' | 'originalName' | 'audience'> | null;
   email: string;
   expectedIssuedAfter?: string | null;
   expectedBy?: string | null;

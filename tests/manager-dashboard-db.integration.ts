@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 
-import { query } from '../src/shared/lib/db/client';
+import { query, withTransaction } from '../src/shared/lib/db/client';
+import { applyPersonalDashboardAudienceMigration } from '../src/shared/lib/db/migrations';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import {
   activatePersonalDashboardHtml, createPersonalDashboardHtml, getPersonalDashboardHtml,
@@ -14,6 +15,7 @@ import {
   listPersonalDashboardAdmin, recordPersonalDashboardImportFailure,
 } from '../src/shared/lib/db/managerDashboardRepo';
 import { getManagerEmailHash, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
+import type { PersonalDashboardAudience } from '../src/shared/lib/managerDashboardAudience';
 import { getPersonalDashboardMailReceipt, recordPersonalDashboardMailReceipt, prunePersonalDashboardMailReceipts } from '../src/shared/lib/db/managerDashboardMailReceipts';
 
 function guard() {
@@ -51,10 +53,10 @@ async function manager(label: string, role = 'manager', active = true, emailOver
 const importFile = (data: Buffer, key = randomUUID()) => importPersonalDashboardSnapshot({
   filename: 'personal.ktsp', bytes: data, sourceKey: key, sender: 'synthetic@example.test', messageId: 'test-message',
 });
-const html = (label: string) => {
+const html = (label: string, audience?: PersonalDashboardAudience) => {
   const content = `<!doctype html><html><body>${label}</body></html>`;
   return createPersonalDashboardHtml({ originalName: `${label}.html`, htmlContent: content,
-    fileSize: Buffer.byteLength(content), sha256: createHash('sha256').update(content).digest('hex'), actorId: 'admin:integration-test' });
+    fileSize: Buffer.byteLength(content), sha256: createHash('sha256').update(content).digest('hex'), actorId: 'admin:integration-test', audience });
 };
 
 test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
@@ -67,8 +69,44 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
     const baseline = await query<{ id: string }>(`select id from schema_migrations where id='202609140001_personal_manager_dashboards'`);
     assert.equal(baseline.rowCount, 1);
 
-    await t.test('eleven attachments map independently; one broken file does not prevent ten good ones', async () => {
-      const recipients = await Promise.all(Array.from({ length: 11 }, (_, index) => manager(`batch-${index}`)));
+    await t.test('additive audience migration preserves legacy development publications and unrelated data', async () => {
+      // Temporary legacy tables shadow public tables only on this connection and disappear at commit.
+      await withTransaction(async (client) => {
+        await client.query(`
+          create temp table personal_dashboard_html_versions (
+            id bigint primary key, html_content text not null, created_at text not null
+          ) on commit drop;
+          create temp table personal_dashboard_html_state (
+            id smallint primary key check (id=1),
+            active_version_id bigint references personal_dashboard_html_versions(id),
+            previous_version_id bigint references personal_dashboard_html_versions(id),
+            updated_by text,
+            check (active_version_id is null or previous_version_id is null or active_version_id<>previous_version_id)
+          ) on commit drop;
+          create temp table personal_dashboard_snapshots (payload text) on commit drop;
+          create temp table wholesale_price_lists (payload text) on commit drop;
+          insert into personal_dashboard_html_versions values (91,'legacy current','unchanged'),(90,'legacy previous','unchanged');
+          insert into personal_dashboard_html_state values (1,91,90,'admin:legacy');
+          insert into personal_dashboard_snapshots values ('encrypted sentinel unchanged');
+          insert into wholesale_price_lists values ('price sentinel unchanged');
+        `);
+        await applyPersonalDashboardAudienceMigration(client);
+        assert.deepEqual((await client.query(`select id,audience,active_version_id::text,previous_version_id::text,updated_by
+          from personal_dashboard_html_state order by id`)).rows, [
+          { id: 1, audience: 'development', active_version_id: '91', previous_version_id: '90', updated_by: 'admin:legacy' },
+          { id: 2, audience: 'support', active_version_id: null, previous_version_id: null, updated_by: null },
+        ]);
+        assert.deepEqual((await client.query(`select id::text,html_content,created_at,audience from personal_dashboard_html_versions order by id`)).rows, [
+          { id: '90', html_content: 'legacy previous', created_at: 'unchanged', audience: 'development' },
+          { id: '91', html_content: 'legacy current', created_at: 'unchanged', audience: 'development' },
+        ]);
+        assert.equal((await client.query(`select payload from personal_dashboard_snapshots`)).rows[0].payload, 'encrypted sentinel unchanged');
+        assert.equal((await client.query(`select payload from wholesale_price_lists`)).rows[0].payload, 'price sentinel unchanged');
+      });
+    });
+
+    await t.test('mixed-role attachments map independently; one broken file does not prevent ten good ones', async () => {
+      const recipients = await Promise.all(Array.from({ length: 11 }, (_, index) => manager(`batch-${index}`, index % 2 ? 'support_manager' : 'manager')));
       const results = [];
       for (let index = 0; index < recipients.length; index++) {
         results.push(await importFile(index === 5 ? Buffer.from('invalid json') : bytes(recipients[index].email)));
@@ -77,11 +115,13 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal(results[5].status, 'invalid');
       for (let index = 0; index < recipients.length; index++) {
         const status = await getPersonalDashboardStatus(recipients[index].id);
+        assert.equal(status.audience, index % 2 ? 'support' : 'development');
         assert.equal(status.snapshot?.managerId ?? null, index === 5 ? null : recipients[index].id);
+        if (index !== 5) assert.equal((await importFile(bytes(recipients[index].email))).status, 'duplicate');
       }
     });
 
-    await t.test('snapshot bytes require owner and CURRENT unique active development email binding', async () => {
+    await t.test('snapshot bytes require owner and CURRENT unique active email across both manager roles', async () => {
       const owner = await manager('owner');
       const other = await manager('other');
       const data = bytes(owner.email);
@@ -94,12 +134,16 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal(await getPersonalDashboardSnapshot(owner.id, imported.snapshotId), null);
       assert.equal((await getPersonalDashboardStatus(owner.id)).history.length, 0);
       await query(`update wholesale_managers set email=$2 where id=$1`, [owner.id, owner.email]);
-      const duplicate = await manager('duplicate', 'manager', true, `  ${owner.email.toUpperCase()}  `);
+      const duplicate = await manager('duplicate', 'support_manager', true, `  ${owner.email.toUpperCase()}  `);
       await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'AMBIGUOUS_EMAIL' });
       assert.equal((await importFile(bytes(owner.email, 0, 2))).status, 'ambiguous');
       await query(`update wholesale_managers set is_active=false where id=$1`, [duplicate.id]);
       assert.ok(await getPersonalDashboardSnapshot(owner.id, imported.snapshotId));
       await query(`update wholesale_managers set role='support_manager' where id=$1`, [owner.id]);
+      assert.equal((await getPersonalDashboardStatus(owner.id)).audience, 'support');
+      assert.equal((await getPersonalDashboardSnapshot(owner.id, snapshotId))?.bytes.equals(data), true,
+        'Current account role selects the HTML audience without discarding this manager snapshot');
+      await query(`update wholesale_managers set role='top' where id=$1`, [owner.id]);
       await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'NOT_FOUND' });
       await query(`update wholesale_managers set role='manager',is_active=false where id=$1`, [owner.id]);
       await assert.rejects(() => getPersonalDashboardStatus(owner.id), { code: 'NOT_FOUND' });
@@ -122,14 +166,14 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       const key = randomUUID();
       const unknown = await importFile(data, key);
       assert.equal(unknown.status, 'unknown');
-      const found = await manager('now-known', 'manager', true, email);
+      const found = await manager('now-known', 'support_manager', true, email);
       const retried = await importFile(data, key);
       assert.equal(retried.status, 'imported');
       assert.equal(retried.id, unknown.id);
       assert.equal(retried.managerId, found.id);
       const support = await manager('support', 'support_manager');
       const inactive = await manager('inactive', 'manager', false);
-      assert.equal((await importFile(bytes(support.email))).status, 'unknown');
+      assert.equal((await importFile(bytes(support.email))).status, 'imported');
       assert.equal((await importFile(bytes(inactive.email))).status, 'unknown');
     });
 
@@ -169,12 +213,58 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal((await getPersonalDashboardStatus(recipient.id)).snapshot?.id, good.snapshotId);
     });
 
+    await t.test('support publication and rollback are independent and cross-audience references fail closed', async () => {
+      const development = await getPersonalDashboardHtml();
+      assert.ok(development);
+      assert.equal(development.audience, 'development');
+      const recipient = await manager('support-publication-owner', 'support_manager');
+      const good = await importFile(bytes(recipient.email));
+      const first = await html('support-one', 'support');
+      const second = await html('support-two', 'support');
+      assert.equal(first.audience, 'support');
+      assert.equal(await getPersonalDashboardHtml(undefined, false, 'support'), null, 'No fallback to development HTML');
+      assert.equal(await getPersonalDashboardHtml(first.id, false, 'support'), null);
+      assert.ok(await getPersonalDashboardHtml(first.id, true, 'support'));
+      assert.equal(await getPersonalDashboardHtml(first.id, true), null, 'Preview also stays in its audience');
+      assert.equal(await getPersonalDashboardHtml(development.id, true, 'support'), null);
+      await assert.rejects(() => activatePersonalDashboardHtml({
+        versionId: development.id, expectedActiveVersionId: null, actorId: 'admin:integration-test', audience: 'support',
+      }), { code: 'NOT_FOUND' });
+      await activatePersonalDashboardHtml({ versionId: first.id, expectedActiveVersionId: null, actorId: 'admin:integration-test', audience: 'support' });
+      const before = await listPersonalDashboardAdmin();
+      assert.deepEqual(before.groups.map((group) => group.audience), ['development', 'support']);
+      const developmentState = before.groups[0];
+      await activatePersonalDashboardHtml({ versionId: second.id, expectedActiveVersionId: first.id, actorId: 'admin:integration-test', audience: 'support' });
+      await assert.rejects(() => activatePersonalDashboardHtml({
+        versionId: first.id, expectedActiveVersionId: first.id, actorId: 'admin:integration-test', audience: 'support',
+      }), { code: 'STATE_CONFLICT' });
+      const rolledBack = await activatePersonalDashboardHtml({ versionId: first.id, expectedActiveVersionId: second.id, actorId: 'admin:integration-test', audience: 'support' });
+      assert.equal(rolledBack.previousHtmlVersionId, second.id);
+      assert.equal((await getPersonalDashboardHtml(undefined, false, 'support'))?.id, first.id);
+      assert.equal(await getPersonalDashboardHtml(second.id, false, 'support'), null);
+      await assert.rejects(() => activatePersonalDashboardHtml({
+        versionId: first.id, expectedActiveVersionId: development.id, actorId: 'admin:integration-test',
+      }), { code: 'NOT_FOUND' });
+      for (const column of ['active_version_id', 'previous_version_id']) {
+        await assert.rejects(() => query(`update personal_dashboard_html_state set ${column}=$1 where id=1`, [first.id]), { code: '23503' });
+        await assert.rejects(() => query(`update personal_dashboard_html_state set ${column}=$1 where id=2`, [development.id]), { code: '23503' });
+      }
+      await assert.rejects(() => query(`update personal_dashboard_html_state set id=3 where id=2`), { code: '23514' });
+      await assert.rejects(() => query(`update personal_dashboard_html_versions set audience='other' where id=$1`, [second.id]), { code: '23514' });
+      const after = await listPersonalDashboardAdmin();
+      assert.deepEqual(after.groups[0], developmentState, 'Support publish and rollback leave development completely unchanged');
+      assert.equal(after.groups[1].managers.find((item) => item.id === recipient.id)?.snapshot?.id, good.snapshotId);
+      assert.equal(after.groups[0].managers.some((item) => item.id === recipient.id), false);
+      assert.equal((await getPersonalDashboardStatus(recipient.id)).snapshot?.id, good.snapshotId);
+      assert.equal((await getPersonalDashboardStatus(recipient.id)).audience, 'support');
+    });
+
     await t.test('published HTML stays available when an active manager has no snapshot or no unique email binding', async () => {
       const published = await getPersonalDashboardHtml();
       assert.ok(published, 'The previous test published a shared HTML version');
       const noSnapshot = await manager('empty-dashboard');
       assert.deepEqual(await getPersonalDashboardStatus(noSnapshot.id), {
-        snapshot: null, history: [], bindingStatus: 'matched',
+        audience: 'development', snapshot: null, history: [], bindingStatus: 'matched',
       });
       assert.equal((await getPersonalDashboardHtml())?.id, published.id);
       assert.equal(await getPersonalDashboardSnapshot(noSnapshot.id), null);
@@ -186,7 +276,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       for (const blankEmail of ['', ' \t\u00a0\n']) {
         await query(`update wholesale_managers set email=$2 where id=$1`, [owner.id, blankEmail]);
         assert.deepEqual(await getPersonalDashboardStatus(owner.id), {
-          snapshot: null, history: [], bindingStatus: 'missing_email',
+          audience: 'development', snapshot: null, history: [], bindingStatus: 'missing_email',
         });
         assert.equal((await getPersonalDashboardHtml())?.id, published.id);
         await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'NOT_FOUND' });
@@ -197,7 +287,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       const duplicate = await manager('binding-overview-duplicate', 'manager', true, owner.email.toUpperCase());
       for (const recipient of [owner, duplicate]) {
         assert.deepEqual(await getPersonalDashboardStatus(recipient.id), {
-          snapshot: null, history: [], bindingStatus: 'ambiguous_email',
+          audience: 'development', snapshot: null, history: [], bindingStatus: 'ambiguous_email',
         });
         assert.equal((await getPersonalDashboardHtml())?.id, published.id);
         await assert.rejects(() => getPersonalDashboardSnapshot(recipient.id, snapshotId), { code: 'AMBIGUOUS_EMAIL' });
@@ -211,7 +301,9 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.ok(await getPersonalDashboardSnapshot(owner.id, snapshotId));
       await assert.rejects(() => getPersonalDashboardStatus(duplicate.id), { code: 'NOT_FOUND' });
       await query(`update wholesale_managers set email='',role='support_manager' where id=$1`, [owner.id]);
-      await assert.rejects(() => getPersonalDashboardStatus(owner.id), { code: 'NOT_FOUND' });
+      assert.deepEqual(await getPersonalDashboardStatus(owner.id), {
+        audience: 'support', snapshot: null, history: [], bindingStatus: 'missing_email',
+      });
       await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'NOT_FOUND' });
     });
 
@@ -245,12 +337,13 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal(result.code, 'ATTACHMENT_FAILED');
       const overview = await listPersonalDashboardAdmin();
       assert.ok(overview.imports.some((item) => item.id === result.id && item.code === 'ATTACHMENT_FAILED'));
-      assert.equal(overview.managers.some((item) => 'bytes' in item), false);
-      assert.ok(overview.htmlVersions.every((item) => !('htmlContent' in item)));
+      assert.equal(overview.groups.some((group) => group.managers.some((item) => 'bytes' in item)), false);
+      assert.ok(overview.groups.every((group) => group.htmlVersions.every((item) => !('htmlContent' in item))));
+      assert.equal('managers' in overview || 'htmlVersions' in overview, false);
     });
 
     await t.test('durable mail receipts require committed success and preserve data while expiring metadata', async () => {
-      const recipient = await manager('mail-checkpoint');
+      const recipient = await manager('mail-checkpoint', 'support_manager');
       const key = `imap-part:v1:${createHash('sha256').update(randomUUID()).digest('hex')}`;
       const source = randomUUID();
       await recordPersonalDashboardMailReceipt(key, source);
@@ -261,8 +354,21 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.deepEqual(await getPersonalDashboardMailReceipt(key), { managerId: recipient.id });
       const collision = await manager('mail-collision', 'manager', true, recipient.email);
       assert.equal(await getPersonalDashboardMailReceipt(key), null, 'ambiguous binding must not be skipped');
+      const ambiguous = await listPersonalDashboardAdmin();
+      for (const [audience, managerId] of [['development', collision.id], ['support', recipient.id]] as const) {
+        const item = ambiguous.groups.find((group) => group.audience === audience)?.managers.find((entry) => entry.id === managerId);
+        assert.equal(item?.bindingStatus, 'ambiguous');
+        assert.equal(item?.snapshot, null);
+        assert.equal((await getPersonalDashboardStatus(managerId)).bindingStatus, 'ambiguous_email');
+      }
       await query(`update wholesale_managers set is_active=false where id=$1`, [collision.id]);
       assert.deepEqual(await getPersonalDashboardMailReceipt(key), { managerId: recipient.id });
+      await query(`update wholesale_managers set role='manager' where id=$1`, [recipient.id]);
+      assert.deepEqual(await getPersonalDashboardMailReceipt(key), { managerId: recipient.id }, 'A role change alone does not repeat a committed import');
+      assert.equal((await getPersonalDashboardStatus(recipient.id)).audience, 'development');
+      await query(`update wholesale_managers set role='top' where id=$1`, [recipient.id]);
+      assert.equal(await getPersonalDashboardMailReceipt(key), null, 'A role outside both personal groups cannot use a receipt');
+      await query(`update wholesale_managers set role='support_manager' where id=$1`, [recipient.id]);
       await query(`update personal_dashboard_mail_receipts set completed_at=now()-interval '31 days' where transport_key=$1`, [key]);
       await prunePersonalDashboardMailReceipts();
       assert.equal(await getPersonalDashboardMailReceipt(key), null);
@@ -281,6 +387,23 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         `select manager_id::text,snapshot_id::text from personal_dashboard_imports where id=$1`, [imported.id]);
       assert.equal(log.rows[0].manager_id, null);
       assert.equal(log.rows[0].snapshot_id, null);
+    });
+
+    await t.test('HTML version quotas are atomic per audience and never discard existing publications', async () => {
+      const before = await listPersonalDashboardAdmin();
+      for (const audience of ['development', 'support'] as const) {
+        const group = (await listPersonalDashboardAdmin()).groups.find((entry) => entry.audience === audience)!;
+        for (let count = group.htmlVersions.length; count < 49; count++) await html(`quota-${audience}-${count}`, audience);
+        const results = await Promise.allSettled([html(`quota-${audience}-last-a`, audience), html(`quota-${audience}-last-b`, audience)]);
+        assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+        const rejected = results.find((result) => result.status === 'rejected');
+        assert.ok(rejected && rejected.status === 'rejected');
+        assert.equal(rejected.reason.code, 'HTML_QUOTA');
+        const latest = (await listPersonalDashboardAdmin()).groups.find((entry) => entry.audience === audience)!;
+        assert.equal(latest.htmlVersions.length, 50);
+        assert.equal(latest.activeHtmlVersionId, before.groups.find((entry) => entry.audience === audience)!.activeHtmlVersionId);
+        assert.equal(latest.previousHtmlVersionId, before.groups.find((entry) => entry.audience === audience)!.previousHtmlVersionId);
+      }
     });
   } finally {
     await globalThis.__ktsPgPool?.end();

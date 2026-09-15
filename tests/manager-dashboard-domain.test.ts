@@ -39,17 +39,28 @@ test('personal storage quota fits fourteen maximum-size daily files plus the nex
   assert.ok(PERSONAL_DASHBOARD_MANAGER_MAX_BYTES >= (PERSONAL_DASHBOARD_RETENTION_DAYS + 1) * PERSONAL_DASHBOARD_SNAPSHOT_MAX_BYTES);
   assert.equal(PERSONAL_DASHBOARD_MANAGER_MAX_BYTES, 128 * 1024 * 1024);
 });
-test('personal recipient matching requires one active development manager and exact current email', () => {
+test('personal recipient matching requires one active manager of either group and exact current email', () => {
   const one = { id: 1, email: '\u00a0MANAGER@Example.test\u00a0', isActive: true, role: 'manager' };
   const hash = getManagerEmailHash('manager@example.test');
   assert.deepEqual(resolvePersonalDashboardManager([one], hash), { status: 'matched', managerId: 1 });
   assert.equal(resolvePersonalDashboardManager([{ ...one, email: 'new@example.test' }], hash).status, 'unknown');
   assert.equal(resolvePersonalDashboardManager([{ ...one, isActive: false }], hash).status, 'unknown');
-  assert.equal(resolvePersonalDashboardManager([{ ...one, role: 'support_manager' }], hash).status, 'unknown');
+  assert.equal(resolvePersonalDashboardManager([{ ...one, role: 'support_manager' }], hash).status, 'matched');
   assert.equal(resolvePersonalDashboardManager([{ ...one, role: 'unexpected' }], hash).status, 'unknown');
   assert.equal(resolvePersonalDashboardManager([one, { ...one, id: 2 }], hash).status, 'ambiguous');
+  assert.equal(resolvePersonalDashboardManager([one, { ...one, id: 2, role: 'support_manager' }], hash).status, 'ambiguous');
   assert.equal(resolvePersonalDashboardManager([one, { ...one, id: 2, isActive: false }], hash).managerId, 1);
   assert.equal(resolvePersonalDashboardManager([{ ...one, email: '' }], getManagerEmailHash('')).status, 'unknown');
+});
+test('mixed snapshot batch assigns by email rather than filename or the audience currently shown to an admin', () => {
+  const managers = [
+    { id: 1, email: 'development@example.test', isActive: true, role: 'manager' },
+    { id: 2, email: 'support@example.test', isActive: true, role: 'support_manager' },
+  ];
+  for (const manager of managers) {
+    const metadata = inspect({ emailHash: getManagerEmailHash(manager.email), role: 'arbitrary source label' });
+    assert.deepEqual(resolvePersonalDashboardManager(managers, metadata.emailHash), { status: 'matched', managerId: manager.id });
+  }
 });
 test('personal snapshot inspects encrypted metadata without exposing ciphertext', () => {
   const result = inspect();

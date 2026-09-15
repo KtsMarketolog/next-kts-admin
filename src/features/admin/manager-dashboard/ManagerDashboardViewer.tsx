@@ -6,8 +6,8 @@ import styles from './ManagerDashboard.module.scss';
 
 type ViewerOverview = Extract<ManagerDashboardOverview, { mode: 'view' }>;
 
-export function managerDashboardViewIdentity(overview: Pick<ViewerOverview, 'email' | 'bindingStatus'>) {
-  return JSON.stringify([overview.email, overview.bindingStatus]);
+export function managerDashboardViewIdentity(overview: Pick<ViewerOverview, 'email' | 'bindingStatus' | 'audience'>) {
+  return JSON.stringify([overview.audience, overview.email, overview.bindingStatus]);
 }
 
 export function ManagerDashboardViewer({ overview, loading, onReload }: {
@@ -79,7 +79,7 @@ export function ManagerDashboardViewer({ overview, loading, onReload }: {
             }}>{loading ? 'Обновляем…' : 'Перезагрузить отчёт'}</button>
           </div>
           {expired ? <p className={styles.warning}>Срок доступа к этому снимку истёк. HTML дашборда доступен, а для открытия личных данных нужен свежий файл.</p> : null}
-          <DashboardFrame versionId={overview.htmlVersion.id} snapshotId={selected?.id} revision={revision} />
+          <DashboardFrame audience={overview.audience} versionId={overview.htmlVersion.id} snapshotId={selected?.id} revision={revision} />
         </section>
       )}
     </div>

@@ -13,12 +13,13 @@ export async function GET() {
     if (access.mode === 'manage') {
       const overview = await listPersonalDashboardAdmin();
       return personalJson({mode: 'manage', ...overview, expectedBy: '10:00 МСК',
-        managers: overview.managers.map((manager) => ({...manager, ...personalDashboardFreshness(manager.snapshot)})),
+        groups: overview.groups.map((group) => ({...group,
+          managers: group.managers.map((manager) => ({...manager, ...personalDashboardFreshness(manager.snapshot)}))})),
         mail: getManagerDashboardMailStatus()});
     }
     const status = await getPersonalDashboardStatus(access.manager!.id);
-    const html = await getPersonalDashboardHtml();
+    const html = await getPersonalDashboardHtml(undefined, false, status.audience);
     return personalJson({mode: 'view', ...status, ...personalDashboardFreshness(status.snapshot),
-      email: access.manager!.email.trim().toLowerCase(), htmlVersion: html ? {id: html.id, originalName: html.originalName} : null});
+      email: access.manager!.email.trim().toLowerCase(), htmlVersion: html ? {id: html.id, originalName: html.originalName, audience: html.audience} : null});
   } catch (error) { return personalApiError(error); }
 }

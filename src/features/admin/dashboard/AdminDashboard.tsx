@@ -27,7 +27,7 @@ export function AdminDashboard({
       <div>
         <h2>{managerDashboardMode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h2>
         <p>{managerDashboardMode === 'manage'
-          ? 'Общая HTML-страница, личные снимки менеджеров и журнал загрузки данных.'
+          ? 'Отдельные HTML для развития и сопровождения, личные снимки и общий журнал загрузки.'
           : 'Ваш персональный отчёт с автоматически загруженными данными.'}</p>
       </div>
       <span className={styles.dashboardCardLink}>Открыть</span>

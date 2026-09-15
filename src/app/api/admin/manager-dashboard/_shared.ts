@@ -1,7 +1,7 @@
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { getWholesaleManagerById } from '@/shared/lib/db/wholesaleAdminRepo/managerRepo';
-import { personalDashboardMode, PERSONAL_PRIVATE_HEADERS, readPersonalRequestBytes } from '@/shared/lib/managerDashboardSecurity';
+import { personalDashboardMode, personalDashboardAudienceSelection, PERSONAL_PRIVATE_HEADERS, readPersonalRequestBytes } from '@/shared/lib/managerDashboardSecurity';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 
 export function personalJson(value: unknown, status = 200) {
@@ -15,7 +15,7 @@ export async function requirePersonalAccess(request?: Request, manageOnly = fals
     return {denied: personalJson({error: 'Нет доступа к личному дашборду. При необходимости войдите заново.'}, session ? 403 : 401)} as const;
   }
   const manager = mode === 'view' ? await getWholesaleManagerById(session.managerId!) : null;
-  if (mode === 'view' && (!manager || !manager.isActive || manager.role !== 'manager')) {
+  if (mode === 'view' && (!manager || !manager.isActive || manager.role !== session.role || (manager.role !== 'manager' && manager.role !== 'support_manager'))) {
     return {denied: personalJson({error: 'Учётная запись менеджера недоступна'}, 403)} as const;
   }
   if (request && request.method !== 'GET') {
@@ -25,6 +25,12 @@ export async function requirePersonalAccess(request?: Request, manageOnly = fals
     if (limited) return {denied: limited} as const;
   }
   return {session, mode, manager, actorId: `${session.role}:${session.adminUserId ?? session.sessionId}`, denied: null} as const;
+}
+
+export function personalRequestAudience(request: Request, access: { mode: 'manage' | 'view'; manager: { role: string } | null }) {
+  const params = new URL(request.url).searchParams;
+  if (params.getAll('audience').length > 1) return null;
+  return personalDashboardAudienceSelection(access.mode, access.manager?.role, params.get('audience'));
 }
 
 export async function personalMultipart(request: Request, maxBytes: number) {

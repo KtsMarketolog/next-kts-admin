@@ -1,5 +1,6 @@
 import type { AdminSession } from './adminAuth';
 import type { PersonalDashboardEmptyState } from './managerDashboardHtml';
+import { getPersonalDashboardAudience, parsePersonalDashboardAudience } from './managerDashboardAudience';
 
 export function personalDashboardMode(session: AdminSession | null): 'manage' | 'view' | null {
   // Do not accept the legacy signed-cookie fallback: persisted sessions recheck
@@ -7,8 +8,16 @@ export function personalDashboardMode(session: AdminSession | null): 'manage' | 
   if (!session?.sessionId) return null;
   if (session.role === 'admin') return 'manage';
   if (session.role === 'admintop' && Number.isSafeInteger(session.adminUserId) && Number(session.adminUserId) > 0) return 'manage';
-  if (session.role === 'manager' && Number.isSafeInteger(session.managerId) && Number(session.managerId) > 0) return 'view';
+  if ((session.role === 'manager' || session.role === 'support_manager') && Number.isSafeInteger(session.managerId) && Number(session.managerId) > 0) return 'view';
   return null;
+}
+
+/** A viewer can never select another group's HTML through query parameters. */
+export function personalDashboardAudienceSelection(mode: 'manage' | 'view', managerRole: string | null | undefined, requested: string | null) {
+  const accountAudience = mode === 'view' ? getPersonalDashboardAudience(managerRole) : null;
+  const audience = requested === null ? mode === 'manage' ? 'development' : accountAudience : parsePersonalDashboardAudience(requested);
+  if (!audience || (mode === 'view' && (!managerRole || audience !== accountAudience))) return null;
+  return audience;
 }
 
 export function personalDashboardFreshness(snapshot: { issued: string; expires: string } | null, now = new Date()) {

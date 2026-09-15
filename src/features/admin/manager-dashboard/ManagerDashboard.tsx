@@ -79,7 +79,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
         const next = await readResponse(response) as ManagerDashboardOverview;
         if (!disposed && next.mode === 'view') {
           if (managerDashboardViewIdentity(next) !== managerDashboardViewIdentity(overview)) {
-            // A changed recipient or lost binding must immediately clear the decrypted report.
+            // A changed role/audience, recipient or binding clears the decrypted report.
             setOverview(next);
             setUpdateAvailable(false);
             return;

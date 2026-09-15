@@ -18,6 +18,7 @@ import {
   personalDashboardFreshness,
   personalDashboardFrameSelection,
   personalDashboardMode,
+  personalDashboardAudienceSelection,
   readPersonalRequestBytes,
 } from '../src/shared/lib/managerDashboardSecurity';
 
@@ -30,14 +31,44 @@ test('personal dashboard requires a persisted session and explicit allowed emplo
   assert.equal(personalDashboardMode({ role: 'admin', sessionId }), 'manage');
   assert.equal(personalDashboardMode({ role: 'admintop', sessionId, adminUserId: 1 }), 'manage');
   assert.equal(personalDashboardMode({ role: 'manager', sessionId, managerId: 2 }), 'view');
-  for (const role of ['support_manager', 'top', 'wholesale_admin'] as const) {
+  assert.equal(personalDashboardMode({ role: 'support_manager', sessionId, managerId: 3 }), 'view');
+  for (const role of ['top', 'wholesale_admin'] as const) {
     assert.equal(personalDashboardMode({ role, sessionId, adminUserId: 1, managerId: 2, canAccessTopDashboard: true, canManageTopDashboard: true }), null);
   }
   for (const id of [undefined, 0, -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
     assert.equal(personalDashboardMode({ role: 'manager', sessionId, managerId: id }), null);
+    assert.equal(personalDashboardMode({ role: 'support_manager', sessionId, managerId: id }), null);
     assert.equal(personalDashboardMode({ role: 'admintop', sessionId, adminUserId: id }), null);
   }
   assert.equal(personalDashboardMode({ role: 'client', sessionId } as unknown as AdminSession), null);
+});
+
+test('HTML audience is selected from the viewer account and cannot be changed through a URL', () => {
+  assert.equal(personalDashboardAudienceSelection('view', 'manager', null), 'development');
+  assert.equal(personalDashboardAudienceSelection('view', 'support_manager', null), 'support');
+  assert.equal(personalDashboardAudienceSelection('view', 'manager', 'development'), 'development');
+  assert.equal(personalDashboardAudienceSelection('view', 'support_manager', 'support'), 'support');
+  assert.equal(personalDashboardAudienceSelection('view', 'manager', 'support'), null);
+  assert.equal(personalDashboardAudienceSelection('view', 'support_manager', 'development'), null);
+  for (const role of ['admin', 'wholesale_admin', 'top', '', null, undefined]) {
+    assert.equal(personalDashboardAudienceSelection('view', role, 'development'), null);
+  }
+  assert.equal(personalDashboardAudienceSelection('manage', null, null), 'development');
+  assert.equal(personalDashboardAudienceSelection('manage', null, 'development'), 'development');
+  assert.equal(personalDashboardAudienceSelection('manage', null, 'support'), 'support');
+  for (const audience of ['', 'manager', 'support_manager', 'all', 'SUPPORT', 'support ', '1', '../support']) {
+    assert.equal(personalDashboardAudienceSelection('manage', null, audience), null);
+    assert.equal(personalDashboardAudienceSelection('view', 'support_manager', audience), null);
+  }
+});
+
+test('frame passes the selected HTML audience to its content without changing snapshot identity', () => {
+  for (const audience of ['development', 'support'] as const) {
+    const { html } = buildPersonalDashboardFrame({ versionId: 9, snapshotId: 23, preview: false, audience });
+    assert.match(html, new RegExp(`content\\?version=9(?:&amp;|&)audience=${audience}`));
+    assert.match(html, /snapshots\?snapshot=23/);
+    assert.doesNotMatch(html, /snapshots\?[^'"\s]*audience/);
+  }
 });
 
 test('personal IDs reject coercions, traversal, overflow and ambiguous spellings', () => {

@@ -17,7 +17,7 @@ export async function getPersonalDashboardMailReceipt(key: string): Promise<{ ma
   if (!row) return null;
   const managers = await query<{ id: string; email: string; role: string; is_active: boolean }>(
     `select id::text,email,role,is_active from wholesale_managers
-     where is_active=true and coalesce(nullif(role,''),'manager')='manager'`);
+     where is_active=true and coalesce(nullif(role,''),'manager') in ('manager','support_manager')`);
   const bindings: PersonalDashboardManagerBinding[] = managers.rows.map((manager) => ({
     id: Number(manager.id), email: manager.email, role: manager.role, isActive: manager.is_active,
   }));

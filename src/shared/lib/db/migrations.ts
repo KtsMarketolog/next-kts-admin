@@ -13,6 +13,30 @@ type SchemaMigration = {
   apply: (client: PoolClient) => Promise<void>;
 };
 
+/** Kept independently callable for isolated legacy-schema upgrade verification. */
+export async function applyPersonalDashboardAudienceMigration(client: PoolClient) {
+  await client.query(`
+    alter table personal_dashboard_html_versions
+      add column audience text not null default 'development',
+      add constraint personal_dashboard_html_versions_audience_check
+        check (audience in ('development', 'support')),
+      add constraint personal_dashboard_html_versions_audience_id_key unique (audience, id);
+    alter table personal_dashboard_html_state
+      add column audience text not null default 'development',
+      drop constraint personal_dashboard_html_state_id_check,
+      add constraint personal_dashboard_html_state_audience_key unique (audience),
+      add constraint personal_dashboard_html_state_audience_mapping_check
+        check ((id=1 and audience='development') or (id=2 and audience='support')),
+      add constraint personal_dashboard_html_state_active_audience_fkey
+        foreign key (audience, active_version_id)
+        references personal_dashboard_html_versions(audience, id) on delete restrict,
+      add constraint personal_dashboard_html_state_previous_audience_fkey
+        foreign key (audience, previous_version_id)
+        references personal_dashboard_html_versions(audience, id) on delete restrict;
+    insert into personal_dashboard_html_state (id, audience) values (2, 'support');
+  `);
+}
+
 const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {
     id: '202606010001_runtime_schema_baseline',
@@ -645,6 +669,11 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
         create index personal_dashboard_mail_receipts_completed_idx on personal_dashboard_mail_receipts(completed_at);
       `);
     },
+  },
+  {
+    id: '202609150001_personal_dashboard_audiences',
+    description: 'Separate development/support HTML publications while preserving manager snapshots and existing development state',
+    apply: applyPersonalDashboardAudienceMigration,
   },
 ];
 

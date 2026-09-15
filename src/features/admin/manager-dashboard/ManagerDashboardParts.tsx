@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { useTopDashboardDownloadBridge } from '@/features/admin/top-dashboard/useTopDashboardDownloadBridge';
+import type { PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
 import type { ManagerDashboardImport, ManagerDashboardSnapshot, ManagerDashboardSnapshotStatus } from './types';
 import styles from './ManagerDashboard.module.scss';
@@ -81,16 +82,17 @@ export function ImportResults({ results, title }: { results: ManagerDashboardImp
 }
 
 export function DashboardFrame({
-  versionId, snapshotId, preview = false, revision = 0,
+  versionId, snapshotId, preview = false, revision = 0, audience = 'development',
 }: {
   versionId: number;
   snapshotId?: number;
   preview?: boolean;
   revision?: number;
+  audience?: PersonalDashboardAudience;
 }) {
   const [downloadStatus, setDownloadStatus] = useState('');
   const frameRef = useTopDashboardDownloadBridge(setDownloadStatus);
-  const params = new URLSearchParams({ version: String(versionId), revision: String(revision) });
+  const params = new URLSearchParams({ version: String(versionId), revision: String(revision), audience });
   if (snapshotId) params.set('snapshot', String(snapshotId));
   if (preview) params.set('preview', '1');
   return (
