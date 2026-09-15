@@ -39,6 +39,7 @@ const initial = {
   mail: {enabled: true, configured: true}, expectedBy: '10:00 МСК', expectedIssuedAfter: '2026-09-15'
 };
 window.fixtureCalls = [];
+window.fixtureFailDelete = false;
 function Fixture() {
   const [overview, setOverview] = useState(initial);
   useEffect(() => {
@@ -50,6 +51,16 @@ function Fixture() {
     if (init.body instanceof FormData) call.files = [...init.body.entries()].map(([field, file]) => ({field, name: file.name, size: file.size}));
     else if (init.body) call.body = JSON.parse(init.body);
     window.fixtureCalls.push(call);
+    if (requestPath.startsWith('/html?') && init.method === 'DELETE') {
+      if (window.fixtureFailDelete) return null;
+      const params = new URL(requestPath, location.origin).searchParams;
+      const audience = params.get('audience');
+      const id = Number(params.get('id'));
+      setOverview(current => ({...current, groups: current.groups.map(group => group.audience === audience ? {...group,
+        previousHtmlVersionId: group.previousHtmlVersionId === id ? null : group.previousHtmlVersionId,
+        htmlVersions: group.htmlVersions.filter(version => version.id !== id)} : group)}));
+      return {message: 'Synthetic deletion succeeded'};
+    }
     if (requestPath.startsWith('/html?')) {
       const audience = new URL(requestPath, location.origin).searchParams.get('audience');
       const version = {...makeVersion(audience === 'development' ? 101 : 111, audience, 'uploaded'), firstPublishedAt: null};
@@ -153,7 +164,12 @@ async function main() {
           });
           const page = await context.newPage();
           page.on('pageerror', (error: Error) => errors.push(error.message));
-          page.on('dialog', (dialog: {accept(): Promise<void>}) => void dialog.accept());
+          let acceptConfirmation = true;
+          const confirmations: string[] = [];
+          page.on('dialog', (dialog: {accept(): Promise<void>; dismiss(): Promise<void>; message(): string}) => {
+            confirmations.push(dialog.message());
+            void (acceptConfirmation ? dialog.accept() : dialog.dismiss());
+          });
           page.setDefaultTimeout(7000);
           try {
             const pageHistoryStart = historyRequests.length;
@@ -270,6 +286,49 @@ async function main() {
             assert.deepEqual(calls[1].body, {audience: 'development', versionId: 101, expectedActiveVersionId: 1});
             assert.deepEqual(calls[3].body, {audience: 'support', versionId: 111, expectedActiveVersionId: null});
             assert.deepEqual(calls[4].files.map((file: {name: string}) => file.name), ['development.ktsp', 'support.ktsp']);
+
+            // Deletion is exercised through actual controls and browser dialogs;
+            // the synthetic mutation never connects to a real API or removes files.
+            const developmentPanel = page.locator('#manager-dashboard-group-development');
+            const supportPanel = page.locator('#manager-dashboard-group-support');
+            const oldRow = developmentPanel.locator('.versionsTable tbody tr').filter({hasText: 'development_synthetic_dashboard_previous.html'});
+            const deleteOld = oldRow.getByRole('button', {name: /^Удалить HTML/});
+            assert.equal(await supportPanel.getByRole('button', {name: /^Удалить HTML/}).isDisabled(), true, 'published support version cannot be deleted');
+            await oldRow.getByRole('button', {name: 'Предпросмотр', exact: true}).click();
+            const previewFrame = page.locator('#manager-dashboard-html-preview iframe');
+            await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('#manager-dashboard-html-preview iframe')?.src.includes('version=2'));
+            const deleteCallCount = () => page.evaluate(() => (window as unknown as {fixtureCalls: Array<{method: string}>}).fixtureCalls.filter(call => call.method === 'DELETE').length);
+            acceptConfirmation = false;
+            await deleteOld.click();
+            assert.equal(await deleteCallCount(), 0, 'cancelled deletion sends no mutation');
+            assert.equal(await oldRow.count(), 1);
+            assert.ok((await previewFrame.getAttribute('src'))?.includes('version=2'), 'cancel preserves the open preview');
+            const deletionConfirmation = confirmations.at(-1)!;
+            assert.match(deletionConfirmation, /development_synthetic_dashboard_previous\.html/);
+            assert.match(deletionConfirmation, /#2/);
+            assert.match(deletionConfirmation, /Менеджеры по развитию/);
+            assert.match(deletionConfirmation, /необратим/);
+            acceptConfirmation = true;
+            await page.evaluate('window.fixtureFailDelete = true');
+            await deleteOld.click();
+            assert.equal(await deleteCallCount(), 1);
+            assert.equal(await oldRow.count(), 1, 'failed mutation keeps the version');
+            assert.ok((await previewFrame.getAttribute('src'))?.includes('version=2'), 'failed deletion preserves the open preview');
+            await page.evaluate('window.fixtureFailDelete = false');
+            await deleteOld.click();
+            await oldRow.waitFor({state: 'detached'});
+            await previewFrame.waitFor({state: 'detached'});
+            assert.equal(await deleteCallCount(), 2, 'retry issues one further mutation');
+            assert.equal(await supportPanel.locator('.versionsTable tbody tr').count(), 1, 'development deletion does not remove support HTML');
+            for (const audience of ['development', 'support']) assert.equal(await page.locator(`#manager-dashboard-files-${audience} tbody tr`).count(), 1, 'personal snapshot rows remain');
+            await assertPanelAlignment('deleting an archived version shrinks both desktop HTML panels');
+            await supportPanel.getByRole('button', {name: 'Предпросмотр', exact: true}).click();
+            const previousRow = developmentPanel.locator('.versionsTable tbody tr').filter({hasText: 'development_synthetic_dashboard_active.html'});
+            await previousRow.getByRole('button', {name: /^Удалить HTML/}).click();
+            await previousRow.waitFor({state: 'detached'});
+            assert.ok((await previewFrame.getAttribute('src'))?.includes('audience=support'), 'deleting another group does not close the support preview');
+            const deleteCalls = await page.evaluate(() => (window as unknown as {fixtureCalls: Array<{path: string; method: string}>}).fixtureCalls.filter(call => call.method === 'DELETE'));
+            assert.deepEqual(deleteCalls.map((call: {path: string}) => call.path), ['/html?audience=development&id=2', '/html?audience=development&id=2', '/html?audience=development&id=1']);
             assert.deepEqual(errors, [], 'no browser script errors');
             assert.deepEqual(external, [], 'no external requests');
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'mutations and preview do not introduce horizontal overflow');
@@ -290,7 +349,7 @@ async function main() {
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'a longer right panel does not introduce horizontal overflow');
             assert.equal(await page.locator('#manager-dashboard-import-journal li').count(), 5, 'fresh initial response remains bounded to five rows');
             await page.screenshot({path: path.join(output, `${engineName}-${width}-support-taller.png`), fullPage: true});
-            console.log(`PASS ${engineName}/${width}: aligned asymmetric groups, natural mobile heights, isolated uploads/publication, journal 5+5+3, full-width preview, no overflow.`);
+            console.log(`PASS ${engineName}/${width}: aligned asymmetric groups, natural mobile heights, isolated uploads/publication/deletion, delete cancellation/retry/preview scope, journal 5+5+3, full-width preview, no overflow.`);
           } finally {await context.close();}
         }
       } finally {await browser.close();}

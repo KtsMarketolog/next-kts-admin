@@ -123,6 +123,19 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     }, `HTML ${isRollback ? 'восстановлен' : 'опубликован'} для группы «${label}».`);
   }
 
+  async function deleteHtml(audience: PersonalDashboardAudience, versionId: number) {
+    const group = overview.groups.find((item) => item.audience === audience);
+    if (busy || mutationRef.current || !group || versionId === group.activeHtmlVersionId) return;
+    const version = group.htmlVersions.find((item) => item.id === versionId);
+    if (!version) return;
+    const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
+    if (!window.confirm(`Удалить HTML «${version.originalName}», версия #${versionId}, из группы «${label}»?\n\nУдаление необратимо: вернуть эту версию можно будет только повторной загрузкой исходного файла.\n\nДействующий HTML, другая группа и личные снимки менеджеров сохранятся.`)) return;
+    const result = await mutate(`/html?audience=${audience}&id=${versionId}`, { method: 'DELETE' }, `HTML «${version.originalName}», версия #${versionId}, удалён из группы «${label}».`);
+    if (result) {
+      setPreviewSelection((current) => current?.audience === audience && current.versionId === versionId ? null : current);
+    }
+  }
+
   async function uploadSnapshots(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy || mutationRef.current) return;
@@ -198,11 +211,16 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
                                 {version.id !== group.activeHtmlVersionId ? (
                                   <button className={styles.primary} type="button" disabled={busy || !previewed} title={!previewed ? 'Сначала откройте предпросмотр этой версии' : undefined} onClick={() => void publish(audience, version.id)}>{version.id === group.previousHtmlVersionId ? 'Вернуть группе' : 'Опубликовать группе'}</button>
                                 ) : null}
+                                <button className={styles.danger} type="button" disabled={busy || version.id === group.activeHtmlVersionId}
+                                  aria-label={`Удалить HTML «${version.originalName}», версия #${version.id}, ${label}`}
+                                  title={version.id === group.activeHtmlVersionId ? 'Сначала опубликуйте другую HTML-версию этой группы' : undefined}
+                                  onClick={() => void deleteHtml(audience, version.id)}>Удалить</button>
                               </div></td>
                             </tr>
                           );
                         })}</tbody>
                       </table>
+                      <p className={styles.muted}>Действующую HTML-версию удалить нельзя — сначала опубликуйте другую. Удаление остальных версий не затрагивает личные снимки.</p>
                     </div>
                   )}
                   </div>

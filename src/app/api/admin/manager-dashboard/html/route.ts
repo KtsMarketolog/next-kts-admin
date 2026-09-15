@@ -1,5 +1,5 @@
 import { readTopDashboardHtmlUpload } from '../../top-dashboard/blocks/routeUtils';
-import { createPersonalDashboardHtml } from '@/shared/lib/db/managerDashboardRepo';
+import { createPersonalDashboardHtml, deletePersonalDashboardHtml } from '@/shared/lib/db/managerDashboardRepo';
 import { isPersonalDashboardHtml } from '@/shared/lib/managerDashboardHtml';
 import { readPersonalRequestBytes } from '@/shared/lib/managerDashboardSecurity';
 import { parsePersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
@@ -23,5 +23,21 @@ export async function POST(request: Request) {
     }
     const version = await createPersonalDashboardHtml({...result.upload, actorId: access.actorId, audience});
     return personalJson({version}, 201);
+  } catch (error) { return personalApiError(error); }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const access = await requirePersonalAccess(request, true);
+    if (access.denied) return access.denied;
+    const params = new URL(request.url).searchParams;
+    const audience = params.getAll('audience').length === 1 ? parsePersonalDashboardAudience(params.get('audience')) : null;
+    const id = params.get('id') ?? '';
+    const versionId = Number(id);
+    if (!audience || params.getAll('id').length !== 1 || [...params.keys()].some((key) => key !== 'id' && key !== 'audience')
+      || !/^[1-9][0-9]{0,15}$/.test(id) || !Number.isSafeInteger(versionId)) {
+      return personalJson({error: 'Укажите группу и HTML-версию для удаления'}, 400);
+    }
+    return personalJson(await deletePersonalDashboardHtml({ versionId, audience, actorId: access.actorId }));
   } catch (error) { return personalApiError(error); }
 }

@@ -288,6 +288,35 @@ export async function activatePersonalDashboardHtml(input: { versionId: number; 
   });
 }
 
+/** Delete only an inactive HTML version. Publication and personal snapshots are never changed. */
+export async function deletePersonalDashboardHtml(input: { versionId: number; actorId: string; audience: PersonalDashboardAudience }) {
+  const audience = checkedAudience(input.audience);
+  positiveId(input.versionId);
+  const deletedBy = actor(input.actorId);
+  await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    // Share the upload/publication lock: a version cannot become active between the check and DELETE.
+    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`kts-personal-dashboard-html:${audience}`]);
+    const stateResult = await client.query<HtmlStateRow>(`select active_version_id::text, previous_version_id::text
+      from personal_dashboard_html_state where audience=$1 for update`, [audience]);
+    const state = stateResult.rows[0];
+    if (!state) throw new PersonalDashboardError('STATE_CONFLICT', 'Состояние публикации изменилось; обновите страницу');
+    if (idOrNull(state.active_version_id) === input.versionId) {
+      throw new PersonalDashboardError('ACTIVE_VERSION_CONFLICT', 'Нельзя удалить опубликованный HTML. Сначала опубликуйте другую версию этой группы.');
+    }
+    const found = await client.query(`select id from personal_dashboard_html_versions where id=$1 and audience=$2`, [input.versionId, audience]);
+    if (!found.rowCount) throw new PersonalDashboardError('NOT_FOUND', 'HTML-версия не найдена; обновите страницу');
+    // Clear only the exact previous pointer before its RESTRICT foreign key is removed.
+    // Record the actor without changing the active version, including when deleting a draft.
+    await client.query(`update personal_dashboard_html_state
+      set previous_version_id=case when previous_version_id=$1 then null else previous_version_id end,
+        updated_by=$2,updated_at=now() where audience=$3`, [input.versionId, deletedBy, audience]);
+    const deleted = await client.query(`delete from personal_dashboard_html_versions where id=$1 and audience=$2 returning id`, [input.versionId, audience]);
+    if (deleted.rowCount !== 1) throw new PersonalDashboardError('STATE_CONFLICT', 'HTML-версия уже изменилась; обновите страницу');
+    return { deletedVersionId: input.versionId, audience };
+  });
+}
+
 async function existingImport(client: PoolClient, key: string) {
   await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`kts-personal-import:${key}`]);
   const prior = await client.query<ImportRow>(`select ${IMPORT_SELECT} from personal_dashboard_imports where source_key=$1`, [key]);

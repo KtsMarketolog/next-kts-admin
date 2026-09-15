@@ -10,7 +10,7 @@ import { query, withTransaction } from '../src/shared/lib/db/client';
 import { applyPersonalDashboardAudienceMigration } from '../src/shared/lib/db/migrations';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import {
-  activatePersonalDashboardHtml, createPersonalDashboardHtml, getPersonalDashboardHtml,
+  activatePersonalDashboardHtml, createPersonalDashboardHtml, deletePersonalDashboardHtml, getPersonalDashboardHtml,
   getPersonalDashboardSnapshot, getPersonalDashboardStatus, importPersonalDashboardSnapshot,
   listPersonalDashboardAdmin, listPersonalDashboardImports, recordPersonalDashboardImportFailure,
 } from '../src/shared/lib/db/managerDashboardRepo';
@@ -257,6 +257,105 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal(after.groups[0].managers.some((item) => item.id === recipient.id), false);
       assert.equal((await getPersonalDashboardStatus(recipient.id)).snapshot?.id, good.snapshotId);
       assert.equal((await getPersonalDashboardStatus(recipient.id)).audience, 'support');
+    });
+
+    await t.test('HTML deletion is audience-scoped, protects active publication, and clears previous foreign keys atomically', async () => {
+      const snapshotRows = (await query(`select id::text,manager_id::text,sha256 from personal_dashboard_snapshots order by id`)).rows;
+      for (const audience of ['development', 'support'] as const) {
+        const before = await listPersonalDashboardAdmin();
+        const group = before.groups.find((item) => item.audience === audience)!;
+        const other = before.groups.find((item) => item.audience !== audience)!;
+        assert.ok(group.activeHtmlVersionId);
+        assert.ok(group.previousHtmlVersionId);
+        const activeId = group.activeHtmlVersionId;
+        const previousId = group.previousHtmlVersionId;
+        await assert.rejects(() => deletePersonalDashboardHtml({ versionId: activeId, actorId: 'admin:integration-test', audience }),
+          { code: 'ACTIVE_VERSION_CONFLICT' });
+        await assert.rejects(() => deletePersonalDashboardHtml({ versionId: other.activeHtmlVersionId!, actorId: 'admin:integration-test', audience }),
+          { code: 'NOT_FOUND' });
+        assert.deepEqual(await deletePersonalDashboardHtml({ versionId: previousId, actorId: 'admintop:integration-delete', audience }),
+          { deletedVersionId: previousId, audience });
+        assert.equal(await getPersonalDashboardHtml(previousId, true, audience), null);
+        assert.equal((await getPersonalDashboardHtml(undefined, false, audience))?.id, activeId);
+        await assert.rejects(() => deletePersonalDashboardHtml({ versionId: previousId, actorId: 'admin:integration-test', audience }), { code: 'NOT_FOUND' });
+        const firstDraft = await html('delete-same-name', audience);
+        const secondDraft = await html('delete-same-name', audience);
+        await deletePersonalDashboardHtml({ versionId: firstDraft.id, actorId: 'admin:integration-test', audience });
+        assert.equal(await getPersonalDashboardHtml(firstDraft.id, true, audience), null);
+        assert.ok(await getPersonalDashboardHtml(secondDraft.id, true, audience), 'An identically named HTML is not the delete target');
+        const after = await listPersonalDashboardAdmin();
+        assert.equal(after.groups.find((item) => item.audience === audience)!.previousHtmlVersionId, null);
+        assert.deepEqual(after.groups.find((item) => item.audience !== audience), other);
+        assert.deepEqual((await query(`select id::text,manager_id::text,sha256 from personal_dashboard_snapshots order by id`)).rows,
+          snapshotRows, 'HTML deletion never modifies encrypted snapshots or their ownership');
+      }
+    });
+
+    await t.test('failed SQL deletion rolls back the previous publication pointer and actor', async () => {
+      const audience = 'development';
+      const current = await getPersonalDashboardHtml();
+      assert.ok(current);
+      const temporary = await html('delete-rollback-target', audience);
+      await activatePersonalDashboardHtml({ versionId: temporary.id, expectedActiveVersionId: current.id, actorId: 'admin:integration-test', audience });
+      await activatePersonalDashboardHtml({ versionId: current.id, expectedActiveVersionId: temporary.id, actorId: 'admin:integration-test', audience });
+      const stateBefore = (await query(`select * from personal_dashboard_html_state where audience=$1`, [audience])).rows;
+      // This database is disposable and guarded above. The trigger injects a failure after pointer UPDATE.
+      await query(`create function kts_personal_test_fail_html_delete() returns trigger language plpgsql as
+        $$ begin raise exception 'synthetic delete failure'; end $$`);
+      try {
+        await query(`create trigger kts_personal_test_fail_html_delete before delete on personal_dashboard_html_versions
+          for each row execute function kts_personal_test_fail_html_delete()`);
+        try {
+          await assert.rejects(() => deletePersonalDashboardHtml({ versionId: temporary.id, actorId: 'admintop:failed-delete', audience }),
+            { code: 'P0001' });
+          assert.deepEqual((await query(`select * from personal_dashboard_html_state where audience=$1`, [audience])).rows, stateBefore);
+          assert.ok(await getPersonalDashboardHtml(temporary.id, true, audience));
+          assert.equal((await getPersonalDashboardHtml())?.id, current.id);
+        } finally {
+          await query(`drop trigger kts_personal_test_fail_html_delete on personal_dashboard_html_versions`);
+        }
+      } finally {
+        await query(`drop function kts_personal_test_fail_html_delete()`);
+      }
+      await deletePersonalDashboardHtml({ versionId: temporary.id, actorId: 'admin:integration-test', audience });
+    });
+
+    await t.test('publication and HTML deletion serialize both orders and concurrent requests without losing the active version', async () => {
+      for (const audience of ['development', 'support'] as const) {
+        const current = await getPersonalDashboardHtml(undefined, false, audience);
+        assert.ok(current);
+        const deleteFirst = await html('delete-before-publication', audience);
+        await deletePersonalDashboardHtml({ versionId: deleteFirst.id, actorId: 'admin:integration-test', audience });
+        await assert.rejects(() => activatePersonalDashboardHtml({ versionId: deleteFirst.id, expectedActiveVersionId: current.id, actorId: 'admin:integration-test', audience }),
+          { code: 'NOT_FOUND' });
+        const publishFirst = await html('publication-before-delete', audience);
+        await activatePersonalDashboardHtml({ versionId: publishFirst.id, expectedActiveVersionId: current.id, actorId: 'admin:integration-test', audience });
+        await assert.rejects(() => deletePersonalDashboardHtml({ versionId: publishFirst.id, actorId: 'admin:integration-test', audience }),
+          { code: 'ACTIVE_VERSION_CONFLICT' });
+        await activatePersonalDashboardHtml({ versionId: current.id, expectedActiveVersionId: publishFirst.id, actorId: 'admin:integration-test', audience });
+        await deletePersonalDashboardHtml({ versionId: publishFirst.id, actorId: 'admin:integration-test', audience });
+
+        for (let iteration = 0; iteration < 4; iteration++) {
+          const target = await html(`concurrent-delete-publication-${iteration}`, audience);
+          const [deletion, publication]: [PromiseSettledResult<Awaited<ReturnType<typeof deletePersonalDashboardHtml>>>,
+            PromiseSettledResult<Awaited<ReturnType<typeof activatePersonalDashboardHtml>>>] = await Promise.allSettled([
+            deletePersonalDashboardHtml({ versionId: target.id, actorId: 'admin:integration-test', audience }),
+            activatePersonalDashboardHtml({ versionId: target.id, expectedActiveVersionId: current.id, actorId: 'admin:integration-test', audience }),
+          ]);
+          assert.notEqual(deletion.status, publication.status, 'Exactly one competing operation succeeds');
+          if (publication.status === 'fulfilled') {
+            assert.ok(deletion.status === 'rejected');
+            assert.equal(deletion.reason.code, 'ACTIVE_VERSION_CONFLICT');
+            assert.equal((await getPersonalDashboardHtml(undefined, false, audience))?.id, target.id);
+            await activatePersonalDashboardHtml({ versionId: current.id, expectedActiveVersionId: target.id, actorId: 'admin:integration-test', audience });
+            await deletePersonalDashboardHtml({ versionId: target.id, actorId: 'admin:integration-test', audience });
+          } else {
+            assert.equal(publication.reason.code, 'NOT_FOUND');
+            assert.equal(await getPersonalDashboardHtml(target.id, true, audience), null);
+          }
+          assert.equal((await getPersonalDashboardHtml(undefined, false, audience))?.id, current.id);
+        }
+      }
     });
 
     await t.test('published HTML stays available when an active manager has no snapshot or no unique email binding', async () => {
