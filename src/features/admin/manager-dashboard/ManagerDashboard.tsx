@@ -158,7 +158,11 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
       </div> : null}
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}
       {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем дашборд…</p></section> : null}
-      {overview?.mode === 'manage' ? <ManagerDashboardManagement overview={overview} busy={busy || loading} mutate={mutate} /> : null}
+      {overview?.mode === 'manage' ? <ManagerDashboardManagement overview={overview} busy={busy || loading} mutate={mutate} onAccessDenied={() => {
+        requestRevision.current += 1;
+        setOverview(null);
+        router.replace('/admin');
+      }} /> : null}
       {overview?.mode === 'view' ? <ManagerDashboardViewer key={managerDashboardViewIdentity(overview)} overview={overview} loading={loading} onReload={refresh} /> : null}
     </main>
   );

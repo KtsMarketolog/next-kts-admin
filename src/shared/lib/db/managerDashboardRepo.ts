@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 
 import { getPersonalDashboardAudience, parsePersonalDashboardAudience, type PersonalDashboardAudience } from '../managerDashboardAudience';
+import { isPersonalDashboardImportCursor, PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE } from '../managerDashboardImportPagination';
 import {
   getManagerEmailHash,
   inspectPersonalSnapshot,
@@ -76,6 +77,7 @@ type ImportRow = {
   id: string; original_name: string; status: PersonalDashboardImportStatus; code: string;
   manager_id: string | null; snapshot_id: string | null;
 };
+type ImportJournalRow = ImportRow & { sender: string; message_id: string; received_at: string; issued: string | null };
 
 const IMPORT_MESSAGES: Record<PersonalDashboardImportStatus, string> = {
   imported: 'Личный снимок сохранён и назначен менеджеру',
@@ -377,6 +379,28 @@ export async function importPersonalDashboardSnapshot(input: ImportPersonalDashb
   });
 }
 
+async function readPersonalDashboardImportPage(client: PoolClient, before: string | null = null) {
+  const result = await client.query<ImportJournalRow>(
+    `select ${IMPORT_SELECT},sender,message_id,received_at::text,issued::text from personal_dashboard_imports journal
+      ${before === null ? '' : 'where journal.id < $1::bigint'} order by journal.id desc limit ${PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE + 1}`,
+    before === null ? [] : [before]);
+  const rows = result.rows.slice(0, PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE);
+  return {
+    imports: rows.map((row) => ({ ...mapImport(row), id: row.id, sender: row.sender, messageId: row.message_id,
+      receivedAt: row.received_at, issued: row.issued })),
+    // Do not derive this cursor from mapImport: its legacy numeric id may lose BIGINT precision.
+    nextCursor: result.rows.length > PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE ? rows[rows.length - 1].id : null,
+  };
+}
+
+export async function listPersonalDashboardImports(before: string | null = null) {
+  if (before !== null && !isPersonalDashboardImportCursor(before)) {
+    throw new PersonalDashboardError('INVALID_CURSOR', 'Некорректный курсор журнала импорта');
+  }
+  await ensureSiteSchema();
+  return withTransaction((client) => readPersonalDashboardImportPage(client, before));
+}
+
 export async function listPersonalDashboardAdmin() {
   await ensureSiteSchema();
   return withTransaction(async (client) => {
@@ -386,8 +410,7 @@ export async function listPersonalDashboardAdmin() {
       where coalesce(nullif(role,''),'manager') in ('manager','support_manager') order by is_active desc,name,id`);
     const snapshots = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT} from personal_dashboard_snapshot_state st
       join personal_dashboard_snapshots s on s.manager_id=st.manager_id and s.id=st.active_snapshot_id`);
-    const imports = await client.query<ImportRow & { sender: string; message_id: string; received_at: string; issued: string | null }>(
-      `select ${IMPORT_SELECT},sender,message_id,received_at::text,issued::text from personal_dashboard_imports order by id desc limit 200`);
+    const importPage = await readPersonalDashboardImportPage(client);
     const managerBindings = bindings(managers.rows);
     return {
       groups: (['development', 'support'] as const).map((audience) => {
@@ -407,8 +430,8 @@ export async function listPersonalDashboardAdmin() {
           }),
         };
       }),
-      imports: imports.rows.map((row) => ({ ...mapImport(row), sender: row.sender, messageId: row.message_id,
-        receivedAt: row.received_at, issued: row.issued })),
+      imports: importPage.imports,
+      importsNextCursor: importPage.nextCursor,
     };
   });
 }

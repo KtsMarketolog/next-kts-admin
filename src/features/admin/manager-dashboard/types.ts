@@ -18,7 +18,7 @@ export type ManagerDashboardHtmlVersion = {
 };
 
 export type ManagerDashboardImport = {
-  id?: number;
+  id?: number | string;
   originalName: string;
   status: string;
   message?: string;
@@ -49,6 +49,7 @@ export type ManagerDashboardOverview = {
   mode: 'manage';
   groups: ManagerDashboardGroup[];
   imports: ManagerDashboardImport[];
+  importsNextCursor: string | null;
   mail: { enabled: boolean; configured: boolean };
   expectedIssuedAfter?: string | null;
   expectedBy?: string | null;

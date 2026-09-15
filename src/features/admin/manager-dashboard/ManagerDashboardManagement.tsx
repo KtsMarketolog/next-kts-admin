@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { PERSONAL_DASHBOARD_AUDIENCE_LABELS, type PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
 import { DashboardFrame, formatDashboardDate, ImportResults, SnapshotStatus } from './ManagerDashboardParts';
+import { ManagerDashboardImportJournal } from './ManagerDashboardImportJournal';
 import type { ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
@@ -16,9 +17,10 @@ type ManagementProps = {
   overview: Extract<ManagerDashboardOverview, { mode: 'manage' }>;
   busy: boolean;
   mutate: (path: string, init: RequestInit, successMessage: string) => Promise<ManagerDashboardMutationResult | null>;
+  onAccessDenied?: () => void;
 };
 
-export function ManagerDashboardManagement({ overview, busy: externalBusy, mutate: performMutation }: ManagementProps) {
+export function ManagerDashboardManagement({ overview, busy: externalBusy, mutate: performMutation, onAccessDenied }: ManagementProps) {
   const [pending, setPending] = useState(false);
   const [previewSelection, setPreviewSelection] = useState<{ audience: PersonalDashboardAudience; versionId: number } | null>(null);
   const [fileErrors, setFileErrors] = useState<Partial<Record<PersonalDashboardAudience, string>>>({});
@@ -28,10 +30,37 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
   const htmlInputs = { development: developmentHtmlInput, support: supportHtmlInput };
   const snapshotInput = useRef<HTMLInputElement>(null);
   const previewPanel = useRef<HTMLElement>(null);
+  const audienceGrid = useRef<HTMLDivElement>(null);
   const mutationRef = useRef(false);
   const busy = externalBusy || pending;
   const previewGroup = overview.groups.find((item) => item.audience === previewSelection?.audience);
   const preview = previewGroup?.htmlVersions.find((version) => version.id === previewSelection?.versionId);
+
+  useEffect(() => {
+    const grid = audienceGrid.current;
+    if (!grid) return;
+    // Measure only natural content, never the cards whose minimum height we set.
+    // This also works in our supported browsers predating CSS subgrid.
+    const contents = Array.from(grid.querySelectorAll<HTMLElement>('[data-dashboard-equal-row]'));
+    const desktop = window.matchMedia('(min-width: 1101px)');
+    const update = () => {
+      for (const row of ['heading', 'html']) {
+        const property = `--dashboard-${row}-height`;
+        if (!desktop.matches) { grid.style.removeProperty(property); continue; }
+        const heights = contents.filter((node) => node.dataset.dashboardEqualRow === row).map((node) => {
+          const style = window.getComputedStyle(node.parentElement!);
+          return node.getBoundingClientRect().height + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+            + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+        });
+        if (heights.length) grid.style.setProperty(property, `${Math.ceil(Math.max(...heights))}px`);
+      }
+    };
+    const observer = new ResizeObserver(update);
+    contents.forEach((node) => observer.observe(node));
+    desktop.addEventListener('change', update);
+    update();
+    return () => { observer.disconnect(); desktop.removeEventListener('change', update); };
+  }, [overview.groups]);
 
   useEffect(() => {
     if (!previewSelection) return;
@@ -132,15 +161,16 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
 
   return (
     <div className={styles.stack}>
-      <div className={styles.audienceGrid}>
+      <div ref={audienceGrid} className={styles.audienceGrid}>
         {AUDIENCES.map((audience) => {
           const group = overview.groups.find((item) => item.audience === audience);
           const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
           return (
             <section key={audience} id={`manager-dashboard-group-${audience}`} className={styles.audienceColumn} aria-labelledby={`manager-dashboard-heading-${audience}`}>
-              <h2 id={`manager-dashboard-heading-${audience}`} className={styles.audienceHeading}>{label}</h2>
+              <h2 id={`manager-dashboard-heading-${audience}`} className={styles.audienceHeading}><span className={styles.equalHeightContent} data-dashboard-equal-row="heading">{label}</span></h2>
               {!group ? <div className={styles.panel}><p className={styles.empty}>Не удалось получить настройки этой группы. Обновите страницу.</p></div> : <>
-                <section className={styles.panel} aria-label={`HTML: ${label}`}>
+                <section id={`manager-dashboard-html-panel-${audience}`} className={`${styles.panel} ${styles.htmlPanel}`} aria-label={`HTML: ${label}`}>
+                  <div className={styles.equalHeightContent} data-dashboard-equal-row="html">
                   <div className={styles.sectionHeading}>
                     <div><h3>HTML дашборда</h3><p>Собственный HTML этой группы. Публикация не меняет дашборд другой группы.</p></div>
                     <span className={styles.badge}>{group.activeHtmlVersionId ? `Опубликована версия #${group.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
@@ -175,9 +205,10 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
                       </table>
                     </div>
                   )}
+                  </div>
                 </section>
 
-                <section className={styles.panel} aria-label={`Личные файлы: ${label}`}>
+                <section id={`manager-dashboard-files-${audience}`} className={styles.panel} aria-label={`Личные файлы: ${label}`}>
                   <div className={styles.sectionHeading}><div><h3>Личные файлы группы</h3><p>Снимки назначаются автоматически из общей почты или ручной загрузки ниже.</p></div><span className={styles.badge}>Менеджеров: {group.managers.length}</span></div>
                   <div className={styles.tableScroll}>
                     <table className={`${styles.table} ${styles.groupTable}`}>
@@ -226,10 +257,8 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
         <ImportResults results={results} title="Результат последней операции" />
       </section>
 
-      <section className={styles.panel}>
-        <h2>Журнал импорта</h2>
-        {overview.imports.length === 0 ? <p className={styles.empty}>Загрузок пока не было.</p> : <ImportResults results={overview.imports} title="Последние файлы" />}
-      </section>
+      <ManagerDashboardImportJournal key={JSON.stringify([overview.imports, overview.importsNextCursor])}
+        imports={overview.imports} nextCursor={overview.importsNextCursor} busy={busy} onAccessDenied={onAccessDenied} />
     </div>
   );
 }

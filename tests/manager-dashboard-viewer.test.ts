@@ -19,6 +19,7 @@ const previousStyleLoader = requireForViewer.extensions['.scss'];
 requireForViewer.extensions['.scss'] = (module) => { module.exports = {}; };
 const { ManagerDashboardViewer, managerDashboardViewIdentity } = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardViewer.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardViewer');
 const parts = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardParts.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardParts');
+const { ManagerDashboardImportJournal } = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardImportJournal.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardImportJournal');
 const { ManagerDashboardManagement } = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardManagement');
 if (previousStyleLoader) requireForViewer.extensions['.scss'] = previousStyleLoader;
 else delete requireForViewer.extensions['.scss'];
@@ -122,7 +123,7 @@ type Manage = Extract<ManagerDashboardOverview, { mode: 'manage' }>;
 function managementOverview(): Manage {
   return {
     mode: 'manage', mail: { enabled: true, configured: true }, expectedBy: '10:00 МСК',
-    imports: [{ id: 1, originalName: 'common-development.ktsp', status: 'imported' }, { id: 2, originalName: 'common-support.ktsp', status: 'imported' }],
+    imports: [{ id: 1, originalName: 'common-development.ktsp', status: 'imported' }, { id: 2, originalName: 'common-support.ktsp', status: 'imported' }], importsNextCursor: null,
     groups: (['development', 'support'] as const).map((audience, index) => ({
       audience, activeHtmlVersionId: index * 10 + 11, previousHtmlVersionId: index ? 22 : null,
       htmlVersions: [11, 12].map((id) => ({
@@ -175,6 +176,7 @@ function management(options: {
   const modules: Record<string, unknown> = {
     react: hooks, 'react/jsx-runtime': jsx, './ManagerDashboard.module.scss': { default: {} },
     './ManagerDashboardParts': parts, '@/shared/lib/managerDashboardAudience': audiences,
+    './ManagerDashboardImportJournal': { ManagerDashboardImportJournal },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -255,12 +257,26 @@ test('management shows both independently labelled groups together without tabs 
   const tree = elements(view.render());
   assert.equal(tree.filter((node) => node.props.id === 'manager-dashboard-snapshots').length, 1);
   assert.equal(tree.filter((node) => node.type === 'button' && text(node.props.children) === 'Проверить почту сейчас').length, 1);
-  assert.equal(tree.filter((node) => node.type === 'h2' && text(node.props.children) === 'Журнал импорта').length, 1);
-  assert.equal(tree.filter((node) => node.type === parts.ImportResults && node.props.title === 'Последние файлы').length, 1);
+  assert.equal(tree.filter((node) => node.type === ManagerDashboardImportJournal).length, 1);
+  assert.equal((html.match(/Журнал импорта/g) ?? []).length, 1);
+  const journal = view.find(ManagerDashboardImportJournal);
+  assert.deepEqual(journal.props.imports, managementOverview().imports);
+  assert.equal(journal.props.nextCursor, null);
   const sharedInputIndex = tree.findIndex((node) => node.props.id === 'manager-dashboard-snapshots');
-  const sharedJournalIndex = tree.findIndex((node) => node.type === 'h2' && text(node.props.children) === 'Журнал импорта');
+  const sharedJournalIndex = tree.findIndex((node) => node.type === ManagerDashboardImportJournal);
   assert.ok(sharedInputIndex > tree.findIndex((node) => node.props.id === 'manager-dashboard-html-support'));
   assert.ok(sharedJournalIndex > sharedInputIndex);
+});
+
+test('management remounts the journal when its first page or cursor changes, not on an unchanged overview refresh', () => {
+  const overview = managementOverview();
+  const original = management({ overview }).find(ManagerDashboardImportJournal) as Element & { key: string };
+  const sameData = management({ overview: JSON.parse(JSON.stringify(overview)) as Manage }).find(ManagerDashboardImportJournal) as Element & { key: string };
+  assert.equal(original.key, sameData.key);
+  const changedRows = management({ overview: { ...overview, imports: [{ ...overview.imports[0], status: 'error' }, overview.imports[1]] } }).find(ManagerDashboardImportJournal) as Element & { key: string };
+  assert.notEqual(original.key, changedRows.key);
+  const changedCursor = management({ overview: { ...overview, importsNextCursor: 'older-page' } }).find(ManagerDashboardImportJournal) as Element & { key: string };
+  assert.notEqual(original.key, changedCursor.key);
 });
 
 test('empty support HTML stays independent from existing development versions and both upload forms remain visible', () => {

@@ -1,6 +1,9 @@
 .stack { display: grid; gap: 24px; }
 .audienceGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
 .audienceColumn { display: grid; gap: 20px; min-width: 0; }
+.equalHeightContent { display: flow-root; }
+.htmlPanel { box-sizing: border-box; min-height: var(--dashboard-html-height, 0px); }
+.audienceHeading { box-sizing: border-box; min-height: var(--dashboard-heading-height, 0px); }
 .audienceHeading { margin: 0; padding: 16px 20px; border: 1px solid #e0d9f0; border-top: 4px solid #312467; border-radius: 12px; background: #f5f2fc; color: #312467; font-size: 22px; line-height: 1.4; overflow-wrap: anywhere; }
 .audienceColumn .sectionHeading { flex-wrap: wrap; gap: 12px; }
 .audienceColumn .sectionHeading > div { flex: 1 1 230px; }
@@ -66,8 +69,11 @@
 .results span { color: #697387; font-size: 13px; flex-shrink: 0; }
 .results p { margin: 6px 0; color: #525d71; font-size: 14px; }
 .results small { color: #697387; font-size: 12px; }
+.journalActions { display: flex; justify-content: center; margin-top: 16px; }
 @media (max-width: 1100px) {
   .audienceGrid { grid-template-columns: minmax(0, 1fr); }
+  .audienceColumn { display: flex; flex-direction: column; }
+  .htmlPanel, .audienceHeading { min-height: 0; }
 }
 @media (max-width: 760px) {
   .audienceHeading { padding: 14px 16px; font-size: 20px; }

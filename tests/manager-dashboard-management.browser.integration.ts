@@ -19,25 +19,32 @@ import { compile } from 'sass';
 type BrowserRoute = { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> };
 
 const fixtureEntry = `
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ManagerDashboardManagement } from './src/features/admin/manager-dashboard/ManagerDashboardManagement';
 const date = '2026-09-15T08:00:00Z';
 const makeVersion = (id, audience, suffix) => ({id, audience, originalName: audience + '_synthetic_dashboard_' + suffix + '.html', fileSize: 140000, createdAt: date, firstPublishedAt: date});
+const supportMany = new URLSearchParams(location.search).get('support') === 'many';
 const initial = {
   mode: 'manage', groups: ['development', 'support'].map((audience, index) => ({
-    audience, activeHtmlVersionId: 1 + index * 10, previousHtmlVersionId: 2 + index * 10,
-    htmlVersions: [makeVersion(1 + index * 10, audience, 'active'), makeVersion(2 + index * 10, audience, 'previous')],
+    audience, activeHtmlVersionId: index ? (supportMany ? 11 : null) : 1, previousHtmlVersionId: index ? (supportMany ? 12 : null) : 2,
+    htmlVersions: index ? (supportMany ? Array.from({length: 7}, (_, i) => makeVersion(11 + i, audience, 'history_' + i)) : [])
+      : [makeVersion(1, audience, 'active'), makeVersion(2, audience, 'previous')],
     managers: [{id: index + 1, name: index ? 'Тестовый менеджер сопровождения' : 'Тестовый менеджер развития',
       email: audience + '.synthetic@example.test', bindingStatus: 'matched', isActive: true,
       snapshotStatus: 'current', snapshot: {id: index + 1, originalName: 'личный_снимок_Синтетический_Менеджер_' + audience + '_2026-09-15.ktsp', issued: '2026-09-15', expires: '2026-10-30', receivedAt: date}}]
   })),
-  imports: [{id: 1, originalName: 'синтетический_снимок_общего_журнала.ktsp', status: 'imported', createdAt: date}],
+  imports: Array.from({length: 5}, (_, i) => ({id: 13 - i, originalName: 'синтетический_снимок_журнала_' + (13 - i) + '.ktsp', status: 'imported', createdAt: date})),
+  importsNextCursor: '9',
   mail: {enabled: true, configured: true}, expectedBy: '10:00 МСК', expectedIssuedAfter: '2026-09-15'
 };
 window.fixtureCalls = [];
 function Fixture() {
   const [overview, setOverview] = useState(initial);
+  useEffect(() => {
+    window.fixtureGrowSupport = () => setOverview(current => ({...current, groups: current.groups.map(group => group.audience === 'support' ? {...group, htmlVersions: Array.from({length: 7}, (_, i) => makeVersion(211 + i, 'support', 'dynamic_' + i))} : group)}));
+    return () => {delete window.fixtureGrowSupport;};
+  }, []);
   const mutate = async (requestPath, init, message) => {
     const call = {path: requestPath, method: init.method, message};
     if (init.body instanceof FormData) call.files = [...init.body.entries()].map(([field, file]) => ({field, name: file.name, size: file.size}));
@@ -91,6 +98,9 @@ async function main() {
     fonts.set(match[1], await readFile(path.join(root, 'public', match[1])));
   }
   const receivedFrames: string[] = [];
+  const historyRequests: Array<{before: number; returned: number}> = [];
+  // Only five rows are in the browser bundle. Remaining records exist solely in this HTTP stub.
+  const history = Array.from({length: 13}, (_, i) => ({id: 13 - i, originalName: `синтетический_снимок_журнала_${13 - i}.ktsp`, status: 'imported', createdAt: '2026-09-15T08:00:00Z'}));
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const headers = {'Cache-Control': 'no-store'};
@@ -98,6 +108,19 @@ async function main() {
     else if (url.pathname === '/fixture.js') response.writeHead(200, {...headers, 'Content-Type': 'text/javascript'}).end(bundle.outputFiles[0].contents);
     else if (url.pathname === '/fixture.css') response.writeHead(200, {...headers, 'Content-Type': 'text/css'}).end(css);
     else if (fonts.has(url.pathname)) response.writeHead(200, {...headers, 'Content-Type': 'font/woff2'}).end(fonts.get(url.pathname));
+    else if (url.pathname === '/api/admin/manager-dashboard/imports') {
+      const before = Number(url.searchParams.get('before'));
+      if (request.method !== 'GET' || !Number.isSafeInteger(before) || before <= 0) {
+        historyRequests.push({before, returned: 0});
+        response.writeHead(400, headers).end();
+        return;
+      }
+      const remaining = history.filter((item) => item.id < before);
+      const imports = remaining.slice(0, 5);
+      const nextCursor = remaining.length > imports.length ? String(imports.at(-1)?.id) : null;
+      historyRequests.push({before, returned: imports.length});
+      response.writeHead(200, {...headers, 'Content-Type': 'application/json'}).end(JSON.stringify({imports, nextCursor}));
+    }
     else if (url.pathname === '/api/admin/manager-dashboard/frame') {
       receivedFrames.push(url.search);
       response.writeHead(200, {...headers, 'Content-Type': 'text/html; charset=utf-8'}).end('<!doctype html><html lang="ru"><meta charset="utf-8"><body style="font-family:system-ui;padding:30px;background:#f2f0fb"><h1>Синтетический предпросмотр HTML</h1><p>Только тестовая рамка — личные данные отсутствуют.</p></body></html>');
@@ -133,6 +156,7 @@ async function main() {
           page.on('dialog', (dialog: {accept(): Promise<void>}) => void dialog.accept());
           page.setDefaultTimeout(7000);
           try {
+            const pageHistoryStart = historyRequests.length;
             await page.goto(origin);
             await page.locator('#manager-dashboard-group-support').waitFor({state: 'visible'});
             await page.evaluate(() => document.fonts.ready);
@@ -145,6 +169,45 @@ async function main() {
             assert.equal(await page.getByRole('button', {name: 'Проверить почту сейчас', exact: true}).count(), 1);
             assert.equal(await page.getByRole('heading', {name: 'Общая загрузка личных файлов', exact: true}).count(), 1);
             assert.equal(await page.getByRole('heading', {name: 'Журнал импорта', exact: true}).count(), 1);
+            const journal = page.locator('#manager-dashboard-import-journal');
+            assert.equal(await journal.locator('li').count(), 5, 'initial journal contains only five supplied rows');
+            const assertPanelAlignment = async (scenario: string) => {
+              // WebKit applies viewport changes asynchronously; allow layout and ResizeObserver to settle.
+              await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+              if (width > 1000) await page.waitForFunction(() => {
+                const left = document.getElementById('manager-dashboard-html-panel-development')?.getBoundingClientRect();
+                const right = document.getElementById('manager-dashboard-html-panel-support')?.getBoundingClientRect();
+                const leftManagers = document.getElementById('manager-dashboard-files-development')?.getBoundingClientRect();
+                const rightManagers = document.getElementById('manager-dashboard-files-support')?.getBoundingClientRect();
+                return left && right && leftManagers && rightManagers && Math.abs(left.height - right.height) < 2 && Math.abs(leftManagers.y - rightManagers.y) < 2;
+              });
+              else await page.waitForFunction(() => ['development', 'support'].every((audience) => {
+                const panel = document.getElementById(`manager-dashboard-html-panel-${audience}`);
+                const inner = panel?.lastElementChild;
+                return panel && inner && panel.getBoundingClientRect().bottom - inner.getBoundingClientRect().bottom <= 40;
+              }));
+              const layout = await page.evaluate(() => ['development', 'support'].map((audience) => {
+                const html = document.getElementById(`manager-dashboard-html-panel-${audience}`);
+                const managers = document.getElementById(`manager-dashboard-files-${audience}`);
+                if (!html || !managers) throw new Error('Synthetic panels missing');
+                const htmlBox = html.getBoundingClientRect();
+                const managersBox = managers.getBoundingClientRect();
+                const contentEnd = html.lastElementChild?.getBoundingClientRect().bottom ?? htmlBox.bottom;
+                return {htmlTop: htmlBox.y, htmlHeight: htmlBox.height, managersTop: managersBox.y, gapAfterHtml: managersBox.y - htmlBox.bottom, innerBottomSpace: htmlBox.bottom - contentEnd};
+              }));
+              if (width > 1000) {
+                assert.ok(Math.abs(layout[0].htmlHeight - layout[1].htmlHeight) < 2, `${scenario}: desktop HTML panels share the taller height`);
+                assert.ok(Math.abs(layout[0].htmlTop - layout[1].htmlTop) < 2, `${scenario}: desktop HTML panels begin together`);
+                assert.ok(Math.abs(layout[0].managersTop - layout[1].managersTop) < 2, `${scenario}: manager panels begin together`);
+              } else {
+                assert.ok(Math.abs(layout[0].htmlHeight - layout[1].htmlHeight) > 40, `${scenario}: mobile HTML panels retain their own natural heights`);
+                for (const column of layout) {
+                  assert.ok(column.gapAfterHtml >= 12 && column.gapAfterHtml <= 28, `${scenario}: no blank alignment gap before mobile managers`);
+                  assert.ok(column.innerBottomSpace <= 40, `${scenario}: shorter mobile HTML panel is not stretched to the other group (${JSON.stringify(column)})`);
+                }
+              }
+            };
+            await assertPanelAlignment('development two versions / support empty');
             const development = await page.locator('#manager-dashboard-group-development').boundingBox();
             const support = await page.locator('#manager-dashboard-group-support').boundingBox();
             assert.ok(development && support);
@@ -163,6 +226,19 @@ async function main() {
             assert.ok(shared && shared.y > Math.max(development.y + development.height, support.y + support.height), 'common upload follows both groups');
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no page horizontal overflow');
             await page.screenshot({path: path.join(output, `${engineName}-${width}-columns.png`), fullPage: true});
+
+            assert.equal(historyRequests.length, pageHistoryStart, 'journal must not download further records before a click');
+            await journal.getByRole('button', {name: /Показать ещё/}).click();
+            await page.waitForFunction(() => document.querySelectorAll('#manager-dashboard-import-journal li').length === 10);
+            assert.deepEqual(historyRequests.slice(pageHistoryStart), [{before: 9, returned: 5}], 'first click fetches only the next five records');
+            await journal.getByRole('button', {name: /Показать ещё/}).click();
+            await page.waitForFunction(() => document.querySelectorAll('#manager-dashboard-import-journal li').length === 13);
+            assert.deepEqual(historyRequests.slice(pageHistoryStart), [{before: 9, returned: 5}, {before: 4, returned: 3}], 'second click fetches only the final three records');
+            assert.equal(await journal.getByRole('button', {name: /Показать ещё/}).count(), 0, 'end of history has no further loading control');
+            const importNames = await journal.locator('li strong').allTextContents();
+            assert.equal(new Set(importNames).size, 13, 'pagination has no duplicated records');
+            assert.deepEqual(importNames, history.map((item) => item.originalName), 'journal remains newest first across page boundaries');
+            await journal.screenshot({path: path.join(output, `${engineName}-${width}-journal-13.png`)});
 
             // Both selectors remain populated independently, even after submitting the other group.
             for (const audience of ['development', 'support']) await page.locator(`#manager-dashboard-html-${audience}`).setInputFiles({name: `${audience}.html`, mimeType: 'text/html', buffer: Buffer.from('<!doctype html><h1>Synthetic</h1>')});
@@ -192,12 +268,29 @@ async function main() {
             const calls = await page.evaluate('window.fixtureCalls');
             assert.deepEqual(calls.map((call: {path: string}) => call.path), ['/html?audience=development', '/publish', '/html?audience=support', '/publish', '/snapshots', '/check-email']);
             assert.deepEqual(calls[1].body, {audience: 'development', versionId: 101, expectedActiveVersionId: 1});
-            assert.deepEqual(calls[3].body, {audience: 'support', versionId: 111, expectedActiveVersionId: 11});
+            assert.deepEqual(calls[3].body, {audience: 'support', versionId: 111, expectedActiveVersionId: null});
             assert.deepEqual(calls[4].files.map((file: {name: string}) => file.name), ['development.ktsp', 'support.ktsp']);
             assert.deepEqual(errors, [], 'no browser script errors');
             assert.deepEqual(external, [], 'no external requests');
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'mutations and preview do not introduce horizontal overflow');
-            console.log(`PASS ${engineName}/${width}: two groups, isolated uploads/publication, common imports, full-width preview, no overflow.`);
+            await page.evaluate('window.fixtureGrowSupport()');
+            await page.locator('#manager-dashboard-group-support .versionsTable tbody tr').nth(6).waitFor({state: 'visible'});
+            await assertPanelAlignment('support grows dynamically after render');
+            await page.goto(`${origin}/?support=many`);
+            await page.locator('#manager-dashboard-group-support .versionsTable tbody tr').nth(6).waitFor({state: 'visible'});
+            await page.evaluate(() => document.fonts.ready);
+            await assertPanelAlignment('development two versions / support seven versions');
+            await page.setViewportSize({width: width > 1000 ? 1280 : 430, height: 1000});
+            await assertPanelAlignment('resize with asymmetric content');
+            await page.setViewportSize({width, height: 1000});
+            await page.evaluate(() => {document.body.style.fontFamily = 'Arial, sans-serif';});
+            await assertPanelAlignment('font metrics change with asymmetric content');
+            await page.evaluate(() => {document.body.style.fontFamily = '';});
+            await assertPanelAlignment('original font metrics restored');
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'a longer right panel does not introduce horizontal overflow');
+            assert.equal(await page.locator('#manager-dashboard-import-journal li').count(), 5, 'fresh initial response remains bounded to five rows');
+            await page.screenshot({path: path.join(output, `${engineName}-${width}-support-taller.png`), fullPage: true});
+            console.log(`PASS ${engineName}/${width}: aligned asymmetric groups, natural mobile heights, isolated uploads/publication, journal 5+5+3, full-width preview, no overflow.`);
           } finally {await context.close();}
         }
       } finally {await browser.close();}

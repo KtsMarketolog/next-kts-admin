@@ -12,7 +12,7 @@ import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import {
   activatePersonalDashboardHtml, createPersonalDashboardHtml, getPersonalDashboardHtml,
   getPersonalDashboardSnapshot, getPersonalDashboardStatus, importPersonalDashboardSnapshot,
-  listPersonalDashboardAdmin, recordPersonalDashboardImportFailure,
+  listPersonalDashboardAdmin, listPersonalDashboardImports, recordPersonalDashboardImportFailure,
 } from '../src/shared/lib/db/managerDashboardRepo';
 import { getManagerEmailHash, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
 import type { PersonalDashboardAudience } from '../src/shared/lib/managerDashboardAudience';
@@ -336,10 +336,44 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         code: 'arbitrary SMTP response with credentials must never enter the journal' });
       assert.equal(result.code, 'ATTACHMENT_FAILED');
       const overview = await listPersonalDashboardAdmin();
-      assert.ok(overview.imports.some((item) => item.id === result.id && item.code === 'ATTACHMENT_FAILED'));
+      assert.ok(overview.imports.some((item) => item.id === String(result.id) && item.code === 'ATTACHMENT_FAILED'));
       assert.equal(overview.groups.some((group) => group.managers.some((item) => 'bytes' in item)), false);
       assert.ok(overview.groups.every((group) => group.htmlVersions.every((item) => !('htmlContent' in item))));
       assert.equal('managers' in overview || 'htmlVersions' in overview, false);
+    });
+
+    await t.test('journal uses five-row BIGINT keyset pages across concurrent new deliveries', async () => {
+      const prefix = `synthetic-pagination:${randomUUID()}:`;
+      // Cross a decimal-width boundary as well as 2^53: ORDER BY id::text would misorder these.
+      const largest = BigInt('10000000000000003');
+      const ids = Array.from({ length: 13 }, (_, index) => String(largest - BigInt(index)));
+      const newerId = String(largest + BigInt(1));
+      const allKeys = [...ids, newerId].map((id) => `${prefix}${id}`);
+      const insertRows = (values: string[]) => query(`insert into personal_dashboard_imports
+        (id,source_key,original_name,status,code)
+        select id,$2 || id::text,'synthetic-' || id::text || '.ktsp','invalid','INVALID_ATTACHMENT'
+        from unnest($1::bigint[]) as item(id)`, [values, prefix]);
+      try {
+        await insertRows(ids);
+        const overview = await listPersonalDashboardAdmin();
+        assert.deepEqual(overview.imports.map((row) => row.id), ids.slice(0, 5));
+        assert.equal(overview.importsNextCursor, ids[4]);
+        const first = await listPersonalDashboardImports();
+        assert.deepEqual(first, { imports: overview.imports, nextCursor: overview.importsNextCursor });
+        await insertRows([newerId]);
+        const second = await listPersonalDashboardImports(first.nextCursor);
+        assert.deepEqual(second.imports.map((row) => row.id), ids.slice(5, 10));
+        assert.equal(second.nextCursor, ids[9]);
+        const third = await listPersonalDashboardImports(second.nextCursor);
+        assert.deepEqual(third.imports.slice(0, 3).map((row) => row.id), ids.slice(10));
+        const seen = [...first.imports, ...second.imports, ...third.imports].map((row) => row.id);
+        assert.equal(new Set(seen).size, seen.length, 'BIGINT identities and page boundaries must not collide');
+        assert.equal(seen.includes(newerId), false);
+        assert.deepEqual(await listPersonalDashboardImports('1'), { imports: [], nextCursor: null });
+      } finally {
+        // Only explicitly named synthetic rows; preserve all other imports and their sequence.
+        await query(`delete from personal_dashboard_imports where source_key=any($1::text[])`, [allKeys]);
+      }
     });
 
     await t.test('durable mail receipts require committed success and preserve data while expiring metadata', async () => {
