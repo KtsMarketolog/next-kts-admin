@@ -14,6 +14,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { build } from 'esbuild';
+import postcss from 'postcss';
 import { compile } from 'sass';
 
 type BrowserRoute = { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> };
@@ -22,6 +23,8 @@ const fixtureEntry = `
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ManagerDashboardManagement } from './src/features/admin/manager-dashboard/ManagerDashboardManagement';
+import adminStyles from './src/app/admin/admin.module.scss';
+import dashboardStyles from './src/features/admin/manager-dashboard/ManagerDashboard.module.scss';
 const date = '2026-09-15T08:00:00Z';
 const makeVersion = (id, audience, suffix) => ({id, audience, originalName: audience + '_synthetic_dashboard_' + suffix + '.html', fileSize: 140000, createdAt: date, firstPublishedAt: date});
 const supportMany = new URLSearchParams(location.search).get('support') === 'many';
@@ -73,7 +76,13 @@ function Fixture() {
     }
     return {results: []};
   };
-  return <main id="fixture"><h1>Дашборды менеджеров</h1><ManagerDashboardManagement overview={overview} busy={false} mutate={mutate}/></main>;
+  return <><main id="fixture" className={adminStyles.page + ' ' + dashboardStyles.dashboardPage}>
+    <div className={adminStyles.topbar}><h1>Дашборды менеджеров</h1><div className={adminStyles.topbarActions}>
+      <a id="fixture-back-link" href="#fixture" className={dashboardStyles.secondary}>В панель управления</a>
+      <button className={dashboardStyles.primary}>Обновить</button>
+    </div></div>
+    <ManagerDashboardManagement overview={overview} busy={false} mutate={mutate}/>
+  </main><aside className={adminStyles.page} id="fixture-unrelated"><button>Другая страница администратора</button></aside></>;
 }
 createRoot(document.getElementById('root')).render(<Fixture/>);
 `;
@@ -95,15 +104,24 @@ async function main() {
     define: {'process.env.NODE_ENV': '"test"'}, alias: {'@': path.join(root, 'src')},
     plugins: [{name: 'synthetic-scss-modules', setup(plugin) {
       plugin.onLoad({filter: /\.module\.scss$/}, async (args) => {
-        const css = compile(args.path).css;
-        styles.set(args.path, css);
+        const css = compile(args.path, {importers: [{findFileUrl(url) {
+          return url.startsWith('@/') ? pathToFileURL(path.join(root, 'src', url.slice(2))) : null;
+        }}]}).css;
         const classNames = [...css.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map((match) => match[1]);
-        return {contents: `export default ${JSON.stringify(Object.fromEntries(classNames.map((name) => [name, name])))};`, loader: 'js'};
+        // Preserve the real admin cascade without colliding unrelated CSS Modules
+        // (e.g. admin .danger !important must not match dashboard .danger).
+        const prefix = args.path.endsWith('/admin.module.scss') ? 'admin_' : '';
+        const parsed = postcss.parse(css);
+        if (prefix) parsed.walkRules(rule => {rule.selector = rule.selector.replace(/\.([a-zA-Z_][\w-]*)/g, (_, name) => `.${prefix}${name}`);});
+        styles.set(args.path, parsed.toString());
+        return {contents: `export default ${JSON.stringify(Object.fromEntries(classNames.map((name) => [name, prefix + name])))};`, loader: 'js'};
       });
     }}],
   });
   const globals = await readFile(path.join(root, 'src/app/globals.css'), 'utf8');
-  const css = `${globals}\n${[...styles.values()].join('\n')}\nhtml,body{overflow-x:visible} body{background:#f5f5f7} #fixture{max-width:1800px;padding:24px;margin:0 auto} #fixture>h1{font-size:28px;margin:0 0 28px} @media(max-width:760px){#fixture{padding:12px} #fixture>h1{font-size:24px}}`;
+  // Load the admin shell last to exercise the least favorable stylesheet order.
+  const moduleStyles = [...styles].sort(([left], [right]) => Number(left.endsWith('/admin.module.scss')) - Number(right.endsWith('/admin.module.scss')));
+  const css = `${globals}\n${moduleStyles.map(([, value]) => value).join('\n')}\nhtml,body{overflow-x:visible} body{background:#f5f5f7} #fixture{max-width:1800px;padding:24px;margin:0 auto} #fixture-unrelated{min-height:0;padding:16px} @media(max-width:760px){#fixture{padding:12px}}`;
   const fonts = new Map<string, Buffer>();
   for (const match of globals.matchAll(/url\("(\/fonts\/[^"?]+)"\)/g)) {
     fonts.set(match[1], await readFile(path.join(root, 'public', match[1])));
@@ -187,6 +205,77 @@ async function main() {
             assert.equal(await page.getByRole('heading', {name: 'Журнал импорта', exact: true}).count(), 1);
             const journal = page.locator('#manager-dashboard-import-journal');
             assert.equal(await journal.locator('li').count(), 5, 'initial journal contains only five supplied rows');
+
+            // Actual admin stylesheet is deliberately loaded after the dashboard
+            // stylesheet: hover, danger colors and keyboard focus must still win.
+            const controls = page.locator('#fixture button, #fixture a.secondary');
+            for (const control of await controls.all()) {
+              const kind = await control.evaluate((element: HTMLElement) => ['primary', 'secondary', 'danger'].find(name => element.classList.contains(name)));
+              assert.ok(kind, 'every dashboard action uses a shared button variant');
+              await page.mouse.move(0, 0);
+              const disabled = await control.isDisabled();
+              const normalBackground = kind === 'primary' ? 'rgb(49, 36, 103)' : 'rgb(255, 255, 255)';
+              await page.waitForFunction(({element, expected}: {element: HTMLElement; expected: string}) => getComputedStyle(element).backgroundColor === expected, {element: await control.elementHandle(), expected: normalBackground});
+              const before = await control.evaluate((element: HTMLElement) => {
+                const style = getComputedStyle(element);
+                return {background: style.backgroundColor, color: style.color, border: style.borderColor, shadow: style.boxShadow, cursor: style.cursor, transform: style.transform};
+              });
+              await control.hover({force: disabled});
+              if (disabled) {
+                const after = await control.evaluate((element: HTMLElement) => {
+                  const style = getComputedStyle(element);
+                  return {background: style.backgroundColor, color: style.color, border: style.borderColor, shadow: style.boxShadow, cursor: style.cursor, transform: style.transform};
+                });
+                assert.deepEqual(after, before, 'disabled buttons do not react visually to hover');
+                assert.equal(after.cursor, 'not-allowed', 'disabled actions do not imply they are loading');
+              } else {
+                const expected = kind === 'primary' ? 'rgb(35, 22, 79)' : kind === 'secondary' ? 'rgb(239, 235, 252)' : 'rgb(165, 47, 36)';
+                await page.waitForFunction(({element, expected}: {element: HTMLElement; expected: string}) => getComputedStyle(element).backgroundColor === expected, {element: await control.elementHandle(), expected});
+                const after = await control.evaluate((element: HTMLElement) => {
+                  const style = getComputedStyle(element);
+                  return {color: style.color, shadow: style.boxShadow, cursor: style.cursor, transform: style.transform};
+                });
+                assert.notEqual(after.shadow, 'none', 'enabled actions have visible hover feedback');
+                assert.equal(after.cursor, 'pointer');
+                assert.equal(after.transform, before.transform, 'hover does not move the action or neighboring rows');
+                await control.screenshot({path: path.join(output, `${engineName}-${width}-${kind}-hover.png`)});
+                if (kind === 'danger') {
+                  assert.equal(after.color, 'rgb(255, 255, 255)', 'delete hover keeps readable contrast');
+                  await page.locator('#manager-dashboard-html-panel-development').screenshot({path: path.join(output, `${engineName}-${width}-actions-hover.png`)});
+                }
+              }
+            }
+            await page.mouse.move(0, 0);
+            const fileInput = page.locator('#manager-dashboard-html-development');
+            await fileInput.hover({position: {x: 30, y: 15}});
+            await page.waitForFunction(() => {
+              const input = document.getElementById('manager-dashboard-html-development');
+              return input && getComputedStyle(input, '::file-selector-button').backgroundColor === 'rgb(239, 235, 252)';
+            });
+            await fileInput.screenshot({path: path.join(output, `${engineName}-${width}-file-hover.png`)});
+            await page.mouse.move(0, 0);
+            await fileInput.focus();
+            await page.keyboard.press('Tab');
+            await page.keyboard.press('Shift+Tab');
+            // macOS WebKit can exclude controls from sequential Tab navigation;
+            // retain keyboard modality but explicitly focus this test target.
+            await fileInput.focus();
+            assert.equal(await fileInput.evaluate((element: HTMLElement) => getComputedStyle(element).outlineStyle), 'solid', `file input keyboard focus survives admin input:read-only:focus styles (${JSON.stringify(await fileInput.evaluate((element: HTMLElement) => ({active: document.activeElement?.id, focusVisible: element.matches(':focus-visible')})))})`);
+            assert.equal(await fileInput.evaluate((element: HTMLElement) => getComputedStyle(element).outlineWidth), '3px');
+            const backLink = page.locator('#fixture-back-link');
+            await backLink.focus();
+            assert.equal(await backLink.evaluate((element: HTMLElement) => getComputedStyle(element).outlineWidth), '3px', 'button-like navigation link has keyboard focus');
+            const unrelated = page.locator('#fixture-unrelated button');
+            const unrelatedBefore = await unrelated.evaluate((element: HTMLElement) => getComputedStyle(element).backgroundColor);
+            await unrelated.hover();
+            assert.equal(await unrelated.evaluate((element: HTMLElement) => getComputedStyle(element).backgroundColor), unrelatedBefore, 'hover remains scoped to this dashboard');
+            assert.equal(unrelatedBefore, 'rgb(38, 11, 134)', 'real admin base styling is present outside the dashboard');
+            await page.emulateMedia({reducedMotion: 'reduce'});
+            for (const control of await controls.all()) assert.equal(await control.evaluate((element: HTMLElement) => getComputedStyle(element).transitionDuration), '0s', 'reduced motion removes action transitions');
+            assert.equal(await fileInput.evaluate((element: HTMLElement) => getComputedStyle(element, '::file-selector-button').transitionDuration), '0s', 'reduced motion removes file-selector transitions');
+            await page.emulateMedia({reducedMotion: 'no-preference'});
+            await page.mouse.move(0, 0);
+            await page.locator('#fixture h1').scrollIntoViewIfNeeded();
             const assertPanelAlignment = async (scenario: string) => {
               // WebKit applies viewport changes asynchronously; allow layout and ResizeObserver to settle.
               await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -240,7 +329,7 @@ async function main() {
             }
             const shared = await page.getByRole('heading', {name: 'Общая загрузка личных файлов', exact: true}).boundingBox();
             assert.ok(shared && shared.y > Math.max(development.y + development.height, support.y + support.height), 'common upload follows both groups');
-            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no page horizontal overflow');
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `no page horizontal overflow: ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('body *')].filter(element => element.getBoundingClientRect().right > innerWidth + 1).slice(0, 12).map(element => ({tag: element.tagName, className: element.className, right: element.getBoundingClientRect().right}))))}`);
             await page.screenshot({path: path.join(output, `${engineName}-${width}-columns.png`), fullPage: true});
 
             assert.equal(historyRequests.length, pageHistoryStart, 'journal must not download further records before a click');
@@ -349,9 +438,33 @@ async function main() {
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'a longer right panel does not introduce horizontal overflow');
             assert.equal(await page.locator('#manager-dashboard-import-journal li').count(), 5, 'fresh initial response remains bounded to five rows');
             await page.screenshot({path: path.join(output, `${engineName}-${width}-support-taller.png`), fullPage: true});
-            console.log(`PASS ${engineName}/${width}: aligned asymmetric groups, natural mobile heights, isolated uploads/publication/deletion, delete cancellation/retry/preview scope, journal 5+5+3, full-width preview, no overflow.`);
+            console.log(`PASS ${engineName}/${width}: real admin CSS cascade, all action/link hovers, disabled protection, file-selector hover, keyboard focus, reduced motion, unrelated admin scope, aligned panels, isolated mutations, journal 5+5+3, no overflow.`);
           } finally {await context.close();}
         }
+        // A narrow desktop viewport is not a touchscreen. Exercise the actual
+        // coarse-pointer/hover:none media features in a separate touch context.
+        const touchContext = await browser.newContext({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+        const touchExternal: string[] = [];
+        try {
+          await touchContext.route('**/*', async (route: BrowserRoute) => {
+            const url = new URL(route.request().url());
+            if (url.origin === origin) await route.continue();
+            else {touchExternal.push(url.origin); await route.abort();}
+          });
+          const touchPage = await touchContext.newPage();
+          await touchPage.goto(origin);
+          await touchPage.locator('#manager-dashboard-group-development').waitFor({state: 'visible'});
+          assert.equal(await touchPage.evaluate(() => matchMedia('(hover: none) and (pointer: coarse)').matches), true, 'touch fixture uses genuine coarse-pointer media features');
+          for (const control of await touchPage.locator('#fixture button:not(:disabled), #fixture a.secondary').all()) {
+            const before = await control.evaluate((element: HTMLElement) => ({background: getComputedStyle(element).backgroundColor, shadow: getComputedStyle(element).boxShadow}));
+            await control.hover();
+            const after = await control.evaluate((element: HTMLElement) => ({background: getComputedStyle(element).backgroundColor, shadow: getComputedStyle(element).boxShadow}));
+            assert.deepEqual(after, before, 'touch devices do not retain hover-only colors or shadows');
+          }
+          assert.deepEqual(touchExternal, [], 'touch checks do not request external services');
+          await touchPage.locator('#manager-dashboard-html-panel-development').screenshot({path: path.join(output, `${engineName}-touch-390-actions.png`)});
+          console.log(`PASS ${engineName}/touch-390: real hover:none/coarse-pointer, no sticky action hover or external requests.`);
+        } finally {await touchContext.close();}
       } finally {await browser.close();}
     }
     assert.ok(enginesTested > 0, 'at least one browser engine must be installed');

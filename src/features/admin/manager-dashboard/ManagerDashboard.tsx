@@ -142,7 +142,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
   }
 
   return (
-    <main className={adminStyles.page}>
+    <main className={`${adminStyles.page} ${styles.dashboardPage}`}>
       <div className={adminStyles.topbar}>
         <div><p>Панель управления</p><h1>{mode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h1></div>
         <div className={adminStyles.topbarActions}>
