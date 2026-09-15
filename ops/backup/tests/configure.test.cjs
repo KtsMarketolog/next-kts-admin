@@ -50,8 +50,50 @@ test('cloud command pins project, profile, endpoint and audited filesystem paths
   }
 });
 
+test('count retention requires explicit approval and reuses the existing dedicated uploader', async () => {
+  const original = await example();
+  original.cloudApproved = true;
+  original.predeployCloudPolicy = 'required';
+  original.retention = { localDays: 14, cloudDays: 5, unrelated: true };
+  original.cloudRetention = { profile: 'foreign-profile', credentialsFile: '/foreign/credentials' };
+  const next = candidate(original, ['retention', 'count', '5']);
+  assert.deepEqual(next.retention, { localDays: 14, cloudCopies: 5, unrelated: true });
+  assert.deepEqual(next.cloudRetention, { mode: 'count', keep: 5, deleteApproved: true,
+    profile: original.cloud.profile, configFile: original.cloud.configFile,
+    credentialsFile: original.cloud.credentialsFile });
+  assert.equal(next.predeployCloudPolicy, 'required');
+  assert.deepEqual(next.cloud, original.cloud);
+  assert.deepEqual(next.untouched, original.untouched);
+  assert.equal(original.retention.cloudDays, 5);
+  assert.equal(original.cloudRetention.profile, 'foreign-profile');
+  for (const args of [['retention'], ['retention', 'count', '4'], ['retention', 'count', '05'],
+    ['retention', 'days', '5'], ['retention', 'count', '5', 'approve']]) {
+    assert.throws(() => candidate(original, args), { code: 'CONFIGURE_USAGE' });
+  }
+});
+
+test('count retention refuses unapproved cloud and unrelated access or destinations', async () => {
+  const original = await example(); original.cloudApproved = true;
+  for (const mutate of [
+    (c) => { c.cloudApproved = false; },
+    (c) => { c.cloud.profile = 'default'; },
+    (c) => { c.cloud.configFile = '/another-project/aws-config'; },
+    (c) => { c.cloud.credentialsFile = '/another-project/keys'; },
+    (c) => { c.cloud.bucket = 'mywood-backups'; },
+    (c) => { c.cloud.kmsKeyId = 'invalid'; },
+    (c) => { c.cloud.endpoint = 'https://unrelated.invalid'; },
+    (c) => { c.cloud.prefix = 'another-project/'; },
+    (c) => { c.cloud = null; },
+  ]) {
+    const changed = structuredClone(original); mutate(changed);
+    assert.throws(() => candidate(changed, ['retention', 'count', '5']), { code: 'CONFIGURE_RETENTION_GUARD' });
+  }
+});
+
 async function commissioning(options = {}) {
-  const config = await example(), original = JSON.stringify(config), writes = [], accesses = [];
+  const config = await example();
+  options.mutateConfig?.(config);
+  const original = JSON.stringify(config), writes = [], accesses = [];
   let reads = 0, validations = 0;
   const mockedFs = {
     lstat: async (filename) => ({ isDirectory: () => true, isSymbolicLink: () => options.symlink === filename,
@@ -70,7 +112,7 @@ async function commissioning(options = {}) {
     validations++;
     assert.equal(ctx.config.cloudApproved, true);
     assert.equal(ctx.config.cloud.profile, 'kts-backup');
-    if (options.badCredentials) throw new Error('SECRET_EXAMPLE');
+    if (options.badCredentials || options.failAtValidation === validations) throw new Error('SECRET_EXAMPLE');
     return true;
   } };
   const req = (name) => name === 'node:fs/promises' ? mockedFs : name === './common.cjs' ? common
@@ -113,6 +155,40 @@ test('policy commissioning does not read AWS credentials or enable cloud', async
   assert.equal(result.error, undefined); assert.equal(result.validations, 0);
   assert.equal(result.writes[0].value.cloudApproved, false);
   assert.equal(result.writes[0].value.predeployCloudPolicy, 'required');
+});
+
+test('count commissioning validates both uses of the existing profile before persisting approval', async () => {
+  const options = { args: ['retention', 'count', '5'], mutateConfig: (config) => {
+    config.cloudApproved = true; config.predeployCloudPolicy = 'required';
+    config.retention = { localDays: 14, cloudDays: 5 };
+  } };
+  const result = await commissioning(options);
+  assert.equal(result.error, undefined); assert.equal(result.validations, 2);
+  assert.equal(result.writes.length, 1);
+  const next = result.writes[0].value;
+  assert.equal(next.cloudRetention.deleteApproved, true);
+  assert.equal(next.cloudRetention.credentialsFile, next.cloud.credentialsFile);
+  assert.equal(next.retention.localDays, 14); assert.equal(next.retention.cloudCopies, 5);
+  assert.equal(Object.hasOwn(next.retention, 'cloudDays'), false);
+  assert.equal(next.predeployCloudPolicy, 'required');
+  for (const additional of [{ badCredentials: true }, { failAtValidation: 2 }, { concurrentChange: true }]) {
+    const rejected = await commissioning({ ...options, ...additional });
+    assert.ok(rejected.error); assert.equal(rejected.writes.length, 0);
+    assert.ok(!safeError(rejected.error).includes('SECRET_EXAMPLE'));
+  }
+});
+
+test('example keeps count deletion disabled and lifecycle does not expire completed objects', async () => {
+  const config = await example();
+  assert.equal(config.cloudRetention.mode, 'count'); assert.equal(config.cloudRetention.keep, 5);
+  assert.equal(config.cloudRetention.deleteApproved, false);
+  assert.equal(config.retention.cloudCopies, 5); assert.equal(Object.hasOwn(config.retention, 'cloudDays'), false);
+  const lifecycle = JSON.parse(await fs.readFile(path.join(__dirname, '../yandex-lifecycle-count.json'), 'utf8'));
+  assert.equal(lifecycle.Rules.length, 1);
+  assert.deepEqual(lifecycle.Rules[0].AbortIncompleteMultipartUpload, { DaysAfterInitiation: 1 });
+  assert.equal(lifecycle.Rules[0].Status, 'Enabled');
+  assert.equal(Object.hasOwn(lifecycle.Rules[0], 'Expiration'), false);
+  assert.equal(Object.hasOwn(lifecycle.Rules[0], 'NoncurrentVersionExpiration'), false);
 });
 
 test('shared cloud configuration validator is local-only and enforces private credentials', async (t) => {

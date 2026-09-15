@@ -33,6 +33,13 @@ const SAFE_DEPENDENCY_CODES = new Set([
   'RESTORE_STOP_FAILED_DIRECTORY_PRESERVED','RESTORE_PID_REMAINS_DIRECTORY_PRESERVED',
   'RESTORE_CLEANUP_GUARD_FAILED','RESTORE_INTERRUPTED','RESTORE_PREPARE_FAILED',
   'RESTORE_FILES_FAILED','RESTORE_INITDB_FAILED','RESTORE_PG_RESTORE_FAILED','RESTORE_VALIDATE_FAILED',
+  'CLOUD_RETENTION_CONFIG','CLOUD_RETENTION_DESCRIPTOR','CLOUD_RETENTION_INVENTORY',
+  'CLOUD_RETENTION_POLICY','CLOUD_RETENTION_VERIFY','CLOUD_RETENTION_DELETE_UNCONFIRMED',
+  'CLOUD_RETENTION_ORPHANS',
+  'CLOUD_RETENTION_ADAPTER','CLOUD_RETENTION_AUDIT','CLOUD_RETENTION_CONTEXT',
+  'CLOUD_RETENTION_COUNT','CLOUD_RETENTION_DELETE','CLOUD_RETENTION_DUPLICATE',
+  'CLOUD_RETENTION_IDENTITY','CLOUD_RETENTION_INSPECT','CLOUD_RETENTION_JOURNAL',
+  'CLOUD_RETENTION_KEEPERS','CLOUD_RETENTION_LIST','CLOUD_RETENTION_PENDING','CLOUD_RETENTION_SET',
 ]);
 let failurePhase = 'CONFIG';
 function fail(code) { const error = new Error(ERRORS[code] || 'Backup operation failed'); error.code = code; return error; }
@@ -145,8 +152,8 @@ async function prune(ctx) {
   let keptUnsent = 0;
   for(const manifest of all) {
     if(manifest.id === newest.id || manifest.id === interrupted?.id || Date.parse(manifest.createdAt) >= cutoff) continue;
-    // Historical full-download proof is sufficient: cloud objects expire after
-    // 5 days, independently of these local files' 14-day retention.
+    // Historical full-download proof is sufficient: cloud rotation is
+    // independent of these local files' 14-day retention.
     let confirmed = false;
     try { confirmed = await require('./cloud.cjs').validReceipt(ctx,manifest); }
     catch { /* Invalid evidence preserves the backup, never authorizes deletion. */ }
@@ -197,7 +204,9 @@ async function staleTemporary(ctx, now = Date.now()) {
   }
   for(const dir of ['state','receipts','manifests','postgres','files','config']) {
     for(const name of await fs.readdir(path.join(ctx.root,dir))) {
-      if(name.endsWith('.part') || /\.tmp-\d+$/.test(name) || (dir === 'state' && name === PRUNE_STATE+'.json')) candidates.push(path.join(ctx.root,dir,name));
+      if(name.endsWith('.part') || /\.tmp-\d+$/.test(name) || (dir === 'state' &&
+        (name === PRUNE_STATE+'.json' || name === 'cloud-prune-in-progress.json' ||
+          /^\.cloud-prune-(?:in-progress|history)\.json\.\d+\.[a-f0-9]+\.tmp$/.test(name)))) candidates.push(path.join(ctx.root,dir,name));
     }
   }
   for(const target of candidates) {
@@ -262,6 +271,7 @@ async function main(action = process.argv[2]) {
     if(linger.stdout.trim() !== 'yes') throw fail('LINGER_DISABLED');
     await staleTemporary(ctx);
     await require('./cloud.cjs').verify(ctx,manifest);
+    if(ctx.config.cloudRetention !== undefined) await require('./cloud.cjs').retentionHealth(ctx);
     const restored = await restoreHealth(ctx);
     log('Backup health OK: '+manifest.id+'; permissions, SHA256, encryption, timer, space and Yandex restore at '+restored.restoredAt+' verified'); return;
   }

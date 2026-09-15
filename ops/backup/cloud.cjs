@@ -1,7 +1,8 @@
 'use strict';
 
 // Cloud credentials never leave their private files. No AWS command uses a
-// shell, ambient AWS credentials, --debug, or a deletion operation.
+// shell, ambient AWS credentials or --debug. Deletion is isolated behind the
+// explicitly approved count-retention adapter, never part of S3 sync --delete.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -346,6 +347,11 @@ function receipt(ctx, api, manifest, descriptor) {
 
 async function sync(ctx, manifests) {
   const api = setup(ctx);
+  if (ctx.config.cloudRetention !== undefined) {
+    // Reject incompatible lifecycle/versioning before consuming upload space;
+    // the deletion adapter repeats these checks immediately before each DELETE.
+    await retentionAdapter(ctx).assertPolicy();
+  }
   if (!Array.isArray(manifests)) fail('sync requires a list of complete manifests');
   // run.sh holds both .operation.lock and the separate .upload.lock with
   // kernel flock for this entire operation, including all awaits and retries.
@@ -361,9 +367,10 @@ async function sync(ctx, manifests) {
         // This is verify-only: expiry, missing bytes, and corruption are errors,
         // never a reason to upload old data again and reset its lifecycle age.
         results.push(await verify(ctx, manifest));
+        await pruneCloud(ctx);
       } else {
-        // Cloud retention is 5 days while local retention is 14 days. Historical
-        // confirmed copies may have legitimately expired; do not HEAD/recreate.
+        // Historical confirmed cloud copies may have legitimately expired or
+        // rotated out of the latest five; do not HEAD/recreate them.
         results.push(saved);
         if (ctx.log) ctx.log(`Historical cloud receipt confirmed: ${manifest.id}`);
       }
@@ -375,8 +382,167 @@ async function sync(ctx, manifests) {
     await ensureUploaded(ctx, api, descriptor);
     results.push(receipt(ctx, api, manifest, descriptor));
     if (ctx.log) ctx.log(`Cloud backup verified: ${manifest.id}`);
+    // Rotate after each fully verified upload, including backlog sets. Never
+    // accumulate an entire outage's backlog before applying the count limit.
+    await pruneCloud(ctx);
   }
   return results;
+}
+
+function retentionError(code) {
+  const error = new Error(code); error.code = code; return error;
+}
+
+function retentionAdapter(ctx) {
+  const r = ctx.config.cloudRetention;
+  if (!r || r.mode !== 'count' || r.keep !== 5 || r.deleteApproved !== true ||
+      !r.profile || !r.configFile || !r.credentialsFile) {
+    throw retentionError('CLOUD_RETENTION_CONFIG');
+  }
+  const api = setup(ctx);
+  // Either an explicitly approved existing profile or a separate profile may
+  // be used. Never fall back to ambient credentials or alter IAM in runtime.
+  const cleanup = setup({ ...ctx, config: { ...ctx.config, cloud: { ...api.c,
+    profile: r.profile, configFile: r.configFile, credentialsFile: r.credentialsFile,
+  } } });
+  const identity = { bucket: api.c.bucket, prefix: api.c.prefix, kmsKeyId: api.c.kmsKeyId };
+  const canonicalManifest = value => {
+    const m = validateManifest(value);
+    return {project:m.project,id:m.id,createdAt:m.createdAt,
+      artifacts:['postgres','files','config'].map(kind=>{
+        const a = m.artifacts.find(item=>item.kind === kind);
+        return {kind:a.kind,key:a.key,size:a.size,sha256:a.sha256};
+      })};
+  };
+  const checkedDescriptor = (d) => {
+    if (!d || !['postgres','files','config','manifest'].includes(d.kind) ||
+        !Number.isSafeInteger(d.size) || d.size <= 0 ||
+        d.size > (d.kind === 'manifest' ? MAX_MANIFEST : MAX_SINGLE_UPLOAD) || !HASH_RE.test(d.sha256 || '')) {
+      throw retentionError('CLOUD_RETENTION_DESCRIPTOR');
+    }
+    const directory = d.kind === 'manifest' ? 'manifests' : d.kind;
+    const ext = d.kind === 'manifest' ? '.json' : d.kind === 'postgres' ? '.dump' : '.tar.gz';
+    const id = typeof d.key === 'string' && d.key.startsWith(directory + '/') && d.key.endsWith(ext)
+      ? d.key.slice(directory.length + 1, -ext.length) : '';
+    if (!ID_RE.test(id) || d.key !== directory + '/' + id + ext) throw retentionError('CLOUD_RETENTION_DESCRIPTOR');
+    return d;
+  };
+  const descriptors = (entry) => {
+    validateManifest(entry?.manifest);
+    const d = checkedDescriptor(entry.descriptor);
+    if (d.kind !== 'manifest' || d.key !== `manifests/${entry.manifest.id}.json`) {
+      throw retentionError('CLOUD_RETENTION_DESCRIPTOR');
+    }
+    return [d, ...entry.manifest.artifacts.map(checkedDescriptor)];
+  };
+  async function listing(prefix) {
+    let token;
+    const seenTokens = new Set(), seenKeys = new Set(), objects = [];
+    do {
+      const args = ['list-objects-v2','--bucket',api.c.bucket,'--prefix',prefix,
+        '--max-keys','1000','--no-paginate'];
+      if (token) args.push('--continuation-token',token);
+      const page = await api.aws(args);
+      if (page.Contents !== undefined && !Array.isArray(page.Contents)) throw retentionError('CLOUD_RETENTION_INVENTORY');
+      for (const object of page.Contents || []) {
+        if (typeof object.Key !== 'string' || !object.Key.startsWith(prefix) || seenKeys.has(object.Key)) {
+          throw retentionError('CLOUD_RETENTION_INVENTORY');
+        }
+        seenKeys.add(object.Key); objects.push(object);
+      }
+      if (objects.length > 5000) throw retentionError('CLOUD_RETENTION_INVENTORY');
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+      if (page.IsTruncated && (typeof token !== 'string' || !token || seenTokens.has(token))) {
+        throw retentionError('CLOUD_RETENTION_INVENTORY');
+      }
+      if (token) seenTokens.add(token);
+    } while (token);
+    return objects;
+  }
+  async function assertPolicy() {
+    const versions = await api.aws(['get-bucket-versioning','--bucket',api.c.bucket]);
+    if (versions.Status !== undefined && versions.Status !== 'Disabled') throw retentionError('CLOUD_RETENTION_POLICY');
+    const life = await api.aws(['get-bucket-lifecycle-configuration','--bucket',api.c.bucket]);
+    if (!Array.isArray(life.Rules) || life.Rules.some(rule => !rule ||
+        !['Enabled','Disabled'].includes(rule.Status) || (rule.Status === 'Enabled' &&
+        (rule.Expiration || rule.NoncurrentVersionExpiration || rule.Transitions || rule.NoncurrentVersionTransitions)))) {
+      throw retentionError('CLOUD_RETENTION_POLICY');
+    }
+    const encryption = await api.aws(['get-bucket-encryption','--bucket',api.c.bucket]);
+    const rules = encryption?.ServerSideEncryptionConfiguration?.Rules;
+    const defaults = Array.isArray(rules) && rules.length === 1 ? rules[0]?.ApplyServerSideEncryptionByDefault : null;
+    if (defaults?.SSEAlgorithm !== 'aws:kms' || defaults.KMSMasterKeyID !== api.c.kmsKeyId) {
+      throw retentionError('CLOUD_RETENTION_POLICY');
+    }
+    return true;
+  }
+  return {
+    ...identity, assertPolicy,
+    async listSets() {
+      const prefix = api.key('manifests/'), sets = [];
+      for (const object of await listing(prefix)) {
+        const name = object.Key.slice(prefix.length);
+        if (!name.endsWith('.json') || !ID_RE.test(name.slice(0,-5))) throw retentionError('CLOUD_RETENTION_INVENTORY');
+        const key = object.Key.slice(api.c.prefix.length), info = await head(api,key);
+        const descriptor = checkedDescriptor({kind:'manifest',key,size:info?.ContentLength,sha256:sha256Metadata(info)});
+        const raw = await downloaded(ctx,api,descriptor,info,ctx.root);
+        const entry = {manifest:canonicalManifest(JSON.parse(raw)),descriptor};
+        descriptors(entry);
+        sets.push(entry);
+      }
+      return sets;
+    },
+    async inspect(entry) {
+      for (const d of descriptors(entry)) {
+        const info = await head(api,d.key);
+        if (!info) return false;
+        checkHead(api,info,d);
+      }
+      return true;
+    },
+    async verifySet(entry) {
+      // Also works after local 14-day history has expired: verify the actual
+      // remote set without relying on local archives or a stale receipt.
+      for (const d of descriptors(entry)) {
+        const raw = await downloaded(ctx,api,d,await head(api,d.key),ctx.root);
+        if (d.kind === 'manifest' && !isDeepStrictEqual(canonicalManifest(JSON.parse(raw)),canonicalManifest(entry.manifest))) {
+          throw retentionError('CLOUD_RETENTION_VERIFY');
+        }
+      }
+    },
+    async remove(descriptor) {
+      const d = checkedDescriptor(descriptor);
+      await assertPolicy();
+      const info = await head(api,d.key);
+      if (!info) return; // Interrupted exact-target journal replay is idempotent.
+      checkHead(api,info,d);
+      // Yandex documents no conditional DeleteObject precondition. The common
+      // operation lock excludes every project writer/restore. Operators must
+      // not replace objects or change bucket settings while rotation runs.
+      await cleanup.aws(['delete-object','--bucket',api.c.bucket,'--key',api.key(d.key)]);
+      if (await head(api,d.key)) throw retentionError('CLOUD_RETENTION_DELETE_UNCONFIRMED');
+    },
+    async assertNoOrphans(sets) {
+      const expected = new Set(sets.flatMap(entry => descriptors(entry).map(d=>api.key(d.key))));
+      const objects = await listing(api.key(''));
+      if (objects.some(o=>!expected.has(o.Key))) throw retentionError('CLOUD_RETENTION_ORPHANS');
+    },
+  };
+}
+
+async function pruneCloud(ctx) {
+  if (ctx.config.cloudRetention === undefined) return {enabled:false};
+  const result = await require('./cloud-retention.cjs').prune(ctx,retentionAdapter(ctx));
+  if (ctx.log) ctx.log(`Cloud count retention verified: kept=${result.total}, deleted=${result.deleted}`);
+  return result;
+}
+
+async function retentionHealth(ctx) {
+  if (ctx.config.cloudRetention === undefined) return {enabled:false};
+  const api = retentionAdapter(ctx);
+  const result = await require('./cloud-retention.cjs').health(ctx,api);
+  await api.assertNoOrphans(await api.listSets());
+  return result;
 }
 
 async function verify(ctx, manifest, { downloadRoot } = {}) {
@@ -444,4 +610,4 @@ async function downloadLatest(ctx, destRoot) {
 // this deliberately never invokes the returned AWS command runner.
 function validateConfiguration(ctx) { setup(ctx); return true; }
 
-module.exports = { sync, verify, downloadLatest, validReceipt, validateConfiguration };
+module.exports = { sync, verify, downloadLatest, validReceipt, validateConfiguration, pruneCloud, retentionHealth };

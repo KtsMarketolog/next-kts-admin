@@ -1,0 +1,10 @@
+{
+  "Rules": [
+    {
+      "ID": "kts-backups-count-abort-incomplete",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

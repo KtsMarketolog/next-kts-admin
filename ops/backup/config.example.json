@@ -7,7 +7,15 @@
   "restoreRoot": "/home/kts/backups/kts-next-admin/.restore",
   "minFreeBytes": 3221225472,
   "minRestoreMemoryBytes": 1073741824,
-  "retention": {"localDays": 14, "cloudDays": 5},
+  "retention": {"localDays": 14, "cloudCopies": 5},
+  "cloudRetention": {
+    "mode": "count",
+    "keep": 5,
+    "deleteApproved": false,
+    "profile": "kts-backup",
+    "configFile": "/home/kts/.config/kts-backup/aws-config",
+    "credentialsFile": "/home/kts/.config/kts-backup/aws-credentials"
+  },
   "cloudApproved": false,
   "predeployCloudPolicy": "required",
   "sources": [

@@ -14,7 +14,7 @@ if [[ ! -e "$root/.kts-backup-root" ]]; then printf 'kts-next-admin\n' > "$root/
 # Do not replace runtime files while a capture/upload/restore is running.
 exec 9>"$root/.operation.lock"
 /usr/bin/flock --exclusive --wait 1800 9 || { echo 'Backup install lock timeout' >&2; exit 75; }
-for file in common.cjs cli.cjs capture.cjs cloud.cjs restore.cjs notify.cjs configure.cjs; do install -m 600 "$source_dir/$file" "$target/$file"; done
+for file in common.cjs cli.cjs capture.cjs cloud.cjs cloud-retention.cjs restore.cjs notify.cjs configure.cjs; do install -m 600 "$source_dir/$file" "$target/$file"; done
 install -m 600 "$source_dir/package.json" "$target/package.json"
 install -m 600 "$source_dir/package-lock.json" "$target/package-lock.json"
 npm ci --prefix "$target" --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error

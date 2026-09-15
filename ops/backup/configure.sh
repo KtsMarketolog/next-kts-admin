@@ -10,7 +10,8 @@ readonly installed=/home/kts/.local/lib/kts-backup
 case "${1:-}" in
   policy) [[ $# == 2 && "$2" == required ]] || { echo 'Usage: configure.sh policy required' >&2; exit 64; };;
   cloud) [[ $# == 3 ]] || { echo 'Usage: configure.sh cloud BUCKET KMS_KEY_ID' >&2; exit 64; };;
-  *) echo 'Usage: configure.sh policy required | cloud BUCKET KMS_KEY_ID' >&2; exit 64;;
+  retention) [[ $# == 3 && "$2" == count && "$3" == 5 ]] || { echo 'Usage: configure.sh retention count 5' >&2; exit 64; };;
+  *) echo 'Usage: configure.sh policy required | cloud BUCKET KMS_KEY_ID | retention count 5' >&2; exit 64;;
 esac
 # Same lock as capture, cloud sync, predeploy and installation.
 exec 9>"$root/.operation.lock"

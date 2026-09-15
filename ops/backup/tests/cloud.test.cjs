@@ -22,7 +22,7 @@ function fixture(t) {
     assert.match(path.basename(root), /^kts-cloud-test-/);
     fs.rmSync(root, { recursive: true }); // This fixture's own temporary tree only.
   });
-  for (const directory of ['postgres', 'files', 'config', 'manifests', 'receipts']) {
+  for (const directory of ['postgres', 'files', 'config', 'manifests', 'receipts', 'state']) {
     fs.mkdirSync(path.join(root, directory), { mode: 0o700 });
   }
   const configFile = path.join(root, 'aws-config');
@@ -47,6 +47,9 @@ function fixture(t) {
     ServerSideEncryptionConfiguration: { Rules: [encryptionRule(config.cloud.kmsKeyId)] },
   };
   let changedDefaultKey;
+  let failDeleteKey;
+  let lifecycle = { Rules: [{ Status: 'Enabled', Expiration: { Days: 5 } }] };
+  let versioning = {};
   const ctx = {
     config, root, log() {},
     async run(binary, args, { env }) {
@@ -69,6 +72,14 @@ function fixture(t) {
         response = { Contents: visible.map((Key) => ({ Key })), IsTruncated: false };
       } else if (operation === 'get-bucket-encryption') {
         response = bucketEncryption;
+      } else if (operation === 'get-bucket-lifecycle-configuration') {
+        response = lifecycle;
+      } else if (operation === 'get-bucket-versioning') {
+        response = versioning;
+      } else if (operation === 'delete-object') {
+        assert.equal(config.cloudRetention?.deleteApproved, true);
+        if (key === failDeleteKey) throw new Error('Simulated interrupted deletion');
+        objects.delete(key);
       } else if (operation === 'put-object') {
         assert.equal(calls.at(-2)?.operation, 'get-bucket-encryption',
           'every PUT must immediately follow a fresh bucket-encryption preflight');
@@ -136,6 +147,14 @@ function fixture(t) {
     metadata(transform) { headMetadata = transform; },
     encryption(response) { bucketEncryption = response; },
     changeDefaultAtNextPut(key) { changedDefaultKey = key; },
+    enableCount() {
+      config.cloudRetention = { mode:'count', keep:5, deleteApproved:true,
+        profile:config.cloud.profile, configFile, credentialsFile };
+      lifecycle = { Rules: [{ Status:'Enabled', AbortIncompleteMultipartUpload:{ DaysAfterInitiation:1 } }] };
+    },
+    lifecycle(value) { lifecycle = value; },
+    versioning(value) { versioning = value; },
+    failDeletion(key) { failDeleteKey = key; },
   };
 }
 
@@ -157,6 +176,131 @@ test('5-day cloud / 14-day local: confirmed history is skipped while newest byte
   assert.ok(f.calls.every((c) => !String(c.key).includes(historical.id) && !String(c.prefix).includes(historical.id)));
   assert.ok(fs.existsSync(path.join(f.root, historical.artifacts[0].key)));
   assert.ok([...f.objects.keys()].every((key) => !key.includes(historical.id)));
+});
+
+test('count retention uploads and verifies sixth first, keeps newest five complete sets and all local files', async t => {
+  const f = fixture(t), older = [5,4,3,2,1].map(age=>f.makeManifest(age));
+  await cloud.sync(f.ctx,older);
+  f.enableCount();
+  const newest = f.makeManifest(0);
+  f.calls.length = 0;
+  await cloud.sync(f.ctx,[...older,newest]);
+  assert.equal(f.objects.size,20);
+  const deleted = f.calls.filter(c=>c.operation === 'delete-object');
+  assert.equal(deleted.length,4);
+  assert.equal(deleted[0].key,`manifests/${older[0].id}.json`);
+  assert.ok(deleted.every(c=>c.key.includes(older[0].id)));
+  const firstDelete = f.calls.findIndex(c=>c.operation === 'delete-object');
+  for (const manifest of [...older.slice(1),newest]) {
+    assert.ok(f.calls.slice(0,firstDelete).some(c=>c.operation === 'get-object' && c.key === `manifests/${manifest.id}.json`));
+    for (const a of manifest.artifacts) assert.ok(f.calls.slice(0,firstDelete).some(c=>c.operation === 'get-object' && c.key === a.key));
+  }
+  for (const manifest of [...older,newest]) {
+    assert.ok(fs.existsSync(path.join(f.root,`manifests/${manifest.id}.json`)));
+    assert.equal(await cloud.validReceipt(f.ctx,manifest),true);
+    for (const a of manifest.artifacts) assert.ok(fs.existsSync(path.join(f.root,a.key)));
+  }
+  assert.equal((await cloud.retentionHealth(f.ctx)).completeSets,5);
+  f.calls.length = 0;
+  await cloud.sync(f.ctx,[...older,newest]);
+  assert.ok(!f.calls.some(c=>['delete-object','put-object'].includes(c.operation)), 'rotated history is not recreated');
+});
+
+test('count retention accepts full production-like manifests and canonicalizes artifact order', async t => {
+  const f = fixture(t), all = [5,4,3,2,1,0].map(age=>f.makeManifest(age));
+  for (const manifest of all) {
+    manifest.database = {serverVersion:'16.4',tableCount:53};
+    manifest.fileInventory = [{relativePath:'fixture-only',size:123}];
+    manifest.artifacts.reverse();
+    manifest.artifacts[0].compression = 'fixture-only';
+    fs.writeFileSync(path.join(f.root,'manifests',`${manifest.id}.json`),JSON.stringify(manifest),{mode:0o600});
+  }
+  await cloud.sync(f.ctx,all);
+  f.enableCount();
+  await cloud.sync(f.ctx,all);
+  assert.equal(f.objects.size,20);
+  assert.ok(f.calls.filter(c=>c.operation === 'delete-object').every(c=>c.key.includes(all[0].id)));
+  assert.equal((await cloud.retentionHealth(f.ctx)).completeSets,5);
+});
+
+test('adapter resumes interrupted exact-set cleanup after re-verifying five retained sets', async t => {
+  const f = fixture(t), all = [5,4,3,2,1,0].map(age=>f.makeManifest(age));
+  await cloud.sync(f.ctx,all);
+  f.enableCount();
+  f.failDeletion(all[0].artifacts[0].key);
+  await assert.rejects(cloud.sync(f.ctx,all),{code:'CLOUD_RETENTION_DELETE'});
+  assert.ok(!f.objects.has(`manifests/${all[0].id}.json`));
+  assert.ok(fs.existsSync(path.join(f.root,'state/cloud-prune-in-progress.json')));
+  assert.equal(f.objects.size,23);
+  for (const manifest of all.slice(1)) {
+    assert.ok(f.objects.has(`manifests/${manifest.id}.json`));
+    for (const a of manifest.artifacts) assert.ok(f.objects.has(a.key));
+  }
+  f.calls.length = 0;
+  f.failDeletion(undefined);
+  await cloud.sync(f.ctx,all);
+  const firstDelete = f.calls.findIndex(c=>c.operation === 'delete-object');
+  for (const manifest of all.slice(1)) for (const a of manifest.artifacts) {
+    assert.ok(f.calls.slice(0,firstDelete).some(c=>c.operation === 'get-object' && c.key === a.key));
+  }
+  assert.ok(f.calls.filter(c=>c.operation === 'delete-object').every(c=>c.key.includes(all[0].id)));
+  assert.equal(f.objects.size,20);
+  assert.ok(!fs.existsSync(path.join(f.root,'state/cloud-prune-in-progress.json')));
+  assert.equal((await cloud.retentionHealth(f.ctx)).completeSets,5);
+});
+
+test('failed newest upload verification never removes existing cloud history', async t => {
+  const f = fixture(t), older = [5,4,3,2,1].map(age=>f.makeManifest(age));
+  await cloud.sync(f.ctx,older);
+  f.enableCount();
+  const newest = f.makeManifest(0);
+  f.corrupt(newest.artifacts[0].key);
+  f.calls.length = 0;
+  await assert.rejects(cloud.sync(f.ctx,[...older,newest]));
+  assert.ok(!f.calls.some(c=>c.operation === 'delete-object'));
+  for (const manifest of older) for (const a of manifest.artifacts) assert.ok(f.objects.has(a.key));
+});
+
+test('count cleanup rejects damaged retained archive and preserves all six manifests', async t => {
+  const f = fixture(t), all = [5,4,3,2,1,0].map(age=>f.makeManifest(age));
+  await cloud.sync(f.ctx,all);
+  f.enableCount();
+  f.corrupt(all[3].artifacts[0].key);
+  f.calls.length = 0;
+  await assert.rejects(cloud.sync(f.ctx,all));
+  assert.ok(!f.calls.some(c=>c.operation === 'delete-object'));
+  assert.equal(f.objects.size,24);
+});
+
+test('existing age expiration and enabled/suspended versioning prevent count cleanup', async t => {
+  const f = fixture(t), all = [5,4,3,2,1,0].map(age=>f.makeManifest(age));
+  await cloud.sync(f.ctx,all);
+  f.enableCount();
+  f.lifecycle({Rules:[{Status:'Enabled',Expiration:{Days:5}}]});
+  f.calls.length = 0;
+  await assert.rejects(cloud.sync(f.ctx,all));
+  assert.ok(!f.calls.some(c=>c.operation === 'delete-object'));
+  f.lifecycle({Rules:[{Status:'Enabled',AbortIncompleteMultipartUpload:{DaysAfterInitiation:1}}]});
+  for (const Status of ['Enabled','Suspended']) {
+    f.versioning({Status});
+    await assert.rejects(cloud.sync(f.ctx,all));
+  }
+  assert.ok(!f.calls.some(c=>c.operation === 'delete-object'));
+});
+
+test('deletion not approved fails before uploading and orphan objects are reported, not erased', async t => {
+  const f = fixture(t), all = [4,3,2,1,0].map(age=>f.makeManifest(age));
+  await cloud.sync(f.ctx,all);
+  f.enableCount();
+  f.ctx.config.cloudRetention.deleteApproved = false;
+  f.calls.length = 0;
+  await assert.rejects(cloud.sync(f.ctx,all),{code:'CLOUD_RETENTION_CONFIG'});
+  assert.equal(f.calls.length,0);
+  f.ctx.config.cloudRetention.deleteApproved = true;
+  f.objects.set('files/unrelated-object',{bytes:Buffer.from('unrelated')});
+  await assert.rejects(cloud.retentionHealth(f.ctx),{code:'CLOUD_RETENTION_ORPHANS'});
+  assert.ok(f.objects.has('files/unrelated-object'));
+  assert.ok(!f.calls.some(c=>c.operation === 'delete-object'));
 });
 
 test('expired newest is an error and never causes any PUT', async (t) => {
