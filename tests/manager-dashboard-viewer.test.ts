@@ -153,6 +153,7 @@ function text(node: unknown): string {
 // refs. No browser, server, application auth, real payload or mutation is used.
 function management(options: {
   overview?: Manage; busy?: boolean;
+  confirm?: () => boolean;
   mutate?: (path: string, init: RequestInit) => Promise<import('../src/features/admin/manager-dashboard/types').ManagerDashboardMutationResult | null>;
 } = {}) {
   const overview = options.overview ?? managementOverview();
@@ -184,7 +185,7 @@ function management(options: {
   const testModule = { exports: {} as { ManagerDashboardManagement: (props: unknown) => Element } };
   new Function('require', 'module', 'exports', 'window', code)((name: string) => {
     assert.ok(name in modules, `Unexpected dependency: ${name}`); return modules[name];
-  }, testModule, testModule.exports, { confirm: (message: string) => { confirmations.push(message); return true; } });
+  }, testModule, testModule.exports, { confirm: (message: string) => { confirmations.push(message); return options.confirm?.() ?? true; } });
   const inputs = new Map<string, { files: File[]; value: string; focus(): void }>();
   let focusedInput = '';
   const render = () => {
@@ -196,7 +197,11 @@ function management(options: {
     for (const node of elements(tree)) {
       if (node.type === 'input' && typeof node.props.id === 'string') {
         const id = node.props.id;
-        if (!inputs.has(id)) inputs.set(id, { files: [], value: '', focus() { focusedInput = id; } });
+        if (!inputs.has(id)) {
+          let value = '';
+          const input = { files: [] as File[], get value() { return value; }, set value(next: string) { value = next; if (!next) input.files = []; }, focus() { focusedInput = id; } };
+          inputs.set(id, input);
+        }
         const ref = node.props.ref;
         if (typeof ref === 'function') ref(inputs.get(id));
         else (ref as { current: unknown }).current = inputs.get(id);
@@ -256,7 +261,10 @@ test('management shows both independently labelled groups together without tabs 
   }
   const tree = elements(view.render());
   assert.equal(tree.filter((node) => node.props.id === 'manager-dashboard-snapshots').length, 1);
-  assert.equal(tree.filter((node) => node.type === 'button' && text(node.props.children) === 'Проверить почту сейчас').length, 1);
+  assert.equal(tree.filter((node) => node.type === 'button' && text(node.props.children) === 'Проверить почту сейчас').length, 0);
+  assert.doesNotMatch(html, /Почт|почт|Ежедневное обновление/);
+  assert.equal((html.match(/Личный HTML дашборда/g) ?? []).length, 2);
+  assert.equal((html.match(/Общий HTML дашборда<\/h2>/g) ?? []).length, 1);
   assert.equal(tree.filter((node) => node.type === ManagerDashboardImportJournal).length, 1);
   assert.equal((html.match(/Журнал импорта/g) ?? []).length, 1);
   const journal = view.find(ManagerDashboardImportJournal);
@@ -419,7 +427,7 @@ test('failed upload preserves both selected HTML files and releases the shared m
   assert.deepEqual(view.requests.map((request) => request.path), ['/html?audience=support', '/html?audience=development']);
 });
 
-test('mixed snapshot uploads and mailbox checks are common and never carry an audience parameter', async () => {
+test('mixed personal snapshot uploads remain manual and never carry an audience or shared parameter', async () => {
   const view = management();
   const files = [new File(['synthetic-development'], 'development.ktsp'), new File(['synthetic-support'], 'support.ktsp')];
   view.selectFiles('manager-dashboard-snapshots', files);
@@ -429,10 +437,8 @@ test('mixed snapshot uploads and mailbox checks are common and never carry an au
   const form = view.requests[0].init.body as FormData;
   assert.deepEqual([...form.keys()], ['files', 'files']);
   assert.deepEqual(form.getAll('files').map((file) => (file as File).name), ['development.ktsp', 'support.ktsp']);
-  (view.find('button', (props) => text(props.children) === 'Проверить почту сейчас').props.onClick as () => void)();
-  await view.settle();
-  assert.equal(view.requests[1].path, '/check-email');
-  assert.equal(view.requests[1].init.body, undefined);
+  assert.equal(view.requests.length, 1);
+  assert.doesNotMatch(text(view.render()), /Проверить почту|почтов|Ежедневное обновление/);
   const results = view.find(parts.ImportResults, (props) => props.title === 'Результат последней операции');
   assert.deepEqual(results.props.results, managementOverview().imports);
 });
@@ -452,9 +458,10 @@ test('external busy blocks uploads, previews, publications and shared controls f
   }
   view.selectFiles('manager-dashboard-snapshots', [new File(['synthetic'], 'support.ktsp')]);
   view.submit('manager-dashboard-snapshots');
-  const check = view.find('button', (props) => text(props.children) === 'Проверить почту сейчас');
-  assert.equal(check.props.disabled, true);
-  (check.props.onClick as () => void)();
+  view.selectFiles('manager-dashboard-shared-html', [new File(['<html>shared</html>'], 'shared.html')]);
+  view.submit('manager-dashboard-shared-html');
+  view.selectFiles('manager-dashboard-shared-snapshot', [new File(['synthetic'], 'shared.ktsp')]);
+  view.submit('manager-dashboard-shared-snapshot');
   assert.equal(view.requests.length, 0);
   assert.equal(view.confirmations.length, 0);
   assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
@@ -465,4 +472,304 @@ test('support manager dashboard card keeps the shared manager-role guard', () =>
   assert.equal(isManagerRole('support_manager'), true);
   assert.equal(isManagerRole('wholesale_admin'), false);
   assert.match(readFileSync(new URL('../src/app/admin/AdminPanel.tsx', import.meta.url), 'utf8'), /managerDashboardMode=\{[^\n]+isManagerRole\(sessionRole\) \? 'view' : null\}/);
+});
+
+function sharedOverview(): NonNullable<Manage['supportShared']> {
+  return {
+    activeHtmlVersionId: 31, previousHtmlVersionId: 32,
+    htmlVersions: [31, 32, 33].map((id) => ({ id, audience: 'support', originalName: `shared-${id}.html`, fileSize: 120, createdAt: '2026-09-01T06:00:00Z' })),
+    snapshot: { ...snapshot, id: 117, email: 'shared@example.test', originalName: 'shared-current.ktsp' },
+    history: [{ ...snapshot, id: 116, email: 'shared@example.test', originalName: 'shared-previous.ktsp' }],
+  };
+}
+
+function sharedVersionButton(view: ReturnType<typeof management>, id: number, label: string) {
+  const section = view.find('section', (props) => props.id === 'manager-dashboard-shared-support');
+  const row = elements(section).find((node) => node.type === 'tr' && elements(node).some((child) => child.type === 'strong' && text(child) === `shared-${id}.html`));
+  assert.ok(row);
+  const button = elements(row).find((node) => node.type === 'button' && text(node) === label);
+  assert.ok(button, `Missing shared #${id} ${label}`);
+  return button;
+}
+
+test('support shows separate personal and shared reports even when personal email is missing or ambiguous', () => {
+  for (const bindingStatus of ['matched', 'missing_email', 'ambiguous_email'] as const) {
+    const html = render({ ...base, audience: 'support', bindingStatus, email: '', snapshot, supportShared: sharedOverview() });
+    assert.match(html, /Личный дашборд/);
+    assert.match(html, /Общий дашборд/);
+    const urls = [...html.matchAll(/<iframe[^>]+src="([^"]+)"/g)].map((match) => new URL(match[1].replaceAll('&amp;', '&'), 'https://example.test'));
+    assert.equal(urls.length, 2);
+    assert.equal(urls[0].pathname, '/api/admin/manager-dashboard/frame');
+    assert.equal(urls[1].pathname, '/api/admin/manager-dashboard/shared/frame');
+    assert.equal(urls[1].searchParams.get('version'), '31');
+    assert.equal(urls[1].searchParams.get('snapshot'), '117');
+    assert.equal(urls[1].searchParams.has('audience'), false);
+    assert.equal(urls[1].searchParams.has('email'), false);
+    assert.match(html, /shared-current.ktsp/);
+    assert.match(html, /manager-dashboard-shared-history/);
+    assert.equal(urls[0].searchParams.has('snapshot'), bindingStatus === 'matched');
+  }
+  const development = render({ ...base, supportShared: sharedOverview() });
+  assert.doesNotMatch(development, /Общий дашборд|shared-current.ktsp|shared\/frame/);
+});
+
+test('shared frame preserves the download sandbox and always omits snapshot data from previews', () => {
+  const html = renderToStaticMarkup(createElement(parts.SharedDashboardFrame, { versionId: 31, snapshotId: 117, preview: true, revision: 4 }));
+  assert.match(html, /shared\/frame\?version=31/);
+  assert.match(html, /preview=1/);
+  assert.match(html, /revision=4/);
+  assert.match(html, /sandbox="allow-scripts allow-same-origin"/);
+  assert.doesNotMatch(html, /snapshot=|audience=|allow-popups|allow-downloads/);
+});
+
+test('shared publication requires its own preview and cannot reuse an identical personal version ID', async () => {
+  const overview = managementOverview();
+  overview.supportShared = sharedOverview();
+  overview.groups[1].htmlVersions[1].id = 32;
+  overview.groups[1].previousHtmlVersionId = 32;
+  const view = management({ overview });
+  view.preview('support', 32);
+  const publish = () => sharedVersionButton(view, 32, 'Вернуть общий HTML');
+  assert.equal(publish().props.disabled, true);
+  (publish().props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests.length, 0);
+  (sharedVersionButton(view, 32, 'Предпросмотр общего HTML').props.onClick as () => void)();
+  assert.equal(view.find(parts.SharedDashboardFrame).props.versionId, 32);
+  assert.equal(view.find(parts.SharedDashboardFrame).props.preview, true);
+  assert.equal(view.find(parts.SharedDashboardFrame).props.snapshotId, undefined);
+  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
+  assert.equal(view.versionButton('support', 32, 'Вернуть группе').props.disabled, true);
+  (publish().props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests[0].path, '/shared/publish');
+  assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { versionId: 32, expectedActiveVersionId: 31 });
+  assert.match(view.confirmations[0], /всех менеджеров по сопровождению/);
+  assert.match(view.confirmations[0], /Личные дашборды и личные файлы менеджеров сохранятся/);
+});
+
+test('shared HTML deletion protects active version and closes only a matching shared preview', async () => {
+  const overview = { ...managementOverview(), supportShared: sharedOverview() };
+  const view = management({ overview });
+  const active = sharedVersionButton(view, 31, 'Удалить');
+  assert.equal(active.props.disabled, true);
+  (active.props.onClick as () => void)();
+  assert.equal(view.requests.length, 0);
+  (sharedVersionButton(view, 33, 'Предпросмотр общего HTML').props.onClick as () => void)();
+  (sharedVersionButton(view, 33, 'Удалить').props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests[0].path, '/shared/html?id=33');
+  assert.equal(view.requests[0].init.method, 'DELETE');
+  assert.equal(elements(view.render()).some((node) => node.type === parts.SharedDashboardFrame), false);
+});
+
+test('shared HTML upload uses its own namespace and preserves personal file selections', async () => {
+  const overview = { ...managementOverview(), supportShared: sharedOverview() };
+  const view = management({ overview, mutate: async () => ({ version: overview.supportShared.htmlVersions[2] }) });
+  view.selectFiles('manager-dashboard-html-support', [new File(['<html>personal</html>'], 'personal.html')]);
+  view.selectFiles('manager-dashboard-shared-html', [new File(['<html>shared</html>'], 'shared.html')]);
+  view.submit('manager-dashboard-shared-html');
+  await view.settle();
+  assert.equal(view.requests[0].path, '/shared/html');
+  assert.deepEqual([...(view.requests[0].init.body as FormData).keys()], ['file']);
+  assert.equal(view.find(parts.SharedDashboardFrame).props.versionId, 33);
+  assert.equal(view.inputs.get('manager-dashboard-shared-html')!.value, '');
+  assert.equal(view.inputs.get('manager-dashboard-html-support')!.value, 'synthetic-selection');
+});
+
+test('shared snapshot publication validates email and size, requires explicit confirmation and sends compare-and-swap identity', async () => {
+  const overview = { ...managementOverview(), supportShared: sharedOverview() };
+  const view = management({ overview });
+  const id = 'manager-dashboard-shared-snapshot';
+  view.selectFiles(id, [new File(['synthetic'], 'shared.ktsp')]);
+  view.submit(id);
+  await view.settle();
+  assert.equal(view.requests.length, 0);
+  assert.match(text(view.render()), /Укажите email получателя/);
+  view.inputs.get('manager-dashboard-shared-email')!.value = 'shared@example.test';
+  view.selectFiles(id, [new File([new Uint8Array(8 * 1024 * 1024 + 1)], 'large.ktsp')]);
+  view.submit(id);
+  await view.settle();
+  assert.equal(view.requests.length, 0);
+  assert.equal(view.confirmations.length, 0);
+  view.selectFiles(id, [new File(['synthetic'], 'shared.ktsp')]);
+  view.submit(id);
+  await view.settle();
+  assert.equal(view.requests[0].path, '/shared/snapshots');
+  const form = view.requests[0].init.body as FormData;
+  assert.deepEqual([...form.keys()], ['file', 'email', 'expectedActiveSnapshotId', 'confirmShared']);
+  assert.equal(form.get('email'), 'shared@example.test');
+  assert.equal(form.get('expectedActiveSnapshotId'), '117');
+  assert.equal(form.get('confirmShared'), 'true');
+  assert.match(view.confirmations[0], /ВСЕХ менеджеров по сопровождению/);
+  assert.match(view.confirmations[0], /Личные дашборды и личные файлы всех менеджеров сохранятся/);
+  assert.equal(view.inputs.get(id)!.value, '');
+});
+
+test('cancelling shared publication preserves file selection and does not start a mutation', async () => {
+  const view = management({ overview: { ...managementOverview(), supportShared: sharedOverview() }, confirm: () => false });
+  view.inputs.get('manager-dashboard-shared-email')!.value = 'shared@example.test';
+  view.selectFiles('manager-dashboard-shared-snapshot', [new File(['synthetic'], 'shared.ktsp')]);
+  view.submit('manager-dashboard-shared-snapshot');
+  await view.settle();
+  assert.equal(view.requests.length, 0);
+  assert.equal(view.inputs.get('manager-dashboard-shared-snapshot')!.value, 'synthetic-selection');
+  (sharedVersionButton(view, 32, 'Предпросмотр общего HTML').props.onClick as () => void)();
+  (sharedVersionButton(view, 32, 'Вернуть общий HTML').props.onClick as () => void)();
+  (sharedVersionButton(view, 32, 'Удалить').props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests.length, 0);
+  assert.equal(view.find(parts.SharedDashboardFrame).props.versionId, 32);
+});
+
+test('personal and shared history, reload and binding changes keep independent frame state', async () => {
+  const stateByComponent = new Map<string, unknown[]>();
+  let slots: unknown[] = [];
+  let cursor = 0;
+  let reloadCount = 0;
+  const hooks = { useState(initial: unknown) {
+    const index = cursor++;
+    const currentSlots = slots;
+    if (!(index in currentSlots)) currentSlots[index] = initial;
+    return [currentSlots[index], (next: unknown) => {
+      currentSlots[index] = typeof next === 'function' ? next(currentSlots[index]) : next;
+    }];
+  } };
+  const modules: Record<string, unknown> = {
+    react: hooks, 'react/jsx-runtime': jsx, './ManagerDashboard.module.scss': { default: {} }, './ManagerDashboardParts': parts,
+  };
+  const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardViewer.tsx', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  const testModule = { exports: {} as { ManagerDashboardViewer: (props: unknown) => Element } };
+  new Function('require', 'module', 'exports', code)((name: string) => {
+    assert.ok(name in modules, `Unexpected dependency: ${name}`); return modules[name];
+  }, testModule, testModule.exports);
+  let overview: View = { ...base, audience: 'support', snapshot, history: [snapshot, { ...snapshot, id: 16 }], supportShared: sharedOverview() };
+  const renderState = () => {
+    const tree = testModule.exports.ManagerDashboardViewer({ overview, loading: false, onReload: async () => { reloadCount++; return true; } });
+    return (tree.props.children as Array<Element & { key: string | null }>).flatMap((child) => {
+      if (!child || typeof child.type !== 'function') return [];
+      const componentKey = `${child.type.name}:${child.key}`;
+      if (!stateByComponent.has(componentKey)) stateByComponent.set(componentKey, []);
+      slots = stateByComponent.get(componentKey)!;
+      cursor = 0;
+      return elements(child.type(child.props));
+    });
+  };
+  const node = (predicate: (value: Element) => boolean) => {
+    const found = renderState().find(predicate);
+    assert.ok(found); return found;
+  };
+  const frame = (shared: boolean) => node((value) => value.type === (shared ? parts.SharedDashboardFrame : parts.DashboardFrame));
+  const select = (id: string, value: string) => {
+    (node((item) => item.props.id === id).props.onChange as (event: unknown) => void)({ target: { value } });
+  };
+  select('manager-dashboard-history', '16');
+  assert.equal(frame(false).props.snapshotId, 16);
+  assert.equal(frame(true).props.snapshotId, 117);
+  select('manager-dashboard-shared-history', '116');
+  assert.equal(frame(false).props.snapshotId, 16);
+  assert.equal(frame(true).props.snapshotId, 116);
+  await (node((item) => item.type === 'button' && text(item) === 'Перезагрузить общий отчёт').props.onClick as () => Promise<void>)();
+  assert.equal(reloadCount, 1);
+  assert.equal(frame(true).props.revision, 1);
+  assert.equal(frame(false).props.revision, 0);
+  overview = { ...overview, email: '', bindingStatus: 'missing_email' };
+  assert.equal(frame(false).props.snapshotId, undefined);
+  assert.equal(frame(true).props.snapshotId, 116);
+  assert.equal(frame(true).props.revision, 1);
+  overview = { ...overview, email: 'new@example.test', bindingStatus: 'matched' };
+  assert.equal(frame(false).props.snapshotId, 17);
+  assert.equal(frame(true).props.snapshotId, 116);
+});
+
+function largePersonalFiles(count: number, mib = 8) {
+  return Array.from({ length: count }, (_, index) => new File([new Uint8Array(mib * 1024 * 1024)], `personal-${index + 1}.ktsp`));
+}
+
+test('a single personal selection larger than 25 MiB is split into sequential requests of at most 16 MiB', async () => {
+  const view = management({ mutate: async (_path, init) => ({ results: (init.body as FormData).getAll('files').map((file) => ({ originalName: (file as File).name, status: 'imported' })) }) });
+  const files = largePersonalFiles(5);
+  view.selectFiles('manager-dashboard-snapshots', files);
+  view.submit('manager-dashboard-snapshots');
+  await view.settle();
+  assert.equal(view.requests.length, 3);
+  const batches = view.requests.map((request) => {
+    assert.equal(request.path, '/snapshots');
+    const files = (request.init.body as FormData).getAll('files') as File[];
+    assert.ok(files.reduce((bytes, file) => bytes + file.size, 0) <= 16 * 1024 * 1024);
+    return files.map((file) => file.name);
+  });
+  assert.deepEqual(batches, [['personal-1.ktsp', 'personal-2.ktsp'], ['personal-3.ktsp', 'personal-4.ktsp'], ['personal-5.ktsp']]);
+  assert.deepEqual(view.find(parts.ImportResults, (props) => props.title === 'Результат последней операции').props.results,
+    files.map((file) => ({ originalName: file.name, status: 'imported' })));
+  assert.equal(view.inputs.get('manager-dashboard-snapshots')!.files.length, 0);
+  view.submit('manager-dashboard-snapshots');
+  await view.settle();
+  assert.equal(view.requests.length, 3, 'another click cannot resend the completed selection');
+});
+
+test('personal batch request failure preserves completed results, identifies uncertain and unsent files, and stops', async () => {
+  for (const throws of [false, true]) {
+    let attempt = 0;
+    const view = management({ mutate: async (_path, init) => {
+      if (++attempt === 2) {
+        if (throws) throw new Error('Synthetic connection lost');
+        return null;
+      }
+      return { results: (init.body as FormData).getAll('files').map((file) => ({ originalName: (file as File).name, status: 'imported' })) };
+    } });
+    view.selectFiles('manager-dashboard-snapshots', largePersonalFiles(5));
+    view.submit('manager-dashboard-snapshots');
+    await view.settle();
+    assert.equal(view.requests.length, 2, 'no remaining request or automatic retry after an uncertain request');
+    const results = view.find(parts.ImportResults, (props) => props.title === 'Результат последней операции').props.results as Array<{originalName: string; status: string; message?: string}>;
+    assert.deepEqual(results.map((result) => result.status), ['imported', 'imported', 'error', 'error', 'skipped']);
+    assert.match(results[2].message!, /Проверьте журнал импорта/);
+    assert.equal(results[4].originalName, 'personal-5.ktsp');
+    assert.match(results[4].message!, /Файл не отправлен/);
+    assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-snapshots').props.disabled, false);
+    view.submit('manager-dashboard-snapshots');
+    await view.settle();
+    assert.equal(view.requests.length, 2, 'failed selections are not replayed by another submit');
+  }
+});
+
+test('per-file rejection in a successful personal request does not stop later batches', async () => {
+  const view = management({ mutate: async (_path, init) => ({ results: (init.body as FormData).getAll('files').map((file) => ({
+    originalName: (file as File).name, status: (file as File).name === 'personal-2.ktsp' ? 'rejected' : 'imported',
+  })) }) });
+  view.selectFiles('manager-dashboard-snapshots', largePersonalFiles(4));
+  view.submit('manager-dashboard-snapshots');
+  await view.settle();
+  assert.equal(view.requests.length, 2);
+  const results = view.find(parts.ImportResults, (props) => props.title === 'Результат последней операции').props.results as Array<{status: string}>;
+  assert.deepEqual(results.map((result) => result.status), ['imported', 'rejected', 'imported', 'imported']);
+});
+
+test('personal selection holds the mutation lock across every request and blocks stale competing controls', async () => {
+  const finishes: Array<(result: import('../src/features/admin/manager-dashboard/types').ManagerDashboardMutationResult) => void> = [];
+  const view = management({ mutate: () => new Promise((resolve) => finishes.push(resolve)) });
+  view.selectFiles('manager-dashboard-snapshots', largePersonalFiles(4));
+  view.selectFiles('manager-dashboard-shared-html', [new File(['<html>synthetic</html>'], 'shared.html')]);
+  const stalePreview = view.versionButton('support', 22, 'Предпросмотр').props.onClick as () => void;
+  const staleUpload = view.find('form', (props) => elements(props.children).some((node) => node.props.id === 'manager-dashboard-shared-html')).props.onSubmit as (event: unknown) => void;
+  view.submit('manager-dashboard-snapshots');
+  stalePreview();
+  staleUpload({ preventDefault() {} });
+  assert.equal(view.requests.length, 1);
+  assert.equal(finishes.length, 1, 'second batch waits for the first response');
+  finishes[0]({ results: [{ originalName: 'personal-1.ktsp', status: 'imported' }, { originalName: 'personal-2.ktsp', status: 'imported' }] });
+  await view.settle();
+  assert.equal(view.requests.length, 2);
+  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-shared-html').props.disabled, true);
+  stalePreview();
+  staleUpload({ preventDefault() {} });
+  assert.equal(view.requests.length, 2);
+  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
+  finishes[1]({ results: [{ originalName: 'personal-3.ktsp', status: 'imported' }, { originalName: 'personal-4.ktsp', status: 'imported' }] });
+  await view.settle();
+  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-shared-html').props.disabled, false);
+  assert.equal(view.inputs.get('manager-dashboard-shared-html')!.value, 'synthetic-selection');
 });

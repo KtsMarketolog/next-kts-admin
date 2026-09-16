@@ -7,6 +7,7 @@ import test from 'node:test';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import {
   buildPersonalDashboardFrame,
+  buildSupportSharedDashboardFrame,
   getPersonalDashboardAdapterScript,
   injectPersonalDashboardAdapter,
   isPersonalDashboardHtml,
@@ -177,7 +178,7 @@ test('personal HTML injection keeps source calculations and adds parseable sandb
 type Message = { source: unknown; origin?: string; data: Record<string, unknown> };
 type Element = { value: string; disabled: boolean; readOnly: boolean; autocomplete: string; placeholder: string; textContent: string; onclick?: unknown };
 
-function adapterHarness() {
+function adapterHarness(scope: 'personal' | 'support_shared' = 'personal') {
   const handlers = new Map<string, Array<(event: Message) => void>>();
   const parent = { postMessage: (message: unknown) => outbound.push(message) };
   const outbound: unknown[] = [];
@@ -211,7 +212,7 @@ function adapterHarness() {
     function render() { calls.render++; }
     gate();
   `, context);
-  new Script(getPersonalDashboardAdapterScript()).runInContext(context);
+  new Script(getPersonalDashboardAdapterScript(scope)).runInContext(context);
   const send = (data: Record<string, unknown>, source: unknown = parent) => {
     for (const handler of handlers.get('message') ?? []) handler({ source, data });
   };
@@ -249,6 +250,41 @@ async function decrypt(context: Context, text: string, email = EMAIL, password =
   Object.assign(context, { fixtureText: text, fixtureEmail: email, fixturePassword: password });
   return await runInContext('decryptFile(fixtureText, fixtureEmail, fixturePassword)', context) as Record<string, unknown>;
 }
+
+test('support shared adapter preserves encryption and uses the explicitly uploaded shared email', async () => {
+  const fixture = encryptedFixture();
+  const harness = adapterHarness('support_shared');
+  bind(harness, fixture);
+  assert.equal(harness.elements.email.value, EMAIL);
+  assert.equal(harness.elements.email.readOnly, true);
+  assert.match(harness.elements.note.textContent, /общий снимок для всех/);
+  assert.match(harness.elements.pass.placeholder, /общего снимка/);
+  assert.deepEqual(JSON.parse(JSON.stringify(await decrypt(harness.context, fixture.text))), fixture.payload);
+  await assert.rejects(decrypt(harness.context, fixture.text, 'support-viewer@example.test'), /недоступен/);
+  await assert.rejects(decrypt(harness.context, fixture.text, EMAIL, 'wrong-password'), /не подходит/);
+  assert.equal(harness.outbound.length, 1, 'no decrypted data or password is sent to the parent');
+});
+
+test('support shared frame uses only dedicated routes and keeps the opaque sandbox and preview isolation', () => {
+  const {html, csp} = buildSupportSharedDashboardFrame({versionId: 9, snapshotId: 23, preview: false});
+  assert.match(html, /\/shared\/content\?version=9/);
+  assert.match(html, /\/shared\/snapshots\?snapshot=23/);
+  assert.doesNotMatch(html, /audience=|managerId=|manager-dashboard\/snapshots/);
+  assert.match(html, /sandbox="allow-scripts"/);
+  assert.doesNotMatch(html, /allow-same-origin|allow-popups/);
+  assert.match(csp, /script-src 'sha256-/);
+  for (const [, script] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) new Script(script);
+  const preview = buildSupportSharedDashboardFrame({versionId: 9, preview: true});
+  assert.match(preview.html, /const preview = true/);
+  assert.match(preview.html, /Снимки и данные сюда не передаются/);
+  const empty = adapterHarness('support_shared');
+  empty.send({marker: 'kts-personal-dashboard-v1', type: 'empty', reason: 'no_snapshot'});
+  assert.match(empty.elements.note.textContent, /общий снимок сопровождения/);
+  assert.equal(empty.elements.pass.disabled, true);
+  const injected = injectPersonalDashboardAdapter(fixtureHtml, 'support_shared');
+  assert.match(personalHtmlCsp(injected), /connect-src 'none'/);
+  assert.doesNotMatch(personalHtmlCsp(injected), /allow-same-origin|unsafe-eval/);
+});
 
 test('personal adapter only binds one snapshot from its parent and does not unlock before delivery', async () => {
   const fixture = encryptedFixture();

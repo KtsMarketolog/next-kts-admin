@@ -1,215 +1,132 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { parseEnv } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
-const requireForInstall = createRequire(import.meta.url);
-type GroupEvidence = {
-  uid: number;
-  gid: number;
-  groups: Array<{ name: string; gid: number; members: string[] }>;
-  users: Array<{ name: string; uid: number; gid: number }>;
-};
-const { updateEnv, updateCrontab, isPrivatePrimaryGroup, safeDirectoryMode, safeError, install, BEGIN, END, VALUES } = requireForInstall('../ops/manager-dashboard/install-mail.cjs') as {
-  updateEnv(source: string): string;
-  updateCrontab(source: string): string;
-  isPrivatePrimaryGroup(evidence: GroupEvidence): boolean;
-  safeDirectoryMode(mode: number, gid: number, privateGid?: number | null): boolean;
+const requireOps = createRequire(import.meta.url);
+type CronIo = {read(): string; backup(source: string): string; write(source: string): void};
+type DisableResult = {mode: string; changed: boolean; blockFound: boolean; unmanagedDashboardJobs: number; backup: string | null};
+const {BEGIN, END, COMMAND, decodeCrontab, removeDashboardMailCrontab, disableCrontab, disable, safeError} = requireOps('../ops/manager-dashboard/disable-mail.cjs') as {
+  BEGIN: string; END: string; COMMAND: string;
+  decodeCrontab(bytes: Uint8Array): string;
+  removeDashboardMailCrontab(source: string): string;
+  disableCrontab(io: CronIo, apply: boolean): DisableResult;
+  disable(args: string[]): unknown;
   safeError(error: unknown): string;
-  install(args: string[]): unknown;
-  BEGIN: string;
-  END: string;
-  VALUES: Record<string, string>;
 };
+const stock = '# BEGIN STOCK IMPORT\n*/15 * * * * /usr/bin/node /srv/stock.cjs >> /srv/stock.log 2>&1\n# END STOCK IMPORT\n';
+const block = [BEGIN, '# Dashboard mail job', '*/5 4-8 * * * ' + COMMAND, '0 9-15 * * * ' + COMMAND, END, ''].join('\n');
 
-const privateGroup: GroupEvidence = {
-  uid: 1000, gid: 1000, groups: [{ name: 'root', gid: 0, members: [] }, { name: 'kts', gid: 1000, members: [] }],
-  users: [{ name: 'root', uid: 0, gid: 0 }, { name: 'kts', uid: 1000, gid: 1000 }],
-};
-
-test('private primary group evidence accepts only kts, including an explicit self-membership', () => {
-  assert.equal(isPrivatePrimaryGroup(privateGroup), true);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, groups: [{ name: 'kts', gid: 1000, members: ['kts'] }] }), true);
+test('retired mail installer cannot configure env, schedule cron, or re-enable import', () => {
+  const installer = fileURLToPath(new URL('../ops/manager-dashboard/install-mail.cjs', import.meta.url));
+  for (const argument of ['configure', 'schedule']) {
+    const child = spawnSync(process.execPath, [installer, argument], {
+      env: {NODE_ENV: 'test', MANAGER_DASHBOARD_MAIL_ENABLED: 'true'}, encoding: 'utf8',
+    });
+    assert.equal(child.status, 0);
+    assert.equal(JSON.parse(child.stdout).reason, 'manual_only');
+    assert.equal(child.stderr, '');
+  }
+  const {install} = requireOps(installer);
+  const forbidden = new Proxy([], {get() { assert.fail('Retired installer must ignore arguments'); }});
+  assert.equal(install(forbidden).status, 'disabled');
 });
 
-test('private primary group rejects extra primary/supplementary members, aliases and inconsistent identity', () => {
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, groups: [{ name: 'kts', gid: 1000, members: ['other'] }] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, users: [...privateGroup.users, { name: 'other', uid: 1001, gid: 1000 }] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, users: [...privateGroup.users, { name: 'alias', uid: 1000, gid: 1001 }] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, groups: [{ name: 'users', gid: 1000, members: [] }] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, groups: [{ name: 'kts', gid: 1001, members: [] }] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, uid: 0 }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, gid: 1001 }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, users: [] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, users: [...privateGroup.users, privateGroup.users[1]] }), false);
+test('disable transform removes only owned cron block and preserves stock, notification and timezone bytes', () => {
+  const prefix = 'MAILTO="operator@example.test"\nCRON_TZ=Europe/Moscow\n' + stock + '\n';
+  const suffix = '# Keep notification schedule\n0 8 * * * /usr/bin/node /srv/send-mail.cjs';
+  assert.equal(removeDashboardMailCrontab(prefix + block + suffix), prefix + suffix);
+  assert.equal(removeDashboardMailCrontab(prefix + suffix), prefix + suffix);
+  assert.equal(removeDashboardMailCrontab(block), '');
+  assert.equal(removeDashboardMailCrontab(''), '');
 });
 
-test('private primary group rejects hidden duplicate-gid aliases and conflicting kts group names', () => {
-  const otherUser = { name: 'other', uid: 1001, gid: 1001 };
-  assert.equal(isPrivatePrimaryGroup({
-    ...privateGroup,
-    users: [...privateGroup.users, otherUser],
-    groups: [...privateGroup.groups, { name: 'shared', gid: 1000, members: ['other'] }],
-  }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, groups: [...privateGroup.groups, { name: 'alias', gid: 1000, members: [] }] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, groups: [...privateGroup.groups, { name: 'kts', gid: 1001, members: [] }] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, groups: [...privateGroup.groups, privateGroup.groups[1]] }), false);
-  assert.equal(isPrivatePrimaryGroup({ ...privateGroup, groups: [] }), false);
+test('disable transform preserves CRLF and no-final-newline content exactly and is idempotent', () => {
+  const prefix = stock.replaceAll('\n', '\r\n');
+  const source = prefix + block.replaceAll('\n', '\r\n') + '# Keep last line';
+  const removed = removeDashboardMailCrontab(source);
+  assert.equal(removed, prefix + '# Keep last line');
+  assert.equal(removeDashboardMailCrontab(removed), removed);
+  assert.equal(removeDashboardMailCrontab(block.trimEnd()), '');
 });
 
-test('directory permissions allow 775 only for the independently validated private gid; world write is always denied', () => {
-  assert.equal(safeDirectoryMode(0o775, 1000, 1000), true);
-  assert.equal(safeDirectoryMode(0o775, 1001, 1000), false);
-  assert.equal(safeDirectoryMode(0o775, 1000), false);
-  assert.equal(safeDirectoryMode(0o777, 1000, 1000), false);
-  assert.equal(safeDirectoryMode(0o757, 1000, 1000), false);
-  assert.equal(safeDirectoryMode(0o755, 1001), true);
-  assert.equal(safeDirectoryMode(0o700, 1000), true);
+test('ambiguous markers or unrelated commands inside the owned block fail without altering source', () => {
+  for (const source of [BEGIN, END, END + '\n' + BEGIN, BEGIN + '\n' + BEGIN + '\n' + END]) {
+    assert.throws(() => removeDashboardMailCrontab(source), /DISABLE_CRON_MARKERS/);
+  }
+  for (const line of ['*/15 * * * * node /srv/stock.cjs', 'MAILTO=changed@example.test',
+    '*/5 4-8 * * * ' + COMMAND + '; node /srv/other.cjs']) {
+    assert.throws(() => removeDashboardMailCrontab(BEGIN + '\n' + line + '\n' + END), /DISABLE_UNKNOWN_BLOCK_CONTENT/);
+  }
 });
 
-test('configure updates only approved env assignments and preserves all unrelated bytes', () => {
-  const untouched = '# comment\r\nSTOCK_MAIL_PASSWORD="synthetic-not-a-credential"\r\nSTOCK_MAIL_ENABLED=true\r\n\r\n';
-  const source = `${untouched} export MANAGER_DASHBOARD_MAIL_ENABLED = false # disabled\r\nMANAGER_DASHBOARD_MAIL_ALLOWED_FROM=old@example.test\r\nTAIL=keep exactly  \r\n`;
-  const result = updateEnv(source);
-  assert.ok(result.startsWith(untouched));
-  assert.ok(result.includes('TAIL=keep exactly  \r\n'));
-  for (const [key, value] of Object.entries(VALUES)) assert.ok(result.includes(`${key}=${value}\r\n`));
-  assert.equal(updateEnv(result), result);
-});
-
-test('configure treats assignment-looking lines inside multiline values as unrelated data', () => {
-  const multiline = 'UNRELATED_VALUE="first\nMANAGER_DASHBOARD_MAIL_ENABLED=false\nlast"\n';
-  const result = updateEnv(multiline);
-  assert.ok(result.startsWith(multiline));
-  assert.ok(result.includes('\nMANAGER_DASHBOARD_MAIL_ENABLED=true\n'));
-  assert.throws(() => updateEnv('UNRELATED_VALUE="unfinished\n'), /INSTALL_ENV_SYNTAX/);
-});
-
-test('configure handles duplicate keys, quoted target values and files without final newline', () => {
-  const result = updateEnv('UNCHANGED=yes\nMANAGER_DASHBOARD_MAIL_ENABLED="false"\nMANAGER_DASHBOARD_MAIL_ENABLED=false');
-  assert.equal(result.match(/MANAGER_DASHBOARD_MAIL_ENABLED=true/g)?.length, 2);
-  assert.ok(result.startsWith('UNCHANGED=yes\n'));
-  assert.equal(updateEnv(result), result);
-  const multilineTarget = updateEnv('MANAGER_DASHBOARD_MAIL_ALLOWED_FROM="\nold@example.test\n"\nOTHER=1\n');
-  assert.ok(multilineTarget.startsWith(`MANAGER_DASHBOARD_MAIL_ALLOWED_FROM=${VALUES.MANAGER_DASHBOARD_MAIL_ALLOWED_FROM}\nOTHER=1\n`));
-});
-
-test('configure preserves a UTF-8 BOM and adds missing values to an empty file', () => {
-  const result = updateEnv('\uFEFF# configuration\nOTHER=value');
-  assert.ok(result.startsWith('\uFEFF# configuration\nOTHER=value\n'));
-  const bomSetting = '\uFEFFMANAGER_DASHBOARD_MAIL_ENABLED=false\n';
-  const updatedBom = updateEnv(bomSetting);
-  assert.ok(updatedBom.startsWith(bomSetting));
-  assert.equal(parseEnv(updatedBom)['\uFEFFMANAGER_DASHBOARD_MAIL_ENABLED'], 'false');
-  assert.equal(parseEnv(updatedBom).MANAGER_DASHBOARD_MAIL_ENABLED, 'true');
-  const quoted = '\uFEFFOTHER="first\nMANAGER_DASHBOARD_MAIL_ENABLED=false\nlast"\n';
-  assert.ok(updateEnv(quoted).startsWith(quoted));
-  assert.equal(Object.keys(VALUES).length, 4);
-  for (const [key, value] of Object.entries(VALUES)) assert.ok(updateEnv('').includes(`${key}=${value}\n`));
-});
-
-function assertParsedPreservation(source: string, result: string) {
-  const before = parseEnv(source);
-  const after = parseEnv(result);
-  const unrelated = (values: Record<string, string | undefined>) => Object.fromEntries(Object.entries(values).filter(([key]) => !(key in VALUES)));
-  assert.deepEqual(unrelated(after), unrelated(before));
-  for (const [key, value] of Object.entries(VALUES)) assert.equal(after[key], value);
+function ioFor(source: string) {
+  let value = source;
+  const backups: string[] = [];
+  const writes: string[] = [];
+  const io: CronIo = {
+    read: () => value,
+    backup: (before) => {backups.push(before); return '/private/test-backup';},
+    write: (after) => {writes.push(after); value = after;},
+  };
+  return {io, backups, writes};
 }
 
-test('configure follows real Node quote parsing and never deletes assignments after a backslash-quote', () => {
-  const source = 'MANAGER_DASHBOARD_MAIL_ALLOWED_FROM="old\\"\nUNRELATED=keep\nNEXT="close"\n';
-  const result = updateEnv(source);
-  assert.ok(result.includes('UNRELATED=keep\nNEXT="close"\n'));
-  assertParsedPreservation(source, result);
-});
-
-test('configure preserves multiline values under dotted, dashed, spaced and BOM keys', () => {
-  for (const key of ['OTHER.KEY', 'OTHER-KEY', 'OTHER KEY', '"OTHER"', '\uFEFFOTHER']) {
-    const source = `${key}="first\nMANAGER_DASHBOARD_MAIL_ENABLED=false\nlast"\n`;
-    const result = updateEnv(source);
-    assert.ok(result.startsWith(source));
-    assertParsedPreservation(source, result);
+test('crontab decoding preserves valid UTF-8 including BOM and rejects malformed bytes before backup/write', () => {
+  const bytes = Buffer.from('\uFEFF# Комментарий\r\n' + stock + block);
+  assert.deepEqual(Buffer.from(decodeCrontab(bytes)), bytes);
+  for (const invalid of [Buffer.from([0xff]), Buffer.from([0xc3, 0x28]), Buffer.from([0xe2, 0x82])]) {
+    for (const apply of [false, true]) {
+      const h = ioFor(block);
+      h.io.read = () => decodeCrontab(Buffer.concat([Buffer.from(stock + block), invalid]));
+      assert.throws(() => disableCrontab(h.io, apply), {code: 'DISABLE_INVALID_TEXT'});
+      assert.deepEqual(h.backups, []);
+      assert.deepEqual(h.writes, []);
+    }
   }
 });
 
-test('configure validates complete Node-parsed values for quote/comment/export edge cases', () => {
-  const fixtures = [
-    '# ignored="quote\nMANAGER_DASHBOARD_MAIL_ENABLED=false\n',
-    'export OTHER.KEY=`first\nMANAGER_DASHBOARD_MAIL_ENABLED=false\nlast`\n',
-    'OTHER="before\\"\nMANAGER_DASHBOARD_MAIL_ENABLED=false\nNEXT=keep\n',
-    'OTHER=one # comment\nMANAGER_DASHBOARD_MAIL_ENABLED="false"\n',
-    'OTHER="first\nMANAGER_DASHBOARD_MAIL_ALLOWED_FROM=not-a-setting\nlast"\nOTHER=final\n',
-  ];
-  for (const source of fixtures) assertParsedPreservation(source, updateEnv(source));
+test('dry-run never creates backup or writes; apply saves exact backup and repeated apply is a no-op', () => {
+  const original = stock + block;
+  const h = ioFor(original);
+  assert.deepEqual(disableCrontab(h.io, false), {
+    mode: 'dry-run', changed: false, blockFound: true, unmanagedDashboardJobs: 0, backup: null,
+  });
+  assert.deepEqual(h.backups, []);
+  assert.deepEqual(h.writes, []);
+  assert.equal(disableCrontab(h.io, true).changed, true);
+  assert.deepEqual(h.backups, [original]);
+  assert.deepEqual(h.writes, [stock]);
+  assert.equal(disableCrontab(h.io, true).changed, false);
+  assert.equal(h.backups.length, 1);
+  assert.equal(h.writes.length, 1);
 });
 
-test('configure fails closed when unsupported syntax could rename an unrelated Node-parsed key', () => {
-  const source = 'export\tMANAGER_DASHBOARD_MAIL_ENABLED=false\nOTHER=keep\n';
-  assert.equal(parseEnv(source)['export\tMANAGER_DASHBOARD_MAIL_ENABLED'], 'false');
-  assert.throws(() => updateEnv(source), /INSTALL_ENV_PRESERVATION/);
+test('unmanaged dashboard jobs outside marker are reported and preserved', () => {
+  const unrelated = '0 * * * * node /custom/manager-dashboard-import.cjs\n';
+  const h = ioFor(stock + unrelated + block);
+  const result = disableCrontab(h.io, true);
+  assert.equal(result.unmanagedDashboardJobs, 1);
+  assert.deepEqual(h.writes, [stock + unrelated]);
 });
 
-const stock = '# BEGIN STOCK IMPORT\n*/15 * * * * /usr/bin/node /srv/stock.cjs >> /srv/stock.log 2>&1\n# END STOCK IMPORT\n';
-
-test('schedule adds the exact UTC jobs in one named block without changing stock bytes', () => {
-  const source = `MAILTO=""\n${stock}\n# keep trailing comment\n`;
-  const result = updateCrontab(source);
-  assert.ok(result.startsWith(source));
-  assert.equal(result.split(BEGIN).length, 2);
-  assert.equal(result.split(END).length, 2);
-  assert.match(result, /^\*\/5 4-8 \* \* \* umask 077; \/usr\/bin\/node --env-file=\/home\/kts\/kts-next-admin\/\.env\.local \/home\/kts\/kts-next-admin\/shared\/bin\/manager-dashboard-check-email\.cjs >> \/home\/kts\/kts-next-admin\/shared\/logs\/manager-dashboard-mail\.log 2>&1$/m);
-  assert.match(result, /^0 9-15 \* \* \* /m);
-  assert.doesNotMatch(result, /\/current\/|CRON_SECRET|PASSWORD/);
-  assert.equal(updateCrontab(result), result);
+test('concurrent cron change and post-write verification failure surface safe errors', () => {
+  let reads = 0;
+  const h = ioFor(block);
+  h.io.read = () => ++reads === 1 ? block : stock + block;
+  assert.throws(() => disableCrontab(h.io, true), /DISABLE_CHANGED/);
+  assert.deepEqual(h.writes, []);
+  const ignoredWrite = ioFor(block);
+  ignoredWrite.io.write = () => {};
+  assert.throws(() => disableCrontab(ignoredWrite.io, true), /DISABLE_VERIFY/);
 });
 
-test('schedule replaces only its own existing block and preserves bytes before and after it', () => {
-  const prefix = `${stock}\n`;
-  const suffix = '\n# keep suffix exactly  \n1 1 * * * /srv/other-job\n';
-  const result = updateCrontab(`${prefix}${BEGIN}\nold personal command\n${END}\n${suffix}`);
-  assert.ok(result.startsWith(prefix));
-  assert.ok(result.endsWith(suffix));
-  assert.doesNotMatch(result, /old personal command/);
-});
-
-test('schedule preserves CRLF stock lines and safely appends after a missing final newline', () => {
-  const crlf = stock.replaceAll('\n', '\r\n');
-  assert.ok(updateCrontab(crlf).startsWith(crlf));
-  assert.equal(updateCrontab(updateCrontab(crlf)), updateCrontab(crlf));
-  assert.ok(updateCrontab('# no final newline').startsWith('# no final newline\n'));
-});
-
-test('schedule rejects malformed blocks, unmanaged duplicate jobs and conflicting timezone declarations', () => {
-  for (const source of [BEGIN, END, `${END}\n${BEGIN}\n`, `${BEGIN}\n${BEGIN}\n${END}\n`]) {
-    assert.throws(() => updateCrontab(source), /INSTALL_CRON_MARKERS/);
-  }
-  assert.throws(() => updateCrontab('0 * * * * node /tmp/manager-dashboard/check-email.cjs\n'), /INSTALL_UNMANAGED_CRON/);
-  assert.throws(() => updateCrontab('CRON_TZ=Europe/Moscow\n'), /INSTALL_TIMEZONE_GUARD/);
-  assert.throws(() => updateCrontab('TZ="Europe/Moscow"\n'), /INSTALL_TIMEZONE_GUARD/);
-  assert.ok(updateCrontab('CRON_TZ=Etc/UTC\n').startsWith('CRON_TZ=Etc/UTC\n'));
-});
-
-test('pure transforms reject binary/oversized content and diagnostic output never exposes arbitrary errors', () => {
-  for (const transform of [updateEnv, updateCrontab]) {
-    assert.throws(() => transform('value\0hidden'), /INSTALL_INVALID_TEXT/);
-    assert.throws(() => transform('x'.repeat(1024 * 1024 + 1)), /INSTALL_INVALID_TEXT/);
-  }
-  assert.equal(safeError(new Error('synthetic sensitive detail')), 'INSTALL_FAILED');
-  assert.equal(safeError({ code: 'INSTALL_PATH_GUARD', message: 'synthetic sensitive detail' }), 'INSTALL_PATH_GUARD');
-  assert.throws(() => install([]), /INSTALL_USAGE/);
-  assert.throws(() => install(['configure', '--base=/tmp']), /INSTALL_USAGE/);
-});
-
-test('pure transforms reject oversized resulting text before any filesystem or crontab write', () => {
-  const max = 1024 * 1024;
-  const envAtInputLimit = `OTHER=${'x'.repeat(max - 'OTHER='.length)}`;
-  const cronAtInputLimit = `#${'x'.repeat(max - 1)}`;
-  assert.equal(Buffer.byteLength(envAtInputLimit), max);
-  assert.equal(Buffer.byteLength(cronAtInputLimit), max);
-  assert.throws(() => updateEnv(envAtInputLimit), /INSTALL_INVALID_TEXT/);
-  assert.throws(() => updateCrontab(cronAtInputLimit), /INSTALL_INVALID_TEXT/);
-  const envPrefix = `OTHER=${'x'.repeat(max - Buffer.byteLength(updateEnv('')) - 'OTHER=\n'.length)}\n`;
-  assert.equal(Buffer.byteLength(updateEnv(envPrefix)), max);
-  const cronPrefix = `#${'x'.repeat(max - Buffer.byteLength(updateCrontab('')) - '#\n'.length)}\n`;
-  assert.equal(Buffer.byteLength(updateCrontab(cronPrefix)), max);
+test('cleanup rejects invalid text/usage and never prints arbitrary sensitive errors', () => {
+  assert.throws(() => removeDashboardMailCrontab('x\0y'), /DISABLE_INVALID_TEXT/);
+  assert.throws(() => removeDashboardMailCrontab('x'.repeat(1024 * 1024 + 1)), /DISABLE_INVALID_TEXT/);
+  assert.throws(() => disable([]), /DISABLE_USAGE/);
+  assert.throws(() => disable(['--apply', '--user=root']), /DISABLE_USAGE/);
+  assert.equal(safeError(new Error('private token or command')), 'DISABLE_FAILED');
+  assert.equal(safeError({code: 'DISABLE_CHANGED', message: 'private token'}), 'DISABLE_CHANGED');
 });

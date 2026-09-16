@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
-import { DashboardFrame, formatDashboardDate, isSnapshotExpired, SnapshotStatus } from './ManagerDashboardParts';
-import type { ManagerDashboardOverview } from './types';
+import { DashboardFrame, SharedDashboardFrame, formatDashboardDate, isSnapshotExpired, SnapshotStatus } from './ManagerDashboardParts';
+import type { ManagerDashboardOverview, ManagerDashboardSupportShared } from './types';
 import styles from './ManagerDashboard.module.scss';
 
 type ViewerOverview = Extract<ManagerDashboardOverview, { mode: 'view' }>;
@@ -10,11 +10,22 @@ export function managerDashboardViewIdentity(overview: Pick<ViewerOverview, 'ema
   return JSON.stringify([overview.audience, overview.email, overview.bindingStatus]);
 }
 
-export function ManagerDashboardViewer({ overview, loading, onReload }: {
+type ViewerProps = {
   overview: ViewerOverview;
   loading: boolean;
-  onReload: () => Promise<boolean>;
-}) {
+  onReload: (report?: 'personal' | 'shared') => Promise<boolean>;
+};
+
+export function ManagerDashboardViewer({ overview, loading, onReload }: ViewerProps) {
+  return (
+    <div className={styles.stack}>
+      <PersonalDashboardViewer key={managerDashboardViewIdentity(overview)} overview={overview} loading={loading} onReload={onReload} />
+      {overview.audience === 'support' ? <SharedDashboardViewer shared={overview.supportShared} loading={loading} onReload={onReload} /> : null}
+    </div>
+  );
+}
+
+function PersonalDashboardViewer({ overview, loading, onReload }: ViewerProps) {
   const [historicalId, setHistoricalId] = useState<number | null>(null);
   const [revision, setRevision] = useState(0);
   const hasBinding = overview.bindingStatus === 'matched';
@@ -54,7 +65,6 @@ export function ManagerDashboardViewer({ overview, loading, onReload }: {
             {isHistorical ? <p className={styles.warning}>Открыт архивный файл. Он не заменяет текущие данные.</p> : null}
           </>
         ) : hasBinding ? <p className={styles.empty}>Ваш файл ещё не поступил. После импорта он появится здесь автоматически. {overview.htmlVersion ? 'Опубликованный HTML уже доступен ниже.' : ''}</p> : null}
-        {overview.expectedBy ? <p className={styles.muted}>Ежедневное обновление — к {overview.expectedBy}.</p> : null}
         {history.length > 0 ? (
           <div className={styles.actions}>
             <label className={styles.inlineLabel} htmlFor="manager-dashboard-history">Версия данных</label>
@@ -69,13 +79,13 @@ export function ManagerDashboardViewer({ overview, loading, onReload }: {
       </section>
 
       {!overview.htmlVersion ? (
-        <section className={styles.panel}><p className={styles.empty}>HTML дашборда ещё не опубликован.</p></section>
+        <section className={styles.panel}><h2>Личный дашборд</h2><p className={styles.empty}>HTML дашборда ещё не опубликован.</p></section>
       ) : (
         <section className={styles.panel}>
           <div className={styles.sectionHeading}>
             <h2>Личный дашборд</h2>
             <button className={styles.secondary} type="button" disabled={loading} onClick={async () => {
-              if (await onReload()) setRevision((value) => value + 1);
+              if (await onReload('personal')) setRevision((value) => value + 1);
             }}>{loading ? 'Обновляем…' : 'Перезагрузить отчёт'}</button>
           </div>
           {expired ? <p className={styles.warning}>Срок доступа к этому снимку истёк. HTML дашборда доступен, а для открытия личных данных нужен свежий файл.</p> : null}
@@ -83,5 +93,50 @@ export function ManagerDashboardViewer({ overview, loading, onReload }: {
         </section>
       )}
     </div>
+  );
+}
+
+function SharedDashboardViewer({ shared, loading, onReload }: {
+  shared?: ManagerDashboardSupportShared | null;
+  loading: boolean;
+  onReload: (report?: 'personal' | 'shared') => Promise<boolean>;
+}) {
+  const [historicalId, setHistoricalId] = useState<number | null>(null);
+  const [revision, setRevision] = useState(0);
+  const selected = historicalId ? shared?.history.find((snapshot) => snapshot.id === historicalId) ?? shared?.snapshot : shared?.snapshot;
+  const isHistorical = Boolean(selected && shared?.snapshot && selected.id !== shared.snapshot.id);
+  const expired = Boolean(selected && isSnapshotExpired(selected.expires));
+  const version = shared?.htmlVersions.find((item) => item.id === shared.activeHtmlVersionId);
+  return (
+    <section className={styles.panel} aria-labelledby="manager-dashboard-shared-heading">
+      <div className={styles.sectionHeading}>
+        <div><h2 id="manager-dashboard-shared-heading">Общий дашборд</h2><p>Один отчёт для всех менеджеров по сопровождению.</p></div>
+        <button className={styles.secondary} type="button" disabled={loading} onClick={async () => {
+          if (await onReload('shared')) setRevision((value) => value + 1);
+        }}>{loading ? 'Обновляем…' : 'Перезагрузить общий отчёт'}</button>
+      </div>
+      <SnapshotStatus snapshot={selected ?? null} />
+      {selected ? <>
+        <dl className={styles.metadata}>
+          <div><dt>Общий файл</dt><dd>{selected.originalName}</dd></div>
+          <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(selected.issued)}</dd></div>
+          <div><dt>Доступ до, МСК</dt><dd>{formatDashboardDate(selected.expires)}</dd></div>
+        </dl>
+        {!expired ? <p className={styles.notice}>Для открытия общего зашифрованного отчёта введите пароль от общего файла внутри дашборда.</p>
+          : <p className={styles.warning}>Срок доступа к общему снимку истёк. Для открытия общих данных нужен свежий файл.</p>}
+        {isHistorical ? <p className={styles.warning}>Открыт архивный общий файл. Он не заменяет текущие данные.</p> : null}
+      </> : <p className={styles.empty}>Общий файл ещё не загружен администратором.</p>}
+      {(shared?.history.length ?? 0) > 0 ? <div className={styles.actions}>
+        <label className={styles.inlineLabel} htmlFor="manager-dashboard-shared-history">Версия общих данных</label>
+        <select id="manager-dashboard-shared-history" value={historicalId ?? ''} onChange={(event) => setHistoricalId(event.target.value ? Number(event.target.value) : null)}>
+          <option value="">Текущий общий файл</option>
+          {shared!.history.filter((snapshot) => snapshot.id !== shared?.snapshot?.id).map((snapshot) => (
+            <option key={snapshot.id} value={snapshot.id}>{formatDashboardDate(snapshot.issued)} — {snapshot.originalName}</option>
+          ))}
+        </select>
+      </div> : null}
+      {version ? <div className={styles.preview}><SharedDashboardFrame versionId={version.id} snapshotId={selected?.id} revision={revision} /></div>
+        : <p className={styles.empty}>Общий HTML дашборда ещё не опубликован.</p>}
+    </section>
   );
 }

@@ -13,6 +13,12 @@ import styles from './ManagerDashboard.module.scss';
 
 const API_PATH = '/api/admin/manager-dashboard';
 
+function reportVersionsChanged(next: Extract<ManagerDashboardOverview, { mode: 'view' }>, current: Extract<ManagerDashboardOverview, { mode: 'view' }>) {
+  return next.htmlVersion?.id !== current.htmlVersion?.id || next.snapshot?.id !== current.snapshot?.id
+    || next.supportShared?.activeHtmlVersionId !== current.supportShared?.activeHtmlVersionId
+    || next.supportShared?.snapshot?.id !== current.supportShared?.snapshot?.id;
+}
+
 async function readResponse(response: Response) {
   const data: unknown = await response.json().catch(() => null);
   if (!response.ok) {
@@ -35,7 +41,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
   const requestRevision = useRef(0);
   const busyRef = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (report?: 'personal' | 'shared', previous?: ManagerDashboardOverview | null) => {
     const revision = ++requestRevision.current;
     setLoading(true);
     try {
@@ -47,8 +53,16 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
       const next = await readResponse(response) as ManagerDashboardOverview;
       if (next.mode !== mode) throw new Error('Права доступа изменились. Откройте раздел заново.');
       if (revision === requestRevision.current) {
-        setOverview(next);
-        setUpdateAvailable(false);
+        let updated = next;
+        if (previous?.mode === 'view' && next.mode === 'view' && previous.audience === 'support' && next.audience === 'support') {
+          if (report === 'shared' && managerDashboardViewIdentity(previous) === managerDashboardViewIdentity(next)) {
+            updated = { ...previous, supportShared: next.supportShared };
+          } else if (report === 'personal') {
+            updated = { ...next, supportShared: previous.supportShared };
+          }
+        }
+        setOverview(updated);
+        setUpdateAvailable(next.mode === 'view' && updated.mode === 'view' && reportVersionsChanged(next, updated));
       }
     } finally {
       if (revision === requestRevision.current) setLoading(false);
@@ -78,13 +92,17 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
         }
         const next = await readResponse(response) as ManagerDashboardOverview;
         if (!disposed && next.mode === 'view') {
+          const sharedChanged = next.supportShared?.activeHtmlVersionId !== overview.supportShared?.activeHtmlVersionId
+            || next.supportShared?.snapshot?.id !== overview.supportShared?.snapshot?.id;
           if (managerDashboardViewIdentity(next) !== managerDashboardViewIdentity(overview)) {
-            // A changed role/audience, recipient or binding clears the decrypted report.
-            setOverview(next);
-            setUpdateAvailable(false);
+            // Clear personal data immediately when its recipient changes. A support
+            // manager's open shared report keeps its own explicit refresh boundary.
+            const keepShared = next.audience === 'support' && overview.audience === 'support';
+            setOverview(keepShared ? { ...next, supportShared: overview.supportShared } : next);
+            setUpdateAvailable(keepShared && sharedChanged);
             return;
           }
-          setUpdateAvailable(next.htmlVersion?.id !== overview.htmlVersion?.id || next.snapshot?.id !== overview.snapshot?.id);
+          setUpdateAvailable(reportVersionsChanged(next, overview));
         }
       } catch {
         // A background check must not interrupt an already decrypted report.
@@ -105,10 +123,10 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
     };
   }, [overview, router]);
 
-  async function refresh() {
+  async function refresh(report?: 'personal' | 'shared') {
     setError('');
     try {
-      await load();
+      await load(report, overview);
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось обновить данные.');
@@ -144,7 +162,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
   return (
     <main className={`${adminStyles.page} ${styles.dashboardPage}`}>
       <div className={adminStyles.topbar}>
-        <div><p>Панель управления</p><h1>{mode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h1></div>
+        <div><p>Панель управления</p><h1>{mode === 'manage' ? 'Дашборды менеджеров' : overview?.mode === 'view' && overview.audience === 'support' ? 'Дашборды' : 'Личный дашборд'}</h1></div>
         <div className={adminStyles.topbarActions}>
           <Link className={styles.secondary} href="/admin">В панель управления</Link>
           <button className={styles.secondary} type="button" disabled={loading || busy} onClick={() => void refresh()}>{loading ? 'Обновляем…' : 'Обновить'}</button>
@@ -153,7 +171,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {message ? <p className={styles.notice} role="status">{message}</p> : null}
       {updateAvailable ? <div className={styles.notice} role="status">
-        <p>Доступна новая версия дашборда или личных данных. Обновите отчёт, когда будете готовы; пароль снимка потребуется ввести снова.</p>
+        <p>Доступна новая версия дашборда или данных. Обновите отчёт, когда будете готовы; пароль снимка потребуется ввести снова.</p>
         <button className={styles.secondary} type="button" disabled={loading || busy} onClick={() => void refresh()}>Открыть обновление</button>
       </div> : null}
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}
@@ -163,7 +181,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
         setOverview(null);
         router.replace('/admin');
       }} /> : null}
-      {overview?.mode === 'view' ? <ManagerDashboardViewer key={managerDashboardViewIdentity(overview)} overview={overview} loading={loading} onReload={refresh} /> : null}
+      {overview?.mode === 'view' ? <ManagerDashboardViewer key={overview.audience} overview={overview} loading={loading} onReload={refresh} /> : null}
     </main>
   );
 }

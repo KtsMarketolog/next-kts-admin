@@ -23,11 +23,18 @@ const fixtureEntry = `
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ManagerDashboardManagement } from './src/features/admin/manager-dashboard/ManagerDashboardManagement';
+import { ManagerDashboard } from './src/features/admin/manager-dashboard/ManagerDashboard';
 import adminStyles from './src/app/admin/admin.module.scss';
 import dashboardStyles from './src/features/admin/manager-dashboard/ManagerDashboard.module.scss';
 const date = '2026-09-15T08:00:00Z';
 const makeVersion = (id, audience, suffix) => ({id, audience, originalName: audience + '_synthetic_dashboard_' + suffix + '.html', fileSize: 140000, createdAt: date, firstPublishedAt: date});
 const supportMany = new URLSearchParams(location.search).get('support') === 'many';
+const sharedSnapshot = {id: 301, originalName: 'общий_файл.ktsp', email: 'shared.synthetic@example.test', issued: '2026-09-15', expires: '2999-10-30', receivedAt: date};
+const sharedInitial = {
+  htmlVersions: [makeVersion(201, 'support', 'shared_active'), makeVersion(202, 'support', 'shared_previous')],
+  activeHtmlVersionId: 201, previousHtmlVersionId: 202, snapshot: sharedSnapshot,
+  history: [sharedSnapshot, {...sharedSnapshot, id: 300, originalName: 'общий_архив.ktsp'}]
+};
 const initial = {
   mode: 'manage', groups: ['development', 'support'].map((audience, index) => ({
     audience, activeHtmlVersionId: index ? (supportMany ? 11 : null) : 1, previousHtmlVersionId: index ? (supportMany ? 12 : null) : 2,
@@ -39,10 +46,24 @@ const initial = {
   })),
   imports: Array.from({length: 5}, (_, i) => ({id: 13 - i, originalName: 'синтетический_снимок_журнала_' + (13 - i) + '.ktsp', status: 'imported', createdAt: date})),
   importsNextCursor: '9',
+  supportShared: sharedInitial,
   mail: {enabled: true, configured: true}, expectedBy: '10:00 МСК', expectedIssuedAfter: '2026-09-15'
 };
 window.fixtureCalls = [];
 window.fixtureFailDelete = false;
+const viewerAudience = new URLSearchParams(location.search).get('view');
+window.fixtureViewerOverview = {
+  mode: 'view', audience: viewerAudience === 'development' ? 'development' : 'support',
+  bindingStatus: 'matched', email: 'support.synthetic@example.test',
+  htmlVersion: makeVersion(11, 'support', 'personal'),
+  snapshot: {...sharedSnapshot, id: 401, originalName: 'личный_файл.ktsp'},
+  history: [{...sharedSnapshot, id: 401, originalName: 'личный_файл.ktsp'}, {...sharedSnapshot, id: 400, originalName: 'личный_архив.ktsp'}],
+  supportShared: sharedInitial
+};
+const originalFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => input === '/api/admin/manager-dashboard'
+  ? new Response(JSON.stringify(window.fixtureViewerOverview), {status: 200, headers: {'Content-Type': 'application/json'}})
+  : originalFetch(input, init);
 function Fixture() {
   const [overview, setOverview] = useState(initial);
   useEffect(() => {
@@ -51,7 +72,10 @@ function Fixture() {
   }, []);
   const mutate = async (requestPath, init, message) => {
     const call = {path: requestPath, method: init.method, message};
-    if (init.body instanceof FormData) call.files = [...init.body.entries()].map(([field, file]) => ({field, name: file.name, size: file.size}));
+    if (init.body instanceof FormData) {
+      call.files = [...init.body.entries()].filter(([, value]) => value instanceof File).map(([field, file]) => ({field, name: file.name, size: file.size}));
+      call.fields = Object.fromEntries([...init.body.entries()].filter(([, value]) => typeof value === 'string'));
+    }
     else if (init.body) call.body = JSON.parse(init.body);
     window.fixtureCalls.push(call);
     if (requestPath.startsWith('/html?') && init.method === 'DELETE') {
@@ -74,6 +98,25 @@ function Fixture() {
       const {audience, versionId} = call.body;
       setOverview(current => ({...current, groups: current.groups.map(group => group.audience === audience ? {...group, previousHtmlVersionId: group.activeHtmlVersionId, activeHtmlVersionId: versionId} : group)}));
     }
+    if (requestPath === '/shared/html' && init.method === 'POST') {
+      const version = {...makeVersion(203, 'support', 'shared_uploaded'), firstPublishedAt: null};
+      setOverview(current => ({...current, supportShared: {...current.supportShared, htmlVersions: [version, ...current.supportShared.htmlVersions]}}));
+      return {version};
+    }
+    if (requestPath === '/shared/publish') {
+      setOverview(current => ({...current, supportShared: {...current.supportShared, previousHtmlVersionId: current.supportShared.activeHtmlVersionId, activeHtmlVersionId: call.body.versionId}}));
+    }
+    if (requestPath.startsWith('/shared/html?') && init.method === 'DELETE') {
+      const id = Number(new URL(requestPath, location.origin).searchParams.get('id'));
+      setOverview(current => ({...current, supportShared: {...current.supportShared, htmlVersions: current.supportShared.htmlVersions.filter(version => version.id !== id)}}));
+    }
+    if (requestPath === '/shared/snapshots') {
+      setOverview(current => ({...current, supportShared: {...current.supportShared, snapshot: {...sharedSnapshot, id: 302, email: call.fields.email, originalName: call.files[0].name}}}));
+    }
+    if (requestPath === '/snapshots') {
+      if (window.fixtureHoldSnapshots) await new Promise(resolve => {window.fixtureReleaseSnapshot = resolve;});
+      return {results: call.files.map(file => ({originalName: file.name, status: file.name === 'large-2.ktsp' ? 'rejected' : 'imported'}))};
+    }
     return {results: []};
   };
   return <><main id="fixture" className={adminStyles.page + ' ' + dashboardStyles.dashboardPage}>
@@ -84,7 +127,7 @@ function Fixture() {
     <ManagerDashboardManagement overview={overview} busy={false} mutate={mutate}/>
   </main><aside className={adminStyles.page} id="fixture-unrelated"><button>Другая страница администратора</button></aside></>;
 }
-createRoot(document.getElementById('root')).render(<Fixture/>);
+createRoot(document.getElementById('root')).render(viewerAudience ? <ManagerDashboard mode="view"/> : <Fixture/>);
 `;
 
 async function main() {
@@ -103,6 +146,10 @@ async function main() {
     bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     define: {'process.env.NODE_ENV': '"test"'}, alias: {'@': path.join(root, 'src')},
     plugins: [{name: 'synthetic-scss-modules', setup(plugin) {
+      plugin.onResolve({filter: /^next\/(navigation|link)$/}, args => ({path: args.path, namespace: 'synthetic-next'}));
+      plugin.onLoad({filter: /.*/, namespace: 'synthetic-next'}, args => ({contents: args.path === 'next/navigation'
+        ? 'const router = {replace(path) {window.fixtureRedirect = path}}; export function useRouter() {return router}'
+        : 'import React from "react"; export default function Link({children,...props}) {return React.createElement("a",props,children)}', loader: 'js', resolveDir: root}));
       plugin.onLoad({filter: /\.module\.scss$/}, async (args) => {
         const css = compile(args.path, {importers: [{findFileUrl(url) {
           return url.startsWith('@/') ? pathToFileURL(path.join(root, 'src', url.slice(2))) : null;
@@ -150,8 +197,8 @@ async function main() {
       historyRequests.push({before, returned: imports.length});
       response.writeHead(200, {...headers, 'Content-Type': 'application/json'}).end(JSON.stringify({imports, nextCursor}));
     }
-    else if (url.pathname === '/api/admin/manager-dashboard/frame') {
-      receivedFrames.push(url.search);
+    else if (url.pathname === '/api/admin/manager-dashboard/frame' || url.pathname === '/api/admin/manager-dashboard/shared/frame') {
+      receivedFrames.push(url.pathname + url.search);
       response.writeHead(200, {...headers, 'Content-Type': 'text/html; charset=utf-8'}).end('<!doctype html><html lang="ru"><meta charset="utf-8"><body style="font-family:system-ui;padding:30px;background:#f2f0fb"><h1>Синтетический предпросмотр HTML</h1><p>Только тестовая рамка — личные данные отсутствуют.</p></body></html>');
     } else response.writeHead(404, headers).end();
   });
@@ -199,8 +246,11 @@ async function main() {
               assert.equal(await page.locator(`#manager-dashboard-heading-${audience}`).isVisible(), true);
               assert.equal(await page.locator(`#manager-dashboard-html-${audience}`).isVisible(), true);
             }
-            assert.equal(await page.locator('input[type=file]').count(), 3, 'two independent HTML uploads plus one shared snapshot input');
-            assert.equal(await page.getByRole('button', {name: 'Проверить почту сейчас', exact: true}).count(), 1);
+            assert.equal(await page.locator('input[type=file]').count(), 5, 'personal HTML pair, personal batch, shared HTML and shared snapshot');
+            assert.equal(await page.getByRole('button', {name: 'Проверить почту сейчас', exact: true}).count(), 0);
+            assert.equal(await page.getByRole('heading', {name: 'Личный HTML дашборда', exact: true}).count(), 2);
+            assert.equal(await page.getByRole('heading', {name: 'Общий HTML дашборда', exact: true}).count(), 1);
+            assert.doesNotMatch(await page.locator('#fixture').innerText(), /почтов|Почтов|Ежедневное обновление/);
             assert.equal(await page.getByRole('heading', {name: 'Общая загрузка личных файлов', exact: true}).count(), 1);
             assert.equal(await page.getByRole('heading', {name: 'Журнал импорта', exact: true}).count(), 1);
             const journal = page.locator('#manager-dashboard-import-journal');
@@ -329,6 +379,10 @@ async function main() {
             }
             const shared = await page.getByRole('heading', {name: 'Общая загрузка личных файлов', exact: true}).boundingBox();
             assert.ok(shared && shared.y > Math.max(development.y + development.height, support.y + support.height), 'common upload follows both groups');
+            const commonReport = await page.locator('#manager-dashboard-shared-support').boundingBox();
+            const personalGrid = await page.locator('.audienceGrid').boundingBox();
+            assert.ok(commonReport && personalGrid && commonReport.y > personalGrid.y + personalGrid.height, 'shared report follows both complete personal columns');
+            assert.ok(Math.abs(commonReport.width - personalGrid.width) < 2, 'shared controls span the full width with no empty neighboring column');
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `no page horizontal overflow: ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('body *')].filter(element => element.getBoundingClientRect().right > innerWidth + 1).slice(0, 12).map(element => ({tag: element.tagName, className: element.className, right: element.getBoundingClientRect().right}))))}`);
             await page.screenshot({path: path.join(output, `${engineName}-${width}-columns.png`), fullPage: true});
 
@@ -369,9 +423,8 @@ async function main() {
               {name: 'support.ktsp', mimeType: 'application/json', buffer: Buffer.from('synthetic support')},
             ]);
             await page.getByRole('button', {name: 'Загрузить файлы', exact: true}).click();
-            await page.getByRole('button', {name: 'Проверить почту сейчас', exact: true}).click();
             const calls = await page.evaluate('window.fixtureCalls');
-            assert.deepEqual(calls.map((call: {path: string}) => call.path), ['/html?audience=development', '/publish', '/html?audience=support', '/publish', '/snapshots', '/check-email']);
+            assert.deepEqual(calls.map((call: {path: string}) => call.path), ['/html?audience=development', '/publish', '/html?audience=support', '/publish', '/snapshots']);
             assert.deepEqual(calls[1].body, {audience: 'development', versionId: 101, expectedActiveVersionId: 1});
             assert.deepEqual(calls[3].body, {audience: 'support', versionId: 111, expectedActiveVersionId: null});
             assert.deepEqual(calls[4].files.map((file: {name: string}) => file.name), ['development.ktsp', 'support.ktsp']);
@@ -418,6 +471,64 @@ async function main() {
             assert.ok((await previewFrame.getAttribute('src'))?.includes('audience=support'), 'deleting another group does not close the support preview');
             const deleteCalls = await page.evaluate(() => (window as unknown as {fixtureCalls: Array<{path: string; method: string}>}).fixtureCalls.filter(call => call.method === 'DELETE'));
             assert.deepEqual(deleteCalls.map((call: {path: string}) => call.path), ['/html?audience=development&id=2', '/html?audience=development&id=2', '/html?audience=development&id=1']);
+            const commonPanel = page.locator('#manager-dashboard-shared-support');
+            const sharedPrevious = commonPanel.locator('tbody tr').filter({hasText: 'support_synthetic_dashboard_shared_previous.html'});
+            assert.equal(await sharedPrevious.getByRole('button', {name: 'Вернуть общий HTML', exact: true}).isDisabled(), true);
+            await sharedPrevious.getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).click();
+            const sharedPreviewUrl = new URL((await previewFrame.getAttribute('src'))!, origin);
+            assert.equal(sharedPreviewUrl.pathname, '/api/admin/manager-dashboard/shared/frame');
+            assert.equal(sharedPreviewUrl.searchParams.get('preview'), '1');
+            assert.equal(sharedPreviewUrl.searchParams.has('snapshot'), false, 'management preview cannot load shared or personal data');
+            await sharedPrevious.getByRole('button', {name: 'Вернуть общий HTML', exact: true}).click();
+            await page.locator('#manager-dashboard-shared-html').setInputFiles({name: 'shared-report.html', mimeType: 'text/html', buffer: Buffer.from('<html>Synthetic shared report</html>')});
+            await commonPanel.getByRole('button', {name: 'Загрузить общий HTML', exact: true}).click();
+            await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('#manager-dashboard-html-preview iframe')?.src.includes('version=203'));
+            const activeShared = commonPanel.locator('tbody tr').filter({hasText: 'support_synthetic_dashboard_shared_uploaded.html'});
+            await activeShared.getByRole('button', {name: 'Опубликовать общий HTML', exact: true}).click();
+            assert.equal(await activeShared.getByRole('button', {name: /^Удалить общий HTML/}).isDisabled(), true);
+            await page.locator('#manager-dashboard-shared-email').fill('shared.recipient@example.test');
+            await page.locator('#manager-dashboard-shared-snapshot').setInputFiles({name: 'all-support.ktsp', mimeType: 'application/json', buffer: Buffer.from('synthetic shared report')});
+            acceptConfirmation = false;
+            await commonPanel.getByRole('button', {name: 'Опубликовать общий файл', exact: true}).click();
+            assert.equal((await page.evaluate('window.fixtureCalls')).filter((call: {path: string}) => call.path === '/shared/snapshots').length, 0);
+            assert.equal(await page.locator('#manager-dashboard-shared-snapshot').evaluate((input: HTMLInputElement) => input.files?.[0]?.name), 'all-support.ktsp');
+            assert.match(confirmations.at(-1)!, /ВСЕХ менеджеров по сопровождению/);
+            assert.match(confirmations.at(-1)!, /Личные дашборды и личные файлы всех менеджеров сохранятся/);
+            acceptConfirmation = true;
+            await commonPanel.getByRole('button', {name: 'Опубликовать общий файл', exact: true}).click();
+            const sharedCalls = (await page.evaluate('window.fixtureCalls')).filter((call: {path: string}) => call.path.startsWith('/shared/'));
+            assert.deepEqual(sharedCalls.map((call: {path: string}) => call.path), ['/shared/publish', '/shared/html', '/shared/publish', '/shared/snapshots']);
+            assert.deepEqual(sharedCalls[0].body, {versionId: 202, expectedActiveVersionId: 201});
+            assert.deepEqual(sharedCalls[2].body, {versionId: 203, expectedActiveVersionId: 202});
+            assert.deepEqual(sharedCalls[3].fields, {email: 'shared.recipient@example.test', expectedActiveSnapshotId: '301', confirmShared: 'true'});
+            assert.deepEqual(sharedCalls[3].files.map((file: {field: string; name: string}) => [file.field, file.name]), [['file', 'all-support.ktsp']]);
+            for (const audience of ['development', 'support']) assert.equal(await page.locator(`#manager-dashboard-files-${audience} tbody tr`).count(), 1, 'shared publication preserves personal snapshot rows');
+            await page.locator('#manager-dashboard-shared-support').screenshot({path: path.join(output, `${engineName}-${width}-shared-management.png`)});
+            const beforeLargeUpload = (await page.evaluate('window.fixtureCalls')).length;
+            await page.evaluate('window.fixtureHoldSnapshots = true');
+            await page.locator('#manager-dashboard-snapshots').setInputFiles(Array.from({length: 4}, (_, index) => ({
+              name: `large-${index + 1}.ktsp`, mimeType: 'application/json', buffer: Buffer.alloc(8 * 1024 * 1024),
+            })));
+            await page.getByRole('button', {name: 'Загрузить файлы', exact: true}).click();
+            await page.waitForFunction('typeof window.fixtureReleaseSnapshot === "function"');
+            assert.equal((await page.evaluate('window.fixtureCalls')).length, beforeLargeUpload + 1, 'only one personal batch is in flight');
+            assert.equal(await page.locator('#manager-dashboard-shared-html').isDisabled(), true);
+            assert.equal(await page.locator('#manager-dashboard-html-support').isDisabled(), true);
+            await page.evaluate('window.fixtureReleaseSnapshot(); delete window.fixtureReleaseSnapshot;');
+            await page.waitForFunction('typeof window.fixtureReleaseSnapshot === "function"');
+            assert.equal(await page.locator('#manager-dashboard-shared-html').isDisabled(), true, 'competing controls remain locked through the second batch');
+            await page.evaluate('window.fixtureHoldSnapshots = false; window.fixtureReleaseSnapshot(); delete window.fixtureReleaseSnapshot;');
+            await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-snapshots')?.disabled);
+            const largeCalls = (await page.evaluate('window.fixtureCalls')).slice(beforeLargeUpload);
+            assert.equal(largeCalls.length, 2, '32 MiB selection is sent as two bounded requests');
+            for (const call of largeCalls) {
+              assert.equal(call.path, '/snapshots');
+              assert.equal(call.files.reduce((bytes: number, file: {size: number}) => bytes + file.size, 0), 16 * 1024 * 1024);
+            }
+            const lastResults = page.getByRole('heading', {name: 'Результат последней операции', exact: true}).locator('..');
+            assert.deepEqual(await lastResults.locator('li strong').allTextContents(), ['large-1.ktsp', 'large-2.ktsp', 'large-3.ktsp', 'large-4.ktsp']);
+            assert.deepEqual(await lastResults.locator('li span').allTextContents(), ['Загружен', 'Отклонён', 'Загружен', 'Загружен']);
+            assert.equal(await page.locator('#manager-dashboard-snapshots').evaluate((input: HTMLInputElement) => input.files?.length), 0, 'processed selection cannot replay successful files');
             assert.deepEqual(errors, [], 'no browser script errors');
             assert.deepEqual(external, [], 'no external requests');
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'mutations and preview do not introduce horizontal overflow');
@@ -438,7 +549,60 @@ async function main() {
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'a longer right panel does not introduce horizontal overflow');
             assert.equal(await page.locator('#manager-dashboard-import-journal li').count(), 5, 'fresh initial response remains bounded to five rows');
             await page.screenshot({path: path.join(output, `${engineName}-${width}-support-taller.png`), fullPage: true});
-            console.log(`PASS ${engineName}/${width}: real admin CSS cascade, all action/link hovers, disabled protection, file-selector hover, keyboard focus, reduced motion, unrelated admin scope, aligned panels, isolated mutations, journal 5+5+3, no overflow.`);
+
+            await page.goto(`${origin}/?view=support`);
+            const personalFrame = page.locator('iframe[title="Личный дашборд менеджера"]');
+            const commonFrame = page.locator('iframe[title="Общий дашборд сопровождения"]');
+            await personalFrame.waitFor({state: 'visible'});
+            await commonFrame.waitFor({state: 'visible'});
+            assert.equal(await page.locator('iframe').count(), 2, 'support has two independently mounted reports');
+            assert.equal(new URL((await personalFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '401');
+            assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '301');
+            await page.locator('#manager-dashboard-history').selectOption('400');
+            await page.locator('#manager-dashboard-shared-history').selectOption('300');
+            assert.equal(new URL((await personalFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '400');
+            assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '300');
+            await personalFrame.evaluate((frame: HTMLIFrameElement) => {frame.dataset.mountToken = 'personal-kept';});
+            await commonFrame.evaluate((frame: HTMLIFrameElement) => {frame.dataset.mountToken = 'shared-before-reload';});
+            await page.evaluate(() => {
+              const state = window as unknown as {fixtureViewerOverview: {htmlVersion: {id: number}; snapshot: {id: number}}};
+              state.fixtureViewerOverview.htmlVersion = {...state.fixtureViewerOverview.htmlVersion, id: 12};
+              state.fixtureViewerOverview.snapshot = {...state.fixtureViewerOverview.snapshot, id: 402};
+            });
+            await page.getByRole('button', {name: 'Перезагрузить общий отчёт', exact: true}).click();
+            await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('iframe[title="Общий дашборд сопровождения"]')?.src.includes('revision=1'));
+            assert.equal(await personalFrame.getAttribute('data-mount-token'), 'personal-kept', 'shared reload does not remount the personal report');
+            assert.equal(new URL((await personalFrame.getAttribute('src'))!, origin).searchParams.get('version'), '11', 'shared reload defers a newly published personal HTML until personal/global refresh');
+            assert.equal(new URL((await personalFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '400', 'shared reload preserves personal archive selection');
+            assert.equal(await commonFrame.getAttribute('data-mount-token'), null, 'shared reload remounts only the common frame');
+            await commonFrame.evaluate((frame: HTMLIFrameElement) => {frame.dataset.mountToken = 'shared-kept';});
+            await page.evaluate(() => {
+              const state = window as unknown as {fixtureViewerOverview: {email: string; bindingStatus: string; supportShared: {activeHtmlVersionId: number; htmlVersions: Array<{id: number}>; snapshot: {id: number; email: string}}}};
+              state.fixtureViewerOverview.email = '';
+              state.fixtureViewerOverview.bindingStatus = 'missing_email';
+              state.fixtureViewerOverview.supportShared = {...state.fixtureViewerOverview.supportShared,
+                activeHtmlVersionId: 204,
+                htmlVersions: [{...state.fixtureViewerOverview.supportShared.htmlVersions[0], id: 204}],
+                snapshot: {...state.fixtureViewerOverview.supportShared.snapshot, id: 303, email: 'new.shared.recipient@example.test'}};
+              window.dispatchEvent(new Event('focus'));
+            });
+            await page.getByText('В профиле не указан email для назначения личного файла.', {exact: false}).waitFor({state: 'visible'});
+            await page.getByRole('button', {name: 'Открыть обновление', exact: true}).waitFor({state: 'visible'});
+            assert.equal(await commonFrame.getAttribute('data-mount-token'), 'shared-kept', 'personal binding changes and shared updates preserve the open shared report until explicit refresh');
+            assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('version'), '201');
+            assert.equal(new URL((await personalFrame.getAttribute('src'))!, origin).searchParams.has('snapshot'), false, 'personal binding loss clears personal data promptly');
+            await page.getByRole('button', {name: 'Открыть обновление', exact: true}).click();
+            await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('iframe[title="Общий дашборд сопровождения"]')?.src.includes('version=204'));
+            await page.locator('#manager-dashboard-shared-history').selectOption('');
+            assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '303');
+            assert.equal(await page.locator('iframe').count(), 2, 'shared report stays available with no personal email');
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'viewer remains within desktop/mobile width');
+            assert.deepEqual(errors, [], 'real viewer polling and frame updates have no browser errors');
+            await page.screenshot({path: path.join(output, `${engineName}-${width}-support-viewer.png`), fullPage: true});
+            await page.goto(`${origin}/?view=development`);
+            await personalFrame.waitFor({state: 'visible'});
+            assert.equal(await commonFrame.count(), 0, 'development never renders the support shared report');
+            console.log(`PASS ${engineName}/${width}: real admin cascade, aligned personal panels, shared preview/publication/upload confirmation, isolated reports and history, safe polling refresh, no email dependency, journal 5+5+3, no overflow.`);
           } finally {await context.close();}
         }
         // A narrow desktop viewport is not a touchscreen. Exercise the actual

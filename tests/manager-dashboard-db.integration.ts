@@ -17,6 +17,11 @@ import {
 import { getManagerEmailHash, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
 import type { PersonalDashboardAudience } from '../src/shared/lib/managerDashboardAudience';
 import { getPersonalDashboardMailReceipt, recordPersonalDashboardMailReceipt, prunePersonalDashboardMailReceipts } from '../src/shared/lib/db/managerDashboardMailReceipts';
+import {
+  activateSupportSharedDashboardHtml, createSupportSharedDashboardHtml, deleteSupportSharedDashboardHtml,
+  getSupportSharedDashboardHtml, getSupportSharedDashboardOverview, getSupportSharedDashboardSnapshot,
+  importSupportSharedDashboardSnapshot,
+} from '../src/shared/lib/db/supportSharedDashboardRepo';
 
 function guard() {
   assert.equal(process.env.KTS_PERSONAL_TEST, '1', 'Isolated integration tests require KTS_PERSONAL_TEST=1');
@@ -537,6 +542,108 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         assert.equal(latest.activeHtmlVersionId, before.groups.find((entry) => entry.audience === audience)!.activeHtmlVersionId);
         assert.equal(latest.previousHtmlVersionId, before.groups.find((entry) => entry.audience === audience)!.previousHtmlVersionId);
       }
+    });
+    await t.test('second shared support report is isolated, manually published, role protected and concurrency safe', async () => {
+      const personalState = () => query(`select
+        (select json_agg(v order by v.id) from personal_dashboard_html_versions v) as html,
+        (select json_agg(st order by st.id) from personal_dashboard_html_state st) as html_state,
+        (select json_agg(s order by s.id) from personal_dashboard_snapshots s) as snapshots,
+        (select json_agg(st order by st.manager_id) from personal_dashboard_snapshot_state st) as snapshot_state,
+        (select json_agg(i order by i.id) from personal_dashboard_imports i) as imports`);
+      const before = (await personalState()).rows;
+      const supportA = await manager('shared-a', 'support_manager', true, '');
+      const supportB = await manager('shared-b', 'support_manager');
+      const development = await manager('shared-denied-development');
+      const inactive = await manager('shared-denied-inactive', 'support_manager', false);
+      const sharedEmail = 'shared-report@example.test';
+      const upload = (data: Buffer, expectedActiveSnapshotId: number | null, email = sharedEmail) => importSupportSharedDashboardSnapshot({
+        filename: 'shared.ktsp', bytes: data, email, actorId: 'admin:integration-test', expectedActiveSnapshotId,
+      });
+      const uploadHtml = (label: string) => {
+        const htmlContent = `<!doctype html><html><body>Shared ${label}</body></html>`;
+        return createSupportSharedDashboardHtml({ originalName: `shared-${label}.html`, htmlContent,
+          fileSize: Buffer.byteLength(htmlContent), sha256: createHash('sha256').update(htmlContent).digest('hex'), actorId: 'admin:integration-test' });
+      };
+      assert.equal((await getSupportSharedDashboardOverview()).snapshot, null);
+      const firstHtml = await uploadHtml('first');
+      const secondHtml = await uploadHtml('second');
+      assert.deepEqual((await getSupportSharedDashboardOverview(supportA.id)).htmlVersions, []);
+      assert.equal(await getSupportSharedDashboardHtml(firstHtml.id, false, supportA.id), null);
+      assert.equal((await getSupportSharedDashboardHtml(firstHtml.id, true))?.id, firstHtml.id);
+
+      const first = await upload(bytes(sharedEmail, -3), null, `  ${sharedEmail.toUpperCase()}  `);
+      assert.equal(first.snapshot.email, sharedEmail);
+      for (const viewer of [supportA, supportB]) {
+        assert.equal((await getSupportSharedDashboardSnapshot(viewer.id))?.bytes.equals(bytes(sharedEmail, -3)), true);
+        assert.equal((await getSupportSharedDashboardOverview(viewer.id)).snapshot?.id, first.snapshot.id);
+      }
+      assert.equal((await upload(bytes(sharedEmail, -3), null)).status, 'duplicate', 'Idempotent retry cannot overwrite newer state');
+      await assert.rejects(() => upload(bytes(sharedEmail, -4), first.snapshot.id), { code: 'STALE_SNAPSHOT' });
+      await assert.rejects(() => upload(bytes(sharedEmail, -3, 2), first.snapshot.id), { code: 'SAME_DAY_CONFLICT' });
+      await assert.rejects(() => upload(bytes(sharedEmail), first.snapshot.id, 'wrong@example.test'), { code: 'EMAIL_MISMATCH' });
+
+      const race = await Promise.allSettled([upload(bytes(sharedEmail, -2, 2), first.snapshot.id), upload(bytes(sharedEmail, -2, 3), first.snapshot.id)]);
+      assert.equal(race.filter((result) => result.status === 'fulfilled').length, 1);
+      const rejected = race.find((result) => result.status === 'rejected');
+      assert.ok(rejected?.status === 'rejected');
+      assert.equal(rejected.reason.code, 'STATE_CONFLICT');
+      const secondId = (await getSupportSharedDashboardOverview()).snapshot!.id;
+      const duplicates = await Promise.all([upload(bytes(sharedEmail, -1), secondId), upload(bytes(sharedEmail, -1), secondId)]);
+      assert.deepEqual(duplicates.map((result) => result.status).sort(), ['duplicate', 'imported']);
+      const thirdId = duplicates[0].snapshot.id;
+      assert.equal((await getSupportSharedDashboardOverview()).history.length, 3);
+      assert.equal((await getSupportSharedDashboardSnapshot(supportB.id, first.snapshot.id))?.id, first.snapshot.id);
+
+      for (const denied of [development, inactive]) {
+        await assert.rejects(() => getSupportSharedDashboardOverview(denied.id), { code: 'NOT_FOUND' });
+        await assert.rejects(() => getSupportSharedDashboardHtml(undefined, false, denied.id), { code: 'NOT_FOUND' });
+        await assert.rejects(() => getSupportSharedDashboardSnapshot(denied.id), { code: 'NOT_FOUND' });
+      }
+      await query(`update wholesale_managers set role='manager' where id=$1`, [supportB.id]);
+      await assert.rejects(() => getSupportSharedDashboardOverview(supportB.id), { code: 'NOT_FOUND' });
+      await query(`update wholesale_managers set role='support_manager',is_active=false where id=$1`, [supportB.id]);
+      await assert.rejects(() => getSupportSharedDashboardSnapshot(supportB.id), { code: 'NOT_FOUND' });
+      await query(`update wholesale_managers set is_active=true where id=$1`, [supportB.id]);
+
+      await activateSupportSharedDashboardHtml({ versionId: firstHtml.id, expectedActiveVersionId: null, actorId: 'admin:integration-test' });
+      assert.deepEqual((await getSupportSharedDashboardOverview(supportA.id)).htmlVersions.map((version) => version.id), [firstHtml.id]);
+      const publishRace = await Promise.allSettled([
+        activateSupportSharedDashboardHtml({ versionId: secondHtml.id, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test' }),
+        activateSupportSharedDashboardHtml({ versionId: secondHtml.id, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test' }),
+      ]);
+      assert.equal(publishRace.filter((result) => result.status === 'fulfilled').length, 1);
+      assert.equal(await getSupportSharedDashboardHtml(firstHtml.id, false, supportA.id), null);
+      assert.equal((await getSupportSharedDashboardHtml(undefined, false, supportA.id))?.id, secondHtml.id);
+      assert.equal((await getSupportSharedDashboardOverview(supportA.id)).previousHtmlVersionId, null);
+      await assert.rejects(() => deleteSupportSharedDashboardHtml({ versionId: secondHtml.id, actorId: 'admin:integration-test' }), { code: 'ACTIVE_VERSION_CONFLICT' });
+      await deleteSupportSharedDashboardHtml({ versionId: firstHtml.id, actorId: 'admin:integration-test' });
+      assert.equal((await getSupportSharedDashboardOverview()).previousHtmlVersionId, null);
+      assert.equal((await getSupportSharedDashboardOverview()).snapshot!.id, thirdId);
+
+      await query(`update support_shared_dashboard_snapshots set expires=$2 where id=$1`, [first.snapshot.id, day(-1)]);
+      await assert.rejects(() => getSupportSharedDashboardSnapshot(supportA.id, first.snapshot.id), { code: 'EXPIRED' });
+      const originalThird = bytes(sharedEmail, -1);
+      await query(`update support_shared_dashboard_snapshots set encrypted_payload=$2 where id=$1`, [thirdId, Buffer.alloc(originalThird.length)]);
+      await assert.rejects(() => getSupportSharedDashboardSnapshot(supportA.id), { code: 'SNAPSHOT_INTEGRITY' });
+      await query(`update support_shared_dashboard_snapshots set encrypted_payload=$2 where id=$1`, [thirdId, originalThird]);
+
+      await query(`update support_shared_dashboard_snapshots set received_at=now()-interval '31 days'`);
+      const latest = await upload(bytes(sharedEmail), thirdId);
+      const retained = await getSupportSharedDashboardOverview();
+      assert.equal(retained.snapshot?.id, latest.snapshot.id);
+      assert.deepEqual(retained.history.map((item) => item.id), [latest.snapshot.id, thirdId]);
+      assert.equal(retained.history[1].status, 'previous', 'Retain the previous working copy regardless of age');
+      assert.equal(await getSupportSharedDashboardSnapshot(supportA.id, first.snapshot.id), null);
+
+      for (let count = retained.htmlVersions.length; count < 49; count++) await uploadHtml(`quota-${count}`);
+      const quotaRace = await Promise.allSettled([uploadHtml('quota-last-a'), uploadHtml('quota-last-b')]);
+      assert.equal(quotaRace.filter((result) => result.status === 'fulfilled').length, 1);
+      const quotaRejected = quotaRace.find((result) => result.status === 'rejected');
+      assert.ok(quotaRejected?.status === 'rejected');
+      assert.equal(quotaRejected.reason.code, 'HTML_QUOTA');
+      assert.equal((await getSupportSharedDashboardOverview()).htmlVersions.length, 50);
+      assert.equal((await getSupportSharedDashboardOverview()).activeHtmlVersionId, secondHtml.id);
+      assert.deepEqual((await personalState()).rows, before, 'Shared report writes and retention must preserve every personal HTML, snapshot, state and import');
     });
   } finally {
     await globalThis.__ktsPgPool?.end();

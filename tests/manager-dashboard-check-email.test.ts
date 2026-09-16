@@ -1,45 +1,25 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
-type CheckOptions = {
-  env: Record<string, string | undefined>;
-  fetchImpl: typeof fetch;
-  log: (line: string) => void;
-  error: (line: string) => void;
-  now: () => Date;
-};
+import { MANAGER_DASHBOARD_MAIL_DISABLED_MESSAGE } from '../src/shared/lib/managerDashboardMail';
+import { PERSONAL_PRIVATE_HEADERS } from '../src/shared/lib/managerDashboardSecurity';
+
 const wrapperPath = fileURLToPath(new URL('../ops/manager-dashboard/check-email.cjs', import.meta.url));
 const { checkManagerDashboardEmail } = createRequire(import.meta.url)(wrapperPath) as {
-  checkManagerDashboardEmail: (options?: Partial<CheckOptions>) => Promise<number>;
+  checkManagerDashboardEmail(options?: Record<string, unknown>): Promise<number>;
 };
 const enabledEnv = {
   MANAGER_DASHBOARD_MAIL_ENABLED: 'true',
   MANAGER_DASHBOARD_MAIL_ALLOWED_FROM: 'synthetic@example.test',
   CRON_SECRET: 'synthetic-cron-secret',
 };
-const completed = { status: 'completed', checkedMessages: 1, imported: 15, duplicates: 0, stale: 0, failed: 0 };
 
-function harness(response: unknown = completed) {
-  const logs: string[] = [];
-  const errors: string[] = [];
-  const requests: Array<{ url: RequestInfo | URL; init?: RequestInit }> = [];
-  const options: CheckOptions = {
-    env: enabledEnv,
-    fetchImpl: async (url, init) => {
-      requests.push({ url, init });
-      return Response.json(response);
-    },
-    log: (line) => { logs.push(line); },
-    error: (line) => { errors.push(line); },
-    now: () => new Date('2026-09-14T07:00:00Z'),
-  };
-  return { logs, errors, requests, options, run: () => checkManagerDashboardEmail(options) };
-}
-
-test('dashboard cron wrapper is safe to import even when its environment is enabled', () => {
+test('legacy dashboard wrapper is safe to import with enabled settings', () => {
   const child = spawnSync(process.execPath, ['-e', `
     globalThis.fetch = () => { throw new Error('Import must not fetch'); };
     const wrapper = require(process.argv[1]);
@@ -50,84 +30,52 @@ test('dashboard cron wrapper is safe to import even when its environment is enab
   assert.equal(child.stderr, '');
 });
 
-test('dashboard cron intentional local disable skips without a request', async () => {
-  for (const env of [{}, { ...enabledEnv, MANAGER_DASHBOARD_MAIL_ENABLED: 'false' }, { ...enabledEnv, MANAGER_DASHBOARD_MAIL_ALLOWED_FROM: '' }]) {
-    const h = harness();
-    h.options.env = env;
-    assert.equal(await h.run(), 0);
-    assert.equal(h.requests.length, 0);
-    assert.equal(h.errors.length, 0);
-    assert.deepEqual(h.logs, ['Manager dashboard mail import is disabled.']);
-  }
+test('legacy wrapper is permanently disabled and does not read secrets or fetch', async () => {
+  const logs: string[] = [];
+  const code = await checkManagerDashboardEmail({
+    get env(): never { return assert.fail('Retired wrapper must not read credentials'); },
+    fetchImpl() { assert.fail('Retired wrapper must not fetch'); },
+    log(line: string) { logs.push(line); },
+  });
+  assert.equal(code, 0);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /disabled.*manually/);
+  const child = spawnSync(process.execPath, [wrapperPath], { env: {NODE_ENV: 'test', ...enabledEnv}, encoding: 'utf8' });
+  assert.equal(child.status, 0);
+  assert.match(child.stdout, /disabled.*manually/);
+  assert.equal(child.stderr, '');
 });
 
-test('dashboard cron POST uses local endpoint and authentication and logs only safe summary fields', async () => {
-  const h = harness({ ...completed, reason: enabledEnv.CRON_SECRET, results: [{ originalName: 'private-name.ktsp', sender: enabledEnv.MANAGER_DASHBOARD_MAIL_ALLOWED_FROM }] });
-  assert.equal(await h.run(), 0);
-  assert.equal(h.requests.length, 1);
-  assert.equal(h.requests[0].url, 'http://127.0.0.1:3000/api/cron/manager-dashboard-import');
-  assert.equal(h.requests[0].init?.method, 'POST');
-  assert.deepEqual(h.requests[0].init?.headers, { authorization: `Bearer ${enabledEnv.CRON_SECRET}` });
-  assert.ok(h.requests[0].init?.signal instanceof AbortSignal);
-  assert.deepEqual(JSON.parse(h.logs[0]), { at: '2026-09-14T07:00:00.000Z', ...completed });
-  assert.doesNotMatch(h.logs.join(''), /private-name|synthetic-cron-secret|synthetic@example/);
-  assert.equal(h.errors.length, 0);
-});
+function route(denied: Response | null = null) {
+  const source = readFileSync(new URL('../src/app/api/admin/manager-dashboard/check-email/route.ts', import.meta.url), 'utf8');
+  const code = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+  const result = {exports: {} as {POST(request: Request): Promise<Response>}};
+  const guards: Array<{request: Request; manageOnly: boolean}> = [];
+  new Function('require', 'module', 'exports', code)((name: string) => {
+    if (name === '@/shared/lib/managerDashboardMail') return {MANAGER_DASHBOARD_MAIL_DISABLED_MESSAGE};
+    assert.equal(name, '../_shared', 'No mail/DB/network implementation may be loaded');
+    return {
+      requirePersonalAccess: async (request: Request, manageOnly: boolean) => {
+        guards.push({request, manageOnly});
+        return {denied};
+      },
+      personalJson: (value: unknown, status: number) => Response.json(value, {status, headers: PERSONAL_PRIVATE_HEADERS}),
+      personalApiError: () => { assert.fail('Unexpected error'); },
+    };
+  }, result, result.exports);
+  return {POST: result.exports.POST, guards};
+}
 
-test('dashboard cron treats HTTP 200 disabled as failure but busy as a safe skip', async () => {
-  const disabled = harness({ ...completed, status: 'disabled', imported: 0 });
-  assert.equal(await disabled.run(), 1);
-  assert.equal(disabled.errors.length, 1);
-  assert.equal(JSON.parse(disabled.logs[0]).status, 'disabled');
-  const busy = harness({ ...completed, status: 'busy', checkedMessages: 0, imported: 0 });
-  assert.equal(await busy.run(), 0);
-  assert.equal(busy.errors.length, 0);
-  assert.equal(JSON.parse(busy.logs[0]).status, 'busy');
-});
-
-test('dashboard cron partial attachment failures return a failure exit code', async () => {
-  const h = harness({ ...completed, imported: 11, failed: 4 });
-  assert.equal(await h.run(), 1);
-  assert.equal(JSON.parse(h.logs[0]).failed, 4);
-});
-
-test('dashboard cron rejects unknown or malformed status without logging raw status text', async () => {
-  for (const response of [null, [], {}, { ...completed, status: null }, { ...completed, status: 1 }, { ...completed, status: 'private response text' }]) {
-    const h = harness(response);
-    assert.equal(await h.run(), 1);
-    assert.deepEqual(h.logs, []);
-    assert.equal(h.errors.length, 1);
-    assert.doesNotMatch(h.errors.join(''), /private response text/);
-  }
-});
-
-test('dashboard cron rejects missing, negative, noninteger or nonnumeric counts', async () => {
-  for (const field of ['checkedMessages', 'imported', 'duplicates', 'stale', 'failed']) {
-    for (const value of [undefined, -1, 1.5, 'private count text', null, Number.MAX_SAFE_INTEGER + 1, Infinity]) {
-      const h = harness({ ...completed, [field]: value });
-      assert.equal(await h.run(), 1);
-      assert.deepEqual(h.logs, []);
-      assert.equal(h.errors.length, 1);
-      assert.doesNotMatch(h.errors.join(''), /private count text/);
-    }
-  }
-});
-
-test('dashboard cron hides authentication, HTTP, JSON and network failure details', async () => {
-  const missingSecret = harness();
-  missingSecret.options.env = { ...enabledEnv, CRON_SECRET: '' };
-  assert.equal(await missingSecret.run(), 1);
-  assert.equal(missingSecret.requests.length, 0);
-  for (const fetchImpl of [
-    async () => new Response('private HTTP details', { status: 503 }),
-    async () => new Response('private malformed JSON', { status: 200 }),
-    async () => { throw new Error('private network details'); },
-  ]) {
-    const h = harness();
-    h.options.fetchImpl = fetchImpl;
-    assert.equal(await h.run(), 1);
-    assert.deepEqual(h.logs, []);
-    assert.equal(h.errors.length, 1);
-    assert.doesNotMatch(h.errors.join(''), /private|synthetic-cron-secret/);
+test('admin mail endpoint preserves authorization and reports manual upload only with 410', async () => {
+  const request = new Request('https://example.test/api/admin/manager-dashboard/check-email', {method: 'POST'});
+  const api = route();
+  const response = await api.POST(request);
+  assert.deepEqual(api.guards, [{request, manageOnly: true}]);
+  assert.equal(response.status, 410);
+  assert.match(response.headers.get('cache-control') ?? '', /no-store/);
+  assert.deepEqual(await response.json(), {error: MANAGER_DASHBOARD_MAIL_DISABLED_MESSAGE, code: 'MANUAL_UPLOAD_ONLY'});
+  for (const status of [401, 403, 429]) {
+    const denied = new Response('denied', {status});
+    assert.equal(await route(denied).POST(request), denied);
   }
 });

@@ -2,15 +2,16 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import { PERSONAL_DASHBOARD_AUDIENCE_LABELS, type PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
-import { DashboardFrame, formatDashboardDate, ImportResults, SnapshotStatus } from './ManagerDashboardParts';
+import { DashboardFrame, SharedDashboardFrame, formatDashboardDate, ImportResults, SnapshotStatus } from './ManagerDashboardParts';
 import { ManagerDashboardImportJournal } from './ManagerDashboardImportJournal';
 import type { ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
-// Leave room for multipart headers inside the server's 64 MiB request limit.
-const MAX_BATCH_FILE_BYTES = 63 * 1024 * 1024;
+const MAX_SELECTION_FILE_BYTES = 63 * 1024 * 1024;
+// Each request stays comfortably below the reverse proxy's 25 MiB body limit.
+const MAX_REQUEST_FILE_BYTES = 16 * 1024 * 1024;
 const AUDIENCES: PersonalDashboardAudience[] = ['development', 'support'];
 
 type ManagementProps = {
@@ -22,19 +23,25 @@ type ManagementProps = {
 
 export function ManagerDashboardManagement({ overview, busy: externalBusy, mutate: performMutation, onAccessDenied }: ManagementProps) {
   const [pending, setPending] = useState(false);
-  const [previewSelection, setPreviewSelection] = useState<{ audience: PersonalDashboardAudience; versionId: number } | null>(null);
+  const [previewSelection, setPreviewSelection] = useState<{ audience: PersonalDashboardAudience | 'support-shared'; versionId: number } | null>(null);
   const [fileErrors, setFileErrors] = useState<Partial<Record<PersonalDashboardAudience, string>>>({});
   const [results, setResults] = useState<ManagerDashboardImport[]>([]);
+  const [sharedError, setSharedError] = useState('');
   const developmentHtmlInput = useRef<HTMLInputElement>(null);
   const supportHtmlInput = useRef<HTMLInputElement>(null);
   const htmlInputs = { development: developmentHtmlInput, support: supportHtmlInput };
   const snapshotInput = useRef<HTMLInputElement>(null);
+  const sharedHtmlInput = useRef<HTMLInputElement>(null);
+  const sharedSnapshotInput = useRef<HTMLInputElement>(null);
+  const sharedEmailInput = useRef<HTMLInputElement>(null);
   const previewPanel = useRef<HTMLElement>(null);
   const audienceGrid = useRef<HTMLDivElement>(null);
   const mutationRef = useRef(false);
   const busy = externalBusy || pending;
   const previewGroup = overview.groups.find((item) => item.audience === previewSelection?.audience);
-  const preview = previewGroup?.htmlVersions.find((version) => version.id === previewSelection?.versionId);
+  const shared = overview.supportShared;
+  const sharedPreview = previewSelection?.audience === 'support-shared';
+  const preview = (sharedPreview ? shared : previewGroup)?.htmlVersions.find((version) => version.id === previewSelection?.versionId);
 
   useEffect(() => {
     const grid = audienceGrid.current;
@@ -142,7 +149,6 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     const files = Array.from(snapshotInput.current?.files ?? []);
     if (files.length === 0) return;
     const rejected: ManagerDashboardImport[] = [];
-    const form = new FormData();
     const accepted: File[] = [];
     for (const file of files) {
       if (!/\.ktsp$/i.test(file.name) || file.size === 0 || file.size > MAX_SNAPSHOT_BYTES) {
@@ -153,23 +159,126 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     }
     setResults(rejected);
     if (accepted.length === 0) return;
-    if (accepted.length > 32 || accepted.reduce((sum, file) => sum + file.size, 0) > MAX_BATCH_FILE_BYTES) {
+    if (accepted.length > 32 || accepted.reduce((sum, file) => sum + file.size, 0) > MAX_SELECTION_FILE_BYTES) {
       setResults([...rejected, { originalName: 'Пакет файлов', status: 'rejected', message: 'Выберите не более 32 подходящих файлов и до 63 МБ суммарно. Разделите большую загрузку на несколько пакетов.' }]);
       return;
     }
-    accepted.forEach((file) => form.append('files', file));
-    const result = await mutate('/snapshots', { method: 'POST', body: form }, 'Обработка файлов завершена. Результат каждого файла указан ниже.');
-    if (result) {
-      setResults([...rejected, ...(result.results ?? [])]);
-      if (snapshotInput.current) snapshotInput.current.value = '';
+    const batches: File[][] = [];
+    let batch: File[] = [];
+    let batchBytes = 0;
+    for (const file of accepted) {
+      if (batchBytes + file.size > MAX_REQUEST_FILE_BYTES) {
+        batches.push(batch);
+        batch = [];
+        batchBytes = 0;
+      }
+      batch.push(file);
+      batchBytes += file.size;
+    }
+    if (batch.length) batches.push(batch);
+
+    // Hold one guard across every request and clear the input once: retries must
+    // be a new explicit selection, never a replay of already processed files.
+    mutationRef.current = true;
+    setPending(true);
+    if (snapshotInput.current) snapshotInput.current.value = '';
+    const completed = [...rejected];
+    try {
+      for (const [index, files] of batches.entries()) {
+        const form = new FormData();
+        files.forEach((file) => form.append('files', file));
+        let result: ManagerDashboardMutationResult | null;
+        try {
+          result = await performMutation('/snapshots', { method: 'POST', body: form }, index === batches.length - 1
+            ? 'Обработка файлов завершена. Результат каждого файла указан ниже.'
+            : `Обработана часть ${index + 1} из ${batches.length}. Продолжаем загрузку файлов.`);
+        } catch {
+          result = null;
+        }
+        if (!result) {
+          setResults([...completed,
+            ...files.map((file) => ({ originalName: file.name, status: 'error', message: 'Не удалось подтвердить результат загрузки. Проверьте журнал импорта перед повторной загрузкой этого файла.' })),
+            ...batches.slice(index + 1).flat().map((file) => ({ originalName: file.name, status: 'skipped', message: 'Файл не отправлен: загрузка остановлена после ошибки запроса. Выберите этот файл для новой загрузки.' })),
+          ]);
+          return;
+        }
+        completed.push(...(result.results ?? []));
+        setResults([...completed]);
+      }
+    } finally {
+      mutationRef.current = false;
+      setPending(false);
     }
   }
 
-  async function checkEmail() {
+  function showSharedPreview(versionId: number) {
+    if (busy || mutationRef.current || !shared?.htmlVersions.some((version) => version.id === versionId)) return;
+    setPreviewSelection({ audience: 'support-shared', versionId });
+  }
+
+  async function uploadSharedHtml(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (busy || mutationRef.current) return;
-    setResults([]);
-    const result = await mutate('/check-email', { method: 'POST' }, 'Проверка почты завершена.');
-    if (result) setResults(result.results ?? []);
+    const file = sharedHtmlInput.current?.files?.[0];
+    if (!file) return;
+    setSharedError('');
+    if (!/\.html?$/i.test(file.name) || file.size === 0 || file.size > MAX_HTML_BYTES) {
+      setSharedError('Выберите непустой HTML-файл размером до 5 МБ.');
+      return;
+    }
+    const form = new FormData();
+    form.append('file', file);
+    const result = await mutate('/shared/html', { method: 'POST', body: form }, 'Общий HTML загружен как черновик. Проверьте предпросмотр перед публикацией.');
+    if (result) {
+      if (sharedHtmlInput.current) sharedHtmlInput.current.value = '';
+      if (result.version) setPreviewSelection({ audience: 'support-shared', versionId: result.version.id });
+    }
+  }
+
+  async function publishShared(versionId: number) {
+    if (busy || mutationRef.current || !shared || !sharedPreview || previewSelection?.versionId !== versionId) return;
+    const version = shared.htmlVersions.find((item) => item.id === versionId);
+    if (!version || versionId === shared.activeHtmlVersionId) return;
+    const rollback = versionId === shared.previousHtmlVersionId;
+    if (!window.confirm(`${rollback ? 'Вернуть' : 'Опубликовать'} общий HTML «${version.originalName}», версия #${versionId}, для всех менеджеров по сопровождению?\n\nЛичные дашборды и личные файлы менеджеров сохранятся.`)) return;
+    await mutate('/shared/publish', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ versionId, expectedActiveVersionId: shared.activeHtmlVersionId }),
+    }, `Общий HTML ${rollback ? 'восстановлен' : 'опубликован'} для всех менеджеров по сопровождению.`);
+  }
+
+  async function deleteSharedHtml(versionId: number) {
+    if (busy || mutationRef.current || !shared || versionId === shared.activeHtmlVersionId) return;
+    const version = shared.htmlVersions.find((item) => item.id === versionId);
+    if (!version) return;
+    if (!window.confirm(`Удалить общий HTML «${version.originalName}», версия #${versionId}?\n\nУдаление необратимо: вернуть версию можно только повторной загрузкой исходного файла. Действующий общий HTML, общий файл данных и личные дашборды сохранятся.`)) return;
+    const result = await mutate(`/shared/html?id=${versionId}`, { method: 'DELETE' }, `Общий HTML «${version.originalName}» удалён.`);
+    if (result) setPreviewSelection((current) => current?.audience === 'support-shared' && current.versionId === versionId ? null : current);
+  }
+
+  async function uploadSharedSnapshot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || mutationRef.current) return;
+    const file = sharedSnapshotInput.current?.files?.[0];
+    if (!file) return;
+    const email = sharedEmailInput.current?.value.trim() ?? '';
+    setSharedError('');
+    if (!/\.ktsp$/i.test(file.name) || file.size === 0 || file.size > MAX_SNAPSHOT_BYTES) {
+      setSharedError('Нужен непустой общий файл .ktsp размером до 8 МБ.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setSharedError('Укажите email получателя, использованный при создании общего файла.');
+      return;
+    }
+    if (!window.confirm(`Опубликовать общий файл «${file.name}» для ВСЕХ менеджеров по сопровождению?\n\nОн заменит текущий общий файл данных. Личные дашборды и личные файлы всех менеджеров сохранятся.`)) return;
+    const form = new FormData();
+    form.append('file', file);
+    form.append('email', email);
+    form.append('expectedActiveSnapshotId', String(shared?.snapshot?.id ?? null));
+    form.append('confirmShared', 'true');
+    const result = await mutate('/shared/snapshots', { method: 'POST', body: form }, 'Общий файл опубликован для всех менеджеров по сопровождению.');
+    if (result && sharedSnapshotInput.current) sharedSnapshotInput.current.value = '';
   }
 
   return (
@@ -185,7 +294,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
                 <section id={`manager-dashboard-html-panel-${audience}`} className={`${styles.panel} ${styles.htmlPanel}`} aria-label={`HTML: ${label}`}>
                   <div className={styles.equalHeightContent} data-dashboard-equal-row="html">
                   <div className={styles.sectionHeading}>
-                    <div><h3>HTML дашборда</h3><p>Собственный HTML этой группы. Публикация не меняет дашборд другой группы.</p></div>
+                    <div><h3>Личный HTML дашборда</h3><p>HTML для личных отчётов этой группы. Каждый менеджер открывает свой файл данных.</p></div>
                     <span className={styles.badge}>{group.activeHtmlVersionId ? `Опубликована версия #${group.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
                   </div>
                   <form className={styles.uploadForm} onSubmit={(event) => void uploadHtml(event, audience)}>
@@ -227,7 +336,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
                 </section>
 
                 <section id={`manager-dashboard-files-${audience}`} className={styles.panel} aria-label={`Личные файлы: ${label}`}>
-                  <div className={styles.sectionHeading}><div><h3>Личные файлы группы</h3><p>Снимки назначаются автоматически из общей почты или ручной загрузки ниже.</p></div><span className={styles.badge}>Менеджеров: {group.managers.length}</span></div>
+                  <div className={styles.sectionHeading}><div><h3>Личные файлы группы</h3><p>Загружайте снимки вручную ниже. Файлы назначаются менеджерам по email получателя.</p></div><span className={styles.badge}>Менеджеров: {group.managers.length}</span></div>
                   <div className={styles.tableScroll}>
                     <table className={`${styles.table} ${styles.groupTable}`}>
                       <thead><tr><th scope="col">Менеджер / email для сопоставления</th><th scope="col">Личный снимок</th></tr></thead>
@@ -250,21 +359,74 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
         })}
       </div>
 
-      {preview && previewGroup ? <section id="manager-dashboard-html-preview" ref={previewPanel} className={`${styles.panel} ${styles.fullWidthPreview}`} aria-labelledby="manager-dashboard-preview-heading" tabIndex={-1}>
-        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. Личные данные менеджеров не загружаются.</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
+      <section id="manager-dashboard-shared-support" className={styles.panel} aria-labelledby="manager-dashboard-shared-management-heading">
+        <div className={styles.sectionHeading}>
+          <div><h2 id="manager-dashboard-shared-management-heading">Общий HTML дашборда</h2><p>Дополнительный отчёт для всех менеджеров по сопровождению: отдельный HTML и один общий файл данных.</p></div>
+          <span className={styles.badge}>{shared?.activeHtmlVersionId ? `Опубликована версия #${shared.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
+        </div>
+        <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedHtml(event)}>
+          <label htmlFor="manager-dashboard-shared-html">Новая версия общего HTML · до 5 МБ</label>
+          <div className={styles.actions}>
+            <input ref={sharedHtmlInput} id="manager-dashboard-shared-html" type="file" accept=".html,.htm,text/html" required disabled={busy} />
+            <button className={styles.primary} type="submit" disabled={busy}>Загрузить общий HTML</button>
+          </div>
+        </form>
+        {(shared?.htmlVersions.length ?? 0) > 0 ? <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead><tr><th scope="col">Версия / загружена, МСК</th><th scope="col">Состояние</th><th scope="col">Действия</th></tr></thead>
+            <tbody>{shared!.htmlVersions.map((version) => {
+              const previewed = sharedPreview && previewSelection.versionId === version.id;
+              return <tr key={version.id}>
+                <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ</small><small>{formatDashboardDate(version.createdAt)}</small></td>
+                <td>{version.id === shared?.activeHtmlVersionId ? 'Опубликована' : version.id === shared?.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
+                <td><div className={styles.actions}>
+                  <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewed} onClick={() => showSharedPreview(version.id)}>Предпросмотр общего HTML</button>
+                  {version.id !== shared?.activeHtmlVersionId ? <button className={styles.primary} type="button" disabled={busy || !previewed} title={!previewed ? 'Сначала откройте предпросмотр этой версии' : undefined} onClick={() => void publishShared(version.id)}>{version.id === shared?.previousHtmlVersionId ? 'Вернуть общий HTML' : 'Опубликовать общий HTML'}</button> : null}
+                  <button className={styles.danger} type="button" disabled={busy || version.id === shared?.activeHtmlVersionId}
+                    aria-label={`Удалить общий HTML «${version.originalName}», версия #${version.id}`}
+                    title={version.id === shared?.activeHtmlVersionId ? 'Сначала опубликуйте другую версию общего HTML' : undefined}
+                    onClick={() => void deleteSharedHtml(version.id)}>Удалить</button>
+                </div></td>
+              </tr>;
+            })}</tbody>
+          </table>
+          <p className={styles.muted}>Действующую версию общего HTML удалить нельзя — сначала опубликуйте другую.</p>
+        </div> : <p className={styles.empty}>Общий HTML ещё не загружен. Загрузите файл, проверьте предпросмотр и опубликуйте версию.</p>}
+        <div className={styles.preview}>
+          <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех менеджеров по сопровождению. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>
+          {shared?.snapshot ? <dl className={styles.metadata}>
+            <div><dt>Текущий общий файл</dt><dd>{shared.snapshot.originalName}</dd></div>
+            <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(shared.snapshot.issued)}</dd></div>
+            <div><dt>Доступ до, МСК</dt><dd>{formatDashboardDate(shared.snapshot.expires)}</dd></div>
+          </dl> : null}
+          <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedSnapshot(event)}>
+            <label htmlFor="manager-dashboard-shared-email">Email получателя общего файла</label>
+            <input ref={sharedEmailInput} id="manager-dashboard-shared-email" type="email" autoComplete="off" required disabled={busy} defaultValue={shared?.snapshot?.email ?? ''} aria-describedby="manager-dashboard-shared-email-help" />
+            <p id="manager-dashboard-shared-email-help" className={styles.muted}>Укажите email, использованный при создании этого .ktsp. Пароль от файла вводится только внутри дашборда при просмотре.</p>
+            <label htmlFor="manager-dashboard-shared-snapshot">Общий файл .ktsp · до 8 МБ</label>
+            <div className={styles.actions}>
+              <input ref={sharedSnapshotInput} id="manager-dashboard-shared-snapshot" type="file" accept=".ktsp" required disabled={busy} />
+              <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий файл</button>
+            </div>
+          </form>
+        </div>
+        {sharedError ? <p className={styles.warning} role="alert">{sharedError}</p> : null}
+      </section>
+
+      {preview && (previewGroup || sharedPreview) ? <section id="manager-dashboard-html-preview" ref={previewPanel} className={`${styles.panel} ${styles.fullWidthPreview}`} aria-labelledby="manager-dashboard-preview-heading" tabIndex={-1}>
+        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {sharedPreview ? 'Общий дашборд сопровождения' : PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup!.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. {sharedPreview ? 'Общие и личные данные не загружаются.' : 'Личные данные менеджеров не загружаются.'}</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
           if (busy || mutationRef.current) return;
           setPreviewSelection(null);
-          htmlInputs[previewGroup.audience].current?.focus();
+          (sharedPreview ? sharedHtmlInput : htmlInputs[previewGroup!.audience]).current?.focus();
         }}>Закрыть</button></div>
-        <DashboardFrame key={`${previewGroup.audience}:${preview.id}`} audience={previewGroup.audience} versionId={preview.id} preview />
+        {sharedPreview ? <SharedDashboardFrame key={`shared:${preview.id}`} versionId={preview.id} preview />
+          : <DashboardFrame key={`${previewGroup!.audience}:${preview.id}`} audience={previewGroup!.audience} versionId={preview.id} preview />}
       </section> : null}
 
       <section className={styles.panel}>
         <div className={styles.sectionHeading}>
-          <div><h2>Общая загрузка личных файлов</h2><p>Почта и ручная загрузка общие для обеих групп. В одном письме или пакете можно смешивать .ktsp менеджеров по развитию и сопровождению: получатель определяется по email, указанному при создании файла, а группа — по его роли в системе.</p></div>
-          <button className={styles.secondary} type="button" disabled={busy || !overview.mail.enabled || !overview.mail.configured} onClick={() => void checkEmail()}>Проверить почту сейчас</button>
+          <div><h2>Общая загрузка личных файлов</h2><p>Ручная загрузка личных файлов для обеих групп. В одном пакете можно смешивать .ktsp менеджеров по развитию и сопровождению: получатель определяется по email, указанному при создании файла, а группа — по его роли в системе.</p></div>
         </div>
-        <p className={styles.muted}>{!overview.mail.configured ? 'Почтовый импорт ещё не настроен.' : !overview.mail.enabled ? 'Почтовый импорт выключен.' : 'Почтовый импорт включён.'}{overview.expectedBy ? ` Ежедневное обновление — к ${overview.expectedBy}.` : ''}</p>
         <form className={styles.uploadForm} onSubmit={(event) => void uploadSnapshots(event)}>
           <label htmlFor="manager-dashboard-snapshots">Ручная загрузка · до 32 файлов, 8 МБ на файл и 63 МБ суммарно</label>
           <div className={styles.actions}>

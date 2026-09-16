@@ -26,7 +26,7 @@
 .dashboardPage .secondary { background: #fff; color: #312467; border: 1px solid #d4d9e3; }
 .dashboardPage .danger { background: #fff; color: #a52f24; border: 1px solid #d9aaa5; }
 .dashboardPage .primary:disabled, .dashboardPage .secondary:disabled, .dashboardPage .danger:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
-.dashboardPage .primary:focus-visible, .dashboardPage .secondary:focus-visible, .dashboardPage .danger:focus-visible, .dashboardPage .uploadForm input[type='file']:focus-visible, .dashboardPage .actions select:not(:disabled):focus-visible { outline: 3px solid #9789cc; outline-offset: 3px; }
+.dashboardPage .primary:focus-visible, .dashboardPage .secondary:focus-visible, .dashboardPage .danger:focus-visible, .dashboardPage .uploadForm input[type='file']:focus-visible, .dashboardPage .uploadForm input[type='email']:focus-visible, .dashboardPage .actions select:not(:disabled):focus-visible { outline: 3px solid #9789cc; outline-offset: 3px; }
 .badge { display: inline-block; white-space: nowrap; font-size: 13px; line-height: 1.4; background: #eff0f6; color: #48536b; border-radius: 7px; padding: 5px 8px; }
 .badge[data-status='current'] { background: #edf8f0; color: #286242; }
 .badge[data-status='stale'] { background: #fff6e5; color: #825a16; }
@@ -43,6 +43,8 @@
 .uploadForm { display: grid; gap: 10px; padding: 18px; margin: 16px 0 22px; background: #f7f8fa; border-radius: 10px; }
 .uploadForm > label { font-weight: 600; font-size: 14px; }
 .uploadForm input { max-width: 100%; padding: 4px; flex: 1; min-width: 200px; }
+.uploadForm input[type='email'] { box-sizing: border-box; width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #d4d9e3; border-radius: 8px; background: #fff; font: inherit; }
+.uploadForm > .muted { margin: 0 0 8px; }
 .uploadForm input::file-selector-button { border: 1px solid #d4d9e3; background: white; color: #312467; padding: 7px 10px; border-radius: 6px; margin-right: 10px; cursor: pointer; transition: background-color .16s ease, color .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .uploadForm input:disabled::file-selector-button { opacity: .5; cursor: not-allowed; }
 @media (hover: hover) and (pointer: fine) {

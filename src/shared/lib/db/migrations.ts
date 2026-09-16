@@ -13,6 +13,54 @@ type SchemaMigration = {
   apply: (client: PoolClient) => Promise<void>;
 };
 
+/** A separate report: this migration never copies or modifies personal dashboard data. */
+export async function applySupportSharedDashboardMigration(client: PoolClient) {
+  await client.query(`
+    create table support_shared_dashboard_html_versions (
+      id bigserial primary key,
+      original_name text not null check (char_length(original_name) between 1 and 255),
+      html_content text not null,
+      file_size bigint not null check (file_size between 1 and 5242880),
+      sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+      uploaded_by text not null,
+      first_published_at timestamptz,
+      first_published_by text,
+      created_at timestamptz not null default now(),
+      check (file_size = octet_length(html_content))
+    );
+    create table support_shared_dashboard_snapshots (
+      id bigserial primary key,
+      original_name text not null check (char_length(original_name) between 1 and 255),
+      encrypted_payload bytea not null,
+      file_size bigint not null check (file_size between 1 and 8388608),
+      sha256 text not null unique check (sha256 ~ '^[0-9a-f]{64}$'),
+      recipient_email text not null check (char_length(recipient_email) between 3 and 320),
+      email_hash text not null check (char_length(email_hash) = 44),
+      person_name text not null check (char_length(person_name) between 1 and 240),
+      person_role text not null check (char_length(person_role) between 1 and 160),
+      issued date not null,
+      expires date not null,
+      uploaded_by text not null,
+      received_at timestamptz not null default now(),
+      check (expires >= issued),
+      check (file_size = octet_length(encrypted_payload))
+    );
+    create table support_shared_dashboard_state (
+      id smallint primary key check (id = 1),
+      active_html_version_id bigint references support_shared_dashboard_html_versions(id) on delete restrict,
+      previous_html_version_id bigint references support_shared_dashboard_html_versions(id) on delete restrict,
+      active_snapshot_id bigint references support_shared_dashboard_snapshots(id) on delete restrict,
+      previous_snapshot_id bigint references support_shared_dashboard_snapshots(id) on delete restrict,
+      updated_by text,
+      updated_at timestamptz not null default now(),
+      check (active_html_version_id is null or previous_html_version_id is null or active_html_version_id <> previous_html_version_id),
+      check (active_snapshot_id is null or previous_snapshot_id is null or active_snapshot_id <> previous_snapshot_id)
+    );
+    insert into support_shared_dashboard_state (id) values (1);
+    create index support_shared_dashboard_snapshots_date_idx on support_shared_dashboard_snapshots(issued desc, id desc);
+  `);
+}
+
 /** Kept independently callable for isolated legacy-schema upgrade verification. */
 export async function applyPersonalDashboardAudienceMigration(client: PoolClient) {
   await client.query(`
@@ -674,6 +722,11 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
     id: '202609150001_personal_dashboard_audiences',
     description: 'Separate development/support HTML publications while preserving manager snapshots and existing development state',
     apply: applyPersonalDashboardAudienceMigration,
+  },
+  {
+    id: '202609160001_support_shared_dashboard',
+    description: 'Add an independent shared support HTML report and encrypted snapshot without changing personal dashboards',
+    apply: applySupportSharedDashboardMigration,
   },
 ];
 

@@ -71,7 +71,7 @@ export function ImportResults({ results, title }: { results: ManagerDashboardImp
       <ul>
         {results.map((result, index) => (
           <li key={result.id ?? `${result.originalName}:${index}`}>
-            <div><strong>{result.originalName || 'Проверка почты'}</strong><span>{IMPORT_STATUS_LABELS[result.status] ?? result.status}</span></div>
+            <div><strong>{result.originalName || 'Импорт файла'}</strong><span>{IMPORT_STATUS_LABELS[result.status] ?? result.status}</span></div>
             {result.message ? <p>{result.message}</p> : null}
             {result.receivedAt || result.createdAt ? <small>{formatDashboardDate(result.receivedAt ?? result.createdAt)} МСК</small> : null}
           </li>
@@ -104,6 +104,37 @@ export function DashboardFrame({
         key={params.toString()}
         src={`/api/admin/manager-dashboard/frame?${params.toString()}`}
         title={preview ? 'Предпросмотр HTML личного дашборда' : 'Личный дашборд менеджера'}
+        sandbox="allow-scripts allow-same-origin"
+        referrerPolicy="same-origin"
+        allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
+        allowFullScreen
+      />
+    </>
+  );
+}
+
+export function SharedDashboardFrame({
+  versionId, snapshotId, preview = false, revision = 0,
+}: {
+  versionId: number;
+  snapshotId?: number;
+  preview?: boolean;
+  revision?: number;
+}) {
+  const [downloadStatus, setDownloadStatus] = useState('');
+  const frameRef = useTopDashboardDownloadBridge(setDownloadStatus);
+  const params = new URLSearchParams({ version: String(versionId), revision: String(revision) });
+  if (snapshotId && !preview) params.set('snapshot', String(snapshotId));
+  if (preview) params.set('preview', '1');
+  return (
+    <>
+      {downloadStatus ? <p className={styles.notice} role="status">{downloadStatus}</p> : null}
+      <iframe
+        ref={frameRef}
+        className={styles.frame}
+        key={params.toString()}
+        src={`/api/admin/manager-dashboard/shared/frame?${params.toString()}`}
+        title={preview ? 'Предпросмотр HTML общего дашборда' : 'Общий дашборд сопровождения'}
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="same-origin"
         allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"

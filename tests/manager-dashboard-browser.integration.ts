@@ -3,6 +3,8 @@
  * INPUT_PERSONAL_HTML=/path/to/v12.html PLAYWRIGHT_MODULE_PATH=/path/to/node_modules/playwright \
  *   node --import tsx tests/manager-dashboard-browser.integration.ts
  * The input HTML is read only, served in memory, and never copied into the repository.
+ * Both personal and shared-support modes run by default. To isolate a mode, set
+ * MANAGER_DASHBOARD_BROWSER_SCOPE=personal or support_shared.
  */
 import assert from 'node:assert/strict';
 import { createCipheriv, createHash, pbkdf2Sync } from 'node:crypto';
@@ -16,26 +18,24 @@ import { gzipSync } from 'node:zlib';
 
 import {
   buildPersonalDashboardFrame,
+  buildSupportSharedDashboardFrame,
   injectPersonalDashboardAdapter,
   personalHtmlCsp,
 } from '../src/shared/lib/managerDashboardHtml';
 import { PERSONAL_PRIVATE_HEADERS } from '../src/shared/lib/managerDashboardSecurity';
 
-const EMAIL = 'synthetic.manager@example.test';
 const PASSWORD = 'synthetic-fixture-password-2026';
-const FILENAME = 'synthetic_manager.ktsp';
+const VIEWER_EMAIL = 'synthetic.manager@example.test';
 const DOWNLOAD_MARKER = 'kts-top-dashboard-download-v1';
-const FRAME_PATH = '/api/admin/manager-dashboard/frame';
-const CONTENT_PATH = '/api/admin/manager-dashboard/content';
-const SNAPSHOT_PATH = '/api/admin/manager-dashboard/snapshots';
 const EMPTY_STATES = ['missing_email', 'ambiguous_email', 'no_snapshot', 'expired'] as const;
 type EmptyState = typeof EMPTY_STATES[number];
+type DashboardScope = 'personal' | 'support_shared';
 
 // Declarations for variables in the provided browser document, used only in Playwright callbacks.
 declare const D: { rows: unknown[] } | null;
 declare const FILE: File | null;
 
-function syntheticSnapshot() {
+function syntheticSnapshot(email: string, scope: DashboardScope) {
   const issued = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
@@ -51,20 +51,22 @@ function syntheticSnapshot() {
   ];
   const cols = [...new Set(rows.flatMap((row) => Object.keys(row)))];
   const payload = {
-    email: EMAIL, name: 'Synthetic Manager', role: 'manager', roleLabel: 'Synthetic development manager',
+    email, name: scope === 'personal' ? 'Synthetic Manager' : 'Synthetic Shared Support',
+    role: scope === 'personal' ? 'manager' : 'support_manager',
+    roleLabel: scope === 'personal' ? 'Synthetic development manager' : 'Synthetic shared support report',
     issued, expires, cols, rows: rows.map((row) => cols.map((column) => row[column] ?? null)),
     control: { [year]: 300, [previousYear]: 80 },
     plan: [{ mk: `${year}-01`, rev: 125 }, { mk: `${year}-09`, rev: 250 }],
   };
   const salt = Buffer.alloc(16, 17);
   const iv = Buffer.alloc(12, 29);
-  const key = pbkdf2Sync(`${EMAIL}:${PASSWORD}`, salt, 200_000, 32, 'sha256');
+  const key = pbkdf2Sync(`${email}:${PASSWORD}`, salt, 200_000, 32, 'sha256');
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(gzipSync(JSON.stringify(payload))), cipher.final(), cipher.getAuthTag()]);
   const envelope = {
     fmt: 'kts-personal', v: 1,
     kdf: { name: 'PBKDF2', hash: 'SHA-256', iter: 200_000, salt: salt.toString('base64') },
-    emailHash: createHash('sha256').update(EMAIL).digest('base64'),
+    emailHash: createHash('sha256').update(email).digest('base64'),
     name: payload.name, role: payload.role, issued, expires,
     gz: true, iv: iv.toString('base64'), ct: encrypted.toString('base64'),
   };
@@ -84,7 +86,19 @@ const stateExpression = `(() => {
 
 type BrowserRoute = { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> };
 
-async function main() {
+async function runScope(scope: DashboardScope) {
+  const shared = scope === 'support_shared';
+  const EMAIL = shared ? 'synthetic.shared.support@example.test' : VIEWER_EMAIL;
+  const FILENAME = shared ? 'synthetic_shared_support.ktsp' : 'synthetic_manager.ktsp';
+  const base = `/api/admin/manager-dashboard/${shared ? 'shared/' : ''}`;
+  const FRAME_PATH = `${base}frame`;
+  const CONTENT_PATH = `${base}content`;
+  const SNAPSHOT_PATH = `${base}snapshots`;
+  const emptyStates: readonly EmptyState[] = shared ? ['no_snapshot', 'expired'] : EMPTY_STATES;
+  const buildFrame = (options: Parameters<typeof buildPersonalDashboardFrame>[0]) => shared
+    ? buildSupportSharedDashboardFrame({versionId: options.versionId, snapshotId: options.snapshotId, preview: options.preview,
+      emptyState: options.emptyState === 'no_snapshot' || options.emptyState === 'expired' ? options.emptyState : undefined})
+    : buildPersonalDashboardFrame(options);
   const inputHtml = process.env.INPUT_PERSONAL_HTML;
   if (!inputHtml) {
     console.log('SKIP browser integration: set INPUT_PERSONAL_HTML to the read-only personal v12 HTML fixture.');
@@ -98,11 +112,13 @@ async function main() {
   }
   const playwright = await import(pathToFileURL(path.join(modulePath, 'index.mjs')).href);
   const originalHtml = await readFile(inputHtml, 'utf8');
-  const adaptedHtml = injectPersonalDashboardAdapter(originalHtml);
-  const frame = buildPersonalDashboardFrame({ versionId: 1, snapshotId: 1, preview: false });
-  const synthetic = syntheticSnapshot();
+  const adaptedHtml = injectPersonalDashboardAdapter(originalHtml, scope);
+  const frame = buildFrame({ versionId: 1, snapshotId: 1, preview: false });
+  const synthetic = syntheticSnapshot(EMAIL, scope);
   const receivedPaths: string[] = [];
-  const shell = (emptyState?: EmptyState) => `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}#shell{width:100%;height:100%;border:0}</style></head><body><div id="parent-secret" hidden>synthetic-parent-only</div><iframe id="shell" sandbox="allow-scripts allow-same-origin" src="${FRAME_PATH}?version=1&amp;snapshot=1${emptyState ? `&amp;empty=${emptyState}` : ''}"></iframe><script>
+  const receivedRequests: Array<{url: string; method: string; body: string}> = [];
+  const shell = (emptyState?: EmptyState, preview = false) => `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}#shell{width:100%;height:100%;border:0}</style></head><body><div id="parent-secret" hidden>synthetic-parent-only</div><iframe id="shell" sandbox="allow-scripts allow-same-origin" src="${FRAME_PATH}?version=1&amp;snapshot=1${emptyState ? `&amp;empty=${emptyState}` : ''}${preview ? '&amp;preview=1' : ''}"></iframe><script>
+    window.fixtureViewerEmail = ${JSON.stringify(VIEWER_EMAIL)};
     window.fixtureDownloads = [];
     window.fixtureMessages = [];
     window.addEventListener('message', async (event) => {
@@ -117,17 +133,21 @@ async function main() {
   </script></body></html>`;
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-    const emptyState = EMPTY_STATES.find((state) => state === url.searchParams.get('empty'));
+    const emptyState = emptyStates.find((state) => state === url.searchParams.get('empty'));
+    const preview = url.searchParams.get('preview') === '1';
     receivedPaths.push(url.pathname);
+    const received = {url: request.url ?? '/', method: request.method ?? '', body: ''};
+    receivedRequests.push(received);
+    request.on('data', (chunk: Buffer) => { received.body += chunk.toString('utf8'); });
     const headers = { ...PERSONAL_PRIVATE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' };
     if (url.pathname === '/') {
-      response.writeHead(200, headers).end(shell(emptyState));
+      response.writeHead(200, headers).end(shell(emptyState, preview));
     } else if (url.pathname === '/standalone') {
       response.writeHead(200, headers).end(originalHtml);
     } else if (url.pathname === FRAME_PATH) {
       // Deliberately include a snapshot ID in empty cases: emptyState must still suppress data access.
-      const options = { versionId: 1, snapshotId: 1, preview: false, emptyState };
-      const selectedFrame = emptyState ? buildPersonalDashboardFrame(options) : frame;
+      const options = { versionId: 1, snapshotId: 1, preview, emptyState };
+      const selectedFrame = emptyState || preview ? buildFrame(options) : frame;
       response.writeHead(200, { ...headers, 'Content-Security-Policy': selectedFrame.csp }).end(selectedFrame.html);
     } else if (url.pathname === CONTENT_PATH) {
       response.writeHead(200, {
@@ -184,7 +204,7 @@ async function main() {
           if (new URL(url).origin === origin) await route.continue();
           else { externalRequests.push(new URL(url).origin); await route.abort(); }
         });
-        for (const emptyState of EMPTY_STATES) {
+        for (const emptyState of emptyStates) {
           const emptyPage = await context.newPage();
           emptyPage.setDefaultTimeout(7000);
           emptyPage.on('pageerror', (error: Error) => scriptErrors.push(error.message));
@@ -218,6 +238,29 @@ async function main() {
             assert.equal(receivedPaths.filter((pathname) => pathname === SNAPSHOT_PATH).length, snapshotRequestsBefore, 'empty mode does not fetch a snapshot even when a snapshot ID was supplied');
           } finally { await emptyPage.close(); }
         }
+
+        const previewPage = await context.newPage();
+        previewPage.setDefaultTimeout(7000);
+        previewPage.on('pageerror', (error: Error) => scriptErrors.push(error.message));
+        const beforePreviewRequests = receivedPaths.filter((pathname) => pathname === SNAPSHOT_PATH).length;
+        try {
+          await previewPage.goto(`${origin}/?preview=1`);
+          await previewPage.waitForFunction(() => document.querySelector<HTMLIFrameElement>('#shell')?.contentDocument?.querySelector('#personal'));
+          const previewContent = previewPage.frames().find((candidate: { url(): string }) => candidate.url().includes(CONTENT_PATH));
+          const previewFrame = previewPage.frames().find((candidate: { url(): string }) => candidate.url().includes(FRAME_PATH));
+          assert.ok(previewContent && previewFrame, `${scope}/${engineName}: preview uses the matching content and frame routes`);
+          await previewContent.waitForFunction(() => document.querySelector<HTMLButtonElement>('#go')?.disabled);
+          assert.equal(await previewContent.evaluate('FILE === null && D === null'), true);
+          assert.equal(await previewContent.locator('#email').inputValue(), '');
+          assert.equal(await previewContent.locator('#pass').inputValue(), '');
+          assert.equal(await previewContent.evaluate('window.fixtureDecryptCalls'), 0);
+          assert.deepEqual(await previewContent.evaluate('window.fixtureIncomingPersonal'), [], 'preview sends no snapshot or recipient into the HTML');
+          assert.match(await previewFrame.locator('#status').innerText(), shared ? /Предпросмотр общего HTML.*данные сюда не передаются/ : /Предпросмотр HTML.*данные менеджеров сюда не передаются/);
+          assert.equal(receivedPaths.filter((pathname) => pathname === SNAPSHOT_PATH).length, beforePreviewRequests, 'preview never requests encrypted bytes even when its input contains a snapshot ID');
+          assert.equal(new URL(previewContent.url()).searchParams.get('preview'), '1');
+          if (shared) assert.equal(new URL(previewContent.url()).searchParams.has('audience'), false);
+        } finally { await previewPage.close(); }
+
         const standalone = await context.newPage();
         const integrated = await context.newPage();
         for (const page of [standalone, integrated]) {
@@ -241,6 +284,14 @@ async function main() {
         assert.ok(content, `${engineName}: nested personal content frame exists`);
         await content.waitForFunction(() => typeof FILE !== 'undefined' && FILE !== null && document.querySelector<HTMLInputElement>('#email')?.readOnly);
         assert.equal(await content.locator('#email').inputValue(), EMAIL);
+        if (shared) {
+          assert.notEqual(EMAIL, VIEWER_EMAIL);
+          assert.equal(await integrated.evaluate('window.fixtureViewerEmail'), VIEWER_EMAIL);
+          assert.notEqual(await content.locator('#email').inputValue(), VIEWER_EMAIL, 'shared decryption binds the explicitly uploaded recipient, not the viewing manager email');
+          assert.match(await content.locator('#pass').getAttribute('placeholder'), /Пароль общего снимка/);
+          assert.match(await content.locator('.gate .note').innerText(), /общий снимок для всех менеджеров по сопровождению/);
+          assert.equal(new URL(content.url()).searchParams.has('audience'), false, 'the shared report never chooses a personal audience');
+        }
         assert.equal(await content.locator('#pass').inputValue(), '');
         assert.equal(await content.locator('#fileInp').isDisabled(), true);
         assert.equal(await content.evaluate('D === null'), true, 'automatic snapshot must not bypass password entry');
@@ -253,6 +304,7 @@ async function main() {
         await content.locator('#pass').fill(PASSWORD);
         await content.locator('#go').click();
         await content.waitForFunction(() => D !== null && document.querySelector('.kpi'));
+        assert.equal(await content.locator('#pass').count(), 0, 'the unlocked v12 removes the password gate');
         assert.deepEqual(await content.evaluate(stateExpression), reference, `${engineName}: initial KPI, control and rendered content match standalone v12`);
 
         const isolation = await content.evaluate(`(async () => {
@@ -267,6 +319,7 @@ async function main() {
         assert.equal(await integrated.locator('#shell').getAttribute('sandbox'), 'allow-scripts allow-same-origin', 'trusted wrapper stays same origin without popup permission');
         const wrapper = integrated.frames().find((candidate: { url(): string }) => candidate.url().includes(FRAME_PATH));
         assert.ok(wrapper);
+        assert.equal(await wrapper.title(), shared ? 'Общий дашборд сопровождения' : 'Личный дашборд продаж');
         assert.equal(await wrapper.locator('#personal').getAttribute('sandbox'), 'allow-scripts');
         const pageCountBeforePopupProbe = context.pages().length;
         await content.evaluate(`(() => {
@@ -338,9 +391,14 @@ async function main() {
         assert.ok(messages.every((entry: { keys: string[] }) => !entry.keys.some((key) => /password|plaintext|payload|rows/i.test(key))));
         assert.deepEqual(externalRequests, [], 'original and integrated fixtures make no external requests');
         assert.deepEqual(scriptErrors, [], 'both original and integrated v12 execute without script errors');
-        console.log(`PASS ${engineName}: four HTML-only empty states without data fetch/decrypt; standalone parity, encrypted delivery/password, KPI/control, all tabs, month/goods/KP filters and resets, opaque sandbox, network/popup denial and gesture XLSX bridge.`);
+        assert.ok(receivedRequests.every((request) => request.method === 'GET' && !request.body && !request.url.includes(PASSWORD)), 'password entry and decryption send no request body, password, or mutation to the server');
+        if (shared) {
+          assert.equal(receivedPaths.some((pathname) => pathname.startsWith('/api/admin/manager-dashboard/') && !pathname.startsWith(base)), false,
+            'shared viewing never requests personal content, frames, or manager snapshots');
+        }
+        console.log(`PASS ${scope}/${engineName}: ${emptyStates.length} HTML-only empty states and preview without data fetch/decrypt; standalone parity, encrypted delivery/password, correct recipient/scope, KPI/control, all tabs, month/goods/KP filters and resets, opaque sandbox, network/popup denial and gesture XLSX bridge.`);
       } catch (error) {
-        failures.push(`${engineName}: ${error instanceof Error ? error.message : String(error)}`);
+        failures.push(`${scope}/${engineName}: ${error instanceof Error ? error.message : String(error)}`);
       } finally { await browser.close(); }
     }
     assert.ok(enginesTested > 0, 'At least one installed browser engine must run.');
@@ -351,6 +409,12 @@ async function main() {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   }
+}
+
+async function main() {
+  const scope = process.env.MANAGER_DASHBOARD_BROWSER_SCOPE ?? 'both';
+  assert.ok(['personal', 'support_shared', 'both'].includes(scope), 'MANAGER_DASHBOARD_BROWSER_SCOPE must be personal, support_shared or both');
+  for (const mode of scope === 'both' ? ['personal', 'support_shared'] as const : [scope as DashboardScope]) await runScope(mode);
 }
 
 main().catch((error) => {

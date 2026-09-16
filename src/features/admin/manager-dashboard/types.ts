@@ -45,17 +45,32 @@ export type ManagerDashboardGroup = {
   }>;
 };
 
+export type ManagerDashboardSharedSnapshot = ManagerDashboardSnapshot & {
+  email: string;
+  fileSize?: number;
+};
+
+export type ManagerDashboardSupportShared = {
+  htmlVersions: ManagerDashboardHtmlVersion[];
+  activeHtmlVersionId: number | null;
+  previousHtmlVersionId: number | null;
+  snapshot: ManagerDashboardSharedSnapshot | null;
+  history: ManagerDashboardSharedSnapshot[];
+};
+
 export type ManagerDashboardOverview = {
   mode: 'manage';
   groups: ManagerDashboardGroup[];
+  supportShared?: ManagerDashboardSupportShared | null;
   imports: ManagerDashboardImport[];
   importsNextCursor: string | null;
-  mail: { enabled: boolean; configured: boolean };
+  mail?: { enabled: boolean; configured: boolean };
   expectedIssuedAfter?: string | null;
   expectedBy?: string | null;
 } | {
   mode: 'view';
   audience: PersonalDashboardAudience;
+  supportShared?: ManagerDashboardSupportShared | null;
   bindingStatus: ManagerDashboardBindingStatus;
   snapshot: ManagerDashboardSnapshot | null;
   snapshotStatus?: ManagerDashboardSnapshotStatus;
