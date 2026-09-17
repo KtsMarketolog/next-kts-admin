@@ -106,7 +106,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     }
     const form = new FormData();
     form.append('file', file);
-    const result = await mutate(`/html?audience=${audience}`, { method: 'POST', body: form }, `HTML для группы «${label}» загружен как черновик. Проверьте предпросмотр перед публикацией.`);
+    const result = await mutate(`/html?audience=${audience}`, { method: 'POST', body: form }, `HTML для группы «${label}» загружен как черновик. Можно опубликовать его сразу или сначала открыть предпросмотр.`);
     if (result) {
       // Never clear the other group's selection or infer a recipient from it.
       if (input) input.value = '';
@@ -117,9 +117,8 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
   async function publish(audience: PersonalDashboardAudience, versionId: number) {
     const group = overview.groups.find((item) => item.audience === audience);
     if (busy || mutationRef.current || !group) return;
-    if (previewSelection?.audience !== audience || previewSelection.versionId !== versionId) return;
     const version = group.htmlVersions.find((item) => item.id === versionId);
-    if (!version) return;
+    if (!version || versionId === group.activeHtmlVersionId) return;
     const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
     const isRollback = versionId === group.previousHtmlVersionId;
     if (!window.confirm(`${isRollback ? 'Вернуть' : 'Опубликовать'} HTML «${version.originalName}», версия #${versionId}, для группы «${label}»?\n\nHTML другой группы и личные файлы данных менеджеров сохранятся.`)) return;
@@ -228,7 +227,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     }
     const form = new FormData();
     form.append('file', file);
-    const result = await mutate('/shared/html', { method: 'POST', body: form }, 'Общий HTML загружен как черновик. Проверьте предпросмотр перед публикацией.');
+    const result = await mutate('/shared/html', { method: 'POST', body: form }, 'Общий HTML загружен как черновик. Можно опубликовать его сразу или сначала открыть предпросмотр.');
     if (result) {
       if (sharedHtmlInput.current) sharedHtmlInput.current.value = '';
       if (result.version) setPreviewSelection({ audience: 'support-shared', versionId: result.version.id });
@@ -236,7 +235,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
   }
 
   async function publishShared(versionId: number) {
-    if (busy || mutationRef.current || !shared || !sharedPreview || previewSelection?.versionId !== versionId) return;
+    if (busy || mutationRef.current || !shared) return;
     const version = shared.htmlVersions.find((item) => item.id === versionId);
     if (!version || versionId === shared.activeHtmlVersionId) return;
     const rollback = versionId === shared.previousHtmlVersionId;
@@ -305,7 +304,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
                     </div>
                     {fileErrors[audience] ? <p id={`manager-dashboard-html-error-${audience}`} className={styles.warning} role="alert">{fileErrors[audience]}</p> : null}
                   </form>
-                  {group.htmlVersions.length === 0 ? <p className={styles.empty}>Для этой группы HTML ещё не загружен. Загрузите HTML, откройте предпросмотр и опубликуйте проверенную версию.</p> : (
+                  {group.htmlVersions.length === 0 ? <p className={styles.empty}>Для этой группы HTML ещё не загружен. Загрузите HTML и опубликуйте версию. Предпросмотр доступен по желанию.</p> : (
                     <div className={styles.tableScroll}>
                       <table className={`${styles.table} ${styles.groupTable} ${styles.versionsTable}`}>
                         <thead><tr><th scope="col">Версия / загружена, МСК</th><th scope="col">Состояние</th><th scope="col">Действия</th></tr></thead>
@@ -318,7 +317,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
                               <td><div className={styles.actions}>
                                 <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewed} onClick={() => showPreview(audience, version.id)}>Предпросмотр</button>
                                 {version.id !== group.activeHtmlVersionId ? (
-                                  <button className={styles.primary} type="button" disabled={busy || !previewed} title={!previewed ? 'Сначала откройте предпросмотр этой версии' : undefined} onClick={() => void publish(audience, version.id)}>{version.id === group.previousHtmlVersionId ? 'Вернуть группе' : 'Опубликовать группе'}</button>
+                                  <button className={styles.primary} type="button" disabled={busy} onClick={() => void publish(audience, version.id)}>{version.id === group.previousHtmlVersionId ? 'Вернуть группе' : 'Опубликовать группе'}</button>
                                 ) : null}
                                 <button className={styles.danger} type="button" disabled={busy || version.id === group.activeHtmlVersionId}
                                   aria-label={`Удалить HTML «${version.originalName}», версия #${version.id}, ${label}`}
@@ -381,7 +380,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
                 <td>{version.id === shared?.activeHtmlVersionId ? 'Опубликована' : version.id === shared?.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
                 <td><div className={styles.actions}>
                   <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewed} onClick={() => showSharedPreview(version.id)}>Предпросмотр общего HTML</button>
-                  {version.id !== shared?.activeHtmlVersionId ? <button className={styles.primary} type="button" disabled={busy || !previewed} title={!previewed ? 'Сначала откройте предпросмотр этой версии' : undefined} onClick={() => void publishShared(version.id)}>{version.id === shared?.previousHtmlVersionId ? 'Вернуть общий HTML' : 'Опубликовать общий HTML'}</button> : null}
+                  {version.id !== shared?.activeHtmlVersionId ? <button className={styles.primary} type="button" disabled={busy} onClick={() => void publishShared(version.id)}>{version.id === shared?.previousHtmlVersionId ? 'Вернуть общий HTML' : 'Опубликовать общий HTML'}</button> : null}
                   <button className={styles.danger} type="button" disabled={busy || version.id === shared?.activeHtmlVersionId}
                     aria-label={`Удалить общий HTML «${version.originalName}», версия #${version.id}`}
                     title={version.id === shared?.activeHtmlVersionId ? 'Сначала опубликуйте другую версию общего HTML' : undefined}
@@ -391,7 +390,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
             })}</tbody>
           </table>
           <p className={styles.muted}>Действующую версию общего HTML удалить нельзя — сначала опубликуйте другую.</p>
-        </div> : <p className={styles.empty}>Общий HTML ещё не загружен. Загрузите файл, проверьте предпросмотр и опубликуйте версию.</p>}
+        </div> : <p className={styles.empty}>Общий HTML ещё не загружен. Загрузите файл и опубликуйте версию. Предпросмотр доступен по желанию.</p>}
         <div className={styles.preview}>
           <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех менеджеров по сопровождению. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>
           {shared?.snapshot ? <dl className={styles.metadata}>

@@ -299,13 +299,16 @@ test('empty support HTML stays independent from existing development versions an
   assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
 });
 
-test('one full-width preview stays outside both columns and publication or rollback targets its exact audience and revision', async () => {
+test('optional full-width preview stays outside both columns while publication and rollback target their own audience and revision', async () => {
   const view = management();
   const rollback = () => view.versionButton('support', 22, 'Вернуть группе');
-  assert.equal(rollback().props.disabled, true);
-  (rollback().props.onClick as () => void)();
+  assert.equal(rollback().props.disabled, false);
+  assert.equal(view.versionButton('development', 12, 'Опубликовать группе').props.disabled, false);
+  (view.versionButton('development', 12, 'Опубликовать группе').props.onClick as () => void)();
   await view.settle();
-  assert.equal(view.requests.length, 0, 'even a directly invoked handler must require a preview');
+  assert.equal(view.requests[0].path, '/publish');
+  assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { audience: 'development', versionId: 12, expectedActiveVersionId: 11 });
+  assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
   view.preview('development', 12);
   assert.equal(view.find(parts.DashboardFrame).props.audience, 'development');
   const panel = view.find('section', (props) => props.id === 'manager-dashboard-html-preview');
@@ -315,43 +318,41 @@ test('one full-width preview stays outside both columns and publication or rollb
     && props.children.some((node: Element) => node?.props?.id === 'manager-dashboard-group-development')
     && props.children.some((node: Element) => node?.props?.id === 'manager-dashboard-group-support'));
   assert.equal(elements(grid).some((node) => node.type === parts.DashboardFrame), false);
-  assert.equal(rollback().props.disabled, true, 'development preview cannot enable support rollback');
+  assert.equal(rollback().props.disabled, false, 'an unrelated preview cannot block support rollback');
   (rollback().props.onClick as () => void)();
   await view.settle();
-  assert.equal(view.requests.length, 0);
-  (view.versionButton('development', 12, 'Опубликовать группе').props.onClick as () => void)();
-  await view.settle();
-  assert.equal(view.requests[0].path, '/publish');
-  assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { audience: 'development', versionId: 12, expectedActiveVersionId: 11 });
+  assert.equal(view.requests[1].path, '/publish');
+  assert.deepEqual(JSON.parse(view.requests[1].init.body as string), { audience: 'support', versionId: 22, expectedActiveVersionId: 21 });
   view.preview('support', 22);
   const preview = view.find(parts.DashboardFrame);
   assert.equal(elements(view.render()).filter((node) => node.type === parts.DashboardFrame).length, 1);
   assert.equal(preview.props.audience, 'support');
   assert.equal(preview.props.preview, true);
   assert.equal(preview.props.versionId, 22);
-  assert.equal(view.versionButton('development', 12, 'Опубликовать группе').props.disabled, true);
-  (rollback().props.onClick as () => void)();
-  await view.settle();
-  assert.deepEqual(JSON.parse(view.requests[1].init.body as string), { audience: 'support', versionId: 22, expectedActiveVersionId: 21 });
+  assert.equal(view.versionButton('development', 12, 'Опубликовать группе').props.disabled, false);
   assert.match(view.confirmations[0], /Менеджеры по развитию/);
   assert.match(view.confirmations[1], /Менеджеры по сопровождению/);
   (view.find('button', (props) => text(props.children) === 'Закрыть').props.onClick as () => void)();
   assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
-  assert.equal(rollback().props.disabled, true);
+  assert.equal(rollback().props.disabled, false);
   assert.equal(view.focusedInput(), 'manager-dashboard-html-support');
 });
 
-test('publication preview gate checks audience as well as version ID', async () => {
+test('publication keeps its own audience when another group previews the same version ID', async () => {
   const overview = managementOverview();
   overview.groups[1].htmlVersions[1].id = 12;
   overview.groups[1].previousHtmlVersionId = 12;
   const view = management({ overview });
   view.preview('development', 12);
   const supportRollback = view.versionButton('support', 12, 'Вернуть группе');
-  assert.equal(supportRollback.props.disabled, true);
+  assert.equal(supportRollback.props.disabled, false);
   (supportRollback.props.onClick as () => void)();
   await view.settle();
-  assert.equal(view.requests.length, 0);
+  assert.equal(view.requests.length, 1);
+  assert.equal(view.requests[0].path, '/publish');
+  assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { audience: 'support', versionId: 12, expectedActiveVersionId: 21 });
+  assert.match(view.confirmations[0], /Менеджеры по сопровождению/);
+  assert.equal(view.find(parts.DashboardFrame).props.audience, 'development');
 });
 
 test('independent HTML selections bind uploads to their caller group and serialize duplicate cross-group events', async () => {
@@ -522,30 +523,36 @@ test('shared frame preserves the download sandbox and always omits snapshot data
   assert.doesNotMatch(html, /snapshot=|audience=|allow-popups|allow-downloads/);
 });
 
-test('shared publication requires its own preview and cannot reuse an identical personal version ID', async () => {
+test('shared publication works without preview and keeps its own namespace when a personal preview uses the same version ID', async () => {
   const overview = managementOverview();
   overview.supportShared = sharedOverview();
   overview.groups[1].htmlVersions[1].id = 32;
   overview.groups[1].previousHtmlVersionId = 32;
   const view = management({ overview });
+  const initialPublish = sharedVersionButton(view, 33, 'Опубликовать общий HTML');
+  assert.equal(initialPublish.props.disabled, false);
+  (initialPublish.props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests[0].path, '/shared/publish');
+  assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { versionId: 33, expectedActiveVersionId: 31 });
+  assert.equal(elements(view.render()).some((node) => node.type === parts.SharedDashboardFrame), false);
   view.preview('support', 32);
   const publish = () => sharedVersionButton(view, 32, 'Вернуть общий HTML');
-  assert.equal(publish().props.disabled, true);
+  assert.equal(publish().props.disabled, false);
   (publish().props.onClick as () => void)();
   await view.settle();
-  assert.equal(view.requests.length, 0);
+  assert.equal(view.requests[1].path, '/shared/publish');
+  assert.deepEqual(JSON.parse(view.requests[1].init.body as string), { versionId: 32, expectedActiveVersionId: 31 });
   (sharedVersionButton(view, 32, 'Предпросмотр общего HTML').props.onClick as () => void)();
   assert.equal(view.find(parts.SharedDashboardFrame).props.versionId, 32);
   assert.equal(view.find(parts.SharedDashboardFrame).props.preview, true);
   assert.equal(view.find(parts.SharedDashboardFrame).props.snapshotId, undefined);
   assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
-  assert.equal(view.versionButton('support', 32, 'Вернуть группе').props.disabled, true);
-  (publish().props.onClick as () => void)();
-  await view.settle();
-  assert.equal(view.requests[0].path, '/shared/publish');
-  assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { versionId: 32, expectedActiveVersionId: 31 });
-  assert.match(view.confirmations[0], /всех менеджеров по сопровождению/);
-  assert.match(view.confirmations[0], /Личные дашборды и личные файлы менеджеров сохранятся/);
+  assert.equal(view.versionButton('support', 32, 'Вернуть группе').props.disabled, false);
+  for (const confirmation of view.confirmations) {
+    assert.match(confirmation, /всех менеджеров по сопровождению/);
+    assert.match(confirmation, /Личные дашборды и личные файлы менеджеров сохранятся/);
+  }
 });
 
 test('shared HTML deletion protects active version and closes only a matching shared preview', async () => {
@@ -614,8 +621,10 @@ test('cancelling shared publication preserves file selection and does not start 
   await view.settle();
   assert.equal(view.requests.length, 0);
   assert.equal(view.inputs.get('manager-dashboard-shared-snapshot')!.value, 'synthetic-selection');
-  (sharedVersionButton(view, 32, 'Предпросмотр общего HTML').props.onClick as () => void)();
   (sharedVersionButton(view, 32, 'Вернуть общий HTML').props.onClick as () => void)();
+  assert.equal(view.confirmations.length, 2, 'publication without preview still requests explicit confirmation');
+  assert.equal(elements(view.render()).some((node) => node.type === parts.SharedDashboardFrame), false);
+  (sharedVersionButton(view, 32, 'Предпросмотр общего HTML').props.onClick as () => void)();
   (sharedVersionButton(view, 32, 'Удалить').props.onClick as () => void)();
   await view.settle();
   assert.equal(view.requests.length, 0);

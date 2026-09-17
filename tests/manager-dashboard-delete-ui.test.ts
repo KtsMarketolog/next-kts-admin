@@ -38,10 +38,20 @@ function overview(): Manage {
         id: 100 + index, originalName: `synthetic-${audience}.ktsp`, issued: '2026-09-01', expires: '2999-12-31', receivedAt: '2026-09-01T06:00:00Z',
       } }],
     })),
+    supportShared: {
+      activeHtmlVersionId: 21, previousHtmlVersionId: 22,
+      htmlVersions: [21, 22, 23].map((id) => ({
+        id, audience: 'support', originalName: `shared-${id}.html`, fileSize: 100,
+        createdAt: '2026-09-01T06:00:00Z', firstPublishedAt: id === 23 ? null : '2026-09-01T06:00:00Z',
+      })),
+      snapshot: { id: 201, originalName: 'synthetic-shared.ktsp', email: 'shared@example.test',
+        issued: '2026-09-01', expires: '2999-12-31', receivedAt: '2026-09-01T06:00:00Z' },
+      history: [],
+    },
   };
 }
 const parts = {
-  DashboardFrame() {}, ImportResults() {}, SnapshotStatus() {},
+  DashboardFrame() {}, SharedDashboardFrame() {}, ImportResults() {}, SnapshotStatus() {},
   formatDashboardDate: (value: string) => value,
 };
 function management(options: {
@@ -102,10 +112,29 @@ function management(options: {
     return item;
   };
   const click = (audience: Audience, id: number, label = 'Удалить') => (button(audience, id, label).props.onClick as () => void)();
+  const sharedButton = (id: number, label: string) => {
+    const section = elements(render()).find((node) => node.props.id === 'manager-dashboard-shared-support');
+    assert.ok(section, 'Missing shared support section');
+    const version = data.supportShared?.htmlVersions.find((item) => item.id === id);
+    assert.ok(version, `Missing shared version #${id}`);
+    const row = elements(section).find((node) => node.type === 'tr'
+      && elements(node).some((child) => child.type === 'strong' && text(child) === version.originalName));
+    assert.ok(row, `Missing shared version #${id} row`);
+    const action = elements(row).find((node) => node.type === 'button' && text(node) === label);
+    assert.ok(action, `Missing shared version #${id} ${label} action`);
+    return action;
+  };
+  const clickShared = (id: number, label: string) => (sharedButton(id, label).props.onClick as () => void)();
   const preview = () => elements(render()).find((node) => node.type === parts.DashboardFrame);
+  const sharedPreview = () => elements(render()).find((node) => node.type === parts.SharedDashboardFrame);
+  const closePreview = () => {
+    const close = elements(render()).find((node) => node.type === 'button' && text(node) === 'Закрыть');
+    assert.ok(close, 'Missing preview close action');
+    (close.props.onClick as () => void)();
+  };
   const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); render(); };
   render();
-  return { render, button, click, preview, settle, requests, confirmations, data };
+  return { render, button, click, sharedButton, clickShared, preview, sharedPreview, closePreview, settle, requests, confirmations, data };
 }
 
 test('management exposes named delete controls for both groups and protects their active HTML versions', async () => {
@@ -252,4 +281,145 @@ test('same-tick double clicks and cross-group actions share the deletion mutatio
   assert.equal(view.requests.length, 2);
   finish(null);
   await view.settle();
+});
+
+test('both personal groups publish drafts, archives and rollbacks without opening a preview', async () => {
+  for (const [audience, active] of [['development', 1], ['support', 11]] as const) {
+    for (const offset of [1, 2, 3]) {
+      const view = management();
+      const before = structuredClone(view.data);
+      const id = active + offset;
+      const label = offset === 1 ? 'Вернуть группе' : 'Опубликовать группе';
+      assert.equal(view.preview(), undefined);
+      assert.equal(view.button(audience, id, label).props.disabled, false);
+      assert.doesNotMatch(String(view.button(audience, id, label).props.title), /[Сс]начала.*предпросмотр/);
+      view.click(audience, id, label);
+      await view.settle();
+      assert.equal(view.requests.length, 1);
+      assert.equal(view.requests[0].path, '/publish');
+      assert.equal(view.requests[0].init.method, 'POST');
+      assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { audience, versionId: id, expectedActiveVersionId: active });
+      assert.equal(view.confirmations.length, 1);
+      assert.ok(view.confirmations[0].includes(audiences.PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience]));
+      assert.match(view.confirmations[0], new RegExp(`#${id}`));
+      assert.ok(view.confirmations[0].includes(`${audience}-${offset + 1}.html`));
+      assert.match(view.confirmations[0], /личные файлы данных менеджеров сохранятся/);
+      assert.deepEqual(view.data, before, 'publication request never rewrites local snapshots or other publications');
+    }
+  }
+});
+
+test('personal publication still works after closing its preview and with another group preview open', async () => {
+  for (const [audience, id, other, otherId, active] of [
+    ['development', 4, 'support', 14, 1], ['support', 14, 'development', 4, 11],
+  ] as const) {
+    for (const mode of ['closed', 'other-group'] as const) {
+      const view = management();
+      view.click(audience, id, 'Предпросмотр');
+      if (mode === 'closed') view.closePreview();
+      else view.click(other, otherId, 'Предпросмотр');
+      assert.equal(view.button(audience, id, 'Опубликовать группе').props.disabled, false);
+      view.click(audience, id, 'Опубликовать группе');
+      await view.settle();
+      assert.equal(view.requests.length, 1);
+      assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { audience, versionId: id, expectedActiveVersionId: active });
+      assert.equal(view.preview()?.props.audience, mode === 'closed' ? undefined : other);
+      assert.equal(view.preview()?.props.versionId, mode === 'closed' ? undefined : otherId);
+    }
+  }
+});
+
+test('shared publication and rollback do not need a preview or inherit the personal publication identity', async () => {
+  for (const id of [22, 23]) {
+    for (const previewState of ['none', 'closed', 'personal'] as const) {
+      const data = overview();
+      data.groups[1].htmlVersions[3].id = id;
+      const view = management({ overview: data });
+      const before = structuredClone(data);
+      const label = id === 22 ? 'Вернуть общий HTML' : 'Опубликовать общий HTML';
+      if (previewState === 'closed') {
+        view.clickShared(id, 'Предпросмотр общего HTML');
+        assert.equal(view.sharedPreview()?.props.versionId, id);
+        view.closePreview();
+      } else if (previewState === 'personal') view.click('support', id, 'Предпросмотр');
+      assert.equal(view.sharedButton(id, label).props.disabled, false);
+      view.clickShared(id, label);
+      await view.settle();
+      assert.equal(view.requests.length, 1);
+      assert.equal(view.requests[0].path, '/shared/publish');
+      assert.equal(view.requests[0].init.method, 'POST');
+      assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { versionId: id, expectedActiveVersionId: 21 });
+      assert.equal(view.confirmations.length, 1);
+      assert.ok(view.confirmations[0].includes(`shared-${id}.html`));
+      assert.match(view.confirmations[0], /всех менеджеров по сопровождению/);
+      assert.match(view.confirmations[0], /Личные дашборды и личные файлы менеджеров сохранятся/);
+      assert.equal(view.preview()?.props.audience, previewState === 'personal' ? 'support' : undefined);
+      assert.equal(view.sharedPreview(), undefined);
+      assert.deepEqual(data, before);
+    }
+  }
+});
+
+test('cancelling direct publication leaves both personal groups and shared state unchanged', async () => {
+  const view = management({ confirm: () => false });
+  const before = structuredClone(view.data);
+  view.click('development', 4, 'Опубликовать группе');
+  view.click('support', 12, 'Вернуть группе');
+  view.clickShared(23, 'Опубликовать общий HTML');
+  await view.settle();
+  assert.equal(view.confirmations.length, 3);
+  assert.equal(view.requests.length, 0);
+  assert.equal(view.preview(), undefined);
+  assert.equal(view.sharedPreview(), undefined);
+  assert.deepEqual(view.data, before);
+  assert.equal(view.button('development', 4, 'Опубликовать группе').props.disabled, false);
+  assert.equal(view.sharedButton(23, 'Опубликовать общий HTML').props.disabled, false);
+});
+
+test('external busy blocks direct publication for both personal groups and shared HTML before confirmation', async () => {
+  const view = management({ busy: true });
+  const actions = [view.button('development', 4, 'Опубликовать группе'), view.button('support', 12, 'Вернуть группе'),
+    view.sharedButton(23, 'Опубликовать общий HTML')];
+  for (const action of actions) {
+    assert.equal(action.props.disabled, true);
+    (action.props.onClick as () => void)();
+  }
+  await view.settle();
+  assert.equal(view.confirmations.length, 0);
+  assert.equal(view.requests.length, 0);
+});
+
+test('direct publication serializes same-tick double clicks across personal and shared HTML with exact CAS targets', async () => {
+  for (const first of ['development', 'support', 'shared'] as const) {
+    let finish!: (result: ManagerDashboardMutationResult | null) => void;
+    const view = management({ mutate: () => new Promise((resolve) => { finish = resolve; }) });
+    const stale = {
+      development: view.button('development', 4, 'Опубликовать группе').props.onClick as () => void,
+      support: view.button('support', 12, 'Вернуть группе').props.onClick as () => void,
+      shared: view.sharedButton(23, 'Опубликовать общий HTML').props.onClick as () => void,
+    };
+    stale[first]();
+    stale[first]();
+    for (const click of Object.values(stale)) click();
+    await view.settle();
+    assert.equal(view.confirmations.length, 1);
+    assert.equal(view.requests.length, 1);
+    assert.equal(view.requests[0].path, first === 'shared' ? '/shared/publish' : '/publish');
+    assert.deepEqual(JSON.parse(view.requests[0].init.body as string), first === 'shared'
+      ? { versionId: 23, expectedActiveVersionId: 21 }
+      : { audience: first, versionId: first === 'development' ? 4 : 12, expectedActiveVersionId: first === 'development' ? 1 : 11 });
+    assert.equal(view.button('development', 4, 'Опубликовать группе').props.disabled, true);
+    assert.equal(view.button('support', 12, 'Вернуть группе').props.disabled, true);
+    assert.equal(view.sharedButton(23, 'Опубликовать общий HTML').props.disabled, true);
+    finish(null);
+    await view.settle();
+    assert.equal(view.button('development', 4, 'Опубликовать группе').props.disabled, false);
+    assert.equal(view.sharedButton(23, 'Опубликовать общий HTML').props.disabled, false);
+    stale[first]();
+    assert.equal(view.requests.length, 2, 'failed publication releases the common guard for retry');
+    assert.equal(view.confirmations.length, 2);
+    assert.deepEqual(view.requests[1].init, view.requests[0].init);
+    finish({ message: 'Synthetic publication succeeded' });
+    await view.settle();
+  }
 });

@@ -415,7 +415,18 @@ async function main() {
               const frameSource = await preview.locator('iframe').getAttribute('src');
               assert.ok(frameSource?.includes(`audience=${audience}`) && frameSource.includes('preview=1'));
               if (audience === 'support') await page.screenshot({path: path.join(output, `${engineName}-${width}-preview.png`), fullPage: true});
-              await page.locator(`#manager-dashboard-group-${audience}`).getByRole('button', {name: 'Опубликовать группе', exact: true}).click();
+              await preview.getByRole('button', {name: 'Закрыть', exact: true}).click();
+              await preview.waitFor({state: 'detached'});
+              const publishButton = page.locator(`#manager-dashboard-group-${audience}`).getByRole('button', {name: 'Опубликовать группе', exact: true});
+              assert.equal(await publishButton.isDisabled(), false, 'closing optional preview must not block publication');
+              const beforePublish = (await page.evaluate('window.fixtureCalls')).length;
+              acceptConfirmation = false;
+              await publishButton.click();
+              assert.equal((await page.evaluate('window.fixtureCalls')).length, beforePublish, 'cancelled confirmation does not publish');
+              assert.ok(confirmations.at(-1)!.includes(`${audience}_synthetic_dashboard_uploaded.html`));
+              assert.ok(confirmations.at(-1)!.includes(audience === 'development' ? 'Менеджеры по развитию' : 'Менеджеры по сопровождению'));
+              acceptConfirmation = true;
+              await publishButton.click();
               await page.waitForFunction((expected: number) => (window as unknown as {fixtureCalls: Array<{path: string; body?: {versionId: number}}>}).fixtureCalls.some((call) => call.path === '/publish' && call.body?.versionId === expected), id);
             }
             await page.locator('#manager-dashboard-snapshots').setInputFiles([
@@ -473,12 +484,15 @@ async function main() {
             assert.deepEqual(deleteCalls.map((call: {path: string}) => call.path), ['/html?audience=development&id=2', '/html?audience=development&id=2', '/html?audience=development&id=1']);
             const commonPanel = page.locator('#manager-dashboard-shared-support');
             const sharedPrevious = commonPanel.locator('tbody tr').filter({hasText: 'support_synthetic_dashboard_shared_previous.html'});
-            assert.equal(await sharedPrevious.getByRole('button', {name: 'Вернуть общий HTML', exact: true}).isDisabled(), true);
+            assert.equal(await sharedPrevious.getByRole('button', {name: 'Вернуть общий HTML', exact: true}).isDisabled(), false, 'shared publication is available while another report is previewed');
             await sharedPrevious.getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).click();
             const sharedPreviewUrl = new URL((await previewFrame.getAttribute('src'))!, origin);
             assert.equal(sharedPreviewUrl.pathname, '/api/admin/manager-dashboard/shared/frame');
             assert.equal(sharedPreviewUrl.searchParams.get('preview'), '1');
             assert.equal(sharedPreviewUrl.searchParams.has('snapshot'), false, 'management preview cannot load shared or personal data');
+            await page.locator('#manager-dashboard-html-preview').getByRole('button', {name: 'Закрыть', exact: true}).click();
+            await previewFrame.waitFor({state: 'detached'});
+            assert.equal(await sharedPrevious.getByRole('button', {name: 'Вернуть общий HTML', exact: true}).isDisabled(), false, 'shared rollback remains available after closing preview');
             await sharedPrevious.getByRole('button', {name: 'Вернуть общий HTML', exact: true}).click();
             await page.locator('#manager-dashboard-shared-html').setInputFiles({name: 'shared-report.html', mimeType: 'text/html', buffer: Buffer.from('<html>Synthetic shared report</html>')});
             await commonPanel.getByRole('button', {name: 'Загрузить общий HTML', exact: true}).click();
