@@ -1,5 +1,6 @@
 import { getSupportSharedDashboardHtml, getSupportSharedDashboardOverview } from '@/shared/lib/db/supportSharedDashboardRepo';
 import { buildSupportSharedDashboardFrame } from '@/shared/lib/managerDashboardHtml';
+import { buildSupportSharedRoutePlannerFrame } from '@/shared/lib/supportSharedRoutePlannerHtml';
 import { PERSONAL_PRIVATE_HEADERS, parsePersonalDashboardId } from '@/shared/lib/managerDashboardSecurity';
 import { personalApiError, personalJson } from '../../_shared';
 import { requireSharedAccess, sharedQuery } from '../_shared';
@@ -19,6 +20,18 @@ export async function GET(request: Request) {
     if ((preview && access.mode !== 'manage') || (!preview && access.mode !== 'view') || (preview && snapshotId)) return personalJson({error: 'Нет доступа'}, 403);
     const version = await getSupportSharedDashboardHtml(versionId, preview, access.manager?.id);
     if (!version) return personalJson({error: 'Версия HTML недоступна'}, 404);
+    if (version.format === 'route-planner-v1') {
+      let jsonSnapshotId: number | undefined;
+      if (!preview) {
+        const overview = await getSupportSharedDashboardOverview(access.manager!.id);
+        const selected = snapshotId ? overview.jsonHistory.find((item) => item.id === snapshotId) : overview.jsonSnapshot;
+        if (overview.activeHtmlVersionId !== versionId || (snapshotId && !selected)
+          || (selected && selected.htmlVersionId !== versionId)) return personalJson({error: 'Снимок недоступен'}, 404);
+        jsonSnapshotId = selected?.id;
+      }
+      const frame = buildSupportSharedRoutePlannerFrame({versionId, preview, snapshotId: jsonSnapshotId});
+      return new Response(frame.html, {headers: {...PERSONAL_PRIVATE_HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': frame.csp}});
+    }
     let selectedId: number | undefined;
     let emptyState: 'no_snapshot' | 'expired' | undefined;
     if (!preview) {

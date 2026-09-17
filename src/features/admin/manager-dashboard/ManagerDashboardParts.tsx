@@ -135,7 +135,7 @@ export function SharedDashboardFrame({
         key={params.toString()}
         src={`/api/admin/manager-dashboard/shared/frame?${params.toString()}`}
         title={preview ? 'Предпросмотр HTML общего дашборда' : 'Общий дашборд сопровождения'}
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-modals"
         referrerPolicy="same-origin"
         allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
         allowFullScreen

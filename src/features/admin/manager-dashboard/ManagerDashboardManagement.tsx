@@ -4,6 +4,7 @@ import { PERSONAL_DASHBOARD_AUDIENCE_LABELS, type PersonalDashboardAudience } fr
 
 import { DashboardFrame, SharedDashboardFrame, formatDashboardDate, ImportResults, SnapshotStatus } from './ManagerDashboardParts';
 import { ManagerDashboardImportJournal } from './ManagerDashboardImportJournal';
+import { prepareSharedJsonUpload } from './sharedJsonUpload';
 import type { ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
@@ -27,6 +28,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
   const [fileErrors, setFileErrors] = useState<Partial<Record<PersonalDashboardAudience, string>>>({});
   const [results, setResults] = useState<ManagerDashboardImport[]>([]);
   const [sharedError, setSharedError] = useState('');
+  const [sharedJsonProgress, setSharedJsonProgress] = useState('');
   const developmentHtmlInput = useRef<HTMLInputElement>(null);
   const supportHtmlInput = useRef<HTMLInputElement>(null);
   const htmlInputs = { development: developmentHtmlInput, support: supportHtmlInput };
@@ -34,12 +36,15 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
   const sharedHtmlInput = useRef<HTMLInputElement>(null);
   const sharedSnapshotInput = useRef<HTMLInputElement>(null);
   const sharedEmailInput = useRef<HTMLInputElement>(null);
+  const sharedJsonInput = useRef<HTMLInputElement>(null);
   const previewPanel = useRef<HTMLElement>(null);
   const audienceGrid = useRef<HTMLDivElement>(null);
   const mutationRef = useRef(false);
   const busy = externalBusy || pending;
   const previewGroup = overview.groups.find((item) => item.audience === previewSelection?.audience);
   const shared = overview.supportShared;
+  const sharedActiveHtml = shared?.htmlVersions.find((version) => version.id === shared.activeHtmlVersionId);
+  const sharedUsesJson = sharedActiveHtml?.format === 'route-planner-v1';
   const sharedPreview = previewSelection?.audience === 'support-shared';
   const preview = (sharedPreview ? shared : previewGroup)?.htmlVersions.find((version) => version.id === previewSelection?.versionId);
 
@@ -239,7 +244,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     const version = shared.htmlVersions.find((item) => item.id === versionId);
     if (!version || versionId === shared.activeHtmlVersionId) return;
     const rollback = versionId === shared.previousHtmlVersionId;
-    if (!window.confirm(`${rollback ? 'Вернуть' : 'Опубликовать'} общий HTML «${version.originalName}», версия #${versionId}, для всех менеджеров по сопровождению?\n\nЛичные дашборды и личные файлы менеджеров сохранятся.`)) return;
+    if (!window.confirm(`${rollback ? 'Вернуть' : 'Опубликовать'} общий HTML «${version.originalName}», версия #${versionId}, для всех менеджеров по сопровождению?${version.format === 'route-planner-v1' ? '\n\nДля этой версии используется отдельный JSON-снимок. После публикации загрузите его ниже, если он ещё не загружен.' : ''}\n\nЛичные дашборды и личные файлы менеджеров сохранятся.`)) return;
     await mutate('/shared/publish', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ versionId, expectedActiveVersionId: shared.activeHtmlVersionId }),
@@ -250,7 +255,10 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     if (busy || mutationRef.current || !shared || versionId === shared.activeHtmlVersionId) return;
     const version = shared.htmlVersions.find((item) => item.id === versionId);
     if (!version) return;
-    if (!window.confirm(`Удалить общий HTML «${version.originalName}», версия #${versionId}?\n\nУдаление необратимо: вернуть версию можно только повторной загрузкой исходного файла. Действующий общий HTML, общий файл данных и личные дашборды сохранятся.`)) return;
+    const consequence = version.format === 'route-planner-v1'
+      ? 'Вместе с этим HTML будут удалены все привязанные к нему JSON-снимки, включая архивные. Удаление необратимо: для восстановления потребуются повторная загрузка исходного HTML и его JSON. Действующий общий HTML и его текущий JSON, а также личные дашборды сохранятся.'
+      : 'Удаление необратимо: вернуть версию можно только повторной загрузкой исходного файла. Действующий общий HTML, общий файл данных и личные дашборды сохранятся.';
+    if (!window.confirm(`Удалить общий HTML «${version.originalName}», версия #${versionId}?\n\n${consequence}`)) return;
     const result = await mutate(`/shared/html?id=${versionId}`, { method: 'DELETE' }, `Общий HTML «${version.originalName}» удалён.`);
     if (result) setPreviewSelection((current) => current?.audience === 'support-shared' && current.versionId === versionId ? null : current);
   }
@@ -278,6 +286,40 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     form.append('confirmShared', 'true');
     const result = await mutate('/shared/snapshots', { method: 'POST', body: form }, 'Общий файл опубликован для всех менеджеров по сопровождению.');
     if (result && sharedSnapshotInput.current) sharedSnapshotInput.current.value = '';
+  }
+
+  async function uploadSharedJson(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || mutationRef.current || !sharedUsesJson || !sharedActiveHtml) return;
+    const file = sharedJsonInput.current?.files?.[0];
+    if (!file) return;
+    setSharedError('');
+    if (!window.confirm(`Опубликовать JSON «${file.name}» для ВСЕХ менеджеров по сопровождению?\n\nHTML: «${sharedActiveHtml.originalName}», версия #${sharedActiveHtml.id}.\nОн заменит текущий общий JSON этой версии. Предыдущий файл сохранится, личные дашборды не изменятся.`)) return;
+    // Hold the same guard while compressing, not only while the request runs.
+    mutationRef.current = true;
+    setPending(true);
+    try {
+      setSharedJsonProgress('Подготавливаем JSON к загрузке…');
+      const body = await prepareSharedJsonUpload(file);
+      setSharedJsonProgress('Загружаем и проверяем JSON… Не закрывайте страницу.');
+      const result = await performMutation('/shared/json', {
+        method: 'POST', body,
+        headers: {
+          'Content-Type': 'application/gzip',
+          'X-KTS-Shared-Version': String(sharedActiveHtml.id),
+          'X-KTS-Shared-Expected-Snapshot': String(shared?.jsonSnapshot?.id ?? null),
+          'X-KTS-Shared-Filename': encodeURIComponent(file.name),
+          'X-KTS-Shared-Confirm': 'true',
+        },
+      }, 'Общий JSON опубликован для всех менеджеров по сопровождению. При открытии общего дашборда он загрузится автоматически.');
+      if (result && sharedJsonInput.current) sharedJsonInput.current.value = '';
+    } catch (cause) {
+      setSharedError(cause instanceof Error ? cause.message : 'Не удалось подготовить или загрузить JSON. Проверьте текущую версию перед повторной попыткой.');
+    } finally {
+      mutationRef.current = false;
+      setPending(false);
+      setSharedJsonProgress('');
+    }
   }
 
   return (
@@ -369,6 +411,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
             <input ref={sharedHtmlInput} id="manager-dashboard-shared-html" type="file" accept=".html,.htm,text/html" required disabled={busy} />
             <button className={styles.primary} type="submit" disabled={busy}>Загрузить общий HTML</button>
           </div>
+          <p className={styles.muted}>Поддерживаются HTML компоновщика рейсов с JSON-снимком и прежний формат с .ktsp. Сначала опубликуйте HTML, затем загрузите соответствующий файл данных ниже.</p>
         </form>
         {(shared?.htmlVersions.length ?? 0) > 0 ? <div className={styles.tableScroll}>
           <table className={styles.table}>
@@ -376,7 +419,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
             <tbody>{shared!.htmlVersions.map((version) => {
               const previewed = sharedPreview && previewSelection.versionId === version.id;
               return <tr key={version.id}>
-                <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ</small><small>{formatDashboardDate(version.createdAt)}</small></td>
+                <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ · {version.format === 'route-planner-v1' ? 'Компоновщик · JSON' : 'Парольный .ktsp'}</small><small>{formatDashboardDate(version.createdAt)}</small></td>
                 <td>{version.id === shared?.activeHtmlVersionId ? 'Опубликована' : version.id === shared?.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
                 <td><div className={styles.actions}>
                   <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewed} onClick={() => showSharedPreview(version.id)}>Предпросмотр общего HTML</button>
@@ -389,9 +432,25 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
               </tr>;
             })}</tbody>
           </table>
-          <p className={styles.muted}>Действующую версию общего HTML удалить нельзя — сначала опубликуйте другую.</p>
+          <p className={styles.muted}>Действующую версию общего HTML удалить нельзя — сначала опубликуйте другую.{shared?.htmlVersions.some((version) => version.format === 'route-planner-v1') ? ' При удалении неактивного HTML компоновщика удаляются и все JSON-снимки, привязанные к этой версии.' : ''}</p>
         </div> : <p className={styles.empty}>Общий HTML ещё не загружен. Загрузите файл и опубликуйте версию. Предпросмотр доступен по желанию.</p>}
-        <div className={styles.preview}>
+        {sharedUsesJson ? <div className={styles.preview}>
+          <div className={styles.sectionHeading}><div><h3>Общий файл данных JSON</h3><p>Один снимок компоновщика автоматически открывается у всех менеджеров по сопровождению. Email и пароль не нужны. Личные .ktsp не изменяются.</p></div><span className={styles.badge} data-status={shared?.jsonSnapshot ? 'current' : 'missing'}>{shared?.jsonSnapshot ? 'Данные получены' : 'Данные ещё не поступили'}</span></div>
+          {shared?.jsonSnapshot ? <dl className={styles.metadata}>
+            <div><dt>Текущий общий файл</dt><dd>{shared.jsonSnapshot.originalName}</dd></div>
+            <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(shared.jsonSnapshot.savedAt)}</dd></div>
+            <div><dt>Загружен, МСК</dt><dd>{formatDashboardDate(shared.jsonSnapshot.receivedAt)}</dd></div>
+          </dl> : null}
+          <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedJson(event)}>
+            <label htmlFor="manager-dashboard-shared-json">JSON-снимок компоновщика · до 100 МБ</label>
+            <div className={styles.actions}>
+              <input ref={sharedJsonInput} id="manager-dashboard-shared-json" type="file" accept=".json,application/json" required disabled={busy} aria-describedby="manager-dashboard-shared-json-help" />
+              <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий JSON</button>
+            </div>
+            <p id="manager-dashboard-shared-json-help" className={styles.muted}>Для HTML «{sharedActiveHtml.originalName}», версия #{sharedActiveHtml.id}. Файл сжимается перед отправкой: до 16 МБ после сжатия. Публикация происходит только после проверки; предыдущая версия данных сохраняется.</p>
+            {sharedJsonProgress ? <p className={styles.notice} role="status">{sharedJsonProgress}</p> : null}
+          </form>
+        </div> : <div className={styles.preview}>
           <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех менеджеров по сопровождению. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>
           {shared?.snapshot ? <dl className={styles.metadata}>
             <div><dt>Текущий общий файл</dt><dd>{shared.snapshot.originalName}</dd></div>
@@ -408,7 +467,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
               <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий файл</button>
             </div>
           </form>
-        </div>
+        </div>}
         {sharedError ? <p className={styles.warning} role="alert">{sharedError}</p> : null}
       </section>
 

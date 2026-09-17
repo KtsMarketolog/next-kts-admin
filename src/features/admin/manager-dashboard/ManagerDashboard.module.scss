@@ -40,7 +40,7 @@
 .error { background: #fff0ed; color: #9d3729; }
 .muted { color: #697387; font-size: 14px; }
 .empty { color: #697387; padding: 16px 0; }
-.uploadForm { display: grid; gap: 10px; padding: 18px; margin: 16px 0 22px; background: #f7f8fa; border-radius: 10px; }
+.uploadForm { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; padding: 18px; margin: 16px 0 22px; background: #f7f8fa; border-radius: 10px; overflow-wrap: anywhere; }
 .uploadForm > label { font-weight: 600; font-size: 14px; }
 .uploadForm input { max-width: 100%; padding: 4px; flex: 1; min-width: 200px; }
 .uploadForm input[type='email'] { box-sizing: border-box; width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #d4d9e3; border-radius: 8px; background: #fff; font: inherit; }

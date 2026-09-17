@@ -20,7 +20,7 @@ export function ManagerDashboardViewer({ overview, loading, onReload }: ViewerPr
   return (
     <div className={styles.stack}>
       <PersonalDashboardViewer key={managerDashboardViewIdentity(overview)} overview={overview} loading={loading} onReload={onReload} />
-      {overview.audience === 'support' ? <SharedDashboardViewer shared={overview.supportShared} loading={loading} onReload={onReload} /> : null}
+      {overview.audience === 'support' ? <SharedDashboardViewer key={overview.supportShared?.activeHtmlVersionId ?? 'unpublished'} shared={overview.supportShared} loading={loading} onReload={onReload} /> : null}
     </div>
   );
 }
@@ -96,11 +96,59 @@ function PersonalDashboardViewer({ overview, loading, onReload }: ViewerProps) {
   );
 }
 
-function SharedDashboardViewer({ shared, loading, onReload }: {
+type SharedViewerProps = {
   shared?: ManagerDashboardSupportShared | null;
   loading: boolean;
   onReload: (report?: 'personal' | 'shared') => Promise<boolean>;
-}) {
+};
+
+function SharedDashboardViewer(props: SharedViewerProps) {
+  const version = props.shared?.htmlVersions.find((item) => item.id === props.shared?.activeHtmlVersionId);
+  return version?.format === 'route-planner-v1'
+    ? <SharedJsonDashboardViewer {...props} versionId={version.id} />
+    : <SharedKtspDashboardViewer {...props} />;
+}
+
+function SharedJsonDashboardViewer({ shared, loading, onReload, versionId }: SharedViewerProps & { versionId: number }) {
+  const [historicalId, setHistoricalId] = useState<number | null>(null);
+  const [revision, setRevision] = useState(0);
+  const history = shared?.jsonHistory?.filter((item) => item.htmlVersionId === versionId) ?? [];
+  const current = shared?.jsonSnapshot?.htmlVersionId === versionId ? shared.jsonSnapshot : null;
+  const selected = historicalId ? history.find((snapshot) => snapshot.id === historicalId) ?? current : current;
+  const isHistorical = Boolean(selected && current && selected.id !== current.id);
+  return (
+    <section className={styles.panel} aria-labelledby="manager-dashboard-shared-heading">
+      <div className={styles.sectionHeading}>
+        <div><h2 id="manager-dashboard-shared-heading">Общий дашборд</h2><p>Один отчёт для всех менеджеров по сопровождению. Опубликованный JSON загружается автоматически, без email и пароля.</p></div>
+        <button className={styles.secondary} type="button" disabled={loading} onClick={async () => {
+          if (await onReload('shared')) setRevision((value) => value + 1);
+        }}>{loading ? 'Обновляем…' : 'Перезагрузить общий отчёт'}</button>
+      </div>
+      <span className={styles.badge} data-status={selected ? 'current' : 'missing'}>{selected ? 'Данные получены' : 'Данные ещё не поступили'}</span>
+      {selected ? <>
+        <dl className={styles.metadata}>
+          <div><dt>Общий файл</dt><dd>{selected.originalName}</dd></div>
+          <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(selected.savedAt)}</dd></div>
+          <div><dt>Загружен, МСК</dt><dd>{formatDashboardDate(selected.receivedAt)}</dd></div>
+        </dl>
+        <p className={styles.notice}>Изменения и расчёты внутри компоновщика не меняют опубликованный файл для других менеджеров.</p>
+        {isHistorical ? <p className={styles.warning}>Открыт архивный общий файл. Он не заменяет текущие данные.</p> : null}
+      </> : <p className={styles.empty}>JSON для этой версии общего HTML ещё не загружен администратором.</p>}
+      {history.some((item) => item.id !== current?.id) ? <div className={styles.actions}>
+        <label className={styles.inlineLabel} htmlFor="manager-dashboard-shared-history">Версия общих данных</label>
+        <select id="manager-dashboard-shared-history" value={isHistorical ? historicalId! : ''} onChange={(event) => setHistoricalId(event.target.value ? Number(event.target.value) : null)}>
+          <option value="">Текущий общий файл</option>
+          {history.filter((snapshot) => snapshot.id !== current?.id).map((snapshot) => (
+            <option key={snapshot.id} value={snapshot.id}>{formatDashboardDate(snapshot.savedAt)} — {snapshot.originalName}</option>
+          ))}
+        </select>
+      </div> : null}
+      <div className={styles.preview}><SharedDashboardFrame versionId={versionId} snapshotId={selected?.id} revision={revision} /></div>
+    </section>
+  );
+}
+
+function SharedKtspDashboardViewer({ shared, loading, onReload }: SharedViewerProps) {
   const [historicalId, setHistoricalId] = useState<number | null>(null);
   const [revision, setRevision] = useState(0);
   const selected = historicalId ? shared?.history.find((snapshot) => snapshot.id === historicalId) ?? shared?.snapshot : shared?.snapshot;

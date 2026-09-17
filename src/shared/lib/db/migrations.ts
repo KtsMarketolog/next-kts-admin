@@ -61,6 +61,38 @@ export async function applySupportSharedDashboardMigration(client: PoolClient) {
   `);
 }
 
+/** Existing shared KTSP reports remain valid; JSON files belong to a specific new HTML version. */
+export async function applySupportSharedRoutePlannerMigration(client: PoolClient) {
+  await client.query(`
+    alter table support_shared_dashboard_html_versions
+      add column format text not null default 'ktsp' check (format in ('ktsp','route-planner-v1'));
+    create table support_shared_dashboard_json_snapshots (
+      id bigserial primary key,
+      html_version_id bigint not null references support_shared_dashboard_html_versions(id) on delete cascade,
+      original_name text not null check (char_length(original_name) between 1 and 255),
+      file_size bigint not null check (file_size between 1 and 104857600),
+      sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+      storage_path text not null unique check (storage_path ~ '^[0-9a-f]{2}/[0-9a-f]{64}-[0-9a-f-]{36}\\.bin$'),
+      saved_at timestamptz not null,
+      received_at timestamptz not null default now(),
+      uploaded_by text not null,
+      unique (html_version_id,id),
+      unique (html_version_id,sha256)
+    );
+    create table support_shared_dashboard_json_state (
+      html_version_id bigint primary key references support_shared_dashboard_html_versions(id) on delete cascade,
+      active_snapshot_id bigint,
+      previous_snapshot_id bigint,
+      updated_by text,
+      updated_at timestamptz not null default now(),
+      foreign key (html_version_id,active_snapshot_id) references support_shared_dashboard_json_snapshots(html_version_id,id) on delete no action deferrable initially deferred,
+      foreign key (html_version_id,previous_snapshot_id) references support_shared_dashboard_json_snapshots(html_version_id,id) on delete no action deferrable initially deferred,
+      check (active_snapshot_id is null or previous_snapshot_id is null or active_snapshot_id <> previous_snapshot_id)
+    );
+    create index support_shared_dashboard_json_versions_idx on support_shared_dashboard_json_snapshots(html_version_id,id desc);
+  `);
+}
+
 /** Kept independently callable for isolated legacy-schema upgrade verification. */
 export async function applyPersonalDashboardAudienceMigration(client: PoolClient) {
   await client.query(`
@@ -727,6 +759,11 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
     id: '202609160001_support_shared_dashboard',
     description: 'Add an independent shared support HTML report and encrypted snapshot without changing personal dashboards',
     apply: applySupportSharedDashboardMigration,
+  },
+  {
+    id: '202609170001_support_shared_route_planner',
+    description: 'Add HTML-bound route planner JSON files without changing encrypted shared or personal snapshots',
+    apply: applySupportSharedRoutePlannerMigration,
   },
 ];
 

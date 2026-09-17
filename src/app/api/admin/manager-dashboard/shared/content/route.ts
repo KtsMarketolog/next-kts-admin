@@ -1,5 +1,6 @@
 import { getSupportSharedDashboardHtml } from '@/shared/lib/db/supportSharedDashboardRepo';
 import { injectPersonalDashboardAdapter, personalHtmlCsp } from '@/shared/lib/managerDashboardHtml';
+import { injectSupportSharedRoutePlannerAdapter, supportSharedRoutePlannerCsp } from '@/shared/lib/supportSharedRoutePlannerHtml';
 import { PERSONAL_PRIVATE_HEADERS, parsePersonalDashboardId } from '@/shared/lib/managerDashboardSecurity';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { personalApiError, personalJson } from '../../_shared';
@@ -30,8 +31,10 @@ export async function GET(request: Request) {
     }
     const version = await getSupportSharedDashboardHtml(versionId, preview, access.manager?.id);
     if (!version) return personalJson({error: 'Версия HTML недоступна'}, 404);
-    const html = injectPersonalDashboardAdapter(version.htmlContent, 'support_shared');
+    const routePlanner = version.format === 'route-planner-v1';
+    const html = routePlanner ? injectSupportSharedRoutePlannerAdapter(version.htmlContent)
+      : injectPersonalDashboardAdapter(version.htmlContent, 'support_shared');
     return new Response(html, {headers: {...PERSONAL_PRIVATE_HEADERS, 'Content-Type': 'text/html; charset=utf-8',
-      'Content-Security-Policy': personalHtmlCsp(html), 'X-DNS-Prefetch-Control': 'off', 'Referrer-Policy': 'no-referrer'}});
+      'Content-Security-Policy': routePlanner ? supportSharedRoutePlannerCsp(html) : personalHtmlCsp(html), 'X-DNS-Prefetch-Control': 'off', 'Referrer-Policy': 'no-referrer'}});
   } catch (error) { return personalApiError(error); }
 }

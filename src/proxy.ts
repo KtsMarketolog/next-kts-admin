@@ -138,6 +138,8 @@ export const config = {
       source: '/api/admin/top-dashboard/blocks/:blockId/data',
       missing: [{ type: 'header', key: 'x-kts-top-data-upload', value: '1' }],
     },
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$).*)',
+    // This route authenticates, rate-limits and checks Origin before reading
+    // its bounded gzip stream. Avoid Next proxy cloning/buffering that stream.
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$|api/admin/manager-dashboard/shared/json/?$).*)',
   ],
 };

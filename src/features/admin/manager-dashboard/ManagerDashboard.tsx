@@ -16,7 +16,8 @@ const API_PATH = '/api/admin/manager-dashboard';
 function reportVersionsChanged(next: Extract<ManagerDashboardOverview, { mode: 'view' }>, current: Extract<ManagerDashboardOverview, { mode: 'view' }>) {
   return next.htmlVersion?.id !== current.htmlVersion?.id || next.snapshot?.id !== current.snapshot?.id
     || next.supportShared?.activeHtmlVersionId !== current.supportShared?.activeHtmlVersionId
-    || next.supportShared?.snapshot?.id !== current.supportShared?.snapshot?.id;
+    || next.supportShared?.snapshot?.id !== current.supportShared?.snapshot?.id
+    || next.supportShared?.jsonSnapshot?.id !== current.supportShared?.jsonSnapshot?.id;
 }
 
 async function readResponse(response: Response) {
@@ -93,7 +94,8 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
         const next = await readResponse(response) as ManagerDashboardOverview;
         if (!disposed && next.mode === 'view') {
           const sharedChanged = next.supportShared?.activeHtmlVersionId !== overview.supportShared?.activeHtmlVersionId
-            || next.supportShared?.snapshot?.id !== overview.supportShared?.snapshot?.id;
+            || next.supportShared?.snapshot?.id !== overview.supportShared?.snapshot?.id
+            || next.supportShared?.jsonSnapshot?.id !== overview.supportShared?.jsonSnapshot?.id;
           if (managerDashboardViewIdentity(next) !== managerDashboardViewIdentity(overview)) {
             // Clear personal data immediately when its recipient changes. A support
             // manager's open shared report keeps its own explicit refresh boundary.
@@ -171,7 +173,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {message ? <p className={styles.notice} role="status">{message}</p> : null}
       {updateAvailable ? <div className={styles.notice} role="status">
-        <p>Доступна новая версия дашборда или данных. Обновите отчёт, когда будете готовы; пароль снимка потребуется ввести снова.</p>
+        <p>Доступна новая версия дашборда или данных. Обновите отчёт, когда будете готовы. Для зашифрованного .ktsp пароль потребуется ввести снова; общий JSON открывается без пароля.</p>
         <button className={styles.secondary} type="button" disabled={loading || busy} onClick={() => void refresh()}>Открыть обновление</button>
       </div> : null}
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}

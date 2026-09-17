@@ -4,6 +4,11 @@
  */
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 
 import { query, withTransaction } from '../src/shared/lib/db/client';
@@ -21,7 +26,10 @@ import {
   activateSupportSharedDashboardHtml, createSupportSharedDashboardHtml, deleteSupportSharedDashboardHtml,
   getSupportSharedDashboardHtml, getSupportSharedDashboardOverview, getSupportSharedDashboardSnapshot,
   importSupportSharedDashboardSnapshot,
+  assertSupportSharedJsonUploadTarget, importSupportSharedDashboardJson, getSupportSharedDashboardJsonSnapshot,
 } from '../src/shared/lib/db/supportSharedDashboardRepo';
+import { prepareSupportSharedRoutePlannerUpload } from '../src/shared/lib/supportSharedRoutePlannerData';
+import { deleteTopDashboardDataFiles } from '../src/shared/lib/topDashboardDataStorage';
 
 function guard() {
   assert.equal(process.env.KTS_PERSONAL_TEST, '1', 'Isolated integration tests require KTS_PERSONAL_TEST=1');
@@ -560,7 +568,8 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         filename: 'shared.ktsp', bytes: data, email, actorId: 'admin:integration-test', expectedActiveSnapshotId,
       });
       const uploadHtml = (label: string) => {
-        const htmlContent = `<!doctype html><html><body>Shared ${label}</body></html>`;
+        const htmlContent = `<!doctype html><html><body>Shared ${label}<input id="fileInp"><script>
+          let FILE=null; const emailHash='kts-personal'; function gate(){} function tryOpen(){} function decryptFile(){}</script></body></html>`;
         return createSupportSharedDashboardHtml({ originalName: `shared-${label}.html`, htmlContent,
           fileSize: Buffer.byteLength(htmlContent), sha256: createHash('sha256').update(htmlContent).digest('hex'), actorId: 'admin:integration-test' });
       };
@@ -644,6 +653,128 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal((await getSupportSharedDashboardOverview()).htmlVersions.length, 50);
       assert.equal((await getSupportSharedDashboardOverview()).activeHtmlVersionId, secondHtml.id);
       assert.deepEqual((await personalState()).rows, before, 'Shared report writes and retention must preserve every personal HTML, snapshot, state and import');
+    });
+    await t.test('route planner JSON binds exact HTML, streams verified private bytes, preserves KTSP, and serializes CAS/retention', async () => {
+      const storageDirectory = await mkdtemp(path.join(tmpdir(), 'kts-shared-json-db-'));
+      const previousDirectory = process.env.TOP_DASHBOARD_DATA_DIR;
+      process.env.TOP_DASHBOARD_DATA_DIR = storageDirectory;
+      const preserved = async () => (await query(`select
+        (select json_agg(s order by s.id) from personal_dashboard_snapshots s) as personal,
+        (select json_agg(s order by s.id) from support_shared_dashboard_snapshots s) as shared_ktsp`)).rows;
+      const before = await preserved();
+      try {
+        const overview = await getSupportSharedDashboardOverview();
+        const legacyHtmlId = overview.activeHtmlVersionId!;
+        assert.equal(overview.htmlVersions.every((version) => version.format === 'ktsp'), true);
+        assert.deepEqual(overview.jsonHistory, []);
+        assert.equal(overview.jsonSnapshot, null);
+        for (const draft of overview.htmlVersions.filter((version) => version.id !== legacyHtmlId).slice(0, 2)) {
+          await deleteSupportSharedDashboardHtml({versionId: draft.id, actorId: 'admin:integration-test'});
+        }
+        const plannerHtml = async (label: string) => {
+          const htmlContent = `<html><body>${label}<input id="snapIn"><script>
+            function loadSnapshot(j){S.orders=revive(j.orders)} function handleFiles(list){}
+            window.UI={}; const example={app:'компоновщик'};</script></body></html>`;
+          return createSupportSharedDashboardHtml({originalName: 'planner.html', htmlContent, fileSize: Buffer.byteLength(htmlContent),
+            sha256: createHash('sha256').update(htmlContent).digest('hex'), actorId: 'admin:integration-test'});
+        };
+        const firstHtml = await plannerHtml('first');
+        const secondHtml = await plannerHtml('second');
+        assert.equal(firstHtml.format, 'route-planner-v1');
+        const support = await manager('json-support', 'support_manager', true, '');
+        const developer = await manager('json-development');
+        await assert.rejects(() => assertSupportSharedJsonUploadTarget(firstHtml.id, null), {code: 'STATE_CONFLICT'});
+        await activateSupportSharedDashboardHtml({versionId: firstHtml.id, expectedActiveVersionId: legacyHtmlId, actorId: 'admin:integration-test'});
+        await assertSupportSharedJsonUploadTarget(firstHtml.id, null);
+        const source = (number: number) => Buffer.from(JSON.stringify({snapshot: true, app: 'компоновщик',
+          savedAt: new Date(Date.UTC(2026, 8, 17, 5, number)).toISOString(), orders: [{id: `synthetic-${number}`}],
+          confirmed: [], zones: [], addrs: [], aliases: {}, contacts: [], tk: [], nomen: [], depots: [],
+          opt: {maxPoints: 8, maxWeight: 1000, maxVol: 10, innerKm: 5, splitByOrg: false, splitByWh: true}, winding: 1, rate: 1,
+          f: {from: '', to: '', ordFrom: '', ordTo: '', zone: [], org: [], dir: [], wh: [], author: [], onlyConfirmed: false}, files: [], diag: {}}));
+        const upload = async (number: number, expectedActiveSnapshotId: number | null, htmlVersionId = firstHtml.id) => {
+          const body = gzipSync(source(number));
+          const prepared = await prepareSupportSharedRoutePlannerUpload(new Request('http://localhost/synthetic', {
+            method: 'POST', headers: {'content-type': 'application/gzip'}, body,
+          }));
+          const storagePath = await prepared.pending.commit();
+          try {
+            const result = await importSupportSharedDashboardJson({htmlVersionId, expectedActiveSnapshotId, originalName: 'synthetic.json',
+              savedAt: prepared.savedAt, fileSize: prepared.pending.fileSize, sha256: prepared.pending.sha256, storagePath, actorId: 'admin:integration-test'});
+            if (result.status === 'imported') prepared.pending.preserve();
+            await deleteTopDashboardDataFiles(result.prunedStoragePaths);
+            return {...result, storagePath};
+          } finally { await prepared.pending.discard(); }
+        };
+        const first = await upload(1, null);
+        assert.equal(first.status, 'imported');
+        const read = await getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id);
+        assert.ok(read);
+        assert.equal(await new Response(Readable.toWeb(read.stream) as ReadableStream<Uint8Array>).text(), source(1).toString());
+        assert.equal(read.htmlVersionId, firstHtml.id);
+        const firstStoredPath = path.join(storageDirectory, first.storagePath);
+        await writeFile(firstStoredPath, Buffer.alloc(source(1).length));
+        await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id), {code: 'SNAPSHOT_INTEGRITY'});
+        await writeFile(firstStoredPath, source(1));
+        assert.equal((await getSupportSharedDashboardOverview(support.id)).jsonSnapshot?.id, first.snapshot.id);
+        await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(developer.id, firstHtml.id), {code: 'NOT_FOUND'});
+        await query(`update wholesale_managers set is_active=false where id=$1`, [support.id]);
+        await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id), {code: 'NOT_FOUND'});
+        await query(`update wholesale_managers set is_active=true where id=$1`, [support.id]);
+        assert.equal((await upload(1, first.snapshot.id)).status, 'duplicate');
+        await assert.rejects(() => upload(0, first.snapshot.id), {code: 'STALE_SNAPSHOT'});
+        const raced = await Promise.allSettled([upload(2, first.snapshot.id), upload(3, first.snapshot.id)]);
+        assert.equal(raced.filter((result) => result.status === 'fulfilled').length, 1);
+        const failed = raced.find((result) => result.status === 'rejected');
+        assert.ok(failed?.status === 'rejected');
+        assert.equal(failed.reason.code, 'STATE_CONFLICT');
+        let active = (await getSupportSharedDashboardOverview()).jsonSnapshot!.id;
+        const duplicateRace = await Promise.all([upload(4, active), upload(4, active)]);
+        assert.deepEqual(duplicateRace.map((result) => result.status).sort(), ['duplicate', 'imported']);
+        active = duplicateRace[0].snapshot.id;
+        for (const number of [5, 6, 7, 8]) active = (await upload(number, active)).snapshot.id;
+        const retained = await getSupportSharedDashboardOverview();
+        assert.equal(retained.jsonHistory.length, 5);
+        assert.equal(retained.jsonHistory[0].status, 'active');
+        assert.equal(retained.jsonHistory[1].status, 'previous');
+        assert.equal(await getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id, first.snapshot.id), null);
+        await assert.rejects(() => access(path.join(storageDirectory, first.storagePath)), {code: 'ENOENT'});
+
+        // Reserve synthetic metadata only to exercise the global byte cap without allocating a GiB.
+        const reserved = await query<{id: string}>(`insert into support_shared_dashboard_json_snapshots
+          (html_version_id,original_name,file_size,sha256,storage_path,saved_at,uploaded_by)
+          select $1,'quota-fixture.json',104857600,lpad(n::text,64,'0'),
+            '00/' || lpad(n::text,64,'0') || '-00000000-0000-0000-0000-000000000000.bin',now(),'admin:integration-test'
+          from generate_series(1,11) n returning id::text`, [secondHtml.id]);
+        try {
+          await assert.rejects(() => upload(9, active), {code: 'SNAPSHOT_QUOTA'});
+          assert.equal((await getSupportSharedDashboardOverview()).jsonSnapshot!.id, active);
+          assert.equal((await getSupportSharedDashboardOverview()).jsonHistory.length, 5);
+        } finally {
+          await query(`delete from support_shared_dashboard_json_snapshots where id=any($1::bigint[])`, [reserved.rows.map((row) => row.id)]);
+        }
+
+        await activateSupportSharedDashboardHtml({versionId: secondHtml.id, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test'});
+        assert.equal((await getSupportSharedDashboardOverview()).jsonSnapshot, null);
+        await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id, active), {code: 'STATE_CONFLICT'});
+        assert.equal(await getSupportSharedDashboardJsonSnapshot(support.id, secondHtml.id, active), null);
+        const second = await upload(10, null, secondHtml.id);
+        await assert.rejects(() => query(`update support_shared_dashboard_json_state set active_snapshot_id=$2 where html_version_id=$1`, [firstHtml.id, second.snapshot.id]), {code: '23503'});
+        await activateSupportSharedDashboardHtml({versionId: firstHtml.id, expectedActiveVersionId: secondHtml.id, actorId: 'admin:integration-test'});
+        assert.equal((await getSupportSharedDashboardOverview()).jsonSnapshot?.id, active, 'HTML rollback recovers only its own JSON');
+        await deleteSupportSharedDashboardHtml({versionId: secondHtml.id, actorId: 'admin:integration-test'});
+        await assert.rejects(() => access(path.join(storageDirectory, second.storagePath)), {code: 'ENOENT'});
+        await activateSupportSharedDashboardHtml({versionId: legacyHtmlId, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test'});
+        const legacy = await getSupportSharedDashboardOverview();
+        assert.equal(legacy.jsonSnapshot, null);
+        assert.deepEqual(legacy.jsonHistory, []);
+        assert.equal(legacy.snapshot?.id, overview.snapshot?.id);
+        await deleteSupportSharedDashboardHtml({versionId: firstHtml.id, actorId: 'admin:integration-test'});
+        assert.deepEqual(await preserved(), before);
+      } finally {
+        if (previousDirectory === undefined) delete process.env.TOP_DASHBOARD_DATA_DIR;
+        else process.env.TOP_DASHBOARD_DATA_DIR = previousDirectory;
+        await rm(storageDirectory, {recursive: true, force: true});
+      }
     });
   } finally {
     await globalThis.__ktsPgPool?.end();

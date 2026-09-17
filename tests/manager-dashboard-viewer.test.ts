@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import test from 'node:test';
 
 import { createElement } from 'react';
@@ -10,6 +11,7 @@ import ts from 'typescript';
 
 import * as audiences from '../src/shared/lib/managerDashboardAudience';
 import { isManagerRole } from '../src/app/admin/adminPanelConfig';
+import * as sharedJsonUpload from '../src/features/admin/manager-dashboard/sharedJsonUpload';
 
 import type { ManagerDashboardOverview, ManagerDashboardSnapshot } from '../src/features/admin/manager-dashboard/types';
 
@@ -178,6 +180,7 @@ function management(options: {
     react: hooks, 'react/jsx-runtime': jsx, './ManagerDashboard.module.scss': { default: {} },
     './ManagerDashboardParts': parts, '@/shared/lib/managerDashboardAudience': audiences,
     './ManagerDashboardImportJournal': { ManagerDashboardImportJournal },
+    './sharedJsonUpload': sharedJsonUpload,
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -484,6 +487,96 @@ function sharedOverview(): NonNullable<Manage['supportShared']> {
   };
 }
 
+function sharedJsonOverview(): NonNullable<Manage['supportShared']> {
+  const shared = sharedOverview();
+  const current = {
+    id: 217, htmlVersionId: 31, originalName: 'route-current.json', fileSize: 1234, sha256: 'a'.repeat(64),
+    savedAt: '2026-09-17T05:28:47Z', receivedAt: '2026-09-17T06:00:00Z', status: 'active' as const,
+  };
+  return { ...shared, htmlVersions: shared.htmlVersions.map((item) => ({ ...item, format: 'route-planner-v1' })),
+    jsonSnapshot: current, jsonHistory: [current, { ...current, id: 216, originalName: 'route-previous.json', status: 'previous' }],
+  };
+}
+
+test('shared JSON mode hides legacy email/password fields and binds upload to the active HTML version', () => {
+  const overview = { ...managementOverview(), supportShared: sharedJsonOverview() };
+  const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview, busy: false, mutate: async () => null }));
+  assert.match(html, /manager-dashboard-shared-json/);
+  assert.match(html, /JSON-снимок компоновщика · до 100 МБ/);
+  assert.match(html, /route-current.json/);
+  assert.doesNotMatch(html, /manager-dashboard-shared-email|manager-dashboard-shared-snapshot|shared-current.ktsp/);
+  for (const audience of ['development', 'support']) assert.match(html, new RegExp(`manager-dashboard-html-${audience}`));
+  assert.match(html, /manager-dashboard-snapshots/);
+});
+
+test('shared JSON viewer uses JSON metadata and frame ID without email/password or stale legacy data', () => {
+  const html = render({ ...base, audience: 'support', bindingStatus: 'missing_email', email: '', supportShared: sharedJsonOverview() });
+  assert.match(html, /route-current.json|route-previous.json/);
+  assert.doesNotMatch(html, /shared-current.ktsp|shared-previous.ktsp|введите пароль от общего файла/);
+  assert.match(html, /JSON загружается автоматически, без email и пароля/);
+  const urls = [...html.matchAll(/<iframe[^>]+src="([^"]+)"/g)].map((match) => new URL(match[1].replaceAll('&amp;', '&'), 'https://example.test'));
+  assert.equal(urls[1].searchParams.get('snapshot'), '217');
+  assert.equal(urls[1].searchParams.get('version'), '31');
+  const shared = sharedJsonOverview();
+  shared.jsonSnapshot!.htmlVersionId = 99;
+  shared.jsonHistory!.forEach((item) => { item.htmlVersionId = 99; });
+  const incompatible = render({ ...base, audience: 'support', supportShared: shared });
+  assert.match(incompatible, /JSON для этой версии общего HTML ещё не загружен/);
+  assert.doesNotMatch(incompatible, /route-current.json|route-previous.json|snapshot=217|snapshot=216/);
+  assert.doesNotMatch(render({ ...base, supportShared: sharedJsonOverview() }), /route-current.json|shared\/frame/);
+});
+
+test('shared JSON upload sends one bounded gzip request with exact version and snapshot CAS, without recipient email', async () => {
+  const overview = { ...managementOverview(), supportShared: sharedJsonOverview() };
+  const view = management({ overview });
+  const file = new File(['{"snapshot":true,"orders":[]}'], 'общий_снимок.json');
+  view.selectFiles('manager-dashboard-shared-json', [file]);
+  view.selectFiles('manager-dashboard-html-support', [new File(['html'], 'personal.html')]);
+  view.submit('manager-dashboard-shared-json');
+  view.submit('manager-dashboard-shared-json');
+  (sharedVersionButton(view, 33, 'Опубликовать общий HTML').props.onClick as () => void)();
+  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-html-support').props.disabled, true);
+  for (let attempt = 0; attempt < 100 && view.requests.length === 0; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+  await view.settle();
+  assert.equal(view.requests.length, 1);
+  assert.equal(view.requests[0].path, '/shared/json');
+  assert.deepEqual(view.requests[0].init.headers, {
+    'Content-Type': 'application/gzip', 'X-KTS-Shared-Version': '31', 'X-KTS-Shared-Expected-Snapshot': '217',
+    'X-KTS-Shared-Filename': encodeURIComponent(file.name), 'X-KTS-Shared-Confirm': 'true',
+  });
+  assert.equal(gunzipSync(Buffer.from(await (view.requests[0].init.body as Blob).arrayBuffer())).toString(), await file.text());
+  assert.equal(view.inputs.get('manager-dashboard-shared-json')!.value, '');
+  assert.equal(view.inputs.get('manager-dashboard-html-support')!.value, 'synthetic-selection');
+  assert.equal(view.confirmations.length, 1);
+  assert.match(view.confirmations[0], /ВСЕХ менеджеров по сопровождению/);
+  assert.match(view.confirmations[0], /shared-31.html/);
+});
+
+test('shared JSON cancelled confirmation and preparation failure preserve files and do not mutate', async () => {
+  for (const confirm of [false, true]) {
+    const view = management({ overview: { ...managementOverview(), supportShared: sharedJsonOverview() }, confirm: () => confirm });
+    view.selectFiles('manager-dashboard-shared-json', [new File(['bad extension'], 'personal.ktsp')]);
+    view.submit('manager-dashboard-shared-json');
+    await view.settle();
+    assert.equal(view.requests.length, 0);
+    assert.equal(view.inputs.get('manager-dashboard-shared-json')!.value, 'synthetic-selection');
+    assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-shared-json').props.disabled, false);
+    if (confirm) assert.match(text(view.render()), /JSON-снимок.*100 МБ/);
+  }
+});
+
+test('deleting inactive route planner HTML discloses removal of its bound JSON history while protecting the active report', async () => {
+  const view = management({ overview: { ...managementOverview(), supportShared: sharedJsonOverview() } });
+  (sharedVersionButton(view, 33, 'Удалить').props.onClick as () => void)();
+  await view.settle();
+  assert.equal(view.requests[0].path, '/shared/html?id=33');
+  assert.match(view.confirmations[0], /shared-33.html/);
+  assert.match(view.confirmations[0], /удалены все привязанные к нему JSON-снимки, включая архивные/);
+  assert.match(view.confirmations[0], /повторная загрузка исходного HTML и его JSON/);
+  assert.match(view.confirmations[0], /Действующий общий HTML и его текущий JSON, а также личные дашборды сохранятся/);
+  assert.match(text(view.render()), /При удалении неактивного HTML компоновщика удаляются и все JSON-снимки/);
+});
+
 function sharedVersionButton(view: ReturnType<typeof management>, id: number, label: string) {
   const section = view.find('section', (props) => props.id === 'manager-dashboard-shared-support');
   const row = elements(section).find((node) => node.type === 'tr' && elements(node).some((child) => child.type === 'strong' && text(child) === `shared-${id}.html`));
@@ -519,7 +612,7 @@ test('shared frame preserves the download sandbox and always omits snapshot data
   assert.match(html, /shared\/frame\?version=31/);
   assert.match(html, /preview=1/);
   assert.match(html, /revision=4/);
-  assert.match(html, /sandbox="allow-scripts allow-same-origin"/);
+  assert.match(html, /sandbox="allow-scripts allow-same-origin allow-modals"/);
   assert.doesNotMatch(html, /snapshot=|audience=|allow-popups|allow-downloads/);
 });
 
@@ -663,7 +756,10 @@ test('personal and shared history, reload and binding changes keep independent f
       if (!stateByComponent.has(componentKey)) stateByComponent.set(componentKey, []);
       slots = stateByComponent.get(componentKey)!;
       cursor = 0;
-      return elements(child.type(child.props));
+      const rendered = child.type(child.props);
+      // The shared wrapper selects either the legacy password viewer or the
+      // JSON viewer. Both keep their state underneath the version-keyed wrapper.
+      return elements(typeof rendered.type === 'function' ? rendered.type(rendered.props) : rendered);
     });
   };
   const node = (predicate: (value: Element) => boolean) => {

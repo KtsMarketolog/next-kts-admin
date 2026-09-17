@@ -191,6 +191,15 @@ async function inspectReferences(client) {
     from public.top_dashboard_block_data_versions where storage_path is not null
     order by storage_path collate "C"
   `)).rows.map((row) => ({ ...row, size: Number(row.size) }));
+  // Shared route-planner files use the same private, backed-up storage root.
+  // Keep the existing manifest shape so pre-migration backups still restore.
+  const sharedTable = await client.query("select to_regclass('public.support_shared_dashboard_json_snapshots') as name");
+  if (sharedTable.rows[0]?.name) {
+    const shared = await client.query(`select storage_path as path, file_size::text as size, sha256
+      from public.support_shared_dashboard_json_snapshots order by storage_path collate "C"`);
+    topDashboard.push(...shared.rows.map((row) => ({ ...row, size: Number(row.size) })));
+    topDashboard.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  }
   const clientDocuments = (await client.query(`
     select file_path as path, file_size::text as size
     from public.client_documents order by file_path collate "C", id

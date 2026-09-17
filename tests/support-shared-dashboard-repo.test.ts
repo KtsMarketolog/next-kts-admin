@@ -52,6 +52,11 @@ function repository(steps: Step[] = []) {
   } };
   const repo = compile<typeof import('../src/shared/lib/db/supportSharedDashboardRepo')>('../src/shared/lib/db/supportSharedDashboardRepo.ts', {
     'node:crypto': crypto, '../managerDashboardDomain': domain,
+    '../supportSharedRoutePlannerHtml': { detectSupportSharedHtmlFormat: () => 'ktsp' },
+    '../supportSharedRoutePlannerData': { SUPPORT_SHARED_JSON_MAX_BYTES: 100 * 1024 * 1024,
+      SUPPORT_SHARED_JSON_MAX_VERSIONS: 5, SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES: 1024 * 1024 * 1024,
+      openVerifiedSupportSharedRoutePlannerFile: async () => assert.fail('unexpected JSON file read') },
+    '../topDashboardDataStorage': { deleteTopDashboardDataFiles: async () => {} },
     './client': { withTransaction: async (callback: (value: typeof client) => unknown) => { transactions++; return callback(client); } },
     './schema': { ensureSiteSchema: async () => { schemaCalls++; } },
   });

@@ -6,6 +6,7 @@ import * as jsx from 'react/jsx-runtime';
 import ts from 'typescript';
 
 import * as audiences from '../src/shared/lib/managerDashboardAudience';
+import * as sharedJsonUpload from '../src/features/admin/manager-dashboard/sharedJsonUpload';
 import type { ManagerDashboardMutationResult, ManagerDashboardOverview } from '../src/features/admin/manager-dashboard/types';
 
 // Exercise the real management component and event handlers using synthetic
@@ -80,6 +81,7 @@ function management(options: {
     react: hooks, 'react/jsx-runtime': jsx, './ManagerDashboard.module.scss': { default: {} },
     './ManagerDashboardParts': parts, '@/shared/lib/managerDashboardAudience': audiences,
     './ManagerDashboardImportJournal': { ManagerDashboardImportJournal() {} },
+    './sharedJsonUpload': sharedJsonUpload,
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },

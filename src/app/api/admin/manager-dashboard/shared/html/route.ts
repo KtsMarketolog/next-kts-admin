@@ -1,5 +1,5 @@
 import { createSupportSharedDashboardHtml, deleteSupportSharedDashboardHtml } from '@/shared/lib/db/supportSharedDashboardRepo';
-import { isPersonalDashboardHtml } from '@/shared/lib/managerDashboardHtml';
+import { detectSupportSharedHtmlFormat } from '@/shared/lib/supportSharedRoutePlannerHtml';
 import { parsePersonalDashboardId, readPersonalRequestBytes } from '@/shared/lib/managerDashboardSecurity';
 import { readTopDashboardHtmlUpload } from '../../../top-dashboard/blocks/routeUtils';
 import { personalApiError, personalJson } from '../../_shared';
@@ -15,8 +15,8 @@ export async function POST(request: Request) {
     const bytes = await readPersonalRequestBytes(request, 5 * 1024 * 1024 + 256 * 1024);
     const result = await readTopDashboardHtmlUpload(new Request(request.url, {method: 'POST', headers: request.headers, body: bytes as Uint8Array<ArrayBuffer>}));
     if (result.error) return result.error;
-    if (!isPersonalDashboardHtml(result.upload.htmlContent)) {
-      return personalJson({error: 'Нужен совместимый HTML с контрактом kts-personal v1, как для личных дашбордов'}, 400);
+    if (!detectSupportSharedHtmlFormat(result.upload.htmlContent)) {
+      return personalJson({error: 'Нужен HTML личного отчёта kts-personal v1 или компоновщика рейсов'}, 400);
     }
     const version = await createSupportSharedDashboardHtml({...result.upload, actorId: access.actorId});
     return personalJson({version}, 201);

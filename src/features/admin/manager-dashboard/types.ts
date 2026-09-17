@@ -15,6 +15,7 @@ export type ManagerDashboardHtmlVersion = {
   fileSize: number;
   createdAt: string;
   firstPublishedAt?: string | null;
+  format?: 'ktsp' | 'route-planner-v1';
 };
 
 export type ManagerDashboardImport = {
@@ -56,6 +57,19 @@ export type ManagerDashboardSupportShared = {
   previousHtmlVersionId: number | null;
   snapshot: ManagerDashboardSharedSnapshot | null;
   history: ManagerDashboardSharedSnapshot[];
+  jsonSnapshot?: ManagerDashboardSharedJsonSnapshot | null;
+  jsonHistory?: ManagerDashboardSharedJsonSnapshot[];
+};
+
+export type ManagerDashboardSharedJsonSnapshot = {
+  id: number;
+  htmlVersionId: number;
+  originalName: string;
+  fileSize: number;
+  sha256: string;
+  savedAt: string;
+  receivedAt: string;
+  status: 'active' | 'previous' | 'archived';
 };
 
 export type ManagerDashboardOverview = {

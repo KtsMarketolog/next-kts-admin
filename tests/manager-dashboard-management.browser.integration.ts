@@ -35,6 +35,14 @@ const sharedInitial = {
   activeHtmlVersionId: 201, previousHtmlVersionId: 202, snapshot: sharedSnapshot,
   history: [sharedSnapshot, {...sharedSnapshot, id: 300, originalName: 'общий_архив.ktsp'}]
 };
+const jsonMode = new URLSearchParams(location.search).has('json');
+const sharedJsonSnapshot = {id: 501, htmlVersionId: 201, originalName: 'общий_компоновщик.json', fileSize: 400,
+  savedAt: date, receivedAt: date, status: 'active', sha256: 'a'.repeat(64)};
+if (jsonMode) {
+  sharedInitial.htmlVersions = sharedInitial.htmlVersions.map(version => ({...version, format: 'route-planner-v1'}));
+  sharedInitial.jsonSnapshot = sharedJsonSnapshot;
+  sharedInitial.jsonHistory = [sharedJsonSnapshot, {...sharedJsonSnapshot, id: 500, originalName: 'архив_компоновщик.json', status: 'previous'}];
+}
 const initial = {
   mode: 'manage', groups: ['development', 'support'].map((audience, index) => ({
     audience, activeHtmlVersionId: index ? (supportMany ? 11 : null) : 1, previousHtmlVersionId: index ? (supportMany ? 12 : null) : 2,
@@ -76,6 +84,11 @@ function Fixture() {
       call.files = [...init.body.entries()].filter(([, value]) => value instanceof File).map(([field, file]) => ({field, name: file.name, size: file.size}));
       call.fields = Object.fromEntries([...init.body.entries()].filter(([, value]) => typeof value === 'string'));
     }
+    else if (init.body instanceof Blob) {
+      call.headers = init.headers;
+      call.gzipSize = init.body.size;
+      call.json = await new Response(init.body.stream().pipeThrough(new DecompressionStream('gzip'))).json();
+    }
     else if (init.body) call.body = JSON.parse(init.body);
     window.fixtureCalls.push(call);
     if (requestPath.startsWith('/html?') && init.method === 'DELETE') {
@@ -112,6 +125,10 @@ function Fixture() {
     }
     if (requestPath === '/shared/snapshots') {
       setOverview(current => ({...current, supportShared: {...current.supportShared, snapshot: {...sharedSnapshot, id: 302, email: call.fields.email, originalName: call.files[0].name}}}));
+    }
+    if (requestPath === '/shared/json') {
+      setOverview(current => ({...current, supportShared: {...current.supportShared,
+        jsonSnapshot: {...sharedJsonSnapshot, id: 502, originalName: decodeURIComponent(call.headers['X-KTS-Shared-Filename'])}}}));
     }
     if (requestPath === '/snapshots') {
       if (window.fixtureHoldSnapshots) await new Promise(resolve => {window.fixtureReleaseSnapshot = resolve;});
@@ -616,7 +633,64 @@ async function main() {
             await page.goto(`${origin}/?view=development`);
             await personalFrame.waitFor({state: 'visible'});
             assert.equal(await commonFrame.count(), 0, 'development never renders the support shared report');
-            console.log(`PASS ${engineName}/${width}: real admin cascade, aligned personal panels, shared preview/publication/upload confirmation, isolated reports and history, safe polling refresh, no email dependency, journal 5+5+3, no overflow.`);
+            await page.goto(`${origin}/?json=1`);
+            const jsonFile = page.locator('#manager-dashboard-shared-json');
+            await jsonFile.waitFor({state: 'visible'});
+            assert.equal(await page.locator('#manager-dashboard-shared-email').count(), 0, 'JSON never requires the old recipient email');
+            assert.equal(await page.locator('#manager-dashboard-shared-snapshot').count(), 0, 'JSON does not use the password .ktsp upload path');
+            await jsonFile.setInputFiles({name: 'общий_маршрут.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({snapshot: true, app: 'компоновщик', orders: [], savedAt: '2026-09-17T05:00:00Z'}))});
+            const publishJson = page.getByRole('button', {name: 'Опубликовать общий JSON', exact: true});
+            acceptConfirmation = false;
+            await publishJson.click();
+            assert.equal((await page.evaluate('window.fixtureCalls')).length, 0, 'cancelled JSON confirmation performs no request');
+            assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.length), 1, 'cancelled JSON preserves file selection');
+            acceptConfirmation = true;
+            await publishJson.click();
+            await page.waitForFunction(() => (window as unknown as {fixtureCalls: Array<{path: string}>}).fixtureCalls.some(call => call.path === '/shared/json'));
+            await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.disabled);
+            const jsonCalls = await page.evaluate('window.fixtureCalls');
+            assert.equal(jsonCalls.length, 1);
+            assert.deepEqual(jsonCalls[0].headers, {'Content-Type': 'application/gzip', 'X-KTS-Shared-Version': '201',
+              'X-KTS-Shared-Expected-Snapshot': '501', 'X-KTS-Shared-Filename': encodeURIComponent('общий_маршрут.json'), 'X-KTS-Shared-Confirm': 'true'});
+            assert.equal(jsonCalls[0].json.app, 'компоновщик');
+            assert.ok(jsonCalls[0].gzipSize < 16 * 1024 * 1024);
+            assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.length), 0);
+            assert.match(await commonPanel.innerText(), /общий_маршрут.json/);
+            const jsonControlBounds = await jsonFile.evaluate((input: HTMLInputElement) => {
+              const form = input.closest('form')!;
+              const outer = form.getBoundingClientRect();
+              return [...form.querySelectorAll('input, button, p')].map(control => {
+                const bounds = control.getBoundingClientRect();
+                return bounds.left >= outer.left && bounds.right <= outer.right;
+              });
+            });
+            assert.ok(jsonControlBounds.every(Boolean), 'long HTML names cannot expand and clip mobile JSON upload controls');
+            await commonPanel.screenshot({path: path.join(output, `${engineName}-${width}-json-management.png`)});
+            await page.goto(`${origin}/?view=support&json=1`);
+            await commonFrame.waitFor({state: 'visible'});
+            assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '501');
+            const jsonViewer = page.getByRole('heading', {name: 'Общий дашборд', exact: true}).locator('..').locator('..').locator('..');
+            assert.doesNotMatch(await jsonViewer.innerText(), /общий_файл.ktsp|введите пароль/);
+            assert.match(await jsonViewer.innerText(), /без email и пароля/);
+            await page.locator('#manager-dashboard-shared-history').selectOption('500');
+            assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '500');
+            await page.locator('#manager-dashboard-shared-history').selectOption('');
+            await personalFrame.evaluate((frame: HTMLIFrameElement) => {frame.dataset.mountToken = 'personal-json-kept';});
+            await commonFrame.evaluate((frame: HTMLIFrameElement) => {frame.dataset.mountToken = 'json-before-refresh';});
+            await page.evaluate(() => {
+              const state = window as unknown as {fixtureViewerOverview: {supportShared: {jsonSnapshot: {id: number}}}};
+              state.fixtureViewerOverview.supportShared.jsonSnapshot = {...state.fixtureViewerOverview.supportShared.jsonSnapshot, id: 502};
+              window.dispatchEvent(new Event('focus'));
+            });
+            await page.getByRole('button', {name: 'Открыть обновление', exact: true}).waitFor({state: 'visible'});
+            assert.equal(await commonFrame.getAttribute('data-mount-token'), 'json-before-refresh', 'new JSON notification does not replace open calculations automatically');
+            await page.getByRole('button', {name: 'Перезагрузить общий отчёт', exact: true}).click();
+            await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('iframe[title="Общий дашборд сопровождения"]')?.src.includes('snapshot=502'));
+            assert.equal(await personalFrame.getAttribute('data-mount-token'), 'personal-json-kept', 'JSON refresh does not reset password-protected personal report');
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'JSON view stays in mobile width');
+            assert.deepEqual(errors, [], 'JSON gzip upload and viewer have no browser errors');
+            assert.deepEqual(external, [], 'JSON UI uses no external services');
+            console.log(`PASS ${engineName}/${width}: real admin cascade, aligned panels, optional preview/publication, bounded gzip JSON upload with confirmation/CAS, separate JSON and password viewers/history, safe JSON polling refresh without resetting personal frame, journal 5+5+3, no overflow.`);
           } finally {await context.close();}
         }
         // A narrow desktop viewport is not a touchscreen. Exercise the actual
