@@ -33,12 +33,15 @@ import {
   isTopDashboardBlockDataMutationFrameRequest,
 } from '@/shared/lib/topDashboardContentSecurity';
 import { acquireDistributedTopDashboardDataUploadSlot } from '@/shared/lib/topDashboardUploadConcurrency';
+import { detectTopDashboardUploadTargets } from '@/shared/lib/topDashboardUploadTargets';
 
 import {
   readTopDashboardDataStreamUpload,
   readTopDashboardDataUpload,
 } from '../../dataUpload';
 import {
+  isTopDashboardDirectFilesUpload,
+  isTopDashboardDirectFilesUploadPayload,
   isTopDashboardDirectSingleFileUpload,
   isTopDashboardDirectSingleFileUploadPayload,
   isTopDashboardMultiFileUpload,
@@ -145,8 +148,13 @@ export async function PUT(request: Request, context: Context) {
 
   const multiFileUpload = isTopDashboardMultiFileUpload(request);
   const directSingleFileUpload = isTopDashboardDirectSingleFileUpload(request);
+  const directFilesUpload = isTopDashboardDirectFilesUpload(request);
+  const directUpload = directSingleFileUpload || directFilesUpload;
   const streamUpload = isTopDashboardStreamUpload(request);
-  if (directSingleFileUpload && (!multiFileUpload || !streamUpload)) {
+  if (
+    (directUpload && (!multiFileUpload || !streamUpload))
+    || (directSingleFileUpload && directFilesUpload)
+  ) {
     return Response.json(
       { error: 'Некорректный режим прямой загрузки файла' },
       { status: 400 },
@@ -200,6 +208,9 @@ export async function PUT(request: Request, context: Context) {
       );
     }
     const contract = detectTopDashboardDataContract(activeHtml.htmlContent);
+    const uploadTargets = directFilesUpload
+      ? detectTopDashboardUploadTargets(activeHtml.htmlContent)
+      : [];
     const expectedHtmlSnapshotFormat = contract.snapshotFormat;
     const expectedHtmlProfile = contract.profile;
     if (contract.mode === 'disabled' || !expectedHtmlSnapshotFormat || !expectedHtmlProfile) {
@@ -226,6 +237,12 @@ export async function PUT(request: Request, context: Context) {
         {
           error: 'Верхняя загрузка недоступна для структуры этого HTML. Выберите файлы внутри предпросмотра.',
         },
+        { status: 422 },
+      );
+    }
+    if (directFilesUpload && uploadTargets.length === 0) {
+      return Response.json(
+        { error: 'Поля выбора создаются внутри отчёта. Откройте предпросмотр и выберите файлы в нём.' },
         { status: 422 },
       );
     }
@@ -263,7 +280,16 @@ export async function PUT(request: Request, context: Context) {
         );
       }
       if (
-        !directSingleFileUpload
+        directFilesUpload
+        && !isTopDashboardDirectFilesUploadPayload(parsed.parsed, uploadTargets)
+      ) {
+        return Response.json(
+          { error: 'Прямая загрузка содержит неверное поле или количество файлов' },
+          { status: 400 },
+        );
+      }
+      if (
+        !directUpload
         && !isTopDashboardBlockDataMutationFrameRequest(
           request,
           blockId,

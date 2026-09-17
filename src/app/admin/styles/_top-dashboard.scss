@@ -328,6 +328,17 @@
   font-size: 13px;
   font-weight: 800;
   cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+
+  &:not([aria-disabled='true']):hover {
+    background: #f0ebff;
+    border-color: #5e40bb;
+  }
+
+  &[aria-disabled='true'] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 
   input {
     position: absolute;
@@ -340,6 +351,45 @@
   &:focus-within {
     outline: 3px solid rgba(38, 11, 134, 0.22);
     outline-offset: 2px;
+  }
+}
+
+.topDashboardMultiUploadControls {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.topDashboardUploadTarget {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+
+  > strong {
+    overflow-wrap: anywhere;
+    color: #363847;
+    font-size: 13px;
+  }
+}
+
+.topDashboardUploadTargetControls {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: 10px;
+}
+
+.topDashboardUploadTargetFooter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid #dedfeb;
+  padding-top: 12px;
+
+  > span {
+    color: #626577;
+    font-size: 13px;
   }
 }
 
@@ -646,6 +696,7 @@
 
   .topDashboardUploadCard,
   .topDashboardUploadControls,
+  .topDashboardUploadTargetControls,
   .topDashboardVersionRow {
     grid-template-columns: 1fr;
   }

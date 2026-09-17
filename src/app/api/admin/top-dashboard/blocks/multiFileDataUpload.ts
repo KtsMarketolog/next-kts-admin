@@ -13,9 +13,13 @@ import {
 import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
 import {
   inspectTopDashboardMultiFileSnapshot,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET,
+  TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS,
   type TopDashboardMultiFileSnapshotTarget,
   type TopDashboardMultiFileSnapshotTargetSummary,
 } from '@/shared/lib/topDashboardMultiFileSnapshot';
+import type { TopDashboardUploadTarget } from '@/shared/lib/topDashboardUploadTargets';
 import { inspectTopDashboardMultiFileSnapshotFile } from '@/shared/lib/topDashboardMultiFileSnapshotFile';
 
 import { parsePositiveId } from './routeUtils';
@@ -28,6 +32,7 @@ import {
 export const TOP_DASHBOARD_MULTI_FILE_UPLOAD_HEADER = 'x-kts-top-dashboard-multi-file';
 export const TOP_DASHBOARD_DIRECT_SINGLE_FILE_UPLOAD_HEADER =
   'x-kts-top-dashboard-direct-single-file';
+export const TOP_DASHBOARD_DIRECT_FILES_UPLOAD_HEADER = 'x-kts-top-dashboard-direct-files';
 
 export type TopDashboardMultiFileDataUpload = {
   expectedActiveVersionId: number | null;
@@ -97,6 +102,43 @@ export function isTopDashboardDirectSingleFileUpload(request: Request) {
   return request.headers.get(TOP_DASHBOARD_DIRECT_SINGLE_FILE_UPLOAD_HEADER) === '1';
 }
 
+export function isTopDashboardDirectFilesUpload(request: Request) {
+  return request.headers.get(TOP_DASHBOARD_DIRECT_FILES_UPLOAD_HEADER) === '1';
+}
+
+export function isTopDashboardDirectFilesUploadPayload(
+  upload: Pick<TopDashboardMultiFileDataUpload, 'targetCount' | 'fileCount' | 'targets'>,
+  expectedTargets: readonly TopDashboardUploadTarget[],
+) {
+  if (
+    !Number.isInteger(upload.targetCount)
+    || upload.targetCount < 1
+    || upload.targetCount > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS
+    || upload.targetCount !== upload.targets.length
+    || !Number.isInteger(upload.fileCount)
+    || upload.fileCount < 1
+    || upload.fileCount > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES
+  ) return false;
+  const seen = new Set<number>();
+  let fileCount = 0;
+  for (const actual of upload.targets) {
+    const expected = expectedTargets.find((entry) => entry.target.index === actual.target.index);
+    if (
+      !expected
+      || seen.has(actual.target.index)
+      || actual.target.id !== expected.target.id
+      || actual.target.name !== expected.target.name
+      || !Number.isInteger(actual.fileCount)
+      || actual.fileCount < 1
+      || actual.fileCount > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET
+      || (!expected.multiple && !expected.directory && actual.fileCount !== 1)
+    ) return false;
+    seen.add(actual.target.index);
+    fileCount += actual.fileCount;
+  }
+  return fileCount === upload.fileCount;
+}
+
 export function isTopDashboardDirectSingleFileUploadPayload(
   upload: Pick<TopDashboardMultiFileDataUpload, 'targetCount' | 'fileCount' | 'targets'>,
   expectedTarget: TopDashboardMultiFileSnapshotTarget | null,
@@ -118,7 +160,7 @@ export function isTopDashboardDirectSingleFileUploadPayload(
 
 /**
  * Reads the opaque envelope created by the trusted frame or the management
- * page's direct single-file uploader. The embedded dashboard never talks to
+ * page's direct uploader. The embedded dashboard never talks to
  * this endpoint directly. Individual files remain byte-for-byte unchanged and
  * are deliberately not parsed or unzipped.
  */
@@ -215,10 +257,20 @@ export async function readTopDashboardMultiFileDataStreamUpload(
   );
   if (received.error) return { error: received.error };
   const pending = received.pending;
-  const validation = await inspectTopDashboardMultiFileSnapshotFile(
-    pending.temporaryPath,
-    pending.fileSize,
-  );
+  let validation: Awaited<ReturnType<typeof inspectTopDashboardMultiFileSnapshotFile>>;
+  try {
+    validation = await inspectTopDashboardMultiFileSnapshotFile(
+      pending.temporaryPath,
+      pending.fileSize,
+    );
+  } catch (error) {
+    // The route receives ownership only after this parser returns. Clean up an
+    // unexpected inspection failure here as well as a malformed envelope.
+    await pending.discard().catch((discardError) => {
+      console.error('Failed to discard uninspected TOP dashboard data', discardError);
+    });
+    throw error;
+  }
   if (!validation.ok) {
     await pending.discard();
     return { error: errorResponse(`Набор файлов повреждён: ${validation.error}`) };

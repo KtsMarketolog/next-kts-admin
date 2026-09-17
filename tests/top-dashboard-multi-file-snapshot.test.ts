@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   decodeTopDashboardMultiFileSnapshot,
+  encodeTopDashboardMultiFileBlobSnapshot,
   encodeTopDashboardMultiFileSnapshot,
   encodeTopDashboardSingleFileBlobSnapshot,
   inspectTopDashboardMultiFileSnapshot,
@@ -17,6 +18,7 @@ import {
   TopDashboardMultiFileSnapshotError,
   type TopDashboardMultiFileSnapshotErrorCode,
   type TopDashboardMultiFileSnapshotInput,
+  type TopDashboardMultiFileBlobSnapshotInput,
   validateTopDashboardMultiFileSnapshot,
 } from '../src/shared/lib/topDashboardMultiFileSnapshot';
 import {
@@ -189,6 +191,127 @@ test('single-file Blob encoder creates a zero-copy compatible generic envelope',
     byteValues(decoded.targets[0]!.files[0]!.bytes),
     [...payloadBytes],
   );
+});
+
+test('multi-file Blob encoder matches binary v2 without reading any payloads', async () => {
+  const input: TopDashboardMultiFileSnapshotInput = {
+    targets: [{
+      target: { id: 'снимки-e\u0301', name: 'data', index: 2 },
+      files: [{
+        name: 'данные_e\u0301.json.gz',
+        type: 'application/gzip',
+        lastModified: 1_788_333_123_456,
+        webkitRelativePath: 'снимки/данные_e\u0301.json.gz',
+        bytes: Uint8Array.of(0x1f, 0x8b, 0xff, 0x00),
+      }, {
+        name: 'meta.json',
+        type: 'application/json',
+        bytes: Uint8Array.of(123, 125),
+      }],
+    }, {
+      target: { name: 'other', index: 5 },
+      files: [{ name: 'meta.json', bytes: Uint8Array.of(1, 2, 3) }],
+    }],
+  };
+  const blobInput = {
+    targets: input.targets.map((entry) => ({
+      target: entry.target,
+      files: entry.files.map(({ bytes, ...metadata }) => {
+        const blob = new Blob([bytes as Uint8Array<ArrayBuffer>]);
+        for (const method of ['arrayBuffer', 'stream', 'text', 'slice']) {
+          Object.defineProperty(blob, method, {
+            value() { throw new Error('Encoder must not read or slice file payloads'); },
+          });
+        }
+        return { ...metadata, blob };
+      }),
+    })),
+  } satisfies TopDashboardMultiFileBlobSnapshotInput;
+  const encoded = encodeTopDashboardMultiFileBlobSnapshot(blobInput);
+  assert.equal(encoded.type, 'application/octet-stream');
+  assert.deepEqual(
+    await encoded.arrayBuffer(),
+    encodeTopDashboardMultiFileSnapshot(input),
+    'Blob composition must use the exact same headers and normalized metadata as the binary encoder',
+  );
+  const decoded = decodeTopDashboardMultiFileSnapshot(await encoded.arrayBuffer());
+  assert.equal(decoded.targets.length, 2);
+  assert.equal(decoded.targets[0]!.files.length, 2);
+  assert.equal(decoded.targets[0]!.files[0]!.webkitRelativePath, 'снимки/данные_é.json.gz');
+});
+
+test('multi-file Blob encoder enforces metadata, duplicate and cardinality validation', () => {
+  const file = { name: 'data.json', blob: new Blob(['{}']) };
+  const make = (targets: TopDashboardMultiFileBlobSnapshotInput['targets']) => (
+    () => encodeTopDashboardMultiFileBlobSnapshot({ targets })
+  );
+  expectSnapshotError(make([]), 'LIMIT_EXCEEDED');
+  expectSnapshotError(make([{ target: { index: 0 }, files: [] }]), 'LIMIT_EXCEEDED');
+  expectSnapshotError(make([{ target: { index: -1 }, files: [file] }]), 'INVALID_TARGET');
+  expectSnapshotError(make([
+    { target: { index: 0 }, files: [file] },
+    { target: { index: 0 }, files: [file] },
+  ]), 'DUPLICATE_TARGET');
+  expectSnapshotError(make([
+    { target: { index: 0, id: 'e\u0301' }, files: [file] },
+    { target: { index: 1, id: 'é' }, files: [file] },
+  ]), 'DUPLICATE_TARGET');
+  expectSnapshotError(make([{ target: { index: 0 }, files: [file, file] }]), 'DUPLICATE_FILE');
+  for (const override of [
+    { name: '../data.json' },
+    { type: 'bad mime' },
+    { lastModified: -1 },
+    { webkitRelativePath: '../data.json' },
+    { blob: new Blob([]) },
+    { blob: {} as Blob },
+  ]) {
+    expectSnapshotError(make([{
+      target: { index: 0 }, files: [{ ...file, ...override }],
+    }]), 'INVALID_FILE');
+  }
+  expectSnapshotError(make(Array.from(
+    { length: TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGETS + 1 },
+    (_, index) => ({ target: { index }, files: [file] }),
+  )), 'LIMIT_EXCEEDED');
+  expectSnapshotError(make([{
+    target: { index: 0 },
+    files: Array.from(
+      { length: TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET + 1 },
+      (_, index) => ({ ...file, name: `${index}.json` }),
+    ),
+  }]), 'LIMIT_EXCEEDED');
+  expectSnapshotError(make(Array.from({ length: 3 }, (_, index) => ({
+    target: { index },
+    files: Array.from(
+      { length: Math.floor(TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES / 3) + 1 },
+      (_, fileIndex) => ({ ...file, name: `${fileIndex}.json` }),
+    ),
+  }))), 'LIMIT_EXCEEDED');
+});
+
+test('multi-file Blob encoder checks individual and aggregate sizes before composition', () => {
+  // Report virtual large sizes to exercise limits without allocating 500 MiB.
+  const virtualBlob = (size: number) => Object.defineProperty(new Blob(['x']), 'size', { value: size });
+  const make = (blobs: Blob[]) => () => encodeTopDashboardMultiFileBlobSnapshot({
+    targets: [{
+      target: { index: 0 },
+      files: blobs.map((blob, index) => ({ name: `${index}.json`, blob })),
+    }],
+  });
+  expectSnapshotError(
+    make([virtualBlob(TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES + 1)]),
+    'LIMIT_EXCEEDED',
+  );
+  expectSnapshotError(
+    make([
+      virtualBlob(TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES),
+      virtualBlob(1),
+    ]),
+    'LIMIT_EXCEEDED',
+  );
+  for (const size of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expectSnapshotError(make([virtualBlob(size)]), 'INVALID_FILE');
+  }
 });
 
 test('file names are normalized to NFC and unsafe or duplicate names are rejected', () => {

@@ -24,3 +24,7 @@ export const TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL = '2 ГБ';
 export const TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES = TOP_DASHBOARD_DATA_STORED_MAX_BYTES * 3;
 
 export const TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES = 512 * 1024;
+
+// Discovery is an inventory of available HTML fields, not the number selected
+// for one snapshot. Keep the inventory separate from the 32-target envelope cap.
+export const TOP_DASHBOARD_UPLOAD_MAX_DISCOVERED_TARGETS = 256;

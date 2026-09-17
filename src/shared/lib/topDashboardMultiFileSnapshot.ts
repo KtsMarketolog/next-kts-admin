@@ -82,15 +82,21 @@ export type TopDashboardMultiFileSnapshotInput = {
   targets: readonly TopDashboardMultiFileSnapshotTargetInput[];
 };
 
+export type TopDashboardMultiFileBlobSnapshotFileInput = Omit<
+  TopDashboardMultiFileSnapshotFileInput,
+  'bytes'
+> & { blob: Blob };
+
+export type TopDashboardMultiFileBlobSnapshotInput = {
+  targets: readonly {
+    target: TopDashboardMultiFileSnapshotTarget;
+    files: readonly TopDashboardMultiFileBlobSnapshotFileInput[];
+  }[];
+};
+
 export type TopDashboardSingleFileBlobSnapshotInput = {
   target?: TopDashboardMultiFileSnapshotTarget;
-  file: {
-    name: string;
-    type?: string | null;
-    lastModified?: number | null;
-    webkitRelativePath?: string | null;
-    blob: Blob;
-  };
+  file: TopDashboardMultiFileBlobSnapshotFileInput;
 };
 
 export type DecodedTopDashboardMultiFileSnapshotFile = {
@@ -151,26 +157,27 @@ export type TopDashboardMultiFileSnapshotInspectionResult =
       error: string;
     };
 
-type NormalizedFile = {
+type NormalizedFile<Payload> = {
   name: string;
-  encodedName: Uint8Array;
+  encodedName: Uint8Array<ArrayBuffer>;
   type: string;
-  encodedType: Uint8Array;
+  encodedType: Uint8Array<ArrayBuffer>;
   webkitRelativePath: string;
-  encodedRelativePath: Uint8Array;
+  encodedRelativePath: Uint8Array<ArrayBuffer>;
   lastModified: number;
-  bytes: Uint8Array;
+  bytes: Payload;
+  byteLength: number;
 };
 
-type NormalizedTarget = {
+type NormalizedTarget<Payload> = {
   target: {
     id: string | null;
     name: string | null;
     index: number;
   };
-  encodedId: Uint8Array;
-  encodedTargetName: Uint8Array;
-  files: NormalizedFile[];
+  encodedId: Uint8Array<ArrayBuffer>;
+  encodedTargetName: Uint8Array<ArrayBuffer>;
+  files: NormalizedFile<Payload>[];
 };
 
 type ParsedSnapshot = {
@@ -336,7 +343,10 @@ function checkedLength(current: number, increment: number) {
   return next;
 }
 
-function normalizeSnapshotInput(input: TopDashboardMultiFileSnapshotInput) {
+function normalizeSnapshotInput<Payload>(
+  input: unknown,
+  readPayload: (file: Record<string, unknown>) => { bytes: Payload; byteLength: number },
+) {
   if (!isRecord(input) || !Array.isArray(input.targets)) {
     throw snapshotError('INVALID_INPUT', 'Контейнер должен содержать массив целей');
   }
@@ -349,7 +359,7 @@ function normalizeSnapshotInput(input: TopDashboardMultiFileSnapshotInput) {
 
   const targetIndexes = new Set<number>();
   const targetIds = new Set<string>();
-  const normalizedTargets: NormalizedTarget[] = [];
+  const normalizedTargets: NormalizedTarget<Payload>[] = [];
   let totalFileCount = 0;
   let totalPayloadLength = 0;
   let totalLength = HEADER_BYTES;
@@ -397,7 +407,7 @@ function normalizeSnapshotInput(input: TopDashboardMultiFileSnapshotInput) {
       TARGET_HEADER_BYTES + id.encoded.byteLength + name.encoded.byteLength,
     );
     const fileIdentities = new Set<string>();
-    const files: NormalizedFile[] = [];
+    const files: NormalizedFile<Payload>[] = [];
     for (const file of entry.files) {
       if (!isRecord(file)) {
         throw snapshotError('INVALID_FILE', 'Описание файла некорректно');
@@ -415,14 +425,14 @@ function normalizeSnapshotInput(input: TopDashboardMultiFileSnapshotInput) {
       }
       fileIdentities.add(fileIdentity);
 
-      const bytes = binaryView(file.bytes, `Содержимое файла «${normalizedName.value}»`);
-      if (bytes.byteLength === 0) {
+      const { bytes, byteLength } = readPayload(file);
+      if (byteLength === 0) {
         throw snapshotError('INVALID_FILE', 'Пустые файлы не поддерживаются');
       }
-      if (bytes.byteLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES) {
+      if (byteLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES) {
         throw snapshotError('LIMIT_EXCEEDED', 'Один из файлов слишком большой');
       }
-      totalPayloadLength += bytes.byteLength;
+      totalPayloadLength += byteLength;
       if (totalPayloadLength > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES) {
         throw snapshotError('LIMIT_EXCEEDED', 'Общий размер файлов слишком большой');
       }
@@ -432,7 +442,7 @@ function normalizeSnapshotInput(input: TopDashboardMultiFileSnapshotInput) {
           + normalizedName.encoded.byteLength
           + normalizedType.encoded.byteLength
           + normalizedRelativePath.encoded.byteLength
-          + bytes.byteLength,
+          + byteLength,
       );
       files.push({
         name: normalizedName.value,
@@ -443,6 +453,7 @@ function normalizeSnapshotInput(input: TopDashboardMultiFileSnapshotInput) {
         encodedRelativePath: normalizedRelativePath.encoded,
         lastModified,
         bytes,
+        byteLength,
       });
     }
 
@@ -476,7 +487,10 @@ function writeBytes(target: Uint8Array, offset: number, value: Uint8Array) {
 export function encodeTopDashboardMultiFileSnapshot(
   input: TopDashboardMultiFileSnapshotInput,
 ): ArrayBuffer {
-  const normalized = normalizeSnapshotInput(input);
+  const normalized = normalizeSnapshotInput(input, (file) => {
+    const bytes = binaryView(file.bytes, `Содержимое файла «${file.name}»`);
+    return { bytes, byteLength: bytes.byteLength };
+  });
   const buffer = new ArrayBuffer(normalized.totalLength);
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
@@ -539,104 +553,83 @@ export function encodeTopDashboardMultiFileSnapshot(
 }
 
 /**
- * Builds the same validated envelope around one browser Blob without first
- * copying the full payload into an ArrayBuffer. This keeps the admin's generic
- * single-file upload bounded even near the configured stream limit.
+ * Builds the same validated envelope around browser Blobs without reading their
+ * payloads into ArrayBuffers. Only the small binary headers are allocated here;
+ * Blob composition preserves raw files and directory paths without base64 copies.
  */
+export function encodeTopDashboardMultiFileBlobSnapshot(
+  input: TopDashboardMultiFileBlobSnapshotInput,
+): Blob {
+  const normalized = normalizeSnapshotInput(input, (file) => {
+    const blob = file.blob;
+    if (
+      typeof Blob === 'undefined'
+      || !(blob instanceof Blob)
+      || !Number.isSafeInteger(blob.size)
+      || blob.size < 0
+    ) {
+      throw snapshotError('INVALID_FILE', 'Содержимое файла недоступно');
+    }
+    return { bytes: blob, byteLength: blob.size };
+  });
+
+  const header = new Uint8Array(HEADER_BYTES);
+  header.set(MAGIC_BYTES, 0);
+  const headerView = new DataView(header.buffer);
+  headerView.setUint16(8, TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION, false);
+  headerView.setUint32(12, normalized.totalLength, false);
+  headerView.setUint16(16, normalized.targets.length, false);
+  headerView.setUint32(20, normalized.totalFileCount, false);
+  const parts: BlobPart[] = [header];
+
+  for (const entry of normalized.targets) {
+    const targetHeader = new Uint8Array(TARGET_HEADER_BYTES);
+    const targetView = new DataView(targetHeader.buffer);
+    targetView.setUint32(0, entry.target.index, false);
+    targetView.setUint16(4, entry.encodedId.byteLength, false);
+    targetView.setUint16(6, entry.encodedTargetName.byteLength, false);
+    targetView.setUint16(8, entry.files.length, false);
+    parts.push(targetHeader, entry.encodedId, entry.encodedTargetName);
+
+    for (const file of entry.files) {
+      const fileHeader = new Uint8Array(FILE_HEADER_BYTES);
+      const fileView = new DataView(fileHeader.buffer);
+      fileView.setUint16(0, file.encodedName.byteLength, false);
+      fileView.setUint16(2, file.encodedType.byteLength, false);
+      fileView.setUint16(4, file.encodedRelativePath.byteLength, false);
+      fileView.setUint32(8, file.byteLength, false);
+      fileView.setUint32(12, Math.floor(file.lastModified / (UINT32_MAX + 1)), false);
+      fileView.setUint32(16, file.lastModified % (UINT32_MAX + 1), false);
+      parts.push(
+        fileHeader,
+        file.encodedName,
+        file.encodedType,
+        file.encodedRelativePath,
+        file.bytes,
+      );
+    }
+  }
+
+  const encoded = new Blob(parts, { type: 'application/octet-stream' });
+  if (encoded.size !== normalized.totalLength) {
+    throw snapshotError('INVALID_LENGTH', 'Не удалось собрать бинарный контейнер');
+  }
+  return encoded;
+}
+
+/** Backwards-compatible shortcut for a single input containing one file. */
 export function encodeTopDashboardSingleFileBlobSnapshot(
   input: TopDashboardSingleFileBlobSnapshotInput,
 ): Blob {
   if (!isRecord(input) || !isRecord(input.file)) {
     throw snapshotError('INVALID_INPUT', 'Описание файла некорректно');
   }
-
-  const rawTarget = input.target ?? { index: 0 };
-  if (!isRecord(rawTarget)) {
+  if (input.target !== undefined && input.target !== null && !isRecord(input.target)) {
     throw snapshotError('INVALID_TARGET', 'Описание целевого поля некорректно');
   }
-  const index = rawTarget.index;
-  if (
-    typeof index !== 'number'
-    || !Number.isInteger(index)
-    || index < 0
-    || index > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX
-  ) {
-    throw snapshotError('INVALID_TARGET', 'Индекс целевого поля некорректен');
-  }
-
-  const id = normalizeTargetText(rawTarget.id, 'ID целевого поля');
-  const targetName = normalizeTargetText(rawTarget.name, 'Name целевого поля');
-  const fileName = normalizeFileName(input.file.name);
-  const mimeType = normalizeMimeType(input.file.type);
-  const relativePath = normalizeRelativePath(
-    input.file.webkitRelativePath,
-    fileName.value,
-  );
-  const lastModified = normalizeLastModified(input.file.lastModified);
-  const blob = input.file.blob;
-  if (
-    typeof Blob === 'undefined'
-    || !(blob instanceof Blob)
-    || !Number.isSafeInteger(blob.size)
-    || blob.size <= 0
-    || blob.size > TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_PAYLOAD_BYTES
-  ) {
-    throw snapshotError('INVALID_FILE', 'Содержимое файла недоступно или пусто');
-  }
-
-  let totalLength = HEADER_BYTES;
-  totalLength = checkedLength(
-    totalLength,
-    TARGET_HEADER_BYTES + id.encoded.byteLength + targetName.encoded.byteLength,
-  );
-  totalLength = checkedLength(
-    totalLength,
-    FILE_HEADER_BYTES
-      + fileName.encoded.byteLength
-      + mimeType.encoded.byteLength
-      + relativePath.encoded.byteLength
-      + blob.size,
-  );
-
-  const header = new Uint8Array(HEADER_BYTES);
-  header.set(MAGIC_BYTES, 0);
-  const headerView = new DataView(header.buffer);
-  headerView.setUint16(8, TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_VERSION, false);
-  headerView.setUint32(12, totalLength, false);
-  headerView.setUint16(16, 1, false);
-  headerView.setUint32(20, 1, false);
-
-  const targetHeader = new Uint8Array(TARGET_HEADER_BYTES);
-  const targetView = new DataView(targetHeader.buffer);
-  targetView.setUint32(0, index, false);
-  targetView.setUint16(4, id.encoded.byteLength, false);
-  targetView.setUint16(6, targetName.encoded.byteLength, false);
-  targetView.setUint16(8, 1, false);
-
-  const fileHeader = new Uint8Array(FILE_HEADER_BYTES);
-  const fileView = new DataView(fileHeader.buffer);
-  fileView.setUint16(0, fileName.encoded.byteLength, false);
-  fileView.setUint16(2, mimeType.encoded.byteLength, false);
-  fileView.setUint16(4, relativePath.encoded.byteLength, false);
-  fileView.setUint32(8, blob.size, false);
-  fileView.setUint32(12, Math.floor(lastModified / (UINT32_MAX + 1)), false);
-  fileView.setUint32(16, lastModified % (UINT32_MAX + 1), false);
-
-  const encoded = new Blob([
-    header,
-    targetHeader,
-    id.encoded,
-    targetName.encoded,
-    fileHeader,
-    fileName.encoded,
-    mimeType.encoded,
-    relativePath.encoded,
-    blob,
-  ], { type: 'application/octet-stream' });
-  if (encoded.size !== totalLength) {
-    throw snapshotError('INVALID_LENGTH', 'Не удалось собрать бинарный контейнер');
-  }
-  return encoded;
+  return encodeTopDashboardMultiFileBlobSnapshot({
+    targets: [{ target: input.target ?? { index: 0 }, files: [input.file] }],
+  });
 }
 
 function assertAvailable(offset: number, length: number, total: number) {

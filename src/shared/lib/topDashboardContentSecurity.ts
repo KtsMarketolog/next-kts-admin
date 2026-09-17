@@ -12,7 +12,7 @@ import {
   TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER,
   TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE,
 } from './topDashboardDownloadBridge';
-import { TOP_DASHBOARD_DATA_MAX_BYTES } from './topDashboardLimits';
+import { TOP_DASHBOARD_DATA_MAX_BYTES, TOP_DASHBOARD_UPLOAD_MAX_DISCOVERED_TARGETS } from './topDashboardLimits';
 import {
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAGIC,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_BYTES,
@@ -633,9 +633,17 @@ export function getTopDashboardDataAdapterScript(
   }
 
   function uniqueInputText(inputs, input, property) {
-    const value = input[property];
-    if (typeof value !== 'string' || !value || value !== value.trim()) return null;
-    return inputs.filter((candidate) => candidate[property] === value).length === 1
+    const normalized = (candidate) => {
+      const raw = candidate[property];
+      if (typeof raw !== 'string' || !raw || raw !== raw.trim()) return null;
+      const text = raw.normalize('NFC');
+      if (/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u.test(text)
+        || new TextEncoder().encode(text).byteLength > ${TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGET_TEXT_BYTES}) return null;
+      return text;
+    };
+    const value = normalized(input);
+    if (!value) return null;
+    return inputs.filter((candidate) => normalized(candidate) === value).length === 1
       ? value
       : null;
   }
@@ -649,6 +657,39 @@ export function getTopDashboardDataAdapterScript(
       name: uniqueInputText(inputs, input, 'name'),
       index,
     };
+  }
+
+  // Report actual inputs, including fields created after the HTML has loaded.
+  // File contents never travel with discovery messages.
+  let uploadTargetsFingerprint = '';
+  let uploadTargetsTimer = 0;
+  function reportUploadTargets(force, requestId) {
+    if (!MULTI_FILE_MODE || READ_ONLY) return;
+    const targets = allFileInputs().filter((input) => !input.disabled).slice(0, ${TOP_DASHBOARD_UPLOAD_MAX_DISCOVERED_TARGETS}).map((input) => ({
+      target: multiFileTarget(input),
+      multiple: input.multiple,
+      directory: input.hasAttribute('webkitdirectory') || input.hasAttribute('directory'),
+      accept: (input.accept || '').slice(0, 512),
+      label: (input.getAttribute('aria-label') || (input.labels && input.labels[0] && input.labels[0].textContent) || input.id || input.name || 'Данные отчёта').trim().slice(0, 160),
+    })).filter((entry) => entry.target);
+    const fingerprint = JSON.stringify(targets);
+    if (!force && fingerprint === uploadTargetsFingerprint) return;
+    uploadTargetsFingerprint = fingerprint;
+    window.parent.postMessage({ marker: MULTI_FILE_MARKER, type: 'upload-targets', targets, requestId }, '*');
+  }
+
+  if (MULTI_FILE_MODE && !READ_ONLY) {
+    const targetsObserver = new MutationObserver(() => {
+      if (uploadTargetsTimer) return;
+      uploadTargetsTimer = window.setTimeout(() => {
+        uploadTargetsTimer = 0;
+        reportUploadTargets(false);
+      }, 100);
+    });
+    targetsObserver.observe(document.documentElement, {
+      childList: true, subtree: true, attributes: true,
+      attributeFilter: ['id', 'name', 'type', 'multiple', 'webkitdirectory', 'directory', 'accept', 'disabled', 'aria-label'],
+    });
   }
 
   function fileInputForDropTarget(value) {
@@ -733,8 +774,8 @@ export function getTopDashboardDataAdapterScript(
 
   function matchesMultiFileTarget(input, target) {
     const inputs = allFileInputs();
-    if (target.id && uniqueInputText(inputs, input, 'id') === target.id) return true;
-    if (target.name && uniqueInputText(inputs, input, 'name') === target.name) return true;
+    if (target.id) return uniqueInputText(inputs, input, 'id')?.normalize('NFC') === target.id;
+    if (target.name) return uniqueInputText(inputs, input, 'name')?.normalize('NFC') === target.name;
     return inputs[target.index] === input;
   }
 
@@ -1072,6 +1113,10 @@ export function getTopDashboardDataAdapterScript(
     if (event.source !== window.parent) return;
     const data = event.data;
     if (!data || typeof data !== 'object') return;
+    if (data.marker === MULTI_FILE_MARKER && data.type === 'probe-upload-targets') {
+      reportUploadTargets(true, data.requestId);
+      return;
+    }
     if (
       data.marker === MULTI_FILE_MARKER
       && data.type === 'restore-files'
@@ -1099,6 +1144,7 @@ export function getTopDashboardDataAdapterScript(
       expectedProfile: EXPECTED_PROFILE,
       multiFileMode: MULTI_FILE_MODE,
     });
+    reportUploadTargets(true);
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', ready, { once: true });
@@ -1139,6 +1185,7 @@ export function createTopDashboardFrameBridgeScript(
 ) {
   const config = JSON.stringify({
     dataPath: `/api/admin/top-dashboard/blocks/${blockId}/data`,
+    blockId,
     htmlVersionId,
     canManage,
   });
@@ -1146,6 +1193,7 @@ export function createTopDashboardFrameBridgeScript(
   return String.raw`(() => {
   'use strict';
   const CONFIG = ${config};
+  const MANAGEMENT_MARKER = 'kts-top-dashboard-management-v1';
   const MARKER = '${TOP_DASHBOARD_DATA_MESSAGE_MARKER}';
   const MULTI_FILE_MARKER = '${TOP_DASHBOARD_MULTI_FILE_MESSAGE_MARKER}';
   const MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES};
@@ -1180,6 +1228,10 @@ export function createTopDashboardFrameBridgeScript(
   let saveRequested = 0;
   let saveCompleted = 0;
   let saveLoopRunning = false;
+  let managementUploadPending = false;
+  let discoveredUploadTargets = [];
+  let uploadTargetsKnown = false;
+  let pendingTargetProbe = null;
 
   function showNotice(kind, message, autoHide) {
     if (!(notice instanceof HTMLElement)) return;
@@ -1817,10 +1869,15 @@ export function createTopDashboardFrameBridgeScript(
     if (!CONFIG.canManage || adapterExpectedFormat !== 'multi-file-v1' || adapterExpectedProfile !== 'generic') {
       return;
     }
+    if (managementUploadPending) {
+      showNotice('error', 'Дождитесь завершения загрузки из панели управления', false);
+      return;
+    }
     if (loadPromise && !(await loadPromise)) {
       showNotice('error', 'Не удалось проверить текущую версию сохранённых файлов', false);
       return;
     }
+    if (managementUploadPending) return;
     const target = normalizedMultiFileTarget(data.target);
     const files = normalizeSelectedFiles(data.files);
     if (!target || !files) {
@@ -1877,6 +1934,120 @@ export function createTopDashboardFrameBridgeScript(
     }
   }
 
+  function sendManagement(type, extra) {
+    if (!CONFIG.canManage) return;
+    window.parent.postMessage(Object.assign({
+      marker: MANAGEMENT_MARKER, type,
+      blockId: CONFIG.blockId, htmlVersionId: CONFIG.htmlVersionId,
+    }, extra || {}), window.location.origin);
+  }
+
+  function acceptUploadTargets(values, requestId) {
+    if (!CONFIG.canManage || !Array.isArray(values) || values.length > ${TOP_DASHBOARD_UPLOAD_MAX_DISCOVERED_TARGETS}) return;
+    const indexes = new Set();
+    const targets = [];
+    for (const entry of values) {
+      const target = entry && normalizedMultiFileTarget(entry.target);
+      if (!target || indexes.has(target.index)
+        || typeof entry.multiple !== 'boolean' || typeof entry.directory !== 'boolean'
+        || typeof entry.accept !== 'string' || entry.accept.length > 512
+        || typeof entry.label !== 'string' || entry.label.length > 160) return;
+      indexes.add(target.index);
+      targets.push({ target, multiple: entry.multiple, directory: entry.directory,
+        accept: entry.accept, label: entry.label });
+    }
+    discoveredUploadTargets = targets;
+    uploadTargetsKnown = true;
+    sendManagement('upload-targets', { targets });
+    if (pendingTargetProbe && pendingTargetProbe.requestId === requestId) {
+      pendingTargetProbe.resolve();
+    }
+  }
+
+  function refreshUploadTargets(requestId) {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        pendingTargetProbe = null;
+        reject(new Error('Не удалось проверить поле загрузки. Перезагрузите предпросмотр.'));
+      }, 5000);
+      pendingTargetProbe = { requestId, resolve: () => {
+        window.clearTimeout(timer);
+        pendingTargetProbe = null;
+        resolve();
+      } };
+      iframe.contentWindow.postMessage({ marker: MULTI_FILE_MARKER, type: 'probe-upload-targets', requestId }, '*');
+    });
+  }
+
+  async function uploadManagementFiles(data) {
+    const respond = (ok, error) => sendManagement('upload-result', {
+      requestId: data.requestId, ok, ...(error ? { error } : {}),
+    });
+    if (typeof data.requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(data.requestId)) return;
+    if (managementUploadPending || saveLoopRunning) {
+      respond(false, 'Уже выполняется загрузка. Дождитесь её завершения.');
+      return;
+    }
+    managementUploadPending = true;
+    let previousTargets = null;
+    try {
+      if (!initialLoadStarted || adapterExpectedFormat !== 'multi-file-v1'
+        || adapterExpectedProfile !== 'generic' || !loadPromise || !(await loadPromise)) {
+        throw new Error('Предпросмотр ещё не готов к загрузке. Повторите после его открытия.');
+      }
+      if (data.expectedActiveDataVersionId !== activeDataVersionId) {
+        throw new Error('Данные изменились. Обновите страницу перед загрузкой.');
+      }
+      await refreshUploadTargets(data.requestId);
+      previousTargets = multiFileTargets;
+      if (!Array.isArray(data.targets) || !data.targets.length
+        || data.targets.length > MULTI_FILE_MAX_TARGETS) throw new Error('Не выбраны файлы данных.');
+      const replacement = new Map();
+      for (const entry of data.targets) {
+        const target = entry && normalizedMultiFileTarget(entry.target);
+        const files = entry && normalizeSelectedFiles(entry.files);
+        const descriptor = target && discoveredUploadTargets.find((candidate) =>
+          candidate.target.index === target.index && candidate.target.id === target.id
+          && candidate.target.name === target.name);
+        if (!target || !files || !descriptor || replacement.has(multiFileTargetKey(target))
+          || (!descriptor.multiple && !descriptor.directory && files.length !== 1)
+          || (descriptor.directory && files.some((file) => !file.webkitRelativePath))) {
+          throw new Error('Поле загрузки изменилось или выбран неверный набор файлов. Выберите файлы заново.');
+        }
+        replacement.set(multiFileTargetKey(target), { target, files });
+      }
+      multiFileTargets = replacement;
+      showNotice('pending', 'Сохраняем выбранные файлы…', false);
+      if (!(await saveCurrentMultiFileData())) {
+        throw new Error('Не удалось подтвердить сохранение. Обновите страницу и проверьте журнал перед повторной загрузкой.');
+      }
+      showNotice('success', 'Данные сохранены для всех пользователей', true);
+      respond(true);
+    } catch (error) {
+      if (previousTargets) multiFileTargets = previousTargets;
+      respond(false, error instanceof Error ? error.message : 'Не удалось сохранить файлы.');
+    } finally {
+      managementUploadPending = false;
+    }
+  }
+
+  // Only the same-origin management page may request an upper-panel upload.
+  // The sandboxed report cannot impersonate its parent or choose an endpoint.
+  window.addEventListener('message', (event) => {
+    if (!CONFIG.canManage || event.source !== window.parent || event.origin !== window.location.origin) return;
+    const data = event.data;
+    if (!data || data.marker !== MANAGEMENT_MARKER || data.blockId !== CONFIG.blockId
+      || data.htmlVersionId !== CONFIG.htmlVersionId) return;
+    if (data.type === 'probe-upload-targets') {
+      if (uploadTargetsKnown) sendManagement('upload-targets', { targets: discoveredUploadTargets });
+      if (iframe instanceof HTMLIFrameElement && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ marker: MULTI_FILE_MARKER, type: 'probe-upload-targets' }, '*');
+      }
+    } else if (data.type === 'upload-files') {
+      void uploadManagementFiles(data);
+    }
+  });
+
   const adapterErrors = {
     SNAPSHOT_INPUT_NOT_FOUND: 'В HTML не найдено поле для файла данных',
     SNAPSHOT_INSTALL_FAILED: 'Не удалось подставить сохранённые данные в HTML',
@@ -1912,7 +2083,9 @@ export function createTopDashboardFrameBridgeScript(
       return;
     }
     if (data.marker === MULTI_FILE_MARKER) {
-      if (data.type === 'files-selected') {
+      if (data.type === 'upload-targets') {
+        acceptUploadTargets(data.targets, data.requestId);
+      } else if (data.type === 'files-selected') {
         void acceptMultiFileSelection(data);
       } else if (
         Number.isSafeInteger(data.restoreId)

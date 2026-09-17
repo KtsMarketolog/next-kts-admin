@@ -453,11 +453,11 @@ test('TOP admin wraps direct generic files before using the universal stream end
     import.meta.url,
   ), 'utf8');
 
-  assert.match(sectionSource, /encodeTopDashboardSingleFileBlobSnapshot/);
+  assert.match(sectionSource, /encodeTopDashboardMultiFileBlobSnapshot/);
   assert.match(sectionSource, /X-KTS-Top-Dashboard-Multi-File/);
-  assert.match(sectionSource, /X-KTS-Top-Dashboard-Direct-Single-File/);
+  assert.match(sectionSource, /X-KTS-Top-Dashboard-Direct-Files/);
   assert.match(sectionSource, /X-KTS-Top-HTML-Version/);
-  assert.match(sectionSource, /usesUniversalDataUpload\s*\?\s*undefined/);
+  assert.match(sectionSource, /uploadTargets/);
   assert.match(blockRouteSource, /activeDataContract/);
   assert.match(blockRouteSource, /detectTopDashboardDataContract/);
   assert.match(blockRouteSource, /htmlVersionId: overview\.activeVersionId/);
@@ -471,7 +471,7 @@ test('TOP admin wraps direct generic files before using the universal stream end
   assert.match(dataRouteSource, /isTopDashboardDirectSingleFileUploadPayload/);
   assert.match(dataRouteSource, /contract\.directUploadTarget/);
   assert.match(sectionSource, /selectedDataHtmlVersionId !== overview\.activeVersionId/);
-  assert.match(sectionSource, /target: directDataUploadTarget/);
+  assert.match(sectionSource, /target: descriptor.target/);
 });
 
 test('dashboard CSP permits only exact uploaded scripts and handlers', () => {

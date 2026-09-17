@@ -10,9 +10,14 @@ import {
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL,
 } from '@/shared/lib/topDashboardLimits';
-import { encodeTopDashboardSingleFileBlobSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
+import { encodeTopDashboardMultiFileBlobSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
+import {
+  normalizeTopDashboardUploadTargets,
+  topDashboardUploadTargetKey,
+  type TopDashboardUploadTarget,
+} from './topDashboardUploadSelection';
 
 type TopDashboardVersionStatus = 'active' | 'draft' | 'archived';
 
@@ -61,6 +66,7 @@ type TopDashboardDataContract = {
     name: string | null;
     index: number;
   } | null;
+  uploadTargets: TopDashboardUploadTarget[];
 };
 
 type TopDashboardOverview = {
@@ -193,6 +199,7 @@ function normalizeTopDashboardDataContract(value: unknown): TopDashboardDataCont
     snapshotFormat: null,
     profile: null,
     directUploadTarget: null,
+    uploadTargets: [],
   };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return disabled;
   const source = value as Record<string, unknown>;
@@ -216,6 +223,7 @@ function normalizeTopDashboardDataContract(value: unknown): TopDashboardDataCont
       snapshotFormat: source.snapshotFormat,
       profile: source.profile,
       directUploadTarget: null,
+      uploadTargets: [],
     };
   }
   if (
@@ -248,6 +256,7 @@ function normalizeTopDashboardDataContract(value: unknown): TopDashboardDataCont
     snapshotFormat: 'multi-file-v1',
     profile: 'generic',
     directUploadTarget,
+    uploadTargets: normalizeTopDashboardUploadTargets(source.uploadTargets),
   };
 }
 
@@ -259,6 +268,12 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedDataFile, setSelectedDataFile] = useState<File | null>(null);
+  const [selectedTargetFiles, setSelectedTargetFiles] = useState<Record<string, File[]>>({});
+  const [runtimeUploadTargets, setRuntimeUploadTargets] = useState<{
+    blockId: number;
+    htmlVersionId: number;
+    targets: TopDashboardUploadTarget[];
+  } | null>(null);
   const [selectedDataHtmlVersionId, setSelectedDataHtmlVersionId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -273,6 +288,14 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   const previewCardRef = useRef<HTMLElement>(null);
   const showStatusRef = useRef(showStatus);
   const overviewRequestIdRef = useRef(0);
+  const uploadSelectionRevisionRef = useRef('');
+  const runtimeUploadRef = useRef<{
+    requestId: string;
+    htmlVersionId: number;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
   const apiBasePath = `/api/admin/top-dashboard/blocks/${blockId}`;
 
   useEffect(() => {
@@ -350,17 +373,6 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   }, [loadOverview]);
 
   useEffect(() => {
-    if (
-      selectedDataFile
-      && selectedDataHtmlVersionId !== overview?.activeVersionId
-    ) {
-      setSelectedDataFile(null);
-      setSelectedDataHtmlVersionId(null);
-      if (dataFileInputRef.current) dataFileInputRef.current.value = '';
-    }
-  }, [overview?.activeVersionId, selectedDataFile, selectedDataHtmlVersionId]);
-
-  useEffect(() => {
     const refreshVisibleOverview = () => {
       if (document.visibilityState === 'visible') void loadOverview();
     };
@@ -403,20 +415,128 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     () => overview?.data.versions.find((version) => version.id === overview.data.activeVersionId) ?? null,
     [overview],
   );
-  const hasActiveHtml = Boolean(overview?.activeVersionId);
+  const activeHtmlVersionId = overview?.activeVersionId ?? null;
+  const hasActiveHtml = Boolean(activeHtmlVersionId);
   const activeDataContractMatches = overview !== null
+    && overview.block.id === blockId
     && overview.activeDataContract.htmlVersionId === overview.activeVersionId;
   const usesUniversalDataUpload = overview?.activeDataContract.mode === 'generic';
-  const directDataUploadTarget = activeDataContractMatches
-    && usesUniversalDataUpload
-    ? overview?.activeDataContract.directUploadTarget ?? null
-    : null;
+  const usesRuntimeUploadTargets = usesUniversalDataUpload
+    && runtimeUploadTargets?.blockId === blockId
+    && runtimeUploadTargets.htmlVersionId === overview?.activeVersionId
+    && selectedVersionId === overview?.activeVersionId;
+  const dataUploadTargets = activeDataContractMatches && usesUniversalDataUpload
+    ? usesRuntimeUploadTargets
+      ? runtimeUploadTargets.targets
+      : overview?.activeDataContract.uploadTargets ?? []
+    : [];
   const canUploadData = hasActiveHtml
     && activeDataContractMatches
     && (
       overview?.activeDataContract.mode === 'legacy'
-      || directDataUploadTarget !== null
+      || dataUploadTargets.length > 0
     );
+  const uploadSelectionRevision = JSON.stringify([
+    blockId, overview?.activeVersionId, usesRuntimeUploadTargets, dataUploadTargets,
+  ]);
+  const selectedFileCount = Object.values(selectedTargetFiles).reduce((count, files) => count + files.length, 0);
+  const selectedFilesSize = Object.values(selectedTargetFiles).flat().reduce((size, file) => size + file.size, 0);
+
+  useEffect(() => {
+    if (uploadSelectionRevisionRef.current === uploadSelectionRevision) return;
+    uploadSelectionRevisionRef.current = uploadSelectionRevision;
+    setSelectedTargetFiles({});
+    setSelectedDataFile(null);
+    setSelectedDataHtmlVersionId(null);
+    if (dataFileInputRef.current) dataFileInputRef.current.value = '';
+  }, [uploadSelectionRevision]);
+
+  const probeRuntimeUploadTargets = useCallback(() => {
+    if (!activeHtmlVersionId || selectedVersionId !== activeHtmlVersionId) return;
+    previewFrameRef.current?.contentWindow?.postMessage({
+      marker: 'kts-top-dashboard-management-v1',
+      type: 'probe-upload-targets',
+      blockId,
+      htmlVersionId: activeHtmlVersionId,
+    }, window.location.origin);
+  }, [blockId, activeHtmlVersionId, previewFrameRef, selectedVersionId]);
+
+  useEffect(() => {
+    const receiveMessage = (event: MessageEvent) => {
+      if (
+        event.origin !== window.location.origin
+        || event.source !== previewFrameRef.current?.contentWindow
+        || !event.data || typeof event.data !== 'object'
+      ) return;
+      const message = event.data as Record<string, unknown>;
+      if (
+        message.marker !== 'kts-top-dashboard-management-v1'
+        || message.blockId !== blockId
+        || message.htmlVersionId !== activeHtmlVersionId
+        || selectedVersionId !== activeHtmlVersionId
+      ) return;
+      if (message.type === 'upload-targets') {
+        const targets = normalizeTopDashboardUploadTargets(message.targets);
+        if (!Number.isSafeInteger(message.htmlVersionId)) return;
+        setRuntimeUploadTargets((current) => {
+          const next = { blockId, htmlVersionId: Number(message.htmlVersionId), targets };
+          return JSON.stringify(current) === JSON.stringify(next) ? current : next;
+        });
+      }
+      if (message.type === 'upload-result') {
+        const pending = runtimeUploadRef.current;
+        if (!pending || pending.requestId !== message.requestId || pending.htmlVersionId !== message.htmlVersionId) return;
+        clearTimeout(pending.timer);
+        runtimeUploadRef.current = null;
+        if (message.ok === true) pending.resolve();
+        else pending.reject(new Error(typeof message.error === 'string'
+          ? message.error : 'Не удалось сохранить выбранные файлы'));
+      }
+    };
+    window.addEventListener('message', receiveMessage);
+    probeRuntimeUploadTargets();
+    return () => {
+      window.removeEventListener('message', receiveMessage);
+      const pending = runtimeUploadRef.current;
+      if (pending) {
+        clearTimeout(pending.timer);
+        runtimeUploadRef.current = null;
+        pending.reject(new Error('Просмотр HTML изменился. Проверьте историю данных перед повторной загрузкой.'));
+      }
+    };
+  }, [blockId, activeHtmlVersionId, previewFrameRef, probeRuntimeUploadTargets, selectedVersionId]);
+
+  const getSelectedUploadTargets = (selection: Record<string, File[]>) => dataUploadTargets
+    .map((descriptor) => ({
+      target: descriptor.target,
+      files: (selection[topDashboardUploadTargetKey(descriptor.target)] ?? []).map((file) => ({
+        name: file.name,
+        type: file.type,
+        lastModified: file.lastModified,
+        webkitRelativePath: file.webkitRelativePath,
+        blob: file,
+      })),
+    }))
+    .filter((entry) => entry.files.length > 0);
+
+  const chooseTargetFiles = (descriptor: TopDashboardUploadTarget, files: File[]) => {
+    if (!canUploadData || busyAction !== null) return;
+    if (!descriptor.multiple && !descriptor.directory && files.length > 1) {
+      showStatusRef.current('Для этого поля отчёт принимает один файл. Для других полей выберите данные отдельно.');
+      return;
+    }
+    const next = { ...selectedTargetFiles, [topDashboardUploadTargetKey(descriptor.target)]: files };
+    const targets = getSelectedUploadTargets(next);
+    try {
+      // Building an envelope validates aggregate size/count/paths; payloads stay
+      // as Blob parts, without copying large source files into ArrayBuffers.
+      if (targets.length) encodeTopDashboardMultiFileBlobSnapshot({ targets });
+      setSelectedTargetFiles(next);
+      setSelectedDataHtmlVersionId(overview?.activeVersionId ?? null);
+    } catch (error) {
+      showStatusRef.current(error instanceof Error ? error.message : 'Не удалось подготовить выбранные файлы');
+    }
+  };
 
   const chooseFile = (file: File | null) => {
     if (!file) {
@@ -505,7 +625,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   };
 
   const uploadDataVersion = async () => {
-    if (!overview || !selectedDataFile) {
+    if (!overview || (usesUniversalDataUpload ? !selectedFileCount : !selectedDataFile)) {
       showStatusRef.current('Сначала выберите файл данных');
       return;
     }
@@ -515,6 +635,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     }
     if (selectedDataHtmlVersionId !== overview.activeVersionId) {
       setSelectedDataFile(null);
+      setSelectedTargetFiles({});
       setSelectedDataHtmlVersionId(null);
       if (dataFileInputRef.current) dataFileInputRef.current.value = '';
       showStatusRef.current('HTML-страница изменилась. Выберите файл данных заново.');
@@ -529,13 +650,59 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       await loadOverview(selectedVersionId);
       return;
     }
-    if (overview.activeDataContract.mode === 'generic' && !directDataUploadTarget) {
-      showStatusRef.current('Для этого HTML выберите файлы внутри предпросмотра');
+    if (overview.activeDataContract.mode === 'generic' && !dataUploadTargets.length) {
+      showStatusRef.current('Дождитесь определения полей загрузки в опубликованном HTML');
       return;
+    }
+    if (usesUniversalDataUpload && activeDataVersion) {
+      const labels = dataUploadTargets
+        .filter((descriptor) => selectedTargetFiles[topDashboardUploadTargetKey(descriptor.target)]?.length)
+        .map((descriptor) => descriptor.label)
+        .join(', ');
+      if (!window.confirm(
+        `Заменить данные для всех пользователей?\n\nВыбрано файлов: ${selectedFileCount}. Поля: ${labels}.\n\nВыбранный набор заменит текущие данные целиком. Если отчёту нужны несколько файлов, выберите их все. Предыдущая версия останется для отката.`,
+      )) return;
     }
 
     setBusyAction('upload-data');
     try {
+      const uploadTargets = getSelectedUploadTargets(selectedTargetFiles);
+      if (usesUniversalDataUpload && usesRuntimeUploadTargets) {
+        // Runtime-only fields must be checked by the trusted preview wrapper,
+        // never submitted as arbitrary target identifiers to the direct API.
+        encodeTopDashboardMultiFileBlobSnapshot({ targets: uploadTargets });
+        const frameWindow = previewFrameRef.current?.contentWindow;
+        if (!frameWindow) throw new Error('Предпросмотр ещё не готов. Повторите после загрузки HTML.');
+        await new Promise<void>((resolve, reject) => {
+          const requestId = crypto.randomUUID();
+          const timer = setTimeout(() => {
+            runtimeUploadRef.current = null;
+            reject(new Error('Подтверждение сохранения не получено. Проверьте историю данных перед повторной загрузкой.'));
+          }, 5 * 60_000);
+          runtimeUploadRef.current = { requestId, htmlVersionId: overview.activeVersionId!, resolve, reject, timer };
+          try {
+            frameWindow.postMessage({
+              marker: 'kts-top-dashboard-management-v1',
+              type: 'upload-files',
+              blockId,
+              htmlVersionId: overview.activeVersionId,
+              expectedActiveDataVersionId: overview.data.activeVersionId,
+              requestId,
+              targets: uploadTargets,
+            }, window.location.origin);
+          } catch (error) {
+            clearTimeout(timer);
+            runtimeUploadRef.current = null;
+            reject(error);
+          }
+        });
+        setSelectedTargetFiles({});
+        setSelectedDataHtmlVersionId(null);
+        await loadOverview(selectedVersionId);
+        setPreviewRevision((current) => current + 1);
+        showStatusRef.current(activeDataVersion ? 'Данные обновлены для всех пользователей' : 'Данные сохранены для всех пользователей');
+        return;
+      }
       const headers: Record<string, string> = {
         'X-KTS-TOP-Data-Upload': '1',
         'X-KTS-Top-Data-Protocol': 'stream-v1',
@@ -543,31 +710,20 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
           ? 'none'
           : String(overview.data.activeVersionId),
       };
-      let body: BodyInit = selectedDataFile;
+      let body: BodyInit = selectedDataFile ?? new Blob();
 
       if (overview.activeDataContract.mode === 'generic') {
         try {
-          body = encodeTopDashboardSingleFileBlobSnapshot({
-            target: directDataUploadTarget!,
-            file: {
-              name: selectedDataFile.name,
-              type: selectedDataFile.type,
-              lastModified: selectedDataFile.lastModified,
-              webkitRelativePath: selectedDataFile.webkitRelativePath,
-              blob: selectedDataFile,
-            },
-          });
-        } catch {
-          showStatusRef.current(
-            `Файл нельзя подготовить к загрузке или его размер с учётом служебных данных превышает ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
-          );
+          body = encodeTopDashboardMultiFileBlobSnapshot({ targets: uploadTargets });
+        } catch (error) {
+          showStatusRef.current(error instanceof Error ? error.message : 'Не удалось подготовить выбранные файлы');
           return;
         }
         headers['X-KTS-Top-Dashboard-Multi-File'] = '1';
-        headers['X-KTS-Top-Dashboard-Direct-Single-File'] = '1';
+        headers['X-KTS-Top-Dashboard-Direct-Files'] = '1';
         headers['X-KTS-Top-HTML-Version'] = String(overview.activeVersionId);
       } else {
-        headers['X-KTS-Top-Data-Name'] = encodeURIComponent(selectedDataFile.name);
+        headers['X-KTS-Top-Data-Name'] = encodeURIComponent(selectedDataFile!.name);
       }
 
       const response = await fetch(`${apiBasePath}/data`, {
@@ -584,13 +740,15 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       }
 
       setSelectedDataFile(null);
+      setSelectedTargetFiles({});
       setSelectedDataHtmlVersionId(null);
       if (dataFileInputRef.current) dataFileInputRef.current.value = '';
       await loadOverview(selectedVersionId);
       setPreviewRevision((current) => current + 1);
       showStatusRef.current(activeDataVersion ? 'Данные обновлены для всех пользователей' : 'Данные сохранены для всех пользователей');
-    } catch {
-      showStatusRef.current('Не удалось сохранить данные дашборда');
+    } catch (error) {
+      if (usesRuntimeUploadTargets) await loadOverview(selectedVersionId);
+      showStatusRef.current(error instanceof Error ? error.message : 'Не удалось сохранить данные дашборда');
     } finally {
       setBusyAction(null);
     }
@@ -931,7 +1089,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
             <p>Самодостаточный HTML до 5 МБ сохранится как черновик. Текущая публикация не изменится до подтверждения; в этом блоке хранится до 50 версий общим объёмом до 100 МБ.</p>
           </div>
           <div className={styles.topDashboardUploadControls}>
-            <label className={styles.topDashboardFilePicker}>
+            <label className={styles.topDashboardFilePicker} aria-disabled={busyAction !== null}>
               <span>Выбрать HTML</span>
               <input
                 ref={fileInputRef}
@@ -992,15 +1150,17 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                 В опубликованной HTML-странице не найдено поле для загрузки данных.
                 Опубликуйте исправленную версию HTML, чтобы подключить общий файл.
               </p>
-            ) : usesUniversalDataUpload && !directDataUploadTarget ? (
+            ) : usesUniversalDataUpload && !dataUploadTargets.length ? (
               <p>
-                Этот HTML использует несколько файлов, папку или создаёт поле выбора динамически.
-                Выберите нужные файлы внутри предпросмотра — верхняя загрузка здесь отключена.
+                Поля загрузки определяются в опубликованном отчёте. Откройте его просмотр ниже;
+                если поле создаётся после действия в отчёте, оно появится здесь после этого действия.
               </p>
             ) : usesUniversalDataUpload ? (
               <p>
-                Поддерживается любой одиночный файл размером до{' '}
-                {TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ: он передаётся HTML-дашборду без изменения.
+                Выберите файл, несколько файлов или папку для нужного поля отчёта.
+                Общий размер — до {TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ.
+                Файлы передаются в HTML без изменения. Выбранный набор заменит текущие данные целиком.
+                Если отчёту нужны несколько файлов, выберите их все. Предыдущая версия останется для отката.
               </p>
             ) : (
               <p>
@@ -1010,8 +1170,80 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
               </p>
             )}
           </div>
-          <div className={styles.topDashboardUploadControls}>
-            <label className={styles.topDashboardFilePicker}>
+          {usesUniversalDataUpload ? (
+            <div className={styles.topDashboardMultiUploadControls}>
+              {dataUploadTargets.map((descriptor) => {
+                const key = topDashboardUploadTargetKey(descriptor.target);
+                const files = selectedTargetFiles[key] ?? [];
+                return (
+                  <div className={styles.topDashboardUploadTarget} key={`${uploadSelectionRevision}:${key}`}>
+                    <strong>{descriptor.label}</strong>
+                    <div className={styles.topDashboardUploadTargetControls}>
+                      <label className={styles.topDashboardFilePicker} aria-disabled={busyAction !== null || !canUploadData}>
+                        <span>{descriptor.directory ? 'Выбрать папку' : descriptor.multiple ? 'Выбрать файлы' : 'Выбрать данные'}</span>
+                        <input
+                          type="file"
+                          aria-label={`${descriptor.directory ? 'Выбрать папку' : 'Выбрать данные'}: ${descriptor.label}`}
+                          accept={descriptor.accept || undefined}
+                          multiple={descriptor.multiple || descriptor.directory}
+                          ref={(input) => {
+                            if (input && descriptor.directory) input.setAttribute('webkitdirectory', '');
+                          }}
+                          disabled={busyAction !== null || !canUploadData}
+                          onChange={(event) => {
+                            chooseTargetFiles(descriptor, Array.from(event.target.files ?? []));
+                            event.target.value = '';
+                          }}
+                        />
+                      </label>
+                      <div className={styles.topDashboardSelectedFile} aria-live="polite">
+                        {files.length ? (
+                          <>
+                            <strong title={files.map((file) => file.webkitRelativePath || file.name).join('\n')}>
+                              {files.length === 1 ? files[0].name : `Файлов выбрано: ${files.length}`}
+                            </strong>
+                            <span>{formatFileSize(files.reduce((size, file) => size + file.size, 0))}</span>
+                          </>
+                        ) : <span>{descriptor.directory ? 'Папка не выбрана' : 'Файлы не выбраны'}</span>}
+                      </div>
+                      {files.length > 0 ? (
+                        <button
+                          type="button"
+                          className={styles.secondary}
+                          disabled={busyAction !== null}
+                          onClick={() => chooseTargetFiles(descriptor, [])}
+                          aria-label={`Убрать выбранные файлы: ${descriptor.label}`}
+                        >Убрать</button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+              {!dataUploadTargets.length && hasActiveHtml ? (
+                <button
+                  type="button"
+                  className={styles.secondary}
+                  disabled={busyAction !== null}
+                  onClick={() => {
+                    setSelectedVersionId(overview!.activeVersionId);
+                    if (selectedVersionId === overview!.activeVersionId) probeRuntimeUploadTargets();
+                    previewCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                >Открыть опубликованный отчёт</button>
+              ) : null}
+              {dataUploadTargets.length > 0 ? (
+                <div className={styles.topDashboardUploadTargetFooter}>
+                  <span aria-live="polite">Выбрано файлов: {selectedFileCount} · {formatFileSize(selectedFilesSize)}</span>
+                  <button
+                    type="button"
+                    disabled={!selectedFileCount || busyAction !== null || !canUploadData}
+                    onClick={() => void uploadDataVersion()}
+                  >{busyAction === 'upload-data' ? 'Сохраняем…' : activeDataVersion ? 'Заменить для всех' : 'Сохранить для всех'}</button>
+                </div>
+              ) : null}
+            </div>
+          ) : <div className={styles.topDashboardUploadControls}>
+            <label className={styles.topDashboardFilePicker} aria-disabled={busyAction !== null || !overview || !canUploadData}>
               <span>Выбрать данные</span>
               <input
                 ref={dataFileInputRef}
@@ -1044,7 +1276,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                   ? 'Заменить для всех'
                   : 'Сохранить для всех'}
             </button>
-          </div>
+          </div>}
         </div>
 
         {activeDataVersion ? (
@@ -1145,6 +1377,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
               <button
                 className={styles.secondary}
                 type="button"
+                disabled={busyAction !== null}
                 onClick={() => {
                   void loadOverview(selectedVersion.id);
                   setPreviewRevision((current) => current + 1);
@@ -1183,6 +1416,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
           <div className={styles.topDashboardFrameShell}>
             <iframe
               ref={previewFrameRef}
+              onLoad={probeRuntimeUploadTargets}
               key={`${blockId}:${selectedVersion.id}:${previewRevision}`}
               className={styles.topDashboardFrame}
               src={`${apiBasePath}/versions/${selectedVersion.id}/frame?revision=${previewRevision}`}
@@ -1236,6 +1470,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                   <button
                     className={styles.secondary}
                     type="button"
+                    disabled={busyAction !== null}
                     onClick={() => {
                       setSelectedVersionId(version.id);
                       setPreviewRevision((current) => current + 1);

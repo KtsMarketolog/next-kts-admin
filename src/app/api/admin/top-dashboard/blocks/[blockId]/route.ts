@@ -20,6 +20,7 @@ import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { detectTopDashboardDataContract } from '@/shared/lib/topDashboardContentSecurity';
 import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
+import { detectTopDashboardUploadTargets } from '@/shared/lib/topDashboardUploadTargets';
 
 import { parsePositiveId } from '../routeUtils';
 
@@ -55,6 +56,7 @@ export async function GET(_request: Request, context: Context) {
     const activeDataContract = activeHtml
       ? {
           ...detectTopDashboardDataContract(activeHtml.htmlContent),
+          uploadTargets: detectTopDashboardUploadTargets(activeHtml.htmlContent),
           htmlVersionId: overview.activeVersionId,
         }
       : {
@@ -62,6 +64,7 @@ export async function GET(_request: Request, context: Context) {
           snapshotFormat: null,
           profile: null,
           directUploadTarget: null,
+          uploadTargets: [],
           htmlVersionId: null,
         } as const;
 
