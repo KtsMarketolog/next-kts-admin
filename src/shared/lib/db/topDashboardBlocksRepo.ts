@@ -110,6 +110,30 @@ export type CreateTopDashboardBlockVersionResult = {
   prunedStoragePaths: string[];
 };
 
+export type PruneTopDashboardBlockHistoryInput = {
+  blockId: number;
+  expectedActiveHtmlVersionId: number | null;
+  expectedPreviousHtmlVersionId: number | null;
+  expectedActiveDataVersionId: number | null;
+  expectedPreviousDataVersionId: number | null;
+  dryRun?: boolean;
+};
+
+export type PruneTopDashboardBlockHistoryResult = {
+  blockId: number;
+  dryRun: boolean;
+  activeHtmlVersionId: number | null;
+  previousHtmlVersionId: number | null;
+  activeDataVersionId: number | null;
+  previousDataVersionId: number | null;
+  prunedHtmlVersionIds: number[];
+  prunedDataVersionIds: number[];
+  prunedStoragePaths: string[];
+  preservedHtmlVersionIds: number[];
+  preservedDataVersionIds: number[];
+  preservedDraftVersionIds: number[];
+};
+
 const TOP_DASHBOARD_VERSION_LIMIT = 50;
 const TOP_DASHBOARD_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 const TOP_DASHBOARD_BLOCK_TITLE_MAX_LENGTH = 120;
@@ -457,15 +481,17 @@ async function pruneDashboardDataVersions(client: Queryable, blockId: number) {
 
 async function pruneDashboardPublishedHtml(client: Queryable, blockId: number) {
   // Data/context cleanup runs first; bound data can then cascade without stale pointers.
-  await client.query(
+  const pruned = await client.query<{ id: string }>(
     `delete from top_dashboard_block_versions versions
      using top_dashboard_block_state state
      where versions.block_id = $1 and state.block_id = versions.block_id
        and versions.first_published_at is not null
        and versions.id <> coalesce(state.active_version_id, 0)
-       and versions.id <> coalesce(state.previous_version_id, 0)`,
+       and versions.id <> coalesce(state.previous_version_id, 0)
+     returning versions.id::text`,
     [blockId],
   );
+  return pruned.rows.map((row) => Number(row.id));
 }
 
 async function assertExpectedActiveHtmlVersion(
@@ -549,6 +575,121 @@ export class TopDashboardDataStorageLimitError extends Error {
   constructor() {
     super('Недостаточно места для нового файла данных. Сохранённые версии не изменены.');
     this.name = 'TopDashboardDataStorageLimitError';
+  }
+}
+
+class TopDashboardHistoryPreviewRollback extends Error {
+  constructor(readonly result: PruneTopDashboardBlockHistoryResult) {
+    super('Roll back TOP dashboard history preview');
+  }
+}
+
+async function readDashboardHistoryMaintenanceSnapshot(client: Queryable, blockId: number) {
+  const state = await client.query<{ snapshot: string }>(
+    `select jsonb_build_object('block', to_jsonb(blocks),
+       'html', to_jsonb(html_state), 'data', to_jsonb(data_state))::text as snapshot
+     from top_dashboard_blocks blocks
+     join top_dashboard_block_state html_state on html_state.block_id = blocks.id
+     join top_dashboard_block_data_state data_state on data_state.block_id = blocks.id
+     where blocks.id = $1`,
+    [blockId],
+  );
+  const html = await client.query<{
+    id: string;
+    first_published_at: string | null;
+    metadata: string;
+  }>(
+    `select id::text, first_published_at::text,
+       (to_jsonb(versions) - 'html_content')::text as metadata
+     from top_dashboard_block_versions versions
+     where block_id = $1 order by versions.id`,
+    [blockId],
+  );
+  const data = await client.query<{ id: string }>(
+    `select id::text from top_dashboard_block_data_versions versions where block_id = $1 order by versions.id`,
+    [blockId],
+  );
+  return { state: state.rows[0]?.snapshot, html: html.rows, data: data.rows };
+}
+
+/** Requires the deployed schema. A preview executes pruning in a rolled-back transaction. */
+export async function pruneTopDashboardBlockHistory(
+  input: PruneTopDashboardBlockHistoryInput,
+): Promise<PruneTopDashboardBlockHistoryResult> {
+  const validId = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+  if (!validId(input.blockId) || [input.expectedActiveHtmlVersionId, input.expectedPreviousHtmlVersionId,
+    input.expectedActiveDataVersionId, input.expectedPreviousDataVersionId]
+    .some((value) => value !== null && !validId(value))
+    || (input.dryRun !== undefined && typeof input.dryRun !== 'boolean')) {
+    throw new TypeError('History pruning requires a block ID and all four explicit expected version IDs');
+  }
+  const dryRun = input.dryRun !== false;
+
+  try {
+    return await withTransaction(async (client) => {
+      await requireBlock(input.blockId, client, true);
+      const htmlStateResult = await client.query<TopDashboardStateRow>(
+        `select active_version_id::text, previous_version_id::text, updated_at::text
+         from top_dashboard_block_state where block_id = $1 for update`,
+        [input.blockId],
+      );
+      const htmlState = htmlStateResult.rows[0];
+      if (!htmlState) throw new TopDashboardBlockStateNotFoundError();
+      const dataStateResult = await client.query<TopDashboardStateRow>(
+        `select active_version_id::text, previous_version_id::text, updated_at::text
+         from top_dashboard_block_data_state where block_id = $1 for update`,
+        [input.blockId],
+      );
+      const dataState = dataStateResult.rows[0];
+      if (!dataState) throw new TopDashboardBlockDataStateNotFoundError();
+
+      const activeHtmlVersionId = numericId(htmlState.active_version_id);
+      const previousHtmlVersionId = numericId(htmlState.previous_version_id);
+      const activeDataVersionId = numericId(dataState.active_version_id);
+      const previousDataVersionId = numericId(dataState.previous_version_id);
+      if (activeHtmlVersionId !== input.expectedActiveHtmlVersionId
+        || previousHtmlVersionId !== input.expectedPreviousHtmlVersionId) {
+        throw new TopDashboardStateConflictError(activeHtmlVersionId);
+      }
+      if (activeDataVersionId !== input.expectedActiveDataVersionId
+        || previousDataVersionId !== input.expectedPreviousDataVersionId) {
+        throw new TopDashboardBlockDataStateConflictError(activeDataVersionId);
+      }
+
+      const before = await readDashboardHistoryMaintenanceSnapshot(client, input.blockId);
+      await initializeDashboardDataContexts(client, input.blockId);
+      const prunedData = await pruneDashboardDataVersions(client, input.blockId);
+      const prunedHtmlVersionIds = (await pruneDashboardPublishedHtml(client, input.blockId)).sort((a, b) => a - b);
+      const after = await readDashboardHistoryMaintenanceSnapshot(client, input.blockId);
+      const preservedHtmlVersionIds = after.html.map((row) => Number(row.id));
+      const preservedDataVersionIds = after.data.map((row) => Number(row.id));
+      const preservedDraftVersionIds = after.html
+        .filter((row) => row.first_published_at === null).map((row) => Number(row.id));
+      const prunedDataVersionIds = prunedData.prunedVersionIds.sort((a, b) => a - b);
+      const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+      const retainedHtml = new Set(preservedHtmlVersionIds);
+      const retainedData = new Set(preservedDataVersionIds);
+      if (before.state === undefined || before.state !== after.state
+        || !same(before.html.filter((row) => retainedHtml.has(Number(row.id))), after.html)
+        || !same(before.html.filter((row) => row.first_published_at === null).map((row) => Number(row.id)), preservedDraftVersionIds)
+        || !same(before.html.filter((row) => !retainedHtml.has(Number(row.id))).map((row) => Number(row.id)), prunedHtmlVersionIds)
+        || !same(before.data.filter((row) => !retainedData.has(Number(row.id))).map((row) => Number(row.id)), prunedDataVersionIds)) {
+        throw new Error('History pruning would change publication state, retained HTML or drafts; rolled back');
+      }
+
+      const result: PruneTopDashboardBlockHistoryResult = {
+        blockId: input.blockId, dryRun, activeHtmlVersionId, previousHtmlVersionId,
+        activeDataVersionId, previousDataVersionId, prunedHtmlVersionIds, prunedDataVersionIds,
+        prunedStoragePaths: [...new Set(prunedData.prunedStoragePaths)].sort(),
+        preservedHtmlVersionIds, preservedDataVersionIds, preservedDraftVersionIds,
+      };
+      // Throw outside the transaction callback's normal return path so preview can never COMMIT.
+      if (dryRun) throw new TopDashboardHistoryPreviewRollback(result);
+      return result;
+    });
+  } catch (error) {
+    if (error instanceof TopDashboardHistoryPreviewRollback) return error.result;
+    throw error;
   }
 }
 

@@ -13,6 +13,7 @@ import {
 import { encodeTopDashboardMultiFileBlobSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
+import { selectWorkingVersionPair } from './topDashboardHistory';
 import {
   normalizeTopDashboardUploadTargets,
   topDashboardUploadTargetKey,
@@ -150,8 +151,9 @@ function formatDate(value: string | null) {
   }).format(date);
 }
 
-function statusLabel(status: TopDashboardVersionStatus) {
+function statusLabel(status: TopDashboardVersionStatus | 'previous') {
   if (status === 'active') return 'Активная';
+  if (status === 'previous') return 'Предыдущая';
   if (status === 'archived') return 'Архивная';
   return 'Черновик';
 }
@@ -412,6 +414,12 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     [overview, selectedVersionId],
   );
   const latestDraft = overview?.versions.find((version) => version.status === 'draft');
+  const workingHtmlVersions = overview
+    ? selectWorkingVersionPair(overview.versions, overview.activeVersionId, overview.previousVersionId)
+    : [];
+  const workingDataVersions = overview
+    ? selectWorkingVersionPair(overview.data.versions, overview.data.activeVersionId, overview.data.previousVersionId)
+    : [];
   const activeDataVersion = useMemo(
     () => overview?.data.versions.find((version) => version.id === overview.data.activeVersionId) ?? null,
     [overview],
@@ -1137,7 +1145,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
             <p>Общие данные</p>
             <h2>Данные дашборда</h2>
           </div>
-          <span className={styles.headingMeta}>{versionCountLabel(overview?.data.versions.length ?? 0)}</span>
+          <span className={styles.headingMeta}>{versionCountLabel(workingDataVersions.length)}</span>
         </div>
 
         <p className={styles.topDashboardDataIntro}>
@@ -1406,7 +1414,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
 
       <section id="top-dashboard-data-history" className={styles.section}>
         <p className={styles.mutedText}>Хранятся текущий и один предыдущий рабочий снимок данных.</p>
-        {overview?.data.versions.length ? (
+        {overview && workingDataVersions.length ? (
           <div className={styles.topDashboardDataHistory}>
             <div className={styles.topDashboardDataHistoryHeader}>
               <h3>История данных</h3>
@@ -1415,7 +1423,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
               ) : null}
             </div>
             <div className={styles.topDashboardVersionList}>
-              {overview.data.versions.map((version) => (
+              {workingDataVersions.map((version) => (
                 <article className={styles.topDashboardVersionRow} key={version.id}>
                   <div>
                     <div className={styles.topDashboardVersionTitle}>
@@ -1464,7 +1472,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
           <div className={styles.topDashboardVersionList}>
             <p className={styles.mutedText}>Хранятся действующий и один предыдущий рабочий HTML. Черновики перечислены отдельно.</p>
             {[
-              { title: 'Рабочие HTML-версии', versions: overview.versions.filter((version) => version.status !== 'draft') },
+              { title: 'Рабочие HTML-версии', versions: workingHtmlVersions },
               { title: 'Черновики HTML', versions: overview.versions.filter((version) => version.status === 'draft') },
             ].filter((group) => group.versions.length).map((group) => <section key={group.title}>
               <h3>{group.title}</h3>
@@ -1477,8 +1485,8 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                     <div>
                       <div className={styles.topDashboardVersionTitle}>
                         <strong>{version.originalName}</strong>
-                        <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${version.status}`]}`}>
-                          {statusLabel(version.status)}
+                        <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${version.id === overview.previousVersionId ? 'previous' : version.status}`]}`}>
+                          {statusLabel(version.id === overview.previousVersionId ? 'previous' : version.status)}
                         </span>
                       </div>
                       <div className={styles.topDashboardMeta}>

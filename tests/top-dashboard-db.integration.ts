@@ -16,6 +16,7 @@ import {
   deleteTopDashboardBlockVersion,
   getActiveTopDashboardBlockDataContent,
   getTopDashboardBlockOverview,
+  pruneTopDashboardBlockHistory,
   TopDashboardDraftLimitError,
   TopDashboardDataStorageLimitError,
 } from '../src/shared/lib/db/topDashboardBlocksRepo';
@@ -79,13 +80,35 @@ async function dataIds(blockId: number) {
 async function queuedPaths() {
   return (await query<{ storage_path: string }>(`select storage_path from dashboard_file_cleanup_queue order by storage_path`)).rows.map((row) => row.storage_path);
 }
-async function legacyData(blockId: number, htmlId: number, label: string) {
+async function legacyData(blockId: number, htmlId: number, label: string, file = false) {
   const content = Buffer.from(label);
+  const storagePath = file ? `${hash(content).slice(0, 2)}/${hash(content)}-${randomUUID()}.bin` : null;
   const result = await query<{ id: string }>(`insert into top_dashboard_block_data_versions
-    (block_id,original_name,compressed_payload,file_size,uncompressed_size,sha256,snapshot_format,dashboard_profile,bound_html_version_id)
-    values ($1,$2,$3,$4,$4,$5,'multi-file-v1','generic',$6) returning id::text`,
-  [blockId, label, content, content.length, hash(content), htmlId]);
+    (block_id,original_name,compressed_payload,file_size,uncompressed_size,sha256,snapshot_format,dashboard_profile,bound_html_version_id,storage_path)
+    values ($1,$2,$3,$4,$4,$5,'multi-file-v1','generic',$6,$7) returning id::text`,
+  [blockId, label, file ? null : content, content.length, hash(content), htmlId, storagePath]);
   return Number(result.rows[0].id);
+}
+
+async function maintenanceSnapshot(blockId: number) {
+  return (await query<{ snapshot: {
+    block: unknown;
+    htmlState: unknown;
+    dataState: unknown;
+    html: unknown[];
+    data: unknown[];
+    contexts: unknown[];
+  } }>(`select jsonb_build_object(
+    'block', (select to_jsonb(blocks) from top_dashboard_blocks blocks where id=$1),
+    'htmlState', (select to_jsonb(state) from top_dashboard_block_state state where block_id=$1),
+    'dataState', (select to_jsonb(state) from top_dashboard_block_data_state state where block_id=$1),
+    'html', (select coalesce(jsonb_agg(to_jsonb(versions) order by id), '[]'::jsonb)
+      from top_dashboard_block_versions versions where block_id=$1),
+    'data', (select coalesce(jsonb_agg(to_jsonb(versions) order by id), '[]'::jsonb)
+      from top_dashboard_block_data_versions versions where block_id=$1),
+    'contexts', (select coalesce(jsonb_agg(to_jsonb(contexts) order by context_key), '[]'::jsonb)
+      from top_dashboard_block_data_context_state contexts where block_id=$1)
+  ) as snapshot`, [blockId])).rows[0].snapshot;
 }
 
 test('TOP retention isolated PostgreSQL acceptance', async (t) => {
@@ -265,6 +288,142 @@ test('TOP retention isolated PostgreSQL acceptance', async (t) => {
       assert.equal(deletedBlock.deletedStoragePaths.length, 2);
       const afterBlockDeletionQueue = await queuedPaths();
       assert.ok(deletedBlock.deletedStoragePaths.every((file) => afterBlockDeletionQueue.includes(file)));
+    });
+
+    await t.test('maintenance previews roll back, preserve working legacy pairs and drafts, and apply only to the selected block', async () => {
+      const { id } = await block();
+      const previous = await html(id, 'maintenance-previous');
+      const active = await html(id, 'maintenance-active');
+      const old = await html(id, 'maintenance-old');
+      const draft = await html(id, 'maintenance-draft');
+      const secondDraft = await html(id, 'maintenance-second-draft');
+      await query(`update top_dashboard_block_versions set first_published_at=now()
+        where block_id=$1 and id=any($2::bigint[])`, [id, [previous, active, old]]);
+      await query(`update top_dashboard_block_state set active_version_id=$2, previous_version_id=$3 where block_id=$1`, [id, active, previous]);
+      const a1 = await legacyData(id, active, 'maintenance-a1', true);
+      const a2 = await legacyData(id, active, 'maintenance-a2', true);
+      const a3 = await legacyData(id, active, 'maintenance-a3', true);
+      const a4 = await legacyData(id, active, 'maintenance-a4', true);
+      const p1 = await legacyData(id, previous, 'maintenance-p1', true);
+      const p2 = await legacyData(id, previous, 'maintenance-p2', true);
+      const p3 = await legacyData(id, previous, 'maintenance-p3', true);
+      const oldData = await legacyData(id, old, 'maintenance-old-data', true);
+      const draftData = await legacyData(id, draft, 'maintenance-draft-data', true);
+      await query(`update top_dashboard_block_data_state set active_version_id=$2,previous_version_id=$3 where block_id=$1`, [id, a2, a3]);
+      const input = { blockId: id, expectedActiveHtmlVersionId: active, expectedPreviousHtmlVersionId: previous,
+        expectedActiveDataVersionId: a2, expectedPreviousDataVersionId: a3 };
+      const removedData = [a1, a4, p1, oldData].sort((a, b) => a - b);
+      const removedPaths = (await query<{ storage_path: string }>(`select storage_path
+        from top_dashboard_block_data_versions where block_id=$1 and id=any($2::bigint[]) order by storage_path`,
+      [id, removedData])).rows.map((row) => row.storage_path);
+      const before = await maintenanceSnapshot(id);
+      const queuedBefore = await queuedPaths();
+
+      const sentinel = await block();
+      const sentinelHtml = await html(sentinel.id, 'maintenance-other-block');
+      await publish(sentinel.id, sentinelHtml, null);
+      await data(sentinel.id, sentinelHtml, null, 'maintenance-other-data', 'generic', true);
+      const sentinelBefore = await maintenanceSnapshot(sentinel.id);
+
+      const preview = await pruneTopDashboardBlockHistory(input);
+      assert.equal(preview.dryRun, true, 'omitting dryRun must never commit');
+      assert.deepEqual(preview.prunedHtmlVersionIds, [old]);
+      assert.deepEqual(preview.prunedDataVersionIds, removedData);
+      assert.deepEqual(preview.prunedStoragePaths, removedPaths);
+      assert.deepEqual(preview.preservedHtmlVersionIds, [previous, active, draft, secondDraft]);
+      assert.deepEqual(preview.preservedDraftVersionIds, [draft, secondDraft]);
+      assert.deepEqual(preview.preservedDataVersionIds, [a2, a3, p2, p3, draftData]);
+      assert.deepEqual(await maintenanceSnapshot(id), before, 'preview rolls back seeded contexts, versions and pointers');
+      assert.deepEqual(await queuedPaths(), queuedBefore, 'preview rolls back the file cleanup outbox');
+
+      for (const stale of [
+        { expectedActiveHtmlVersionId: old }, { expectedPreviousHtmlVersionId: null },
+        { expectedActiveDataVersionId: a1 }, { expectedPreviousDataVersionId: null },
+      ]) {
+        await assert.rejects(pruneTopDashboardBlockHistory({ ...input, ...stale, dryRun: false }),
+          'expectedActiveHtmlVersionId' in stale || 'expectedPreviousHtmlVersionId' in stale
+            ? TopDashboardStateConflictError : TopDashboardBlockDataStateConflictError);
+      }
+      assert.deepEqual(await maintenanceSnapshot(id), before);
+      assert.deepEqual(await queuedPaths(), queuedBefore);
+
+      const applied = await pruneTopDashboardBlockHistory({ ...input, dryRun: false });
+      assert.deepEqual(applied, { ...preview, dryRun: false });
+      const after = await maintenanceSnapshot(id);
+      assert.deepEqual(after.block, before.block);
+      assert.deepEqual(after.htmlState, before.htmlState, 'HTML pointers, attribution and timestamps remain exact');
+      assert.deepEqual(after.dataState, before.dataState, 'data pointers, attribution and timestamps remain exact');
+      assert.deepEqual(after.html, before.html.filter((row) => (row as { id: number }).id !== old));
+      assert.deepEqual(await queuedPaths(), [...queuedBefore, ...removedPaths].sort());
+      assert.deepEqual(await maintenanceSnapshot(sentinel.id), sentinelBefore);
+
+      const repeated = await pruneTopDashboardBlockHistory({ ...input, dryRun: false });
+      assert.deepEqual(repeated, { ...applied, prunedHtmlVersionIds: [], prunedDataVersionIds: [], prunedStoragePaths: [] });
+      assert.deepEqual(await maintenanceSnapshot(id), after, 'repeated maintenance is idempotent');
+      assert.deepEqual(await queuedPaths(), [...queuedBefore, ...removedPaths].sort());
+      await publish(id, previous, active);
+      const restored = await getTopDashboardBlockOverview(id);
+      assert.equal(restored.data.activeVersionId, p3);
+      assert.equal(restored.data.previousVersionId, p2, 'previous HTML remains fully usable after pruning');
+      await deleteTopDashboardBlock(id);
+      await deleteTopDashboardBlock(sentinel.id);
+    });
+
+    await t.test('maintenance preserves saved inactive-context rollback choices over newer legacy uploads', async () => {
+      const { id } = await block();
+      const previous = await html(id, 'saved-previous');
+      const active = await html(id, 'saved-active');
+      await query(`update top_dashboard_block_versions set first_published_at=now() where block_id=$1`, [id]);
+      await query(`update top_dashboard_block_state set active_version_id=$2, previous_version_id=$3 where block_id=$1`, [id, active, previous]);
+      const p1 = await legacyData(id, previous, 'saved-p1', true);
+      const p2 = await legacyData(id, previous, 'saved-p2', true);
+      const p3 = await legacyData(id, previous, 'saved-p3', true);
+      const a1 = await legacyData(id, active, 'saved-a1', true);
+      await query(`update top_dashboard_block_data_state set active_version_id=$2 where block_id=$1`, [id, a1]);
+      await query(`insert into top_dashboard_block_data_context_state
+        (block_id,context_key,bound_html_version_id,active_version_id,previous_version_id)
+        values ($1,$2,$3,$4,$5)`, [id, `html:${previous}`, previous, p1, p2]);
+      const input = { blockId: id, expectedActiveHtmlVersionId: active, expectedPreviousHtmlVersionId: previous,
+        expectedActiveDataVersionId: a1, expectedPreviousDataVersionId: null, dryRun: false };
+      const result = await pruneTopDashboardBlockHistory(input);
+      assert.deepEqual(result.prunedDataVersionIds, [p3]);
+      assert.deepEqual(result.preservedDataVersionIds, [p1, p2, a1]);
+      await publish(id, previous, active);
+      const restored = await getTopDashboardBlockOverview(id);
+      assert.equal(restored.data.activeVersionId, p1);
+      assert.equal(restored.data.previousVersionId, p2);
+      await deleteTopDashboardBlock(id);
+    });
+
+    await t.test('maintenance invariant failures roll back deletions, contexts and queued files', async () => {
+      const { id } = await block();
+      const active = await html(id, 'maintenance-failure-active');
+      await publish(id, active, null);
+      const oldData = await legacyData(id, active, 'maintenance-failure-old', true);
+      const a1 = await legacyData(id, active, 'maintenance-failure-a1', true);
+      const a2 = await legacyData(id, active, 'maintenance-failure-a2', true);
+      await query(`update top_dashboard_block_data_state set active_version_id=$2,previous_version_id=$3 where block_id=$1`, [id, a2, a1]);
+      const before = await maintenanceSnapshot(id);
+      const queuedBefore = await queuedPaths();
+      await query(`create function top_maintenance_test_state_change() returns trigger language plpgsql as $$
+        begin if old.block_id = ${id} then
+          update top_dashboard_blocks set updated_at=updated_at + interval '1 second' where id=${id};
+        end if; return old; end $$;
+        create trigger top_maintenance_test_state_change after delete on top_dashboard_block_data_versions
+        for each row execute function top_maintenance_test_state_change()`);
+      try {
+        await assert.rejects(pruneTopDashboardBlockHistory({ blockId: id,
+          expectedActiveHtmlVersionId: active, expectedPreviousHtmlVersionId: null,
+          expectedActiveDataVersionId: a2, expectedPreviousDataVersionId: a1, dryRun: false }),
+        /would change publication state/);
+        assert.deepEqual(await maintenanceSnapshot(id), before);
+        assert.deepEqual(await queuedPaths(), queuedBefore);
+        assert.ok((await dataIds(id)).includes(oldData));
+      } finally {
+        await query(`drop trigger top_maintenance_test_state_change on top_dashboard_block_data_versions;
+          drop function top_maintenance_test_state_change()`);
+      }
+      await deleteTopDashboardBlock(id);
     });
 
     await t.test('draft quota rejects the new upload without evicting drafts', async () => {

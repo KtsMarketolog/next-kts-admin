@@ -25,7 +25,7 @@ const target=(id,index,multiple=false)=>({target:{id,name:null,index},multiple,d
 const targets=scenario==='multiple'?[target('sales',0,true)]:[target('sales',0),target('inventory',1,true)];
 const version=(id,status)=>({id,status,originalName:'synthetic-'+id+'.html',fileSize:1000,sha256:'a'.repeat(64),uploadedByName:'Тест',firstPublishedByName:'Тест',firstPublishedAt:date,createdAt:date});
 const snapshot=id=>({id,originalName:'synthetic-'+id+'.ktsmf',fileSize:1000,uncompressedSize:900,sha256:'b'.repeat(64),snapshotFormat:'multi-file-v1',boundHtmlVersionId:10,status:'active',uploadedByName:'Тест',createdAt:date});
-window.fixtureOverview={block:{id:7,title:'Синтетический обзор',createdAt:date},activeVersionId:10,previousVersionId:null,updatedAt:date,versions:[version(10,'active'),version(11,'draft')],data:{activeVersionId:200,previousVersionId:199,updatedAt:date,versions:[snapshot(200),{...snapshot(199),status:'previous'}]},activeDataContract:{htmlVersionId:10,mode:'generic',snapshotFormat:'multi-file-v1',profile:'generic',directUploadTarget:null,uploadTargets:scenario==='runtime'?[]:targets}};
+window.fixtureOverview={block:{id:7,title:'Синтетический обзор',createdAt:date},activeVersionId:10,previousVersionId:9,updatedAt:date,versions:[version(10,'active'),version(11,'draft'),version(9,'archived'),version(8,'archived')],data:{activeVersionId:200,previousVersionId:199,updatedAt:date,versions:[snapshot(200),{...snapshot(199),status:'previous'},{...snapshot(198),status:'archived'},{...snapshot(190),status:'archived',boundHtmlVersionId:9}]},activeDataContract:{htmlVersionId:10,mode:'generic',snapshotFormat:'multi-file-v1',profile:'generic',directUploadTarget:null,uploadTargets:scenario==='runtime'?[]:targets}};
 window.fixtureRuntimeTargets=scenario==='runtime'?targets:null;
 window.fixtureUploads=[];window.fixtureRuntimeUploads=[];window.fixtureStatuses=[];window.fixtureConfirms=[];window.fixtureConfirmAllowed=true;window.fixtureFail=false;window.fixtureConflict=false;window.fixtureOverviewLoads=0;
 window.confirm=message=>{window.fixtureConfirms.push(message);return window.fixtureConfirmAllowed};
@@ -110,6 +110,13 @@ async function main() {
         page.on('pageerror', (error: Error) => errors.push(error.message));
         const json = (name: string, value: number) => ({ name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ value })) });
         await page.goto(`${origin}/?case=multiple`);
+        await page.waitForSelector('#top-dashboard-data-history .topDashboardVersionRow');
+        assert.equal(await page.locator('#top-dashboard-data-history .topDashboardVersionRow').count(), 2);
+        assert.equal(await page.locator('#top-dashboard-html-history .topDashboardVersionRow').count(), 3, 'current, previous and separate draft only');
+        assert.equal(await page.locator('#top-dashboard-html-history .topDashboardStatusprevious').textContent(), 'Предыдущая');
+        assert.equal(await page.locator('#top-dashboard-html-history .topDashboardStatusdraft').count(), 1);
+        assert.equal(await page.locator('#top-dashboard-html-history').getByText('Версия #8', { exact: true }).count(), 0);
+        assert.equal(await page.locator('#top-dashboard-data-history').getByText('Версия данных #190', { exact: true }).count(), 0, 'previous HTML data stays stored but is not an archive in the current history');
         const sales = page.getByLabel('Выбрать данные: Продажи', { exact: true });
         await sales.setInputFiles([json('sales.json', 1), json('inventory.json', 2)]);
         const assertHistoryBelowReport = async () => {
