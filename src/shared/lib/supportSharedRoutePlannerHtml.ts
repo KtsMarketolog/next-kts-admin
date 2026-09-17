@@ -114,11 +114,12 @@ export function buildSupportSharedRoutePlannerFrame(input: {versionId: number; s
   const content = '/api/admin/manager-dashboard/shared/content?' + query;
   const dataQuery = new URLSearchParams({version: String(input.versionId)});
   if (input.snapshotId) dataQuery.set('snapshot', String(input.snapshotId));
+  if (input.preview) dataQuery.set('preview', '1');
   const dataPath = '/api/admin/manager-dashboard/shared/json?' + dataQuery;
   const script = `(() => {
     'use strict';
     const frame = document.getElementById('report'), status = document.getElementById('status');
-    const marker = '${MARKER}', preview = ${input.preview}, hasSnapshot = ${!!input.snapshotId};
+    const marker = '${MARKER}', hasSnapshot = ${!!input.snapshotId};
     let ready = false, sent = false, snapshot = null, printing = false;
     const controller = new AbortController();
     let tileRunning = 0, tileBudget = 0, tileWindow = Date.now();
@@ -149,7 +150,7 @@ export function buildSupportSharedRoutePlannerFrame(input: {versionId: number; s
       }
     }
     function requestTile(data) {
-      if (preview || !sent || !Number.isSafeInteger(data.id) || data.id < 1 || data.id > 1000000) return;
+      if (!sent || !Number.isSafeInteger(data.id) || data.id < 1 || data.id > 1000000) return;
       if (Date.now() - tileWindow > 60000) { tileBudget = 0; tileWindow = Date.now(); }
       if (![data.z,data.x,data.y].every(Number.isSafeInteger) || data.z < 0 || data.z > 18
         || data.x < 0 || data.y < 0 || data.x >= 2 ** data.z || data.y >= 2 ** data.z
@@ -207,8 +208,7 @@ export function buildSupportSharedRoutePlannerFrame(input: {versionId: number; s
         window.parent.postMessage(d, window.location.origin);
       }
     });
-    if (preview) status.textContent = 'Предпросмотр общего HTML без данных менеджеров.';
-    else if (!hasSnapshot) status.textContent = 'Для этой версии HTML общий JSON ещё не опубликован.';
+    if (!hasSnapshot) status.textContent = 'Для этой версии HTML общий JSON ещё не опубликован.';
     else fetch(${JSON.stringify(dataPath)}, {credentials:'same-origin',cache:'no-store',signal:controller.signal}).then(async (res) => {
       if (!res.ok || !res.body || res.headers.get('x-kts-shared-version') !== '${input.versionId}'
         || res.headers.get('x-kts-shared-snapshot') !== '${input.snapshotId ?? ''}'

@@ -47,21 +47,24 @@ async function main() {
   }
   let active = fixtures[0];
   let dataRequests = 0;
+  let lastDataQuery = new URLSearchParams();
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const common = {'Cache-Control': 'no-store'};
     if (url.pathname === '/') {
-      const preview = url.searchParams.has('preview') ? '&preview=1' : '';
+      const preview = (url.searchParams.has('preview') ? '&preview=1' : '')
+        + (url.searchParams.has('empty') ? '&empty=1' : '');
       response.writeHead(200, {...common, 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': 'fixture-auth=secret; SameSite=Strict'}).end(`<!doctype html><html><body><iframe id="outer" sandbox="allow-scripts allow-same-origin allow-modals" style="width:100%;height:950px" src="/api/admin/manager-dashboard/shared/frame?version=7${preview}"></iframe><script>
 window.addEventListener('message',e=>{if(e.source!==document.getElementById('outer').contentWindow||e.origin!==location.origin||e.data?.type!=='download-request')return;const a=document.createElement('a');a.href=URL.createObjectURL(e.data.blob);a.download=e.data.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});</script></body></html>`);
     } else if (url.pathname.endsWith('/frame')) {
-      const frame = buildSupportSharedRoutePlannerFrame({versionId: 7, snapshotId: 9, preview: url.searchParams.has('preview')});
+      const frame = buildSupportSharedRoutePlannerFrame({versionId: 7, snapshotId: url.searchParams.has('empty') ? undefined : 9, preview: url.searchParams.has('preview')});
       response.writeHead(200, {...common, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': frame.csp}).end(frame.html);
     } else if (url.pathname.endsWith('/content')) {
       const content = injectSupportSharedRoutePlannerAdapter(active.html);
       response.writeHead(200, {...common, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': supportSharedRoutePlannerCsp(content)}).end(content);
     } else if (url.pathname.endsWith('/json')) {
       dataRequests += 1;
+      lastDataQuery = url.searchParams;
       response.writeHead(200, {...common, 'Content-Type': 'application/json', 'Content-Length': active.json.length, 'X-KTS-Shared-Version': '7', 'X-KTS-Shared-Snapshot': '9', 'X-KTS-Shared-Sha256': createHash('sha256').update(active.json).digest('hex')});
       if (active.jsonPath) createReadStream(active.jsonPath).pipe(response); else response.end(active.json);
     } else response.writeHead(404, common).end();
@@ -120,6 +123,7 @@ window.addEventListener('message',e=>{if(e.source!==document.getElementById('out
             throw error;
           });
           const loadMs = Date.now() - started;
+          assert.equal(lastDataQuery.has('preview'), false, 'Manager view uses the manager-only JSON path');
           assert.equal(await report.locator('input[type="password"],input[type="email"]').count(), 0);
           const reportFrame = page.frames().find((frame: {url(): string}) => frame.url().includes('/content?'));
           assert.ok(reportFrame);
@@ -165,10 +169,31 @@ window.addEventListener('message',e=>{if(e.source!==document.getElementById('out
           assert.deepEqual(blocked, [], 'No unexpected external network requests');
           const beforePreview = dataRequests;
           await page.goto(origin + '/?preview=1');
-          await page.frameLocator('#outer').frameLocator('#report').locator('body').waitFor();
-          await page.waitForTimeout(500);
-          assert.equal(dataRequests, beforePreview, 'Preview never fetches a snapshot');
-          console.log(JSON.stringify({engine: engineName, fixture: fixture.name, bytes: fixture.json.length, rows: fixture.rows, loadMs, reportedHeapBytes, tiles, printCalls, result: 'pass'}));
+          await wrapper.locator('#status').waitFor({state: 'hidden', timeout: 30000});
+          assert.equal(dataRequests, beforePreview + 1, 'Administrator preview fetches its bound shared snapshot exactly once');
+          assert.equal(lastDataQuery.get('preview'), '1');
+          assert.equal(lastDataQuery.get('version'), '7');
+          assert.equal(lastDataQuery.get('snapshot'), '9');
+          if (fixture.name === 'synthetic') {
+            assert.equal(await report.locator('#rows').innerText(), '2', 'Admin preview displays the snapshot data');
+          } else {
+            await report.locator('[onclick^="UI.go(\'data\')"]').click();
+            const expectedRows = new Intl.NumberFormat('ru-RU').format(fixture.rows).replace(/\s/g, '');
+            assert.ok((await report.locator('#body').innerText()).replace(/\s/g, '').includes(expectedRows), 'Admin preview displays the real snapshot row count');
+            const tilesBeforePreviewMap = tiles;
+            await report.locator('[onclick^="UI.go(\'map\')"]').click();
+            await report.locator('#mapbox .leaflet-tile').first().waitFor({state: 'attached', timeout: 10000});
+            assert.ok(tiles > tilesBeforePreviewMap, 'Preview map uses the same restricted tile bridge as the manager report');
+          }
+          const beforeEmptyPreview = dataRequests;
+          await page.goto(origin + '/?preview=1&empty=1');
+          await report.locator('body').waitFor();
+          assert.equal(await wrapper.locator('#status').innerText(), 'Для этой версии HTML общий JSON ещё не опубликован.');
+          await page.waitForTimeout(300);
+          assert.equal(dataRequests, beforeEmptyPreview, 'Preview without its own JSON never fetches another version’s data');
+          assert.deepEqual(errors, [], 'Manager and administrator preview have no report runtime errors');
+          assert.deepEqual(blocked, [], 'Preview also makes no unexpected external requests');
+          console.log(JSON.stringify({engine: engineName, fixture: fixture.name, bytes: fixture.json.length, rows: fixture.rows, loadMs, reportedHeapBytes, tiles, printCalls, previewWithData: 'pass', emptyPreview: 'pass', result: 'pass'}));
           await context.close();
         }
       } finally { await browser.close(); }

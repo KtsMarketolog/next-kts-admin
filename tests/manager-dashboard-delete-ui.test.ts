@@ -139,6 +139,50 @@ function management(options: {
   return { render, button, click, sharedButton, clickShared, preview, sharedPreview, closePreview, settle, requests, confirmations, data };
 }
 
+test('shared JSON preview uses only the selected HTML data revision and explains automatic loading', () => {
+  const data = overview();
+  const shared = data.supportShared!;
+  shared.htmlVersions[0].format = 'route-planner-v1';
+  shared.htmlVersions[1].format = 'route-planner-v1';
+  const view = management({ overview: data });
+  view.clickShared(21, 'Предпросмотр общего HTML');
+  assert.equal(view.sharedPreview()?.props.revision, 0, 'preview starts without data');
+  assert.equal(view.sharedPreview()?.props.preview, true);
+  assert.equal(view.sharedPreview()?.props.snapshotId, undefined, 'the server selects the JSON for the preview HTML');
+  assert.match(text(view.render()), /Общий JSON, привязанный к этой версии HTML, загружается автоматически/);
+  assert.match(text(view.render()), /Личные данные менеджеров не загружаются/);
+  assert.doesNotMatch(text(view.render()), /Общие и личные данные не загружаются/);
+
+  shared.jsonSnapshot = { id: 301, htmlVersionId: 21, originalName: 'shared.json', fileSize: 100,
+    sha256: 'a'.repeat(64), savedAt: '2026-09-17T05:00:00Z', receivedAt: '2026-09-17T06:00:00Z', status: 'active' };
+  assert.equal(view.sharedPreview()?.props.revision, 301, 'first JSON upload refreshes the open HTML');
+  shared.jsonSnapshot = { ...shared.jsonSnapshot, id: 302 };
+  assert.equal(view.sharedPreview()?.props.revision, 302, 'replacement JSON refreshes the same HTML');
+
+  view.clickShared(22, 'Предпросмотр общего HTML');
+  assert.equal(view.sharedPreview()?.props.revision, 0, 'another HTML never inherits the active HTML JSON revision');
+  assert.equal(view.sharedPreview()?.props.versionId, 22);
+  shared.jsonSnapshot = { ...shared.jsonSnapshot, id: 303 };
+  assert.equal(view.sharedPreview()?.props.revision, 0, 'unrelated JSON uploads leave another HTML preview alone');
+});
+
+test('legacy shared and personal previews keep data-free copy and ignore shared JSON changes', () => {
+  const view = management();
+  view.clickShared(21, 'Предпросмотр общего HTML');
+  assert.match(text(view.render()), /Общие и личные данные не загружаются/);
+  assert.equal(view.sharedPreview()?.props.revision, 0);
+  view.data.supportShared!.jsonSnapshot = { id: 301, htmlVersionId: 21, originalName: 'shared.json', fileSize: 100,
+    sha256: 'a'.repeat(64), savedAt: '2026-09-17T05:00:00Z', receivedAt: '2026-09-17T06:00:00Z', status: 'active' };
+  assert.equal(view.sharedPreview()?.props.revision, 0, 'JSON metadata never enables refresh of a password preview');
+
+  view.click('development', 1, 'Предпросмотр');
+  assert.match(text(view.render()), /Личные данные менеджеров не загружаются/);
+  assert.doesNotMatch(text(view.render()), /Общий JSON, привязанный/);
+  assert.deepEqual(view.preview()?.props, { audience: 'development', versionId: 1, preview: true });
+  view.data.supportShared!.jsonSnapshot = { ...view.data.supportShared!.jsonSnapshot!, id: 302 };
+  assert.deepEqual(view.preview()?.props, { audience: 'development', versionId: 1, preview: true });
+});
+
 test('management exposes named delete controls for both groups and protects their active HTML versions', async () => {
   const view = management();
   for (const [audience, first] of [['development', 1], ['support', 11]] as const) {

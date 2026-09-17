@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import * as crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import test from 'node:test';
 import ts from 'typescript';
 
@@ -37,8 +38,9 @@ function snapshotRow() {
     issued: metadata.issued, expires: metadata.expires, uploaded_by: 'admin:test', received_at: new Date().toISOString(), encrypted_payload: bytes };
 }
 type Step = { sql: RegExp; rows: unknown[]; params?: unknown[]; count?: number };
-function repository(steps: Step[] = []) {
+function repository(steps: Step[] = [], options: {openFile?: () => Readable | Promise<Readable>; transactionError?: Error} = {}) {
   const queries: string[] = [];
+  const fileReads: unknown[][] = [];
   let schemaCalls = 0;
   let transactions = 0;
   const client = { query: async (sql: string, params: unknown[] = []) => {
@@ -55,12 +57,20 @@ function repository(steps: Step[] = []) {
     '../supportSharedRoutePlannerHtml': { detectSupportSharedHtmlFormat: () => 'ktsp' },
     '../supportSharedRoutePlannerData': { SUPPORT_SHARED_JSON_MAX_BYTES: 100 * 1024 * 1024,
       SUPPORT_SHARED_JSON_MAX_VERSIONS: 5, SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES: 1024 * 1024 * 1024,
-      openVerifiedSupportSharedRoutePlannerFile: async () => assert.fail('unexpected JSON file read') },
+      openVerifiedSupportSharedRoutePlannerFile: async (...args: unknown[]) => {
+        fileReads.push(args);
+        return options.openFile ? options.openFile() : assert.fail('unexpected JSON file read');
+      } },
     '../topDashboardDataStorage': { deleteTopDashboardDataFiles: async () => {} },
-    './client': { withTransaction: async (callback: (value: typeof client) => unknown) => { transactions++; return callback(client); } },
+    './client': { withTransaction: async (callback: (value: typeof client) => unknown) => {
+      transactions++;
+      const result = await callback(client);
+      if (options.transactionError) throw options.transactionError;
+      return result;
+    } },
     './schema': { ensureSiteSchema: async () => { schemaCalls++; } },
   });
-  return { repo, queries, get schemaCalls() { return schemaCalls; }, get transactions() { return transactions; },
+  return { repo, queries, fileReads, get schemaCalls() { return schemaCalls; }, get transactions() { return transactions; },
     done() { assert.deepEqual(steps, []); } };
 }
 const support = { sql: /^select role,is_active from wholesale_managers where id=\$1 for share$/, rows: [{ role: 'support_manager', is_active: true }], params: [20] };
@@ -85,16 +95,91 @@ test('shared migration only creates new report tables and does not migrate or co
 test('all viewer reads recheck exact active support role under a manager-row share lock', async () => {
   for (const account of [{ role: 'manager', is_active: true }, { role: null, is_active: true },
     { role: ' support_manager ', is_active: true }, { role: 'support_manager', is_active: false }, null]) {
-    for (const kind of ['overview', 'html', 'snapshot'] as const) {
+    for (const kind of ['overview', 'html', 'snapshot', 'json'] as const) {
       const db = repository([{ ...support, rows: account ? [account] : [] }]);
       await assert.rejects(() => kind === 'overview' ? db.repo.getSupportSharedDashboardOverview(20)
         : kind === 'html' ? db.repo.getSupportSharedDashboardHtml(undefined, false, 20)
-          : db.repo.getSupportSharedDashboardSnapshot(20), { code: 'NOT_FOUND' });
+          : kind === 'snapshot' ? db.repo.getSupportSharedDashboardSnapshot(20)
+            : db.repo.getSupportSharedDashboardJsonSnapshot(20, 8), { code: 'NOT_FOUND' });
       assert.equal(db.transactions, 1);
       assert.equal(db.queries.length, 1, 'Denied accounts receive no shared metadata or encrypted bytes');
       db.done();
     }
   }
+});
+
+const previewJsonSelect = /from support_shared_dashboard_html_versions h join support_shared_dashboard_json_state st on st.html_version_id=h.id join support_shared_dashboard_json_snapshots s on s.html_version_id=st.html_version_id and s.id=st.active_snapshot_id where h.id=\$1 and h.format='route-planner-v1' and \(\$2::bigint is null or s.id=\$2::bigint\) for share of h,st,s$/;
+function jsonRow(htmlVersionId = '7') {
+  return {id: '91', html_version_id: htmlVersionId, original_name: 'shared.json', file_size: '18', sha256: 'a'.repeat(64),
+    storage_path: 'private/shared.bin', saved_at: '2026-09-17T05:28:47.226Z', received_at: '2026-09-17', uploaded_by: 'admin:test',
+    active_snapshot_id: '91', previous_snapshot_id: '90'};
+}
+
+test('administrator preview metadata selects only that HTML version active JSON without publication or file reads', async () => {
+  for (const htmlVersionId of [7, 8]) {
+    const db = repository([{sql: previewJsonSelect, rows: [jsonRow(String(htmlVersionId))], params: [htmlVersionId, null]}]);
+    const result = await db.repo.getSupportSharedDashboardJsonPreviewMetadata(htmlVersionId);
+    assert.equal(result?.id, 91);
+    assert.equal(result?.htmlVersionId, htmlVersionId);
+    assert.equal(result?.status, 'active');
+    assert.equal('storage_path' in result!, false);
+    assert.equal('stream' in result!, false);
+    assert.deepEqual(db.fileReads, []);
+    assert.doesNotMatch(db.queries.join(' '), /first_published_at|support_shared_dashboard_state|wholesale_managers/);
+    db.done();
+  }
+});
+
+test('preview stream uses version-bound active ID and verifies private file size and checksum', async () => {
+  const stream = Readable.from([Buffer.from('{"synthetic":true}')]);
+  const db = repository([{sql: previewJsonSelect, rows: [jsonRow()], params: [7, 91]}], {openFile: () => stream});
+  const result = await db.repo.getSupportSharedDashboardJsonPreviewSnapshot(7, 91);
+  assert.ok(result);
+  assert.equal(result.stream, stream);
+  assert.deepEqual(db.fileReads, [['private/shared.bin', 18, 'a'.repeat(64)]]);
+  assert.equal(await new Response(Readable.toWeb(result.stream) as ReadableStream<Uint8Array>).text(), '{"synthetic":true}');
+  db.done();
+});
+
+test('missing, foreign and stale preview JSON return null without opening a private file', async () => {
+  for (const snapshotId of [undefined, 90, 999]) {
+    const db = repository([{sql: previewJsonSelect, rows: [], params: [7, snapshotId ?? null]}]);
+    assert.equal(await db.repo.getSupportSharedDashboardJsonPreviewSnapshot(7, snapshotId), null);
+    assert.deepEqual(db.fileReads, []);
+    db.done();
+  }
+  const db = repository([{sql: previewJsonSelect, rows: [], params: [8, null]}]);
+  assert.equal(await db.repo.getSupportSharedDashboardJsonPreviewMetadata(8), null);
+  db.done();
+});
+
+test('invalid preview IDs fail before database access and failed stream transactions close the file', async () => {
+  const invalid = repository();
+  await assert.rejects(() => invalid.repo.getSupportSharedDashboardJsonPreviewMetadata(0), {code: 'NOT_FOUND'});
+  await assert.rejects(() => invalid.repo.getSupportSharedDashboardJsonPreviewSnapshot(7, -1), {code: 'NOT_FOUND'});
+  assert.equal(invalid.schemaCalls, 0);
+  const stream = Readable.from(['synthetic']);
+  const error = new Error('Transaction failed');
+  const db = repository([{sql: previewJsonSelect, rows: [jsonRow()], params: [7, null]}], {
+    openFile: () => stream, transactionError: error,
+  });
+  await assert.rejects(() => db.repo.getSupportSharedDashboardJsonPreviewSnapshot(7), error);
+  assert.equal(stream.destroyed, true);
+  db.done();
+});
+
+test('manager JSON reads still require the active published route planner HTML', async () => {
+  const archived = repository([support, readState]);
+  await assert.rejects(() => archived.repo.getSupportSharedDashboardJsonSnapshot(20, 7), {code: 'STATE_CONFLICT'});
+  assert.deepEqual(archived.fileReads, []);
+  archived.done();
+  const legacy = repository([support, readState, {
+    sql: /^select format from support_shared_dashboard_html_versions where id=\$1 and first_published_at is not null$/,
+    rows: [{format: 'ktsp'}], params: [8],
+  }]);
+  await assert.rejects(() => legacy.repo.getSupportSharedDashboardJsonSnapshot(20, 8), {code: 'HTML_FORMAT'});
+  assert.deepEqual(legacy.fileReads, []);
+  legacy.done();
 });
 
 test('viewer overview selects active published HTML only and hides previous HTML identity', async () => {

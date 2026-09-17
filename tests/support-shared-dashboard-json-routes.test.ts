@@ -21,6 +21,7 @@ type Role = 'admin' | 'admintop' | 'support_manager' | 'manager' | 'top' | null;
 function api(role: Role = 'admin', options: {
   sessionId?: string | null; inactive?: boolean; limited?: boolean; busy?: boolean;
   preflightError?: Error; prepareError?: Error; importError?: Error; duplicate?: boolean;
+  missingSnapshot?: boolean; readError?: Error;
 } = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
   const observe = (name: string, fn: (...args: unknown[]) => unknown = () => undefined) => async (...args: unknown[]) => {
@@ -50,6 +51,10 @@ function api(role: Role = 'admin', options: {
           return {status: options.duplicate ? 'duplicate' : 'imported', snapshot, prunedStoragePaths: ['synthetic-pruned-file']};
         }),
         getSupportSharedDashboardJsonSnapshot: observe('read', () => ({...snapshot, stream: Readable.from([Buffer.from('{"synthetic":true}')])})),
+        getSupportSharedDashboardJsonPreviewSnapshot: observe('preview-read', () => {
+          if (options.readError) throw options.readError;
+          return options.missingSnapshot ? null : {...snapshot, stream: Readable.from([Buffer.from('{"synthetic":true}')])};
+        }),
       },
       '@/shared/lib/supportSharedRoutePlannerData': {SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES: 16 * 1024 * 1024,
         prepareSupportSharedRoutePlannerUpload: observe('prepare', () => {if (options.prepareError) throw options.prepareError; return {pending, savedAt: snapshot.savedAt};})},
@@ -138,7 +143,7 @@ test('invalid streamed JSON releases the cross-worker slot before returning the 
   assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'release']);
 });
 
-test('JSON GET is exact active support scope, never an administrator preview or personal manager selector', async () => {
+test('normal JSON GET remains support-only and rejects personal manager selectors', async () => {
   for (const role of ['admin', 'admintop', 'manager', 'top', null] as const) {
     const harness = api(role);
     assert.ok([401, 403].includes((await harness.route.GET(new Request(`${URL_ROOT}?version=8`))).status));
@@ -147,7 +152,7 @@ test('JSON GET is exact active support scope, never an administrator preview or 
   const denied = api('support_manager', {inactive: true});
   assert.equal((await denied.route.GET(new Request(`${URL_ROOT}?version=8`))).status, 403);
   assert.deepEqual(denied.calls, []);
-  for (const query of ['', '?version=8&version=9', '?version=8&managerId=21', '?version=8&preview=1', '?version=8&snapshot=01']) {
+  for (const query of ['', '?version=8&version=9', '?version=8&managerId=21', '?version=8&snapshot=01']) {
     const harness = api('support_manager');
     assert.equal((await harness.route.GET(new Request(URL_ROOT + query))).status, 400);
     assert.deepEqual(harness.calls, []);
@@ -161,4 +166,41 @@ test('JSON GET is exact active support scope, never an administrator preview or 
   assert.equal(response.headers.get('x-kts-shared-version'), '8');
   assert.equal(response.headers.get('x-kts-shared-filename'), encodeURIComponent('маршруты.json'));
   assert.equal(response.headers.get('x-personal-email'), null);
+});
+
+test('JSON preview requires a persisted administrator session and never uses manager reads', async () => {
+  for (const [role, options, status] of [[null, {}, 401], ['manager', {}, 403], ['support_manager', {}, 403],
+    ['support_manager', {inactive: true}, 403], ['top', {}, 403], ['admin', {sessionId: null}, 403]] as const) {
+    const harness = api(role, options);
+    assert.equal((await harness.route.GET(new Request(`${URL_ROOT}?version=8&snapshot=9&preview=1`))).status, status);
+    assert.deepEqual(harness.calls, []);
+  }
+  for (const role of ['admin', 'admintop'] as const) {
+    const harness = api(role);
+    const response = await harness.route.GET(new Request(`${URL_ROOT}?version=8&snapshot=9&preview=1`));
+    assert.equal(response.status, 200);
+    assert.deepEqual(harness.calls, [{name: 'preview-read', args: [8, 9]}]);
+    assert.equal(await response.text(), '{"synthetic":true}');
+    assert.match(response.headers.get('cache-control')!, /private.*no-store/);
+    assert.equal(response.headers.get('x-kts-shared-version'), '8');
+    assert.equal(response.headers.get('x-kts-shared-snapshot'), '9');
+    assert.equal(response.headers.get('x-kts-shared-sha256'), 'a'.repeat(64));
+  }
+});
+
+test('JSON preview validates selectors and reports unavailable or corrupt data without fallback', async () => {
+  for (const query of ['?version=8&preview=0', '?version=8&preview=1&preview=1', '?version=8&preview=1&managerId=20',
+    '?version=8&preview=1&snapshot=01', '?version=8&preview=1&snapshot=9&snapshot=10']) {
+    const harness = api('admin');
+    assert.equal((await harness.route.GET(new Request(URL_ROOT + query))).status, 400);
+    assert.deepEqual(harness.calls, []);
+  }
+  for (const [options, status] of [[{missingSnapshot: true}, 404],
+    [{readError: new PersonalDashboardError('SNAPSHOT_INTEGRITY', 'Invalid')}, 400]] as const) {
+    const harness = api('admin', options);
+    const response = await harness.route.GET(new Request(`${URL_ROOT}?version=8&preview=1`));
+    assert.equal(response.status, status);
+    assert.deepEqual(harness.calls, [{name: 'preview-read', args: [8, undefined]}]);
+    assert.match(response.headers.get('cache-control')!, /private.*no-store/);
+  }
 });

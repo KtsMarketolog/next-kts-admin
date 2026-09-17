@@ -25,7 +25,7 @@ const sharedSnapshot = {id: 31, email: 'shared@example.test', originalName: 'sha
 type Role = 'admin' | 'admintop' | 'manager' | 'support_manager' | 'top' | null;
 type Route = {GET(request: Request): Promise<Response>; POST(request: Request): Promise<Response>; DELETE(request: Request): Promise<Response>};
 
-function routes(role: Role = 'support_manager', options: {inactive?: boolean; currentRole?: string; limit?: boolean; noSnapshot?: boolean; expired?: boolean; routePlanner?: boolean} = {}) {
+function routes(role: Role = 'support_manager', options: {inactive?: boolean; currentRole?: string; limit?: boolean; noSnapshot?: boolean; expired?: boolean; routePlanner?: boolean; foreignPreviewSnapshot?: boolean} = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
   const session = role ? {role, sessionId: 'synthetic-session', adminUserId: 2, managerId: 71} : null;
   const manager = {id: 71, role: options.currentRole ?? role, email: '', isActive: !options.inactive};
@@ -48,6 +48,8 @@ function routes(role: Role = 'support_manager', options: {inactive?: boolean; cu
     getSupportSharedDashboardOverview: observed('overview', () => overview),
     getSupportSharedDashboardHtml: observed('html', (id, preview) => id === 22 || (preview && id === 23) ? {id, htmlContent: options.routePlanner ? routeFixture : fixture, format: options.routePlanner ? 'route-planner-v1' : 'ktsp'} : null),
     getSupportSharedDashboardSnapshot: observed('snapshot', (_manager, id) => id === undefined || id === 31 ? {...sharedSnapshot, bytes: Buffer.from('encrypted-fixture')} : null),
+    getSupportSharedDashboardJsonPreviewMetadata: observed('preview-metadata', (htmlVersionId) => options.noSnapshot ? null
+      : {id: htmlVersionId === 23 ? 82 : 81, htmlVersionId: options.foreignPreviewSnapshot ? 99 : htmlVersionId}),
     createSupportSharedDashboardHtml: observed('create', () => ({id: 24})),
     activateSupportSharedDashboardHtml: observed('publish', () => ({activeHtmlVersionId: 24})),
     deleteSupportSharedDashboardHtml: observed('delete', () => ({deleted: true})),
@@ -98,9 +100,29 @@ test('route-planner frame selects only version-bound JSON and never the legacy K
   assert.equal((await api.frame.GET(request('frame?version=22&snapshot=31'))).status, 404);
   const noData = routes('support_manager', {routePlanner: true, noSnapshot: true});
   assert.match(await (await noData.frame.GET(request('frame?version=22'))).text(), /hasSnapshot = false/);
-  const preview = routes('admintop', {routePlanner: true});
-  assert.match(await (await preview.frame.GET(request('frame?version=23&preview=1'))).text(), /preview = true/);
-  assert.deepEqual(preview.calls, [{name: 'html', args: [23, true, undefined]}]);
+});
+
+test('administrator route-planner preview resolves JSON only for the selected HTML version', async () => {
+  for (const role of ['admin', 'admintop'] as const) {
+    for (const version of [22, 23]) {
+      const api = routes(role, {routePlanner: true});
+      const response = await api.frame.GET(request(`frame?version=${version}&preview=1`));
+      assert.equal(response.status, 200);
+      const document = await response.text();
+      assert.match(document, new RegExp(`shared/json\\?version=${version}&snapshot=${version === 23 ? 82 : 81}&preview=1`));
+      assert.match(document, /hasSnapshot = true/);
+      assert.deepEqual(api.calls, [{name: 'html', args: [version, true, undefined]}, {name: 'preview-metadata', args: [version]}]);
+    }
+  }
+  const foreign = routes('admin', {routePlanner: true, foreignPreviewSnapshot: true});
+  assert.equal((await foreign.frame.GET(request('frame?version=23&preview=1'))).status, 404);
+  const empty = routes('admin', {routePlanner: true, noSnapshot: true});
+  const response = await empty.frame.GET(request('frame?version=23&preview=1'));
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /hasSnapshot = false/);
+  const injected = routes('admin', {routePlanner: true});
+  assert.equal((await injected.frame.GET(request('frame?version=23&preview=1&snapshot=81'))).status, 403);
+  assert.deepEqual(injected.calls, []);
 });
 
 test('route-planner content retains opaque sandbox and hashed scripts with limited map images', async () => {
@@ -168,7 +190,7 @@ test('frame pins a shared snapshot, leaves HTML visible without data, rejects fo
   }
 });
 
-test('administrator previews HTML without snapshot reads and cannot use viewer data endpoints', async () => {
+test('administrator KTSP previews remain without snapshot reads and cannot use viewer data endpoints', async () => {
   for (const role of ['admin', 'admintop'] as const) {
     const api = routes(role);
     const frame = await api.frame.GET(request('frame?version=23&preview=1'));

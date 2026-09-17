@@ -1,7 +1,8 @@
 import { Readable } from 'node:stream';
 
 import {
-  assertSupportSharedJsonUploadTarget, getSupportSharedDashboardJsonSnapshot, importSupportSharedDashboardJson,
+  assertSupportSharedJsonUploadTarget, getSupportSharedDashboardJsonSnapshot, getSupportSharedDashboardJsonPreviewSnapshot,
+  importSupportSharedDashboardJson,
 } from '@/shared/lib/db/supportSharedDashboardRepo';
 import { PersonalDashboardError } from '@/shared/lib/managerDashboardDomain';
 import { PERSONAL_PRIVATE_HEADERS, parsePersonalDashboardId } from '@/shared/lib/managerDashboardSecurity';
@@ -18,12 +19,15 @@ export async function GET(request: Request) {
   try {
     const access = await requireSharedAccess();
     if (access.denied) return access.denied;
-    if (access.mode !== 'view') return personalJson({error: 'JSON доступен только в кабинете сопровождения'}, 403);
-    const query = sharedQuery(request, ['version', 'snapshot']);
+    const query = sharedQuery(request, ['version', 'snapshot', 'preview']);
     const version = parsePersonalDashboardId(query?.get('version') ?? null);
     const id = parsePersonalDashboardId(query?.get('snapshot') ?? null);
     if (!query || !version || (query.has('snapshot') && !id)) return personalJson({error: 'Некорректные параметры JSON'}, 400);
-    const snapshot = await getSupportSharedDashboardJsonSnapshot(access.manager!.id, version, id ?? undefined);
+    const preview = query.get('preview') === '1';
+    if ((preview && access.mode !== 'manage') || (!preview && access.mode !== 'view')) return personalJson({error: 'Нет доступа к JSON'}, 403);
+    const snapshot = preview
+      ? await getSupportSharedDashboardJsonPreviewSnapshot(version, id ?? undefined)
+      : await getSupportSharedDashboardJsonSnapshot(access.manager!.id, version, id ?? undefined);
     if (!snapshot) return personalJson({error: 'JSON не найден или недоступен'}, 404);
     return new Response(Readable.toWeb(snapshot.stream) as ReadableStream<Uint8Array>, {headers: {
       ...PERSONAL_PRIVATE_HEADERS, 'Content-Type': 'application/json; charset=utf-8',

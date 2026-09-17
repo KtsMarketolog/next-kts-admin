@@ -27,6 +27,7 @@ import {
   getSupportSharedDashboardHtml, getSupportSharedDashboardOverview, getSupportSharedDashboardSnapshot,
   importSupportSharedDashboardSnapshot,
   assertSupportSharedJsonUploadTarget, importSupportSharedDashboardJson, getSupportSharedDashboardJsonSnapshot,
+  getSupportSharedDashboardJsonPreviewMetadata, getSupportSharedDashboardJsonPreviewSnapshot,
 } from '../src/shared/lib/db/supportSharedDashboardRepo';
 import { prepareSupportSharedRoutePlannerUpload } from '../src/shared/lib/supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles } from '../src/shared/lib/topDashboardDataStorage';
@@ -681,6 +682,8 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         const firstHtml = await plannerHtml('first');
         const secondHtml = await plannerHtml('second');
         assert.equal(firstHtml.format, 'route-planner-v1');
+        assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(firstHtml.id), null, 'A draft without JSON has no preview data');
+        assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(legacyHtmlId), null, 'KTSP stays outside JSON preview');
         const support = await manager('json-support', 'support_manager', true, '');
         const developer = await manager('json-development');
         await assert.rejects(() => assertSupportSharedJsonUploadTarget(firstHtml.id, null), {code: 'STATE_CONFLICT'});
@@ -707,6 +710,10 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         };
         const first = await upload(1, null);
         assert.equal(first.status, 'imported');
+        assert.equal((await getSupportSharedDashboardJsonPreviewMetadata(firstHtml.id))?.id, first.snapshot.id);
+        const preview = await getSupportSharedDashboardJsonPreviewSnapshot(firstHtml.id, first.snapshot.id);
+        assert.ok(preview);
+        assert.equal(await new Response(Readable.toWeb(preview.stream) as ReadableStream<Uint8Array>).text(), source(1).toString());
         const read = await getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id);
         assert.ok(read);
         assert.equal(await new Response(Readable.toWeb(read.stream) as ReadableStream<Uint8Array>).text(), source(1).toString());
@@ -714,6 +721,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         const firstStoredPath = path.join(storageDirectory, first.storagePath);
         await writeFile(firstStoredPath, Buffer.alloc(source(1).length));
         await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id), {code: 'SNAPSHOT_INTEGRITY'});
+        await assert.rejects(() => getSupportSharedDashboardJsonPreviewSnapshot(firstHtml.id), {code: 'SNAPSHOT_INTEGRITY'});
         await writeFile(firstStoredPath, source(1));
         assert.equal((await getSupportSharedDashboardOverview(support.id)).jsonSnapshot?.id, first.snapshot.id);
         await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(developer.id, firstHtml.id), {code: 'NOT_FOUND'});
@@ -736,6 +744,8 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         assert.equal(retained.jsonHistory.length, 5);
         assert.equal(retained.jsonHistory[0].status, 'active');
         assert.equal(retained.jsonHistory[1].status, 'previous');
+        assert.equal(await getSupportSharedDashboardJsonPreviewSnapshot(firstHtml.id, retained.jsonHistory[1].id), null,
+          'Preview pins only the current JSON, not a previous snapshot');
         assert.equal(await getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id, first.snapshot.id), null);
         await assert.rejects(() => access(path.join(storageDirectory, first.storagePath)), {code: 'ENOENT'});
 
@@ -755,13 +765,22 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
 
         await activateSupportSharedDashboardHtml({versionId: secondHtml.id, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test'});
         assert.equal((await getSupportSharedDashboardOverview()).jsonSnapshot, null);
+        assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(secondHtml.id), null, 'A new HTML never borrows archived version data');
+        assert.equal((await getSupportSharedDashboardJsonPreviewMetadata(firstHtml.id))?.id, active, 'Archived HTML retains its own active JSON for preview');
+        const archivedPreview = await getSupportSharedDashboardJsonPreviewSnapshot(firstHtml.id, active);
+        assert.ok(archivedPreview);
+        assert.equal(await new Response(Readable.toWeb(archivedPreview.stream) as ReadableStream<Uint8Array>).text(), source(8).toString());
         await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(support.id, firstHtml.id, active), {code: 'STATE_CONFLICT'});
         assert.equal(await getSupportSharedDashboardJsonSnapshot(support.id, secondHtml.id, active), null);
         const second = await upload(10, null, secondHtml.id);
+        assert.equal(await getSupportSharedDashboardJsonPreviewSnapshot(firstHtml.id, second.snapshot.id), null);
+        assert.equal(await getSupportSharedDashboardJsonPreviewSnapshot(secondHtml.id, active), null);
         await assert.rejects(() => query(`update support_shared_dashboard_json_state set active_snapshot_id=$2 where html_version_id=$1`, [firstHtml.id, second.snapshot.id]), {code: '23503'});
         await activateSupportSharedDashboardHtml({versionId: firstHtml.id, expectedActiveVersionId: secondHtml.id, actorId: 'admin:integration-test'});
         assert.equal((await getSupportSharedDashboardOverview()).jsonSnapshot?.id, active, 'HTML rollback recovers only its own JSON');
         await deleteSupportSharedDashboardHtml({versionId: secondHtml.id, actorId: 'admin:integration-test'});
+        assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(secondHtml.id), null);
+        assert.equal(await getSupportSharedDashboardJsonPreviewSnapshot(secondHtml.id, second.snapshot.id), null);
         await assert.rejects(() => access(path.join(storageDirectory, second.storagePath)), {code: 'ENOENT'});
         await activateSupportSharedDashboardHtml({versionId: legacyHtmlId, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test'});
         const legacy = await getSupportSharedDashboardOverview();

@@ -33,6 +33,24 @@ test('trusted wrapper pins data IDs, bounds downloads and never gives inner repo
   assert.match(result.csp, /connect-src 'self'/);
 });
 
+test('administrator preview loads its pinned shared JSON via the explicit preview endpoint', () => {
+  const result = buildSupportSharedRoutePlannerFrame({versionId: 7, snapshotId: 9, preview: true});
+  assert.match(result.html, /shared\/json\?version=7&snapshot=9&preview=1/);
+  assert.match(result.html, /shared\/content\?version=7&amp;preview=1/);
+  assert.match(result.html, /hasSnapshot = true/);
+  assert.doesNotMatch(result.html, /if \(preview\)/);
+  assert.doesNotMatch(result.html, /preview \|\| !sent/);
+  assert.match(result.html, /sandbox="allow-scripts"/);
+  assert.doesNotThrow(() => new Function(result.html.match(/<script>([\s\S]*?)<\/script>/)![1]));
+});
+
+test('preview without a bound JSON explains the missing data and does not start the fetch', () => {
+  const result = buildSupportSharedRoutePlannerFrame({versionId: 8, preview: true});
+  assert.match(result.html, /hasSnapshot = false/);
+  assert.match(result.html, /if \(!hasSnapshot\) status\.textContent = 'Для этой версии HTML общий JSON ещё не опубликован\.';\s+else fetch\(/);
+  assert.doesNotMatch(result.html, /без данных менеджеров|snapshot=/);
+});
+
 test('Unicode in bundled libraries does not shift the closing-body insertion offset', () => {
   const html = fixture.replace('const S={}', 'const special="İ"; const S={}');
   const adapted = injectSupportSharedRoutePlannerAdapter(html);

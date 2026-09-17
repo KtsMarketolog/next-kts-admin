@@ -314,6 +314,43 @@ export async function getSupportSharedDashboardJsonSnapshot(managerId: number, h
   } catch (error) { stream?.destroy(); throw error; }
 }
 
+async function selectSupportSharedDashboardJsonPreview(client: PoolClient, htmlVersionId: number, id?: number) {
+  // Each HTML version keeps its own current JSON, including after another HTML version is published.
+  // Lock those rows while opening the file so concurrent pruning/deletion cannot remove it first.
+  const result = await client.query<JsonRow>(`select ${JSON_SELECT} from support_shared_dashboard_html_versions h
+    join support_shared_dashboard_json_state st on st.html_version_id=h.id
+    join support_shared_dashboard_json_snapshots s on s.html_version_id=st.html_version_id and s.id=st.active_snapshot_id
+    where h.id=$1 and h.format='route-planner-v1' and ($2::bigint is null or s.id=$2::bigint)
+    for share of h,st,s`, [htmlVersionId, id ?? null]);
+  return result.rows[0];
+}
+
+/** Administrator-only preview contract: callers must verify an authenticated admin/admintop session. */
+export async function getSupportSharedDashboardJsonPreviewMetadata(htmlVersionId: number) {
+  positiveId(htmlVersionId);
+  await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    const row = await selectSupportSharedDashboardJsonPreview(client, htmlVersionId);
+    return row ? mapJson(row) : null;
+  });
+}
+
+/** Administrator-only; a pinned ID must still be the selected HTML version's current JSON. */
+export async function getSupportSharedDashboardJsonPreviewSnapshot(htmlVersionId: number, id?: number) {
+  positiveId(htmlVersionId);
+  if (id !== undefined) positiveId(id);
+  await ensureSiteSchema();
+  let stream: Awaited<ReturnType<typeof openVerifiedSupportSharedRoutePlannerFile>> | undefined;
+  try {
+    return await withTransaction(async (client) => {
+      const row = await selectSupportSharedDashboardJsonPreview(client, htmlVersionId, id);
+      if (!row) return null;
+      stream = await openVerifiedSupportSharedRoutePlannerFile(row.storage_path, Number(row.file_size), row.sha256);
+      return { ...mapJson(row), stream };
+    });
+  } catch (error) { stream?.destroy(); throw error; }
+}
+
 /** Internal validated-file contract; routes inspect the complete JSON stream before committing its private file. */
 export async function importSupportSharedDashboardJson(input: {
   htmlVersionId: number; expectedActiveSnapshotId: number | null; originalName: string; savedAt: string;

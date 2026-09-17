@@ -47,6 +47,11 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
   const sharedUsesJson = sharedActiveHtml?.format === 'route-planner-v1';
   const sharedPreview = previewSelection?.audience === 'support-shared';
   const preview = (sharedPreview ? shared : previewGroup)?.htmlVersions.find((version) => version.id === previewSelection?.versionId);
+  const sharedJsonPreview = sharedPreview && preview?.format === 'route-planner-v1';
+  // Reload an open JSON preview when its data changes, including the first upload.
+  // The server resolves the snapshot for this HTML; revision only refreshes the iframe.
+  const sharedPreviewRevision = sharedJsonPreview && shared?.jsonSnapshot?.htmlVersionId === preview?.id
+    ? shared.jsonSnapshot.id : 0;
 
   useEffect(() => {
     const grid = audienceGrid.current;
@@ -472,12 +477,12 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
       </section>
 
       {preview && (previewGroup || sharedPreview) ? <section id="manager-dashboard-html-preview" ref={previewPanel} className={`${styles.panel} ${styles.fullWidthPreview}`} aria-labelledby="manager-dashboard-preview-heading" tabIndex={-1}>
-        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {sharedPreview ? 'Общий дашборд сопровождения' : PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup!.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. {sharedPreview ? 'Общие и личные данные не загружаются.' : 'Личные данные менеджеров не загружаются.'}</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
+        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {sharedPreview ? 'Общий дашборд сопровождения' : PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup!.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. {sharedJsonPreview ? 'Общий JSON, привязанный к этой версии HTML, загружается автоматически, если он опубликован. Личные данные менеджеров не загружаются.' : sharedPreview ? 'Общие и личные данные не загружаются.' : 'Личные данные менеджеров не загружаются.'}</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
           if (busy || mutationRef.current) return;
           setPreviewSelection(null);
           (sharedPreview ? sharedHtmlInput : htmlInputs[previewGroup!.audience]).current?.focus();
         }}>Закрыть</button></div>
-        {sharedPreview ? <SharedDashboardFrame key={`shared:${preview.id}`} versionId={preview.id} preview />
+        {sharedPreview ? <SharedDashboardFrame key={`shared:${preview.id}`} versionId={preview.id} revision={sharedPreviewRevision} preview />
           : <DashboardFrame key={`${previewGroup!.audience}:${preview.id}`} audience={previewGroup!.audience} versionId={preview.id} preview />}
       </section> : null}
 
