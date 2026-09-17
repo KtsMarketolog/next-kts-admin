@@ -28,6 +28,8 @@ import adminStyles from './src/app/admin/admin.module.scss';
 import dashboardStyles from './src/features/admin/manager-dashboard/ManagerDashboard.module.scss';
 const date = '2026-09-15T08:00:00Z';
 const makeVersion = (id, audience, suffix) => ({id, audience, originalName: audience + '_synthetic_dashboard_' + suffix + '.html', fileSize: 140000, createdAt: date, firstPublishedAt: date});
+const requestedAudience = new URLSearchParams(location.search).get('audience');
+const managementAudience = ['development', 'support'].includes(requestedAudience) ? requestedAudience : null;
 const supportMany = new URLSearchParams(location.search).get('support') === 'many';
 const sharedSnapshot = {id: 301, originalName: 'общий_файл.ktsp', email: 'shared.synthetic@example.test', issued: '2026-09-15', expires: '2999-10-30', receivedAt: date};
 const sharedInitial = {
@@ -142,10 +144,10 @@ function Fixture() {
       <a id="fixture-back-link" href="#fixture" className={dashboardStyles.secondary}>В панель управления</a>
       <button className={dashboardStyles.primary}>Обновить</button>
     </div></div>
-    <ManagerDashboardManagement overview={overview} busy={false} mutate={mutate}/>
+    <ManagerDashboardManagement audience={managementAudience} overview={overview} busy={false} mutate={mutate}/>
   </main><aside className={adminStyles.page} id="fixture-unrelated"><button>Другая страница администратора</button></aside></>;
 }
-createRoot(document.getElementById('root')).render(viewerAudience ? <ManagerDashboard mode="view"/> : <Fixture/>);
+createRoot(document.getElementById('root')).render(viewerAudience ? <ManagerDashboard mode="view" audience={managementAudience}/> : <Fixture/>);
 `;
 
 async function main() {
@@ -583,12 +585,82 @@ async function main() {
             assert.equal(await page.locator('#manager-dashboard-import-journal li').count(), 5, 'fresh initial response remains bounded to five rows');
             await page.screenshot({path: path.join(output, `${engineName}-${width}-support-taller.png`), fullPage: true});
 
-            await page.goto(`${origin}/?view=support`);
+            for (const audience of ['development', 'support']) {
+              const otherAudience = audience === 'development' ? 'support' : 'development';
+              const versionId = audience === 'development' ? 101 : 111;
+              const scopedHistoryStart = historyRequests.length;
+              await page.goto(`${origin}/?audience=${audience}`);
+              const group = page.locator(`#manager-dashboard-group-${audience}`);
+              await group.waitFor({state: 'visible'});
+              await page.evaluate(() => document.fonts.ready);
+              assert.equal(await page.locator(`#manager-dashboard-group-${otherAudience}`).count(), 0, `${audience}: other personal group is absent from the DOM`);
+              assert.equal(await page.locator(`#manager-dashboard-html-${otherAudience}`).count(), 0, `${audience}: other HTML uploader is absent`);
+              assert.equal(await page.locator(`#manager-dashboard-files-${otherAudience}`).count(), 0, `${audience}: other manager files are absent`);
+              assert.equal(await group.locator('tbody tr').filter({hasText: `Тестовый менеджер ${audience === 'development' ? 'развития' : 'сопровождения'}`}).count(), 1);
+              assert.equal(await page.getByRole('heading', {name: 'Личный HTML дашборда', exact: true}).count(), 1);
+              assert.equal(await page.locator('#manager-dashboard-shared-support').count(), audience === 'support' ? 1 : 0, `${audience}: shared support report is available only in support management`);
+              assert.equal(await page.locator('input[type=file]').count(), audience === 'support' ? 4 : 2);
+              assert.equal(await page.getByRole('heading', {name: 'Общая загрузка личных файлов', exact: true}).count(), 1);
+              assert.equal(await page.locator('#manager-dashboard-snapshots').count(), 1, 'scoped view retains one common mixed-file uploader');
+              assert.equal(await page.getByRole('heading', {name: 'Журнал импорта', exact: true}).count(), 1);
+              assert.equal(await page.locator('#manager-dashboard-import-journal li').count(), 5);
+              assert.equal(historyRequests.length, scopedHistoryStart, 'scoped journal also waits for explicit pagination');
+              const scopedGrid = await page.locator('.audienceGrid').boundingBox();
+              const scopedColumn = await group.boundingBox();
+              assert.ok(scopedGrid && scopedColumn && Math.abs(scopedGrid.width - scopedColumn.width) < 2, `${audience}: single group fills the available width`);
+              assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${audience}: scoped management has no horizontal overflow`);
+              await page.screenshot({path: path.join(output, `${engineName}-${width}-${audience}-scoped.png`), fullPage: true});
+
+              await page.locator(`#manager-dashboard-html-${audience}`).setInputFiles({name: `${audience}-scoped.html`, mimeType: 'text/html', buffer: Buffer.from('<!doctype html><h1>Scoped synthetic</h1>')});
+              await group.getByRole('button', {name: 'Загрузить черновик', exact: true}).click();
+              await page.waitForFunction((expected: number) => document.querySelector<HTMLIFrameElement>('#manager-dashboard-html-preview iframe')?.src.includes(`version=${expected}`), versionId);
+              const scopedFrame = new URL((await page.locator('#manager-dashboard-html-preview iframe').getAttribute('src'))!, origin);
+              assert.equal(scopedFrame.searchParams.get('audience'), audience, 'scoped upload previews the selected group');
+              await group.getByRole('button', {name: 'Опубликовать группе', exact: true}).click();
+              await page.waitForFunction(() => (window as unknown as {fixtureCalls: Array<{path: string}>}).fixtureCalls.some(call => call.path === '/publish'));
+              await page.locator('#manager-dashboard-snapshots').setInputFiles([
+                {name: 'development.ktsp', mimeType: 'application/json', buffer: Buffer.from('synthetic development')},
+                {name: 'support.ktsp', mimeType: 'application/json', buffer: Buffer.from('synthetic support')},
+              ]);
+              await page.getByRole('button', {name: 'Загрузить файлы', exact: true}).click();
+              await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-snapshots')?.disabled);
+              const scopedCalls = await page.evaluate('window.fixtureCalls');
+              assert.deepEqual(scopedCalls.map((call: {path: string}) => call.path), [`/html?audience=${audience}`, '/publish', '/snapshots']);
+              assert.deepEqual(scopedCalls[1].body, {audience, versionId, expectedActiveVersionId: audience === 'development' ? 1 : null});
+              assert.deepEqual(scopedCalls[2].files.map((file: {name: string}) => file.name), ['development.ktsp', 'support.ktsp'], 'both groups can still share one batch in either scoped view');
+              assert.deepEqual(scopedCalls[2].fields, {}, 'mixed snapshot upload does not gain an audience override');
+              await page.locator('#manager-dashboard-import-journal').getByRole('button', {name: /Показать ещё/}).click();
+              await page.waitForFunction(() => document.querySelectorAll('#manager-dashboard-import-journal li').length === 10);
+              assert.deepEqual(historyRequests.slice(scopedHistoryStart), [{before: 9, returned: 5}], 'scoped view uses the same common import journal');
+              assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${audience}: uploads, preview and pagination preserve page width`);
+            }
+
+            await page.goto(`${origin}/?audience=support&json=1`);
+            await page.locator('#manager-dashboard-shared-json').waitFor({state: 'visible'});
+            assert.equal(await page.locator('#manager-dashboard-group-development').count(), 0, 'support JSON mode stays scoped');
+            assert.equal(await page.locator('#manager-dashboard-shared-email').count(), 0, 'scoped JSON needs no recipient email');
+            await page.locator('#manager-dashboard-shared-support').getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).first().click();
+            const scopedJsonPreview = page.locator('#manager-dashboard-html-preview iframe');
+            await scopedJsonPreview.waitFor({state: 'visible'});
+            const scopedJsonSource = new URL((await scopedJsonPreview.getAttribute('src'))!, origin);
+            assert.equal(scopedJsonSource.pathname, '/api/admin/manager-dashboard/shared/frame');
+            assert.equal(scopedJsonSource.searchParams.get('preview'), '1');
+            assert.equal(scopedJsonSource.searchParams.get('version'), '201');
+            assert.equal(scopedJsonSource.searchParams.get('revision'), '501');
+            assert.equal(scopedJsonSource.searchParams.has('snapshot'), false);
+            await page.locator('#manager-dashboard-shared-json').setInputFiles({name: 'scoped-support.json', mimeType: 'application/json', buffer: Buffer.from('{"snapshot":true,"orders":[]}')});
+            await page.getByRole('button', {name: 'Опубликовать общий JSON', exact: true}).click();
+            await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('#manager-dashboard-html-preview iframe')?.src.includes('revision=502'));
+            assert.equal((await page.evaluate('window.fixtureCalls'))[0].path, '/shared/json', 'scoped support retains the shared JSON mutation route');
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'scoped support JSON preview has no horizontal overflow');
+            await page.screenshot({path: path.join(output, `${engineName}-${width}-support-scoped-json-preview.png`), fullPage: true});
+
+            await page.goto(`${origin}/?view=support&audience=development`);
             const personalFrame = page.locator('iframe[title="Личный дашборд менеджера"]');
             const commonFrame = page.locator('iframe[title="Общий дашборд сопровождения"]');
             await personalFrame.waitFor({state: 'visible'});
             await commonFrame.waitFor({state: 'visible'});
-            assert.equal(await page.locator('iframe').count(), 2, 'support has two independently mounted reports');
+            assert.equal(await page.locator('iframe').count(), 2, 'support has two independently mounted reports even with a development management prop');
             assert.equal(new URL((await personalFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '401');
             assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '301');
             await page.locator('#manager-dashboard-history').selectOption('400');
@@ -632,9 +704,9 @@ async function main() {
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'viewer remains within desktop/mobile width');
             assert.deepEqual(errors, [], 'real viewer polling and frame updates have no browser errors');
             await page.screenshot({path: path.join(output, `${engineName}-${width}-support-viewer.png`), fullPage: true});
-            await page.goto(`${origin}/?view=development`);
+            await page.goto(`${origin}/?view=development&audience=support`);
             await personalFrame.waitFor({state: 'visible'});
-            assert.equal(await commonFrame.count(), 0, 'development never renders the support shared report');
+            assert.equal(await commonFrame.count(), 0, 'development never renders the support shared report even with a support management prop');
             await page.goto(`${origin}/?json=1`);
             const jsonFile = page.locator('#manager-dashboard-shared-json');
             await jsonFile.waitFor({state: 'visible'});
@@ -722,7 +794,7 @@ async function main() {
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'JSON view stays in mobile width');
             assert.deepEqual(errors, [], 'JSON gzip upload and viewer have no browser errors');
             assert.deepEqual(external, [], 'JSON UI uses no external services');
-            console.log(`PASS ${engineName}/${width}: real admin cascade, aligned panels, optional preview/publication, bounded gzip JSON upload with confirmation/CAS, shared JSON preview refresh on replacement/first upload without resetting personal preview, separate JSON and password viewers/history, safe JSON polling refresh without resetting personal frame, journal 5+5+3, no overflow.`);
+            console.log(`PASS ${engineName}/${width}: combined aligned panels, scoped group management and uploads, common batch/journal, scoped shared JSON preview, real admin cascade, optional preview/publication, bounded gzip JSON upload with confirmation/CAS, shared JSON preview refresh on replacement/first upload without resetting personal preview, role-bound JSON and password viewers/history, safe JSON polling refresh without resetting personal frame, journal 5+5+3, no overflow.`);
           } finally {await context.close();}
         }
         // A narrow desktop viewport is not a touchscreen. Exercise the actual

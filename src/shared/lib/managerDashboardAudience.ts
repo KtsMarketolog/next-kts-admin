@@ -1,5 +1,10 @@
 export type PersonalDashboardAudience = 'development' | 'support';
 
+export const MANAGER_DASHBOARD_TITLES: Record<PersonalDashboardAudience, string> = {
+  development: 'Дашборды МР',
+  support: 'Дашборды МС',
+};
+
 export const PERSONAL_DASHBOARD_AUDIENCE_LABELS: Record<PersonalDashboardAudience, string> = {
   development: 'Менеджеры по развитию',
   support: 'Менеджеры по сопровождению',

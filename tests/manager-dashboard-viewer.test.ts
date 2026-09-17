@@ -155,6 +155,7 @@ function text(node: unknown): string {
 // refs. No browser, server, application auth, real payload or mutation is used.
 function management(options: {
   overview?: Manage; busy?: boolean;
+  audience?: audiences.PersonalDashboardAudience;
   confirm?: () => boolean;
   mutate?: (path: string, init: RequestInit) => Promise<import('../src/features/admin/manager-dashboard/types').ManagerDashboardMutationResult | null>;
 } = {}) {
@@ -193,7 +194,7 @@ function management(options: {
   let focusedInput = '';
   const render = () => {
     cursor = 0;
-    const tree = testModule.exports.ManagerDashboardManagement({ overview, busy: options.busy ?? false, mutate: async (path: string, init: RequestInit) => {
+    const tree = testModule.exports.ManagerDashboardManagement({ overview, audience: options.audience, busy: options.busy ?? false, mutate: async (path: string, init: RequestInit) => {
       requests.push({ path, init });
       return options.mutate ? options.mutate(path, init) : { results: overview.imports };
     } });
@@ -497,6 +498,33 @@ function sharedJsonOverview(): NonNullable<Manage['supportShared']> {
     jsonSnapshot: current, jsonHistory: [current, { ...current, id: 216, originalName: 'route-previous.json', status: 'previous' }],
   };
 }
+
+test('MR/MS management pages isolate HTML and manager lists but preserve the shared personal upload and journal', async () => {
+  const overview = { ...managementOverview(), supportShared: sharedJsonOverview() };
+  for (const audience of ['development', 'support'] as const) {
+    const other = audience === 'development' ? 'support' : 'development';
+    const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview, audience, busy: false, mutate: async () => null }));
+    assert.match(html, new RegExp(`manager-dashboard-group-${audience}`));
+    assert.match(html, new RegExp(`Only ${audience} manager`));
+    assert.doesNotMatch(html, new RegExp(`manager-dashboard-group-${other}|manager-dashboard-html-${other}|Only ${other} manager`));
+    assert.equal((html.match(/Личный HTML дашборда/g) ?? []).length, 1);
+    assert.equal((html.match(/Общий HTML дашборда<\/h2>/g) ?? []).length, audience === 'support' ? 1 : 0);
+    if (audience === 'support') assert.match(html, /route-current.json/);
+    else assert.doesNotMatch(html, /manager-dashboard-shared-json|route-current.json|shared-31.html/);
+    assert.equal((html.match(/id="manager-dashboard-snapshots"/g) ?? []).length, 1);
+    assert.equal((html.match(/Журнал импорта/g) ?? []).length, 1);
+    assert.match(html, /common-development.ktsp/);
+    assert.match(html, /common-support.ktsp/);
+
+    const view = management({ overview, audience });
+    view.selectFiles('manager-dashboard-snapshots', [new File(['synthetic-development'], 'development.ktsp'), new File(['synthetic-support'], 'support.ktsp')]);
+    view.submit('manager-dashboard-snapshots');
+    await view.settle();
+    assert.equal(view.requests[0].path, '/snapshots');
+    assert.deepEqual((view.requests[0].init.body as FormData).getAll('files').map((file) => (file as File).name), ['development.ktsp', 'support.ktsp']);
+    assert.deepEqual(view.find(ManagerDashboardImportJournal).props.imports, overview.imports);
+  }
+});
 
 test('shared JSON mode hides legacy email/password fields and binds upload to the active HTML version', () => {
   const overview = { ...managementOverview(), supportShared: sharedJsonOverview() };

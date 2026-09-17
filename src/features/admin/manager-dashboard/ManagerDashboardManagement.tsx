@@ -17,12 +17,13 @@ const AUDIENCES: PersonalDashboardAudience[] = ['development', 'support'];
 
 type ManagementProps = {
   overview: Extract<ManagerDashboardOverview, { mode: 'manage' }>;
+  audience?: PersonalDashboardAudience | null;
   busy: boolean;
   mutate: (path: string, init: RequestInit, successMessage: string) => Promise<ManagerDashboardMutationResult | null>;
   onAccessDenied?: () => void;
 };
 
-export function ManagerDashboardManagement({ overview, busy: externalBusy, mutate: performMutation, onAccessDenied }: ManagementProps) {
+export function ManagerDashboardManagement({ overview, audience = null, busy: externalBusy, mutate: performMutation, onAccessDenied }: ManagementProps) {
   const [pending, setPending] = useState(false);
   const [previewSelection, setPreviewSelection] = useState<{ audience: PersonalDashboardAudience | 'support-shared'; versionId: number } | null>(null);
   const [fileErrors, setFileErrors] = useState<Partial<Record<PersonalDashboardAudience, string>>>({});
@@ -42,7 +43,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
   const mutationRef = useRef(false);
   const busy = externalBusy || pending;
   const previewGroup = overview.groups.find((item) => item.audience === previewSelection?.audience);
-  const shared = overview.supportShared;
+  const shared = audience === 'development' ? undefined : overview.supportShared;
   const sharedActiveHtml = shared?.htmlVersions.find((version) => version.id === shared.activeHtmlVersionId);
   const sharedUsesJson = sharedActiveHtml?.format === 'route-planner-v1';
   const sharedPreview = previewSelection?.audience === 'support-shared';
@@ -77,7 +78,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
     desktop.addEventListener('change', update);
     update();
     return () => { observer.disconnect(); desktop.removeEventListener('change', update); };
-  }, [overview.groups]);
+  }, [overview.groups, audience]);
 
   useEffect(() => {
     if (!previewSelection) return;
@@ -329,8 +330,8 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
 
   return (
     <div className={styles.stack}>
-      <div ref={audienceGrid} className={styles.audienceGrid}>
-        {AUDIENCES.map((audience) => {
+      <div ref={audienceGrid} className={`${styles.audienceGrid}${audience ? ` ${styles.audienceGridSingle}` : ''}`}>
+        {(audience ? [audience] : AUDIENCES).map((audience) => {
           const group = overview.groups.find((item) => item.audience === audience);
           const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
           return (
@@ -405,7 +406,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
         })}
       </div>
 
-      <section id="manager-dashboard-shared-support" className={styles.panel} aria-labelledby="manager-dashboard-shared-management-heading">
+      {audience !== 'development' ? <section id="manager-dashboard-shared-support" className={styles.panel} aria-labelledby="manager-dashboard-shared-management-heading">
         <div className={styles.sectionHeading}>
           <div><h2 id="manager-dashboard-shared-management-heading">Общий HTML дашборда</h2><p>Дополнительный отчёт для всех менеджеров по сопровождению: отдельный HTML и один общий файл данных.</p></div>
           <span className={styles.badge}>{shared?.activeHtmlVersionId ? `Опубликована версия #${shared.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
@@ -474,7 +475,7 @@ export function ManagerDashboardManagement({ overview, busy: externalBusy, mutat
           </form>
         </div>}
         {sharedError ? <p className={styles.warning} role="alert">{sharedError}</p> : null}
-      </section>
+      </section> : null}
 
       {preview && (previewGroup || sharedPreview) ? <section id="manager-dashboard-html-preview" ref={previewPanel} className={`${styles.panel} ${styles.fullWidthPreview}`} aria-labelledby="manager-dashboard-preview-heading" tabIndex={-1}>
         <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {sharedPreview ? 'Общий дашборд сопровождения' : PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup!.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. {sharedJsonPreview ? 'Общий JSON, привязанный к этой версии HTML, загружается автоматически, если он опубликован. Личные данные менеджеров не загружаются.' : sharedPreview ? 'Общие и личные данные не загружаются.' : 'Личные данные менеджеров не загружаются.'}</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {

@@ -499,6 +499,7 @@ export default function AdminPanel({
           canAccessSite={sessionRole === 'admin'}
           topDashboardMode={topDashboardMode}
           managerDashboardMode={sessionRole === 'admin' || sessionRole === 'admintop' ? 'manage' : isManagerRole(sessionRole) ? 'view' : null}
+          managerDashboardAudience={sessionRole === 'manager' ? 'development' : sessionRole === 'support_manager' ? 'support' : null}
           isTopAreaOnlyUser={isTopAreaOnlyRole(sessionRole)}
           wholesaleHref={isManagerRole(sessionRole) ? '/admin/wholesale/manager' : '/admin/wholesale/admin'}
         />

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import adminStyles from '@/app/admin/admin.module.scss';
+import { MANAGER_DASHBOARD_TITLES, type PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
 import { ManagerDashboardManagement } from './ManagerDashboardManagement';
 import { ManagerDashboardViewer, managerDashboardViewIdentity } from './ManagerDashboardViewer';
@@ -31,7 +32,7 @@ async function readResponse(response: Response) {
   return data;
 }
 
-export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
+export function ManagerDashboard({ mode, audience = null }: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null }) {
   const router = useRouter();
   const [overview, setOverview] = useState<ManagerDashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -161,10 +162,12 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
     }
   }
 
+  const displayedAudience = mode === 'manage' ? audience : overview?.mode === 'view' ? overview.audience : audience;
+
   return (
     <main className={`${adminStyles.page} ${styles.dashboardPage}`}>
       <div className={adminStyles.topbar}>
-        <div><p>Панель управления</p><h1>{mode === 'manage' ? 'Дашборды менеджеров' : overview?.mode === 'view' && overview.audience === 'support' ? 'Дашборды' : 'Личный дашборд'}</h1></div>
+        <div><p>Панель управления</p><h1>{displayedAudience ? MANAGER_DASHBOARD_TITLES[displayedAudience] : mode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h1></div>
         <div className={adminStyles.topbarActions}>
           <Link className={styles.secondary} href="/admin">В панель управления</Link>
           <button className={styles.secondary} type="button" disabled={loading || busy} onClick={() => void refresh()}>{loading ? 'Обновляем…' : 'Обновить'}</button>
@@ -178,7 +181,7 @@ export function ManagerDashboard({ mode }: { mode: 'manage' | 'view' }) {
       </div> : null}
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}
       {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем дашборд…</p></section> : null}
-      {overview?.mode === 'manage' ? <ManagerDashboardManagement overview={overview} busy={busy || loading} mutate={mutate} onAccessDenied={() => {
+      {overview?.mode === 'manage' ? <ManagerDashboardManagement key={audience ?? 'all'} audience={audience} overview={overview} busy={busy || loading} mutate={mutate} onAccessDenied={() => {
         requestRevision.current += 1;
         setOverview(null);
         router.replace('/admin');

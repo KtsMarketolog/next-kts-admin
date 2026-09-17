@@ -3,6 +3,7 @@
 import Link from 'next/link';
 
 import styles from '@/app/admin/admin.module.scss';
+import { MANAGER_DASHBOARD_TITLES, type PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
 const interactiveCardClassName = `${styles.dashboardCard} ${styles.dashboardCardInteractive}`;
 
@@ -10,6 +11,7 @@ type AdminDashboardProps = {
   canAccessSite: boolean;
   topDashboardMode: 'manage' | 'view' | null;
   managerDashboardMode: 'manage' | 'view' | null;
+  managerDashboardAudience?: PersonalDashboardAudience | null;
   isTopAreaOnlyUser: boolean;
   wholesaleHref: '/admin/wholesale/admin' | '/admin/wholesale/manager';
 };
@@ -18,26 +20,42 @@ export function AdminDashboard({
   canAccessSite,
   topDashboardMode,
   managerDashboardMode,
+  managerDashboardAudience = null,
   isTopAreaOnlyUser,
   wholesaleHref,
 }: AdminDashboardProps) {
   const isTopDashboardManager = topDashboardMode === 'manage';
-  const managerDashboardCard = managerDashboardMode ? (
-    <Link className={interactiveCardClassName} href="/admin/manager-dashboard" replace scroll={false}>
+  const managerDashboardAudiences: PersonalDashboardAudience[] = managerDashboardMode === 'manage'
+    ? ['development', 'support']
+    : managerDashboardMode === 'view' && managerDashboardAudience
+      ? [managerDashboardAudience]
+      : [];
+  const managerDashboardCards = managerDashboardAudiences.map((audience) => (
+    <Link
+      key={audience}
+      className={interactiveCardClassName}
+      href={`/admin/manager-dashboard?audience=${audience}`}
+      replace
+      scroll={false}
+    >
       <div>
-        <h2>{managerDashboardMode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h2>
-        <p>{managerDashboardMode === 'manage'
-          ? 'Отдельные HTML для развития и сопровождения, личные снимки и общий журнал загрузки.'
-          : 'Ваш персональный отчёт с автоматически загруженными данными.'}</p>
+        <h2>{MANAGER_DASHBOARD_TITLES[audience]}</h2>
+        <p>{audience === 'development'
+          ? managerDashboardMode === 'manage'
+            ? 'HTML-дашборды менеджеров развития, личные данные и журнал загрузки.'
+            : 'Ваш персональный отчёт с автоматически загруженными данными.'
+          : managerDashboardMode === 'manage'
+            ? 'Личные и общие дашборды менеджеров сопровождения, данные и журнал загрузки.'
+            : 'Ваш личный и общие дашборды менеджеров сопровождения.'}</p>
       </div>
       <span className={styles.dashboardCardLink}>Открыть</span>
     </Link>
-  ) : null;
+  ));
 
   if (isTopAreaOnlyUser) {
     return (
       <section
-        className={`${styles.dashboardGrid} ${managerDashboardMode ? '' : styles.dashboardGridSingle}`}
+        className={`${styles.dashboardGrid} ${managerDashboardCards.length ? '' : styles.dashboardGridSingle}`}
         aria-label="Разделы панели управления"
       >
         <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
@@ -51,7 +69,7 @@ export function AdminDashboard({
           </div>
           <span className={styles.dashboardCardLink}>Открыть</span>
         </Link>
-        {managerDashboardCard}
+        {managerDashboardCards}
       </section>
     );
   }
@@ -105,7 +123,7 @@ export function AdminDashboard({
         </div>
         <span className={styles.dashboardCardLink}>Открыть</span>
       </Link>
-      {managerDashboardCard}
+      {managerDashboardCards}
     </section>
   );
 }
