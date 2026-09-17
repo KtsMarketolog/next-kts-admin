@@ -411,6 +411,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     () => overview?.versions.find((version) => version.id === selectedVersionId) ?? null,
     [overview, selectedVersionId],
   );
+  const latestDraft = overview?.versions.find((version) => version.status === 'draft');
   const activeDataVersion = useMemo(
     () => overview?.data.versions.find((version) => version.id === overview.data.activeVersionId) ?? null,
     [overview],
@@ -1086,7 +1087,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         <div className={styles.topDashboardUploadCard}>
           <div>
             <h3>Загрузить новую версию</h3>
-            <p>Самодостаточный HTML до 5 МБ сохранится как черновик. Текущая публикация не изменится до подтверждения; в этом блоке хранится до 50 версий общим объёмом до 100 МБ.</p>
+            <p>Самодостаточный HTML до 5 МБ сохранится как черновик. Хранятся действующий и один предыдущий рабочий HTML; неопубликованные черновики — отдельно. Общий лимит блока: 50 версий и 100 МБ.</p>
           </div>
           <div className={styles.topDashboardUploadControls}>
             <label className={styles.topDashboardFilePicker} aria-disabled={busyAction !== null}>
@@ -1114,6 +1115,17 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
             </button>
           </div>
         </div>
+        <p className={styles.mutedText}>{activeVersion ? `Сейчас опубликован: ${activeVersion.originalName}, версия #${activeVersion.id}.` : 'HTML ещё не опубликован.'}</p>
+        {latestDraft ? <article className={styles.topDashboardVersionRow}>
+          <div><h3>Последний черновик</h3><div className={styles.topDashboardVersionTitle}><strong>{latestDraft.originalName}</strong></div><p className={styles.mutedText}>Версия #{latestDraft.id} · {formatDate(latestDraft.createdAt)}</p></div>
+          <div className={styles.topDashboardVersionActions}>
+            <button className={styles.secondary} type="button" disabled={busyAction !== null} onClick={() => {
+              setSelectedVersionId(latestDraft.id);
+              setPreviewRevision((current) => current + 1);
+            }}>Предпросмотр черновика</button>
+            <button type="button" disabled={busyAction !== null} onClick={() => activateVersion(latestDraft)}>{busyAction === `activate:${latestDraft.id}` ? 'Публикуем…' : 'Опубликовать черновик'}</button>
+          </div>
+        </article> : null}
       </section>
 
       <section
@@ -1306,49 +1318,6 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
           </div>
         )}
 
-        {overview?.data.versions.length ? (
-          <div className={styles.topDashboardDataHistory}>
-            <div className={styles.topDashboardDataHistoryHeader}>
-              <h3>История данных</h3>
-              {overview.data.previousVersionId ? (
-                <span>Предыдущая версия #{overview.data.previousVersionId}</span>
-              ) : null}
-            </div>
-            <div className={styles.topDashboardVersionList}>
-              {overview.data.versions.map((version) => (
-                <article className={styles.topDashboardVersionRow} key={version.id}>
-                  <div>
-                    <div className={styles.topDashboardVersionTitle}>
-                      <strong>{version.originalName}</strong>
-                      <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${version.status}`]}`}>
-                        {dataStatusLabel(version.status)}
-                      </span>
-                    </div>
-                    <div className={styles.topDashboardMeta}>
-                      <span>Версия данных #{version.id}</span>
-                      <span>{snapshotFormatLabel(version.snapshotFormat)}</span>
-                      <span>Файл: {formatFileSize(version.fileSize)}</span>
-                      <span>{storedSizeLabel(version)}</span>
-                      <span>Загрузил: {version.uploadedByName || 'Администратор'}</span>
-                      <span>{formatDate(version.createdAt)}</span>
-                    </div>
-                  </div>
-                  {version.status !== 'active' ? (
-                    <div className={styles.topDashboardVersionActions}>
-                      <button
-                        type="button"
-                        disabled={busyAction !== null || !hasActiveHtml}
-                        onClick={() => void activateDataVersion(version)}
-                      >
-                        {busyAction === `activate-data:${version.id}` ? 'Возвращаем…' : 'Откатить данные'}
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-          </div>
-        ) : null}
       </section>
 
       <section
@@ -1435,7 +1404,54 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         )}
       </section>
 
-      <section className={styles.section}>
+      <section id="top-dashboard-data-history" className={styles.section}>
+        <p className={styles.mutedText}>Хранятся текущий и один предыдущий рабочий снимок данных.</p>
+        {overview?.data.versions.length ? (
+          <div className={styles.topDashboardDataHistory}>
+            <div className={styles.topDashboardDataHistoryHeader}>
+              <h3>История данных</h3>
+              {overview.data.previousVersionId ? (
+                <span>Предыдущая версия #{overview.data.previousVersionId}</span>
+              ) : null}
+            </div>
+            <div className={styles.topDashboardVersionList}>
+              {overview.data.versions.map((version) => (
+                <article className={styles.topDashboardVersionRow} key={version.id}>
+                  <div>
+                    <div className={styles.topDashboardVersionTitle}>
+                      <strong>{version.originalName}</strong>
+                      <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${version.status}`]}`}>
+                        {dataStatusLabel(version.status)}
+                      </span>
+                    </div>
+                    <div className={styles.topDashboardMeta}>
+                      <span>Версия данных #{version.id}</span>
+                      <span>{snapshotFormatLabel(version.snapshotFormat)}</span>
+                      <span>Файл: {formatFileSize(version.fileSize)}</span>
+                      <span>{storedSizeLabel(version)}</span>
+                      <span>Загрузил: {version.uploadedByName || 'Администратор'}</span>
+                      <span>{formatDate(version.createdAt)}</span>
+                    </div>
+                  </div>
+                  {version.status !== 'active' ? (
+                    <div className={styles.topDashboardVersionActions}>
+                      <button
+                        type="button"
+                        disabled={busyAction !== null || !hasActiveHtml}
+                        onClick={() => void activateDataVersion(version)}
+                      >
+                        {busyAction === `activate-data:${version.id}` ? 'Возвращаем…' : 'Откатить данные'}
+                      </button>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      <section id="top-dashboard-html-history" className={styles.section}>
         <div className={styles.sectionHeader}>
           <div>
             <p>История</p>
@@ -1446,60 +1462,69 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
 
         {overview?.versions.length ? (
           <div className={styles.topDashboardVersionList}>
-            {overview.versions.map((version) => (
-              <article
-                className={`${styles.topDashboardVersionRow} ${version.id === selectedVersionId ? styles.topDashboardVersionSelected : ''}`}
-                key={version.id}
-              >
-                <div>
-                  <div className={styles.topDashboardVersionTitle}>
-                    <strong>{version.originalName}</strong>
-                    <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${version.status}`]}`}>
-                      {statusLabel(version.status)}
-                    </span>
-                  </div>
-                  <div className={styles.topDashboardMeta}>
-                    <span>Версия #{version.id}</span>
-                    <span>{formatFileSize(version.fileSize)}</span>
-                    <span>Загрузил: {version.uploadedByName || 'Администратор'}</span>
-                    <span>{formatDate(version.createdAt)}</span>
-                    {version.firstPublishedAt ? <span>Первая публикация: {formatDate(version.firstPublishedAt)}</span> : null}
-                  </div>
-                </div>
-                <div className={styles.topDashboardVersionActions}>
-                  <button
-                    className={styles.secondary}
-                    type="button"
-                    disabled={busyAction !== null}
-                    onClick={() => {
-                      setSelectedVersionId(version.id);
-                      setPreviewRevision((current) => current + 1);
-                    }}
+            <p className={styles.mutedText}>Хранятся действующий и один предыдущий рабочий HTML. Черновики перечислены отдельно.</p>
+            {[
+              { title: 'Рабочие HTML-версии', versions: overview.versions.filter((version) => version.status !== 'draft') },
+              { title: 'Черновики HTML', versions: overview.versions.filter((version) => version.status === 'draft') },
+            ].filter((group) => group.versions.length).map((group) => <section key={group.title}>
+              <h3>{group.title}</h3>
+              <div className={styles.topDashboardVersionList}>
+                {group.versions.map((version) => (
+                  <article
+                    className={`${styles.topDashboardVersionRow} ${version.id === selectedVersionId ? styles.topDashboardVersionSelected : ''}`}
+                    key={version.id}
                   >
-                    Предпросмотр
-                  </button>
-                  {version.status !== 'active' ? (
-                    <>
-                      <button type="button" disabled={busyAction !== null} onClick={() => activateVersion(version)}>
-                        {busyAction === `activate:${version.id}`
-                          ? 'Публикуем…'
-                          : version.status === 'archived'
-                            ? 'Откатить'
-                            : 'Опубликовать'}
-                      </button>
+                    <div>
+                      <div className={styles.topDashboardVersionTitle}>
+                        <strong>{version.originalName}</strong>
+                        <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${version.status}`]}`}>
+                          {statusLabel(version.status)}
+                        </span>
+                      </div>
+                      <div className={styles.topDashboardMeta}>
+                        <span>Версия #{version.id}</span>
+                        <span>{formatFileSize(version.fileSize)}</span>
+                        <span>Загрузил: {version.uploadedByName || 'Администратор'}</span>
+                        <span>{formatDate(version.createdAt)}</span>
+                        {version.firstPublishedAt ? <span>Первая публикация: {formatDate(version.firstPublishedAt)}</span> : null}
+                      </div>
+                    </div>
+                    <div className={styles.topDashboardVersionActions}>
                       <button
-                        className={styles.danger}
+                        className={styles.secondary}
                         type="button"
                         disabled={busyAction !== null}
-                        onClick={() => deleteVersion(version)}
+                        onClick={() => {
+                          setSelectedVersionId(version.id);
+                          setPreviewRevision((current) => current + 1);
+                        }}
                       >
-                        {busyAction === `delete:${version.id}` ? 'Удаляем…' : 'Удалить'}
+                        Предпросмотр
                       </button>
-                    </>
-                  ) : null}
-                </div>
-              </article>
-            ))}
+                      {version.status !== 'active' ? (
+                        <>
+                          <button type="button" disabled={busyAction !== null} onClick={() => activateVersion(version)}>
+                            {busyAction === `activate:${version.id}`
+                              ? 'Публикуем…'
+                              : version.status === 'archived'
+                                ? 'Откатить'
+                                : 'Опубликовать'}
+                          </button>
+                          <button
+                            className={styles.danger}
+                            type="button"
+                            disabled={busyAction !== null}
+                            onClick={() => deleteVersion(version)}
+                          >
+                            {busyAction === `delete:${version.id}` ? 'Удаляем…' : 'Удалить'}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>)}
           </div>
         ) : (
           <p className={styles.mutedText}>История появится после первой загрузки HTML.</p>

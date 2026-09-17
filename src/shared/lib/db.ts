@@ -57,6 +57,8 @@ export {
   TopDashboardBlockNotFoundError,
   TopDashboardBlockStateNotFoundError,
   TopDashboardBlockTitleValidationError,
+  TopDashboardDraftLimitError,
+  TopDashboardDataStorageLimitError,
 } from './db/topDashboardBlocksRepo';
 export type {
   ActivateTopDashboardBlockVersionInput,

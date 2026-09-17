@@ -107,7 +107,7 @@ function management(options: {
     assert.ok(group, `Missing ${audience} group`);
     const version = data.groups.find((item) => item.audience === audience)?.htmlVersions.find((item) => item.id === id);
     assert.ok(version, `Missing ${audience} version #${id}`);
-    const row = elements(group).find((node) => node.type === 'tr' && elements(node).some((child) => child.type === 'strong' && text(child) === version.originalName));
+    const row = elements(render()).find((node) => node.type === 'tr' && node.props['data-version-audience'] === audience && node.props['data-version-id'] === id);
     assert.ok(row, `Missing ${audience} version #${id} row`);
     const item = elements(row).find((node) => node.type === 'button' && text(node) === label);
     assert.ok(item, `Missing ${audience} version #${id} ${label} action`);
@@ -119,8 +119,7 @@ function management(options: {
     assert.ok(section, 'Missing shared support section');
     const version = data.supportShared?.htmlVersions.find((item) => item.id === id);
     assert.ok(version, `Missing shared version #${id}`);
-    const row = elements(section).find((node) => node.type === 'tr'
-      && elements(node).some((child) => child.type === 'strong' && text(child) === version.originalName));
+    const row = elements(render()).find((node) => node.type === 'tr' && node.props['data-version-audience'] === 'support-shared' && node.props['data-version-id'] === id);
     assert.ok(row, `Missing shared version #${id} row`);
     const action = elements(row).find((node) => node.type === 'button' && text(node) === label);
     assert.ok(action, `Missing shared version #${id} ${label} action`);

@@ -38,9 +38,13 @@ function snapshotRow() {
     issued: metadata.issued, expires: metadata.expires, uploaded_by: 'admin:test', received_at: new Date().toISOString(), encrypted_payload: bytes };
 }
 type Step = { sql: RegExp; rows: unknown[]; params?: unknown[]; count?: number };
-function repository(steps: Step[] = [], options: {openFile?: () => Readable | Promise<Readable>; transactionError?: Error} = {}) {
+function repository(steps: Step[] = [], options: {openFile?: () => Readable | Promise<Readable>; transactionError?: Error;
+  domainOverrides?: Record<string, number | undefined>} = {}) {
   const queries: string[] = [];
   const fileReads: unknown[][] = [];
+  const deletedFiles: string[][] = [];
+  const queuedFiles: string[][] = [];
+  let transactionActive = false;
   let schemaCalls = 0;
   let transactions = 0;
   const client = { query: async (sql: string, params: unknown[] = []) => {
@@ -53,24 +57,32 @@ function repository(steps: Step[] = [], options: {openFile?: () => Readable | Pr
     return { rows: expected.rows, rowCount: expected.count ?? expected.rows.length };
   } };
   const repo = compile<typeof import('../src/shared/lib/db/supportSharedDashboardRepo')>('../src/shared/lib/db/supportSharedDashboardRepo.ts', {
-    'node:crypto': crypto, '../managerDashboardDomain': domain,
+    'node:crypto': crypto, '../managerDashboardDomain': {...domain, ...options.domainOverrides},
     '../supportSharedRoutePlannerHtml': { detectSupportSharedHtmlFormat: () => 'ktsp' },
     '../supportSharedRoutePlannerData': { SUPPORT_SHARED_JSON_MAX_BYTES: 100 * 1024 * 1024,
-      SUPPORT_SHARED_JSON_MAX_VERSIONS: 5, SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES: 1024 * 1024 * 1024,
+      SUPPORT_SHARED_JSON_MAX_VERSIONS: 2, SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES: 1024 * 1024 * 1024,
       openVerifiedSupportSharedRoutePlannerFile: async (...args: unknown[]) => {
         fileReads.push(args);
         return options.openFile ? options.openFile() : assert.fail('unexpected JSON file read');
       } },
-    '../topDashboardDataStorage': { deleteTopDashboardDataFiles: async () => {} },
+    '../topDashboardDataStorage': { deleteTopDashboardDataFiles: async (paths: string[]) => { deletedFiles.push(paths); } },
+    './dashboardFileCleanupRepo': { enqueueDashboardFilesForDeletion: async (connection: typeof client, paths: string[]) => {
+      assert.equal(connection, client, 'Outbox uses the same transaction as snapshot/HTML pruning');
+      assert.equal(transactionActive, true, 'Outbox is durable before COMMIT');
+      queuedFiles.push(paths);
+    } },
     './client': { withTransaction: async (callback: (value: typeof client) => unknown) => {
       transactions++;
-      const result = await callback(client);
-      if (options.transactionError) throw options.transactionError;
-      return result;
+      transactionActive = true;
+      try {
+        const result = await callback(client);
+        if (options.transactionError) throw options.transactionError;
+        return result;
+      } finally { transactionActive = false; }
     } },
     './schema': { ensureSiteSchema: async () => { schemaCalls++; } },
   });
-  return { repo, queries, fileReads, get schemaCalls() { return schemaCalls; }, get transactions() { return transactions; },
+  return { repo, queries, fileReads, deletedFiles, queuedFiles, get schemaCalls() { return schemaCalls; }, get transactions() { return transactions; },
     done() { assert.deepEqual(steps, []); } };
 }
 const support = { sql: /^select role,is_active from wholesale_managers where id=\$1 for share$/, rows: [{ role: 'support_manager', is_active: true }], params: [20] };
@@ -185,7 +197,7 @@ test('manager JSON reads still require the active published route planner HTML',
 test('viewer overview selects active published HTML only and hides previous HTML identity', async () => {
   const db = repository([support, readState,
     { sql: /from support_shared_dashboard_html_versions where id=\$1 and first_published_at is not null order by id desc$/, rows: [], params: ['8'] },
-    { sql: /from support_shared_dashboard_snapshots order by issued desc,id desc limit 32$/, rows: [snapshotRow()] },
+    { sql: /from support_shared_dashboard_snapshots order by issued desc,id desc limit 2$/, rows: [snapshotRow()] },
   ]);
   const overview = await db.repo.getSupportSharedDashboardOverview(20);
   assert.deepEqual(overview.htmlVersions, []);
@@ -264,16 +276,84 @@ test('duplicate content retries are idempotent and preserve the current shared s
   db.done();
 });
 
-test('snapshot version and byte quotas fail without pruning or overwriting current data', async () => {
-  for (const [count, fileSize] of [[32, 1000], [16, 8 * 1024 * 1024]]) {
-    const rows = Array.from({ length: count }, (_, index) => ({ ...snapshotRow(), id: String(index + 1),
-      issued: day(-1), sha256: String(index).padStart(64, '0'), file_size: String(fileSize) }));
+test('snapshot quota rejection leaves pointers and accumulated history unchanged', async () => {
+  for (const domainOverrides of [{PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS: 1}, {PERSONAL_DASHBOARD_MANAGER_MAX_BYTES: 1}]) {
+    const rows = Array.from({ length: 32 }, (_, index) => ({ ...snapshotRow(), id: String(index + 1),
+      issued: day(-1), sha256: String(index).padStart(64, '0') }));
     const db = repository([lock, writeState,
       { sql: /from support_shared_dashboard_snapshots order by issued desc,id desc$/, rows },
-    ]);
+    ], {domainOverrides});
     await assert.rejects(() => db.repo.importSupportSharedDashboardSnapshot({ filename: 'shared.ktsp', bytes: snapshot(),
       email: 'shared@example.test', actorId: 'admin:test', expectedActiveSnapshotId: 4 }), { code: 'SNAPSHOT_QUOTA' });
     assert.equal(db.queries.some((sql) => /^\s*(insert|update|delete)/.test(sql)), false);
+    db.done();
+  }
+});
+
+test('shared HTML pruning deletes associated files only after a confirmed transaction commit', async () => {
+  for (const transactionError of [undefined, new Error('uncertain commit')]) {
+    const db = repository([lock, writeState,
+      {sql: /^select id from support_shared_dashboard_html_versions where id=\$1$/, rows: [{id: '9'}], params: [9]},
+      {sql: /^update support_shared_dashboard_html_versions set first_published_at=/, rows: []},
+      {sql: /^update support_shared_dashboard_state set previous_html_version_id=active_html_version_id,/, rows: []},
+      {sql: /^select s.storage_path .*v.first_published_at is not null and v.id is distinct from st.active_html_version_id and v.id is distinct from st.previous_html_version_id$/, rows: [{storage_path: 'retired-json.bin'}]},
+      {sql: /^delete from support_shared_dashboard_html_versions v using support_shared_dashboard_state st .*v.first_published_at is not null and v.id is distinct from st.active_html_version_id and v.id is distinct from st.previous_html_version_id$/, rows: []},
+    ], {transactionError});
+    const publish = () => db.repo.activateSupportSharedDashboardHtml({versionId: 9, expectedActiveVersionId: 8, actorId: 'admin:test'});
+    if (transactionError) {
+      await assert.rejects(publish, transactionError);
+      assert.deepEqual(db.deletedFiles, []);
+    } else {
+      assert.deepEqual(await publish(), {activeHtmlVersionId: 9, previousHtmlVersionId: 8});
+      assert.deepEqual(db.deletedFiles, [['retired-json.bin']]);
+    }
+    assert.deepEqual(db.queuedFiles, [['retired-json.bin']], 'Even an uncertain COMMIT has already included its cleanup outbox');
+    db.done();
+  }
+});
+
+test('JSON retention protects the actual prior active pointer instead of the latest inserted archive', async () => {
+  const active = jsonRow('8');
+  const previous = {...active, id: '90', sha256: 'b'.repeat(64), storage_path: 'old-previous.bin'};
+  const legacy = {...active, id: '94', sha256: 'c'.repeat(64), storage_path: 'legacy-archive.bin'};
+  const created = {...active, id: '95', sha256: 'd'.repeat(64), storage_path: `dd/${'d'.repeat(64)}-00000000-0000-0000-0000-000000000000.bin`, saved_at: '2026-09-18T00:00:00Z'};
+  const db = repository([lock, writeState,
+    {sql: /^select format from support_shared_dashboard_html_versions where id=\$1 and first_published_at is not null$/, rows: [{format: 'route-planner-v1'}], params: [8]},
+    {sql: /from support_shared_dashboard_json_snapshots s .*where s.html_version_id=\$1 order by s.id desc$/, rows: [legacy, active, previous], params: [8]},
+    {sql: /^select active_snapshot_id::text from support_shared_dashboard_json_state where html_version_id=\$1 for update$/, rows: [{active_snapshot_id: '91'}], params: [8]},
+    {sql: /^select coalesce\(sum\(file_size\),0\)::text as bytes from support_shared_dashboard_json_snapshots$/, rows: [{bytes: '54'}]},
+    {sql: /^insert into support_shared_dashboard_json_snapshots/, rows: [created]},
+    {sql: /^update support_shared_dashboard_json_state set previous_snapshot_id=active_snapshot_id,/, rows: [], params: [8, '95', 'admin:test']},
+    {sql: /^delete from support_shared_dashboard_json_snapshots where html_version_id=\$1 and id=any\(\$2::bigint\[\]\)$/, rows: [], params: [8, ['94', '90']]},
+  ]);
+  const result = await db.repo.importSupportSharedDashboardJson({htmlVersionId: 8, expectedActiveSnapshotId: 91,
+    originalName: 'next.json', fileSize: 18, sha256: created.sha256, storagePath: created.storage_path,
+    savedAt: created.saved_at, actorId: 'admin:test'});
+  assert.equal(result.status, 'imported');
+  assert.equal(result.snapshot.id, 95);
+  assert.deepEqual(result.prunedStoragePaths, ['legacy-archive.bin', 'old-previous.bin']);
+  assert.deepEqual(db.queuedFiles, [['legacy-archive.bin', 'old-previous.bin']]);
+  assert.deepEqual(db.deletedFiles, [], 'The route owns confirmed-commit file cleanup for JSON imports');
+  db.done();
+});
+
+test('manual shared HTML deletion records bound files in the same transaction before cleanup', async () => {
+  for (const transactionError of [undefined, new Error('uncertain commit')]) {
+    const db = repository([lock, writeState,
+      {sql: /^select id,format from support_shared_dashboard_html_versions where id=\$1$/, rows: [{id: '7', format: 'route-planner-v1'}], params: [7]},
+      {sql: /^select storage_path from support_shared_dashboard_json_snapshots where html_version_id=\$1$/, rows: [{storage_path: 'deleted-html-json.bin'}], params: [7]},
+      {sql: /^update support_shared_dashboard_state set previous_html_version_id=case/, rows: []},
+      {sql: /^delete from support_shared_dashboard_html_versions where id=\$1 returning id$/, rows: [{id: '7'}], params: [7]},
+    ], {transactionError});
+    const remove = () => db.repo.deleteSupportSharedDashboardHtml({versionId: 7, actorId: 'admin:test'});
+    if (transactionError) {
+      await assert.rejects(remove, transactionError);
+      assert.deepEqual(db.deletedFiles, []);
+    } else {
+      assert.deepEqual(await remove(), {deletedVersionId: 7});
+      assert.deepEqual(db.deletedFiles, [['deleted-html-json.bin']]);
+    }
+    assert.deepEqual(db.queuedFiles, [['deleted-html-json.bin']]);
     db.done();
   }
 });

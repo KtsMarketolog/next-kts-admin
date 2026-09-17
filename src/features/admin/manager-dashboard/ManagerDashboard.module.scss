@@ -1,4 +1,6 @@
 .stack { display: grid; gap: 24px; }
+.stack > * { min-width: 0; }
+.draftSummary { overflow-wrap: anywhere; }
 .audienceGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
 .audienceGridSingle { grid-template-columns: minmax(0, 1fr); }
 .audienceColumn { display: grid; gap: 20px; min-width: 0; }

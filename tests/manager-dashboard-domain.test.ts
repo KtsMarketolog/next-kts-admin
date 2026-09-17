@@ -7,7 +7,7 @@ import {
   inspectPersonalSnapshot,
   PERSONAL_DASHBOARD_SNAPSHOT_MAX_BYTES,
   PERSONAL_DASHBOARD_MANAGER_MAX_BYTES,
-  PERSONAL_DASHBOARD_RETENTION_DAYS,
+  PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS,
   personalDashboardToday,
   PersonalDashboardError,
 } from '../src/shared/lib/managerDashboardDomain';
@@ -35,8 +35,9 @@ test('personal business dates use Moscow midnight rather than UTC midnight', () 
   assert.equal(personalDashboardToday(new Date('2026-09-14T20:59:59Z')), '2026-09-14');
   assert.equal(personalDashboardToday(new Date('2026-09-14T21:00:00Z')), '2026-09-15');
 });
-test('personal storage quota fits fourteen maximum-size daily files plus the next arrival', () => {
-  assert.ok(PERSONAL_DASHBOARD_MANAGER_MAX_BYTES >= (PERSONAL_DASHBOARD_RETENTION_DAYS + 1) * PERSONAL_DASHBOARD_SNAPSHOT_MAX_BYTES);
+test('personal storage quota fits the current and previous maximum-size snapshots without an age cutoff', () => {
+  assert.equal(PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS, 2);
+  assert.ok(PERSONAL_DASHBOARD_MANAGER_MAX_BYTES >= PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS * PERSONAL_DASHBOARD_SNAPSHOT_MAX_BYTES);
   assert.equal(PERSONAL_DASHBOARD_MANAGER_MAX_BYTES, 128 * 1024 * 1024);
 });
 test('personal recipient matching requires one active manager of either group and exact current email', () => {

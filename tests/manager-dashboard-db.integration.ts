@@ -19,7 +19,7 @@ import {
   getPersonalDashboardSnapshot, getPersonalDashboardStatus, importPersonalDashboardSnapshot,
   listPersonalDashboardAdmin, listPersonalDashboardImports, recordPersonalDashboardImportFailure,
 } from '../src/shared/lib/db/managerDashboardRepo';
-import { getManagerEmailHash, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
+import { getManagerEmailHash, inspectPersonalSnapshot, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
 import type { PersonalDashboardAudience } from '../src/shared/lib/managerDashboardAudience';
 import { getPersonalDashboardMailReceipt, recordPersonalDashboardMailReceipt, prunePersonalDashboardMailReceipts } from '../src/shared/lib/db/managerDashboardMailReceipts';
 import {
@@ -31,6 +31,7 @@ import {
 } from '../src/shared/lib/db/supportSharedDashboardRepo';
 import { prepareSupportSharedRoutePlannerUpload } from '../src/shared/lib/supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles } from '../src/shared/lib/topDashboardDataStorage';
+import { drainDashboardFileCleanup } from '../src/shared/lib/dashboardFileCleanup';
 
 function guard() {
   assert.equal(process.env.KTS_PERSONAL_TEST, '1', 'Isolated integration tests require KTS_PERSONAL_TEST=1');
@@ -273,6 +274,49 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal((await getPersonalDashboardStatus(recipient.id)).audience, 'support');
     });
 
+    await t.test('publication prunes only older published HTML in its audience, preserves every draft, and rolls back cleanup failures', async () => {
+      for (const audience of ['development', 'support'] as const) {
+        const before = await listPersonalDashboardAdmin();
+        const group = before.groups.find((item) => item.audience === audience)!;
+        const other = before.groups.find((item) => item.audience !== audience)!;
+        const olderDraft = await html('retention-older-draft', audience);
+        const laterDraft = await html('retention-later-draft', audience);
+        const legacy = await html('retention-legacy-published', audience);
+        await query(`update personal_dashboard_html_versions set first_published_at=now()-interval '400 days' where id=$1`, [legacy.id]);
+        const unchanged = (await query(`select * from personal_dashboard_html_state where audience=$1`, [audience])).rows;
+        assert.ok(await getPersonalDashboardHtml(legacy.id, true, audience), 'Reads do not prune accumulated history');
+        await assert.rejects(() => activatePersonalDashboardHtml({versionId: olderDraft.id, expectedActiveVersionId: null,
+          actorId: 'admin:integration-test', audience}), {code: 'STATE_CONFLICT'});
+        assert.ok(await getPersonalDashboardHtml(legacy.id, true, audience), 'A rejected publication does not prune history');
+        await query(`create function kts_test_reject_retention() returns trigger language plpgsql as
+          $$ begin raise exception 'synthetic retention failure'; end $$`);
+        try {
+          await query(`create trigger kts_test_reject_retention before delete on personal_dashboard_html_versions
+            for each row execute function kts_test_reject_retention()`);
+          try {
+            await assert.rejects(() => activatePersonalDashboardHtml({versionId: olderDraft.id, expectedActiveVersionId: group.activeHtmlVersionId,
+              actorId: 'admin:integration-test', audience}), {code: 'P0001'});
+            assert.deepEqual((await query(`select * from personal_dashboard_html_state where audience=$1`, [audience])).rows, unchanged);
+            assert.equal((await getPersonalDashboardHtml(olderDraft.id, true, audience))?.firstPublishedAt, null);
+            assert.ok(await getPersonalDashboardHtml(legacy.id, true, audience));
+          } finally { await query(`drop trigger kts_test_reject_retention on personal_dashboard_html_versions`); }
+        } finally { await query(`drop function kts_test_reject_retention()`); }
+        await activatePersonalDashboardHtml({versionId: olderDraft.id, expectedActiveVersionId: group.activeHtmlVersionId,
+          actorId: 'admin:integration-test', audience});
+        assert.equal(await getPersonalDashboardHtml(legacy.id, true, audience), null);
+        assert.equal(await getPersonalDashboardHtml(group.previousHtmlVersionId!, true, audience), null);
+        assert.equal((await getPersonalDashboardHtml(laterDraft.id, true, audience))?.status, 'draft');
+        await activatePersonalDashboardHtml({versionId: group.activeHtmlVersionId!, expectedActiveVersionId: olderDraft.id,
+          actorId: 'admin:integration-test', audience});
+        const after = await listPersonalDashboardAdmin();
+        const retained = after.groups.find((item) => item.audience === audience)!;
+        assert.deepEqual(retained.htmlVersions.filter((item) => item.firstPublishedAt).map((item) => item.id).sort((a,b) => a-b),
+          [group.activeHtmlVersionId!, olderDraft.id].sort((a,b) => a-b));
+        assert.equal(retained.previousHtmlVersionId, olderDraft.id, 'Rollback preserves the version just replaced');
+        assert.deepEqual(after.groups.find((item) => item.audience !== audience), other);
+      }
+    });
+
     await t.test('HTML deletion is audience-scoped, protects active publication, and clears previous foreign keys atomically', async () => {
       const snapshotRows = (await query(`select id::text,manager_id::text,sha256 from personal_dashboard_snapshots order by id`)).rows;
       for (const audience of ['development', 'support'] as const) {
@@ -420,7 +464,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'NOT_FOUND' });
     });
 
-    await t.test('fourteen-day cleanup preserves the newest two and is atomic with accepted import', async () => {
+    await t.test('each accepted personal import keeps current and previous regardless of age', async () => {
       const recipient = await manager('retention');
       for (const offset of [-3, -2, -1]) assert.equal((await importFile(bytes(recipient.email, offset))).status, 'imported');
       await query(`update personal_dashboard_snapshots set received_at=now()-interval '15 days' where manager_id=$1`, [recipient.id]);
@@ -431,17 +475,56 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal(state.history[1].status, 'previous');
     });
 
-    await t.test('version quota rejects a new import without deleting the current good copy', async () => {
-      const recipient = await manager('quota');
+    await t.test('personal history changes only with a committed import and protects the actual prior active snapshot', async () => {
+      const recipient = await manager('legacy-history');
+      const first = await importFile(bytes(recipient.email, -5));
+      const active = await importFile(bytes(recipient.email, -4));
+      const legacyBytes = bytes(recipient.email, -3, 42);
+      const metadata = inspectPersonalSnapshot(legacyBytes, 'legacy.ktsp');
+      const legacy = await query<{id: string}>(`insert into personal_dashboard_snapshots
+        (manager_id,original_name,encrypted_payload,file_size,sha256,email_hash,person_name,person_role,issued,expires,source_key)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id::text`,
+      [recipient.id, metadata.originalName, legacyBytes, metadata.fileSize, metadata.sha256, metadata.emailHash,
+        metadata.name, metadata.role, metadata.issued, metadata.expires, randomUUID()]);
+      const before = (await query(`select * from personal_dashboard_snapshots where manager_id=$1 order by id`, [recipient.id])).rows;
+      const stateBefore = (await query(`select * from personal_dashboard_snapshot_state where manager_id=$1`, [recipient.id])).rows;
+      assert.equal((await getPersonalDashboardStatus(recipient.id)).history.length, 3);
+      assert.equal((await importFile(legacyBytes)).status, 'duplicate');
+      assert.equal((await importFile(bytes(recipient.email, -6))).status, 'stale');
+      assert.equal((await importFile(bytes(recipient.email, -4, 2))).status, 'conflict');
+      assert.deepEqual((await query(`select * from personal_dashboard_snapshots where manager_id=$1 order by id`, [recipient.id])).rows, before);
+      await query(`create function kts_test_reject_snapshot_retention() returns trigger language plpgsql as
+        $$ begin raise exception 'synthetic retention failure'; end $$`);
+      const sourceKey = randomUUID();
+      try {
+        await query(`create trigger kts_test_reject_snapshot_retention before delete on personal_dashboard_snapshots
+          for each row execute function kts_test_reject_snapshot_retention()`);
+        try {
+          await assert.rejects(() => importFile(bytes(recipient.email, -2), sourceKey), {code: 'P0001'});
+          assert.deepEqual((await query(`select * from personal_dashboard_snapshots where manager_id=$1 order by id`, [recipient.id])).rows, before);
+          assert.deepEqual((await query(`select * from personal_dashboard_snapshot_state where manager_id=$1`, [recipient.id])).rows, stateBefore);
+          assert.equal((await query(`select id from personal_dashboard_imports where source_key=$1`, [sourceKey])).rowCount, 0);
+        } finally { await query(`drop trigger kts_test_reject_snapshot_retention on personal_dashboard_snapshots`); }
+      } finally { await query(`drop function kts_test_reject_snapshot_retention()`); }
+      const imported = await importFile(bytes(recipient.email, -2), sourceKey);
+      assert.equal(imported.status, 'imported');
+      const after = await getPersonalDashboardStatus(recipient.id);
+      assert.deepEqual(after.history.map((item) => item.id), [imported.snapshotId, active.snapshotId]);
+      assert.equal(await getPersonalDashboardSnapshot(recipient.id, first.snapshotId!), null);
+      assert.equal(await getPersonalDashboardSnapshot(recipient.id, Number(legacy.rows[0].id)), null);
+    });
+
+    await t.test('ongoing imports never fill a history quota and preserve only the working pair', async () => {
+      const recipient = await manager('continuous-import');
       for (let offset = -32; offset < 0; offset++) {
         assert.equal((await importFile(bytes(recipient.email, offset, offset + 40))).status, 'imported');
       }
       const before = await getPersonalDashboardStatus(recipient.id);
-      assert.equal(before.history.length, 32);
-      assert.equal((await importFile(bytes(recipient.email))).status, 'quota');
+      assert.equal(before.history.length, 2);
+      assert.equal((await importFile(bytes(recipient.email))).status, 'imported');
       const after = await getPersonalDashboardStatus(recipient.id);
-      assert.equal(after.snapshot?.id, before.snapshot?.id);
-      assert.equal(after.history.length, 32);
+      assert.equal(after.history.find((item) => item.status === 'previous')?.id, before.snapshot?.id);
+      assert.equal(after.history.length, 2);
     });
 
     await t.test('transport failures are safe and visible in the administrator import journal', async () => {
@@ -601,8 +684,8 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       const duplicates = await Promise.all([upload(bytes(sharedEmail, -1), secondId), upload(bytes(sharedEmail, -1), secondId)]);
       assert.deepEqual(duplicates.map((result) => result.status).sort(), ['duplicate', 'imported']);
       const thirdId = duplicates[0].snapshot.id;
-      assert.equal((await getSupportSharedDashboardOverview()).history.length, 3);
-      assert.equal((await getSupportSharedDashboardSnapshot(supportB.id, first.snapshot.id))?.id, first.snapshot.id);
+      assert.equal((await getSupportSharedDashboardOverview()).history.length, 2);
+      assert.equal(await getSupportSharedDashboardSnapshot(supportB.id, first.snapshot.id), null);
 
       for (const denied of [development, inactive]) {
         await assert.rejects(() => getSupportSharedDashboardOverview(denied.id), { code: 'NOT_FOUND' });
@@ -630,14 +713,27 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal((await getSupportSharedDashboardOverview()).previousHtmlVersionId, null);
       assert.equal((await getSupportSharedDashboardOverview()).snapshot!.id, thirdId);
 
-      await query(`update support_shared_dashboard_snapshots set expires=$2 where id=$1`, [first.snapshot.id, day(-1)]);
-      await assert.rejects(() => getSupportSharedDashboardSnapshot(supportA.id, first.snapshot.id), { code: 'EXPIRED' });
+      await query(`update support_shared_dashboard_snapshots set expires=$2 where id=$1`, [secondId, day(-1)]);
+      await assert.rejects(() => getSupportSharedDashboardSnapshot(supportA.id, secondId), { code: 'EXPIRED' });
       const originalThird = bytes(sharedEmail, -1);
       await query(`update support_shared_dashboard_snapshots set encrypted_payload=$2 where id=$1`, [thirdId, Buffer.alloc(originalThird.length)]);
       await assert.rejects(() => getSupportSharedDashboardSnapshot(supportA.id), { code: 'SNAPSHOT_INTEGRITY' });
       await query(`update support_shared_dashboard_snapshots set encrypted_payload=$2 where id=$1`, [thirdId, originalThird]);
 
       await query(`update support_shared_dashboard_snapshots set received_at=now()-interval '31 days'`);
+      const snapshotStateBefore = (await query(`select * from support_shared_dashboard_state`)).rows;
+      const snapshotsBefore = (await query(`select * from support_shared_dashboard_snapshots order by id`)).rows;
+      await query(`create function kts_test_reject_shared_retention() returns trigger language plpgsql as
+        $$ begin raise exception 'synthetic retention failure'; end $$`);
+      try {
+        await query(`create trigger kts_test_reject_shared_retention before delete on support_shared_dashboard_snapshots
+          for each row execute function kts_test_reject_shared_retention()`);
+        try {
+          await assert.rejects(() => upload(bytes(sharedEmail), thirdId), {code: 'P0001'});
+          assert.deepEqual((await query(`select * from support_shared_dashboard_state`)).rows, snapshotStateBefore);
+          assert.deepEqual((await query(`select * from support_shared_dashboard_snapshots order by id`)).rows, snapshotsBefore);
+        } finally { await query(`drop trigger kts_test_reject_shared_retention on support_shared_dashboard_snapshots`); }
+      } finally { await query(`drop function kts_test_reject_shared_retention()`); }
       const latest = await upload(bytes(sharedEmail), thirdId);
       const retained = await getSupportSharedDashboardOverview();
       assert.equal(retained.snapshot?.id, latest.snapshot.id);
@@ -694,7 +790,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
           confirmed: [], zones: [], addrs: [], aliases: {}, contacts: [], tk: [], nomen: [], depots: [],
           opt: {maxPoints: 8, maxWeight: 1000, maxVol: 10, innerKm: 5, splitByOrg: false, splitByWh: true}, winding: 1, rate: 1,
           f: {from: '', to: '', ordFrom: '', ordTo: '', zone: [], org: [], dir: [], wh: [], author: [], onlyConfirmed: false}, files: [], diag: {}}));
-        const upload = async (number: number, expectedActiveSnapshotId: number | null, htmlVersionId = firstHtml.id) => {
+        const upload = async (number: number, expectedActiveSnapshotId: number | null, htmlVersionId = firstHtml.id, deferCleanup = false) => {
           const body = gzipSync(source(number));
           const prepared = await prepareSupportSharedRoutePlannerUpload(new Request('http://localhost/synthetic', {
             method: 'POST', headers: {'content-type': 'application/gzip'}, body,
@@ -704,7 +800,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
             const result = await importSupportSharedDashboardJson({htmlVersionId, expectedActiveSnapshotId, originalName: 'synthetic.json',
               savedAt: prepared.savedAt, fileSize: prepared.pending.fileSize, sha256: prepared.pending.sha256, storagePath, actorId: 'admin:integration-test'});
             if (result.status === 'imported') prepared.pending.preserve();
-            await deleteTopDashboardDataFiles(result.prunedStoragePaths);
+            if (!deferCleanup) await deleteTopDashboardDataFiles(result.prunedStoragePaths);
             return {...result, storagePath};
           } finally { await prepared.pending.discard(); }
         };
@@ -739,9 +835,48 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         const duplicateRace = await Promise.all([upload(4, active), upload(4, active)]);
         assert.deepEqual(duplicateRace.map((result) => result.status).sort(), ['duplicate', 'imported']);
         active = duplicateRace[0].snapshot.id;
-        for (const number of [5, 6, 7, 8]) active = (await upload(number, active)).snapshot.id;
+        for (const number of [5, 6, 7]) active = (await upload(number, active)).snapshot.id;
+        const jsonStateBefore = (await query(`select * from support_shared_dashboard_json_state order by html_version_id`)).rows;
+        const jsonRowsBefore = (await query<{storage_path: string}>(`select * from support_shared_dashboard_json_snapshots order by id`)).rows;
+        await query(`create function kts_test_reject_json_retention() returns trigger language plpgsql as
+          $$ begin raise exception 'synthetic retention failure'; end $$`);
+        try {
+          await query(`create trigger kts_test_reject_json_retention before delete on support_shared_dashboard_json_snapshots
+            for each row execute function kts_test_reject_json_retention()`);
+          try {
+            await assert.rejects(() => upload(8, active), {code: 'P0001'});
+            assert.deepEqual((await query(`select * from support_shared_dashboard_json_state order by html_version_id`)).rows, jsonStateBefore);
+            assert.deepEqual((await query(`select * from support_shared_dashboard_json_snapshots order by id`)).rows, jsonRowsBefore);
+            for (const row of jsonRowsBefore) await access(path.join(storageDirectory, row.storage_path));
+          } finally { await query(`drop trigger kts_test_reject_json_retention on support_shared_dashboard_json_snapshots`); }
+        } finally { await query(`drop function kts_test_reject_json_retention()`); }
+        const outboxBefore = (await query(`select * from dashboard_file_cleanup_queue order by storage_path`)).rows;
+        await query(`create function kts_test_reject_cleanup_outbox() returns trigger language plpgsql as
+          $$ begin raise exception 'synthetic cleanup outbox failure'; end $$`);
+        try {
+          await query(`create trigger kts_test_reject_cleanup_outbox before insert on dashboard_file_cleanup_queue
+            for each row execute function kts_test_reject_cleanup_outbox()`);
+          try {
+            await assert.rejects(() => upload(8, active), {code: 'P0001'});
+            assert.deepEqual((await query(`select * from support_shared_dashboard_json_state order by html_version_id`)).rows, jsonStateBefore);
+            assert.deepEqual((await query(`select * from support_shared_dashboard_json_snapshots order by id`)).rows, jsonRowsBefore);
+            assert.deepEqual((await query(`select * from dashboard_file_cleanup_queue order by storage_path`)).rows, outboxBefore);
+            for (const row of jsonRowsBefore) await access(path.join(storageDirectory, row.storage_path));
+          } finally { await query(`drop trigger kts_test_reject_cleanup_outbox on dashboard_file_cleanup_queue`); }
+        } finally { await query(`drop function kts_test_reject_cleanup_outbox()`); }
+        // Simulate process exit immediately after COMMIT: the caller never enqueues filesystem markers.
+        const deferred = await upload(8, active, firstHtml.id, true);
+        active = deferred.snapshot.id;
+        assert.ok(deferred.prunedStoragePaths.length);
+        assert.deepEqual((await query<{storage_path: string}>(`select storage_path from dashboard_file_cleanup_queue
+          where storage_path=any($1::text[]) order by storage_path`, [deferred.prunedStoragePaths])).rows.map((row) => row.storage_path),
+        [...deferred.prunedStoragePaths].sort());
+        for (const storagePath of deferred.prunedStoragePaths) await access(path.join(storageDirectory, storagePath));
+        await drainDashboardFileCleanup(storageDirectory);
+        assert.equal((await query(`select storage_path from dashboard_file_cleanup_queue where storage_path=any($1::text[])`, [deferred.prunedStoragePaths])).rowCount, 0);
+        for (const storagePath of deferred.prunedStoragePaths) await assert.rejects(access(path.join(storageDirectory, storagePath)), {code: 'ENOENT'});
         const retained = await getSupportSharedDashboardOverview();
-        assert.equal(retained.jsonHistory.length, 5);
+        assert.equal(retained.jsonHistory.length, 2);
         assert.equal(retained.jsonHistory[0].status, 'active');
         assert.equal(retained.jsonHistory[1].status, 'previous');
         assert.equal(await getSupportSharedDashboardJsonPreviewSnapshot(firstHtml.id, retained.jsonHistory[1].id), null,
@@ -758,7 +893,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         try {
           await assert.rejects(() => upload(9, active), {code: 'SNAPSHOT_QUOTA'});
           assert.equal((await getSupportSharedDashboardOverview()).jsonSnapshot!.id, active);
-          assert.equal((await getSupportSharedDashboardOverview()).jsonHistory.length, 5);
+          assert.equal((await getSupportSharedDashboardOverview()).jsonHistory.length, 2);
         } finally {
           await query(`delete from support_shared_dashboard_json_snapshots where id=any($1::bigint[])`, [reserved.rows.map((row) => row.id)]);
         }
@@ -782,12 +917,34 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(secondHtml.id), null);
         assert.equal(await getSupportSharedDashboardJsonPreviewSnapshot(secondHtml.id, second.snapshot.id), null);
         await assert.rejects(() => access(path.join(storageDirectory, second.storagePath)), {code: 'ENOENT'});
-        await activateSupportSharedDashboardHtml({versionId: legacyHtmlId, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test'});
+        const firstRemainingFiles = (await query<{storage_path: string}>(`select storage_path from support_shared_dashboard_json_snapshots where html_version_id=$1`, [firstHtml.id])).rows;
+        const thirdHtml = await plannerHtml('third');
+        const fourthHtml = await plannerHtml('fourth');
+        const retainedDraftIds = (await getSupportSharedDashboardOverview()).htmlVersions.filter((version) => version.status === 'draft'
+          && version.id !== thirdHtml.id && version.id !== fourthHtml.id).map((version) => version.id);
+        await activateSupportSharedDashboardHtml({versionId: thirdHtml.id, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test'});
+        const third = await upload(11, null, thirdHtml.id);
+        assert.equal((await getSupportSharedDashboardJsonPreviewMetadata(firstHtml.id))?.id, active);
+        for (const file of firstRemainingFiles) await access(path.join(storageDirectory, file.storage_path));
+        await activateSupportSharedDashboardHtml({versionId: firstHtml.id, expectedActiveVersionId: thirdHtml.id, actorId: 'admin:integration-test'});
+        assert.equal((await getSupportSharedDashboardOverview()).jsonSnapshot?.id, active);
+        await activateSupportSharedDashboardHtml({versionId: fourthHtml.id, expectedActiveVersionId: firstHtml.id, actorId: 'admin:integration-test'});
+        assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(thirdHtml.id), null);
+        assert.equal((await query(`select id from support_shared_dashboard_json_snapshots where html_version_id=$1`, [thirdHtml.id])).rowCount, 0);
+        await assert.rejects(() => access(path.join(storageDirectory, third.storagePath)), {code: 'ENOENT'});
+        assert.equal((await getSupportSharedDashboardJsonPreviewMetadata(firstHtml.id))?.id, active);
+        assert.deepEqual((await getSupportSharedDashboardOverview()).htmlVersions.filter((version) => version.status === 'draft').map((version) => version.id), retainedDraftIds);
+        await assert.rejects(() => activateSupportSharedDashboardHtml({versionId: legacyHtmlId, expectedActiveVersionId: fourthHtml.id, actorId: 'admin:integration-test'}), {code: 'NOT_FOUND'});
+        const replacementLegacyContent = '<!doctype html><html><input id="fileInp"><script>let FILE=null; const emailHash="kts-personal"; function gate(){} function tryOpen(){} function decryptFile(){}</script></html>';
+        const replacementLegacy = await createSupportSharedDashboardHtml({originalName: 'new-ktsp.html', htmlContent: replacementLegacyContent,
+          fileSize: Buffer.byteLength(replacementLegacyContent), sha256: createHash('sha256').update(replacementLegacyContent).digest('hex'), actorId: 'admin:integration-test'});
+        await activateSupportSharedDashboardHtml({versionId: replacementLegacy.id, expectedActiveVersionId: fourthHtml.id, actorId: 'admin:integration-test'});
         const legacy = await getSupportSharedDashboardOverview();
         assert.equal(legacy.jsonSnapshot, null);
         assert.deepEqual(legacy.jsonHistory, []);
         assert.equal(legacy.snapshot?.id, overview.snapshot?.id);
-        await deleteSupportSharedDashboardHtml({versionId: firstHtml.id, actorId: 'admin:integration-test'});
+        assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(firstHtml.id), null);
+        for (const file of firstRemainingFiles) await assert.rejects(() => access(path.join(storageDirectory, file.storage_path)), {code: 'ENOENT'});
         assert.deepEqual(await preserved(), before);
       } finally {
         if (previousDirectory === undefined) delete process.env.TOP_DASHBOARD_DATA_DIR;

@@ -68,7 +68,7 @@ async function rejectsUpload(input: Request, code = 'INVALID_SNAPSHOT') {
 test('route planner storage limits match the upload and retention contract', () => {
   assert.equal(SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, 16 * 1024 * 1024);
   assert.equal(SUPPORT_SHARED_JSON_MAX_BYTES, 100 * 1024 * 1024);
-  assert.equal(SUPPORT_SHARED_JSON_MAX_VERSIONS, 5);
+  assert.equal(SUPPORT_SHARED_JSON_MAX_VERSIONS, 2);
   assert.equal(SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES, 1024 * 1024 * 1024);
 });
 

@@ -17,6 +17,10 @@ import * as multiFileUploadModule from '../src/app/api/admin/top-dashboard/block
 import * as streamUploadModule from '../src/app/api/admin/top-dashboard/blocks/streamDataUpload';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
 import * as dashboardErrors from '../src/shared/lib/db/topDashboardDomain';
+import {
+  TopDashboardBlockNotFoundError,
+  TopDashboardDataStorageLimitError,
+} from '../src/shared/lib/db/topDashboardBlocksRepo';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 import * as contentSecurity from '../src/shared/lib/topDashboardContentSecurity';
 import {
@@ -250,18 +254,26 @@ function directRouteHarness(options: {
   forgedTarget?: boolean;
   staleHtml?: boolean;
   commitConflict?: boolean;
+  databaseError?: Error;
+  storageCommitError?: Error;
 } = {}) {
   const calls: string[] = [];
   let created: Record<string, unknown> | null = null;
+  let preserved = false;
+  let discardedFile = false;
   const target = detectTopDashboardUploadTargets(html)[0]!.target;
   const pendingFile = {
     fileSize: 80,
     firstBytes: Buffer.alloc(0),
     sha256: 'a'.repeat(64),
     temporaryPath: '/test/pending',
-    async commit() { calls.push('commit'); return 'test.ktsmf'; },
-    async discard() { calls.push('discard'); },
-    preserve() { calls.push('preserve'); },
+    async commit() {
+      calls.push('commit');
+      if (options.storageCommitError) throw options.storageCommitError;
+      return 'test.ktsmf';
+    },
+    async discard() { calls.push('discard'); discardedFile = !preserved; },
+    preserve() { calls.push('preserve'); preserved = true; },
   };
   const parsed = {
     expectedActiveVersionId: 70,
@@ -293,11 +305,14 @@ function directRouteHarness(options: {
     '@/shared/lib/adminSecurity': { async enforceAdminActionRateLimit() { return null; } },
     '@/shared/lib/db': {
       ...dashboardErrors,
+      TopDashboardBlockNotFoundError,
+      TopDashboardDataStorageLimitError,
       async getTopDashboardBlockOverview() { calls.push('overview'); return { activeVersionId: 19 }; },
       async getTopDashboardBlockVersionContent() { return { htmlContent: html }; },
       async createAndActivateTopDashboardBlockDataVersion(input: Record<string, unknown>) {
         calls.push('create');
         if (options.commitConflict) throw new dashboardErrors.TopDashboardStateConflictError(20);
+        if (options.databaseError) throw options.databaseError;
         created = input;
         return {
           version: { id: 71, ...input }, activeVersionId: 71, previousVersionId: 70,
@@ -330,7 +345,7 @@ function directRouteHarness(options: {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
   runInNewContext(compiled, {
-    exports, Response, console,
+    exports, Response, console: { ...console, error() {} },
     require: (name: string) => {
       assert.ok(name in dependencies, `Unexpected infrastructure dependency: ${name}`);
       return dependencies[name];
@@ -339,6 +354,7 @@ function directRouteHarness(options: {
   return {
     calls,
     created: () => created,
+    discardedFile: () => discardedFile,
     put(headers: Record<string, string> = {}) {
       return exports.PUT!(new Request('https://kts-impex.ru/api/admin/top-dashboard/blocks/7/data', {
         method: 'PUT',
@@ -376,7 +392,7 @@ test('direct route validates destinations/HTML binding before commit and always 
   }
 });
 
-test('direct route retains prior data version CAS and preserves file only after successful activation', async () => {
+test('direct route retains prior data version CAS and preserves files after successful activation', async () => {
   const harness = directRouteHarness();
   assert.equal((await harness.put()).status, 201);
   assert.deepEqual(harness.calls, ['slot', 'overview', 'parse', 'commit', 'create', 'preserve', 'audit', 'discard', 'release']);
@@ -389,6 +405,26 @@ test('direct route retains prior data version CAS and preserves file only after 
   const conflicted = directRouteHarness({ commitConflict: true });
   assert.equal((await conflicted.put()).status, 409);
   assert.deepEqual(conflicted.calls, ['slot', 'overview', 'parse', 'commit', 'create', 'discard', 'release']);
+  assert.equal(conflicted.discardedFile(), true);
+});
+
+test('direct route keeps possibly committed file bytes when the database COMMIT acknowledgement is lost', async () => {
+  const harness = directRouteHarness({ databaseError: new Error('connection lost after COMMIT') });
+  assert.equal((await harness.put()).status, 500);
+  assert.deepEqual(harness.calls, ['slot', 'overview', 'parse', 'commit', 'create', 'preserve', 'discard', 'release']);
+  assert.equal(harness.discardedFile(), false, 'active database references must not lose their file after uncertain commit');
+});
+
+test('direct route discards files on known quota rejection and failures before the database attempt', async () => {
+  const quota = directRouteHarness({ databaseError: new TopDashboardDataStorageLimitError() });
+  assert.equal((await quota.put()).status, 409);
+  assert.deepEqual(quota.calls, ['slot', 'overview', 'parse', 'commit', 'create', 'discard', 'release']);
+  assert.equal(quota.discardedFile(), true);
+
+  const storage = directRouteHarness({ storageCommitError: new Error('file rename failed') });
+  assert.equal((await storage.put()).status, 500);
+  assert.deepEqual(storage.calls, ['slot', 'overview', 'parse', 'commit', 'discard', 'release']);
+  assert.equal(storage.discardedFile(), true);
 });
 
 test('ordinary universal uploads retain the protected-frame request requirement', async () => {

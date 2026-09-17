@@ -275,6 +275,13 @@ async function main() {
             assert.equal(await page.getByRole('heading', {name: 'Журнал импорта', exact: true}).count(), 1);
             const journal = page.locator('#manager-dashboard-import-journal');
             assert.equal(await journal.locator('li').count(), 5, 'initial journal contains only five supplied rows');
+            assert.equal(await page.evaluate(() => {
+              const history = document.getElementById('manager-dashboard-html-history')!;
+              const upload = document.getElementById('manager-dashboard-snapshots')!;
+              return Boolean(upload.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING)
+                && history.getBoundingClientRect().top > upload.getBoundingClientRect().bottom;
+            }), true, 'all working HTML history is below the shared and personal upload sections');
+            assert.equal(await page.locator('.audienceGrid [data-version-id]').count(), 0, 'published HTML history is absent from the working cards');
 
             // Actual admin stylesheet is deliberately loaded after the dashboard
             // stylesheet: hover, danger colors and keyboard focus must still win.
@@ -375,7 +382,6 @@ async function main() {
                 assert.ok(Math.abs(layout[0].htmlTop - layout[1].htmlTop) < 2, `${scenario}: desktop HTML panels begin together`);
                 assert.ok(Math.abs(layout[0].managersTop - layout[1].managersTop) < 2, `${scenario}: manager panels begin together`);
               } else {
-                assert.ok(Math.abs(layout[0].htmlHeight - layout[1].htmlHeight) > 40, `${scenario}: mobile HTML panels retain their own natural heights`);
                 for (const column of layout) {
                   assert.ok(column.gapAfterHtml >= 12 && column.gapAfterHtml <= 28, `${scenario}: no blank alignment gap before mobile managers`);
                   assert.ok(column.innerBottomSpace <= 40, `${scenario}: shorter mobile HTML panel is not stretched to the other group (${JSON.stringify(column)})`);
@@ -462,8 +468,8 @@ async function main() {
 
             // Deletion is exercised through actual controls and browser dialogs;
             // the synthetic mutation never connects to a real API or removes files.
-            const developmentPanel = page.locator('#manager-dashboard-group-development');
-            const supportPanel = page.locator('#manager-dashboard-group-support');
+            const developmentPanel = page.locator('#manager-dashboard-history-development');
+            const supportPanel = page.locator('#manager-dashboard-history-support');
             const oldRow = developmentPanel.locator('.versionsTable tbody tr').filter({hasText: 'development_synthetic_dashboard_previous.html'});
             const deleteOld = oldRow.getByRole('button', {name: /^Удалить HTML/});
             assert.equal(await supportPanel.getByRole('button', {name: /^Удалить HTML/}).isDisabled(), true, 'published support version cannot be deleted');
@@ -503,7 +509,7 @@ async function main() {
             const deleteCalls = await page.evaluate(() => (window as unknown as {fixtureCalls: Array<{path: string; method: string}>}).fixtureCalls.filter(call => call.method === 'DELETE'));
             assert.deepEqual(deleteCalls.map((call: {path: string}) => call.path), ['/html?audience=development&id=2', '/html?audience=development&id=2', '/html?audience=development&id=1']);
             const commonPanel = page.locator('#manager-dashboard-shared-support');
-            const sharedPrevious = commonPanel.locator('tbody tr').filter({hasText: 'support_synthetic_dashboard_shared_previous.html'});
+            const sharedPrevious = page.locator('[data-version-audience="support-shared"]').filter({hasText: 'support_synthetic_dashboard_shared_previous.html'});
             assert.equal(await sharedPrevious.getByRole('button', {name: 'Вернуть общий HTML', exact: true}).isDisabled(), false, 'shared publication is available while another report is previewed');
             await sharedPrevious.getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).click();
             const sharedPreviewUrl = new URL((await previewFrame.getAttribute('src'))!, origin);
@@ -518,7 +524,7 @@ async function main() {
             await page.locator('#manager-dashboard-shared-html').setInputFiles({name: 'shared-report.html', mimeType: 'text/html', buffer: Buffer.from('<html>Synthetic shared report</html>')});
             await commonPanel.getByRole('button', {name: 'Загрузить общий HTML', exact: true}).click();
             await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('#manager-dashboard-html-preview iframe')?.src.includes('version=203'));
-            const activeShared = commonPanel.locator('tbody tr').filter({hasText: 'support_synthetic_dashboard_shared_uploaded.html'});
+            const activeShared = page.locator('[data-version-audience="support-shared"]').filter({hasText: 'support_synthetic_dashboard_shared_uploaded.html'});
             await activeShared.getByRole('button', {name: 'Опубликовать общий HTML', exact: true}).click();
             assert.equal(await activeShared.getByRole('button', {name: /^Удалить общий HTML/}).isDisabled(), true);
             await page.locator('#manager-dashboard-shared-email').fill('shared.recipient@example.test');
@@ -568,10 +574,10 @@ async function main() {
             assert.deepEqual(external, [], 'no external requests');
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'mutations and preview do not introduce horizontal overflow');
             await page.evaluate('window.fixtureGrowSupport()');
-            await page.locator('#manager-dashboard-group-support .versionsTable tbody tr').nth(6).waitFor({state: 'visible'});
+            await page.locator('#manager-dashboard-history-support .versionsTable tbody tr').nth(6).waitFor({state: 'visible'});
             await assertPanelAlignment('support grows dynamically after render');
             await page.goto(`${origin}/?support=many`);
-            await page.locator('#manager-dashboard-group-support .versionsTable tbody tr').nth(6).waitFor({state: 'visible'});
+            await page.locator('#manager-dashboard-history-support .versionsTable tbody tr').nth(6).waitFor({state: 'visible'});
             await page.evaluate(() => document.fonts.ready);
             await assertPanelAlignment('development two versions / support seven versions');
             await page.setViewportSize({width: width > 1000 ? 1280 : 430, height: 1000});
@@ -639,7 +645,7 @@ async function main() {
             await page.locator('#manager-dashboard-shared-json').waitFor({state: 'visible'});
             assert.equal(await page.locator('#manager-dashboard-group-development').count(), 0, 'support JSON mode stays scoped');
             assert.equal(await page.locator('#manager-dashboard-shared-email').count(), 0, 'scoped JSON needs no recipient email');
-            await page.locator('#manager-dashboard-shared-support').getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).first().click();
+            await page.locator('#manager-dashboard-history-support-shared').getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).first().click();
             const scopedJsonPreview = page.locator('#manager-dashboard-html-preview iframe');
             await scopedJsonPreview.waitFor({state: 'visible'});
             const scopedJsonSource = new URL((await scopedJsonPreview.getAttribute('src'))!, origin);
@@ -660,6 +666,12 @@ async function main() {
             const commonFrame = page.locator('iframe[title="Общий дашборд сопровождения"]');
             await personalFrame.waitFor({state: 'visible'});
             await commonFrame.waitFor({state: 'visible'});
+            assert.equal(await page.evaluate(() => {
+              const history = document.getElementById('manager-dashboard-data-history')!;
+              return [...document.querySelectorAll('iframe')].every(frame =>
+                Boolean(frame.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING)
+                && frame.getBoundingClientRect().bottom < history.getBoundingClientRect().top);
+            }), true, 'personal and shared data history follows both reports in DOM and visual order');
             assert.equal(await page.locator('iframe').count(), 2, 'support has two independently mounted reports even with a development management prop');
             assert.equal(new URL((await personalFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '401');
             assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '301');
@@ -712,7 +724,7 @@ async function main() {
             await jsonFile.waitFor({state: 'visible'});
             assert.equal(await page.locator('#manager-dashboard-shared-email').count(), 0, 'JSON never requires the old recipient email');
             assert.equal(await page.locator('#manager-dashboard-shared-snapshot').count(), 0, 'JSON does not use the password .ktsp upload path');
-            await commonPanel.getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).first().click();
+            await page.locator('#manager-dashboard-history-support-shared').getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).first().click();
             assert.match(await page.locator('#manager-dashboard-html-preview').innerText(), /Общий JSON, привязанный к этой версии HTML, загружается автоматически/);
             assert.match(await page.locator('#manager-dashboard-html-preview').innerText(), /Личные данные менеджеров не загружаются/);
             assert.doesNotMatch(await page.locator('#manager-dashboard-html-preview').innerText(), /Общие и личные данные не загружаются/);
@@ -754,7 +766,7 @@ async function main() {
             });
             assert.ok(jsonControlBounds.every(Boolean), 'long HTML names cannot expand and clip mobile JSON upload controls');
             await commonPanel.screenshot({path: path.join(output, `${engineName}-${width}-json-management.png`)});
-            await page.locator('#manager-dashboard-group-development').getByRole('button', {name: 'Предпросмотр', exact: true}).first().click();
+            await page.locator('#manager-dashboard-history-development').getByRole('button', {name: 'Предпросмотр', exact: true}).first().click();
             await previewFrame.evaluate((frame: HTMLIFrameElement) => {frame.dataset.mountToken = 'personal-preview-kept';});
             await jsonFile.setInputFiles({name: 'обновлённый_маршрут.json', mimeType: 'application/json', buffer: Buffer.from('{"snapshot":true,"orders":[]}')});
             await publishJson.click();
@@ -762,7 +774,7 @@ async function main() {
             await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.disabled);
             assert.equal(await previewFrame.getAttribute('data-mount-token'), 'personal-preview-kept', 'shared JSON upload preserves an unrelated personal preview');
             await page.goto(`${origin}/?json=empty`);
-            await commonPanel.getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).first().click();
+            await page.locator('#manager-dashboard-history-support-shared').getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).first().click();
             assert.equal(new URL((await previewFrame.getAttribute('src'))!, origin).searchParams.get('revision'), '0');
             await previewFrame.evaluate((frame: HTMLIFrameElement) => {frame.dataset.mountToken = 'empty-json-preview';});
             await jsonFile.setInputFiles({name: 'первый_маршрут.json', mimeType: 'application/json', buffer: Buffer.from('{"snapshot":true,"orders":[]}')});

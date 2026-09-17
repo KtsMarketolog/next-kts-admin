@@ -5,7 +5,7 @@ import { PERSONAL_DASHBOARD_AUDIENCE_LABELS, type PersonalDashboardAudience } fr
 import { DashboardFrame, SharedDashboardFrame, formatDashboardDate, ImportResults, SnapshotStatus } from './ManagerDashboardParts';
 import { ManagerDashboardImportJournal } from './ManagerDashboardImportJournal';
 import { prepareSharedJsonUpload } from './sharedJsonUpload';
-import type { ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview } from './types';
+import type { ManagerDashboardGroup, ManagerDashboardHtmlVersion, ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
@@ -45,6 +45,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
   const previewGroup = overview.groups.find((item) => item.audience === previewSelection?.audience);
   const shared = audience === 'development' ? undefined : overview.supportShared;
   const sharedActiveHtml = shared?.htmlVersions.find((version) => version.id === shared.activeHtmlVersionId);
+  const sharedDrafts = shared?.htmlVersions.filter((version) => !version.firstPublishedAt && version.id !== shared.activeHtmlVersionId && version.id !== shared.previousHtmlVersionId) ?? [];
   const sharedUsesJson = sharedActiveHtml?.format === 'route-planner-v1';
   const sharedPreview = previewSelection?.audience === 'support-shared';
   const preview = (sharedPreview ? shared : previewGroup)?.htmlVersions.find((version) => version.id === previewSelection?.versionId);
@@ -328,12 +329,35 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
     }
   }
 
+  function personalVersions(group: ManagerDashboardGroup, versions: ManagerDashboardHtmlVersion[]) {
+    const audience = group.audience;
+    const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
+    return <div className={styles.tableScroll}>
+      <table className={`${styles.table} ${styles.groupTable} ${styles.versionsTable}`}>
+        <thead><tr><th scope="col">Версия / загружена, МСК</th><th scope="col">Состояние</th><th scope="col">Действия</th></tr></thead>
+        <tbody>{versions.map((version) => <tr key={version.id} data-version-audience={audience} data-version-id={version.id}>
+          <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ</small><small>{formatDashboardDate(version.createdAt)}</small></td>
+          <td>{version.id === group.activeHtmlVersionId ? 'Опубликована' : version.id === group.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
+          <td><div className={styles.actions}>
+            <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewSelection?.audience === audience && previewSelection.versionId === version.id} onClick={() => showPreview(audience, version.id)}>Предпросмотр</button>
+            {version.id !== group.activeHtmlVersionId ? <button className={styles.primary} type="button" disabled={busy} onClick={() => void publish(audience, version.id)}>{version.id === group.previousHtmlVersionId ? 'Вернуть группе' : 'Опубликовать группе'}</button> : null}
+            <button className={styles.danger} type="button" disabled={busy || version.id === group.activeHtmlVersionId}
+              aria-label={`Удалить HTML «${version.originalName}», версия #${version.id}, ${label}`}
+              title={version.id === group.activeHtmlVersionId ? 'Сначала опубликуйте другую HTML-версию этой группы' : undefined}
+              onClick={() => void deleteHtml(audience, version.id)}>Удалить</button>
+          </div></td>
+        </tr>)}</tbody>
+      </table>
+    </div>;
+  }
+
   return (
     <div className={styles.stack}>
       <div ref={audienceGrid} className={`${styles.audienceGrid}${audience ? ` ${styles.audienceGridSingle}` : ''}`}>
         {(audience ? [audience] : AUDIENCES).map((audience) => {
           const group = overview.groups.find((item) => item.audience === audience);
           const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
+          const drafts = group?.htmlVersions.filter((version) => !version.firstPublishedAt && version.id !== group.activeHtmlVersionId && version.id !== group.previousHtmlVersionId) ?? [];
           return (
             <section key={audience} id={`manager-dashboard-group-${audience}`} className={styles.audienceColumn} aria-labelledby={`manager-dashboard-heading-${audience}`}>
               <h2 id={`manager-dashboard-heading-${audience}`} className={styles.audienceHeading}><span className={styles.equalHeightContent} data-dashboard-equal-row="heading">{label}</span></h2>
@@ -352,33 +376,14 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
                     </div>
                     {fileErrors[audience] ? <p id={`manager-dashboard-html-error-${audience}`} className={styles.warning} role="alert">{fileErrors[audience]}</p> : null}
                   </form>
-                  {group.htmlVersions.length === 0 ? <p className={styles.empty}>Для этой группы HTML ещё не загружен. Загрузите HTML и опубликуйте версию. Предпросмотр доступен по желанию.</p> : (
-                    <div className={styles.tableScroll}>
-                      <table className={`${styles.table} ${styles.groupTable} ${styles.versionsTable}`}>
-                        <thead><tr><th scope="col">Версия / загружена, МСК</th><th scope="col">Состояние</th><th scope="col">Действия</th></tr></thead>
-                        <tbody>{group.htmlVersions.map((version) => {
-                          const previewed = previewSelection?.audience === audience && previewSelection.versionId === version.id;
-                          return (
-                            <tr key={version.id}>
-                              <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ</small><small>{formatDashboardDate(version.createdAt)}</small></td>
-                              <td>{version.id === group.activeHtmlVersionId ? 'Опубликована' : version.id === group.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
-                              <td><div className={styles.actions}>
-                                <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewed} onClick={() => showPreview(audience, version.id)}>Предпросмотр</button>
-                                {version.id !== group.activeHtmlVersionId ? (
-                                  <button className={styles.primary} type="button" disabled={busy} onClick={() => void publish(audience, version.id)}>{version.id === group.previousHtmlVersionId ? 'Вернуть группе' : 'Опубликовать группе'}</button>
-                                ) : null}
-                                <button className={styles.danger} type="button" disabled={busy || version.id === group.activeHtmlVersionId}
-                                  aria-label={`Удалить HTML «${version.originalName}», версия #${version.id}, ${label}`}
-                                  title={version.id === group.activeHtmlVersionId ? 'Сначала опубликуйте другую HTML-версию этой группы' : undefined}
-                                  onClick={() => void deleteHtml(audience, version.id)}>Удалить</button>
-                              </div></td>
-                            </tr>
-                          );
-                        })}</tbody>
-                      </table>
-                      <p className={styles.muted}>Действующую HTML-версию удалить нельзя — сначала опубликуйте другую. Удаление остальных версий не затрагивает личные снимки.</p>
+                  <p className={styles.muted}>Хранятся действующий и один предыдущий рабочий HTML. История и откат — внизу страницы. Черновики хранятся отдельно.</p>
+                  {drafts.length ? <div className={styles.draftSummary}>
+                    <h3>Последний черновик HTML</h3><p>{drafts[0].originalName} · #{drafts[0].id}</p>
+                    <div className={styles.actions}>
+                      <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewSelection?.audience === audience && previewSelection.versionId === drafts[0].id} onClick={() => showPreview(audience, drafts[0].id)}>Предпросмотр</button>
+                      <button className={styles.primary} type="button" disabled={busy} onClick={() => void publish(audience, drafts[0].id)}>Опубликовать группе</button>
                     </div>
-                  )}
+                  </div> : <p className={styles.empty}>{group.htmlVersions.length ? 'Неопубликованных черновиков нет.' : 'Для этой группы HTML ещё не загружен. Загрузите HTML и опубликуйте версию. Предпросмотр доступен по желанию.'}</p>}
                   </div>
                 </section>
 
@@ -419,27 +424,13 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
           </div>
           <p className={styles.muted}>Поддерживаются HTML компоновщика рейсов с JSON-снимком и прежний формат с .ktsp. Сначала опубликуйте HTML, затем загрузите соответствующий файл данных ниже.</p>
         </form>
-        {(shared?.htmlVersions.length ?? 0) > 0 ? <div className={styles.tableScroll}>
-          <table className={styles.table}>
-            <thead><tr><th scope="col">Версия / загружена, МСК</th><th scope="col">Состояние</th><th scope="col">Действия</th></tr></thead>
-            <tbody>{shared!.htmlVersions.map((version) => {
-              const previewed = sharedPreview && previewSelection.versionId === version.id;
-              return <tr key={version.id}>
-                <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ · {version.format === 'route-planner-v1' ? 'Компоновщик · JSON' : 'Парольный .ktsp'}</small><small>{formatDashboardDate(version.createdAt)}</small></td>
-                <td>{version.id === shared?.activeHtmlVersionId ? 'Опубликована' : version.id === shared?.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
-                <td><div className={styles.actions}>
-                  <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={previewed} onClick={() => showSharedPreview(version.id)}>Предпросмотр общего HTML</button>
-                  {version.id !== shared?.activeHtmlVersionId ? <button className={styles.primary} type="button" disabled={busy} onClick={() => void publishShared(version.id)}>{version.id === shared?.previousHtmlVersionId ? 'Вернуть общий HTML' : 'Опубликовать общий HTML'}</button> : null}
-                  <button className={styles.danger} type="button" disabled={busy || version.id === shared?.activeHtmlVersionId}
-                    aria-label={`Удалить общий HTML «${version.originalName}», версия #${version.id}`}
-                    title={version.id === shared?.activeHtmlVersionId ? 'Сначала опубликуйте другую версию общего HTML' : undefined}
-                    onClick={() => void deleteSharedHtml(version.id)}>Удалить</button>
-                </div></td>
-              </tr>;
-            })}</tbody>
-          </table>
-          <p className={styles.muted}>Действующую версию общего HTML удалить нельзя — сначала опубликуйте другую.{shared?.htmlVersions.some((version) => version.format === 'route-planner-v1') ? ' При удалении неактивного HTML компоновщика удаляются и все JSON-снимки, привязанные к этой версии.' : ''}</p>
-        </div> : <p className={styles.empty}>Общий HTML ещё не загружен. Загрузите файл и опубликуйте версию. Предпросмотр доступен по желанию.</p>}
+        <p className={styles.muted}>Хранятся действующий и один предыдущий рабочий HTML. История и откат — внизу страницы. Черновики хранятся отдельно.</p>
+        {sharedDrafts.length
+          ? <div className={styles.draftSummary}><h3>Последний черновик общего HTML</h3><p>{sharedDrafts[0].originalName} · #{sharedDrafts[0].id}</p><div className={styles.actions}>
+            <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={sharedPreview && previewSelection.versionId === sharedDrafts[0].id} onClick={() => showSharedPreview(sharedDrafts[0].id)}>Предпросмотр общего HTML</button>
+            <button className={styles.primary} type="button" disabled={busy} onClick={() => void publishShared(sharedDrafts[0].id)}>Опубликовать общий HTML</button>
+          </div></div>
+          : <p className={styles.empty}>{shared?.htmlVersions.length ? 'Неопубликованных черновиков нет.' : 'Общий HTML ещё не загружен. Загрузите файл и опубликуйте версию. Предпросмотр доступен по желанию.'}</p>}
         {sharedUsesJson ? <div className={styles.preview}>
           <div className={styles.sectionHeading}><div><h3>Общий файл данных JSON</h3><p>Один снимок компоновщика автоматически открывается у всех менеджеров по сопровождению. Email и пароль не нужны. Личные .ktsp не изменяются.</p></div><span className={styles.badge} data-status={shared?.jsonSnapshot ? 'current' : 'missing'}>{shared?.jsonSnapshot ? 'Данные получены' : 'Данные ещё не поступили'}</span></div>
           {shared?.jsonSnapshot ? <dl className={styles.metadata}>
@@ -499,6 +490,48 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
           </div>
         </form>
         <ImportResults results={results} title="Результат последней операции" />
+      </section>
+
+      <section id="manager-dashboard-html-history" className={styles.panel} aria-labelledby="manager-dashboard-html-history-heading">
+        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-html-history-heading">История HTML и откат</h2><p>Действующий и один предыдущий рабочий HTML для каждого отчёта. Неопубликованные черновики перечислены отдельно.</p></div></div>
+        <div className={styles.stack}>
+          {overview.groups.filter((group) => !audience || group.audience === audience).map((group) => {
+            const versions = group.htmlVersions.filter((version) => version.firstPublishedAt || version.id === group.activeHtmlVersionId || version.id === group.previousHtmlVersionId);
+            const drafts = group.htmlVersions.filter((version) => !version.firstPublishedAt && version.id !== group.activeHtmlVersionId && version.id !== group.previousHtmlVersionId);
+            return <section key={group.audience} id={`manager-dashboard-history-${group.audience}`} aria-labelledby={`manager-dashboard-history-heading-${group.audience}`}>
+              <h3 id={`manager-dashboard-history-heading-${group.audience}`}>{PERSONAL_DASHBOARD_AUDIENCE_LABELS[group.audience]}</h3>
+              {versions.length ? personalVersions(group, versions) : <p className={styles.empty}>Рабочий HTML ещё не опубликован.</p>}
+              {drafts.length ? <div className={styles.preview}><h3>Черновики HTML</h3>{personalVersions(group, drafts)}</div> : null}
+            </section>;
+          })}
+          {shared ? <section id="manager-dashboard-history-support-shared" aria-labelledby="manager-dashboard-history-heading-support-shared">
+            <h3 id="manager-dashboard-history-heading-support-shared">Общий дашборд сопровождения</h3>
+            {[
+              { title: 'Рабочие версии', versions: shared.htmlVersions.filter((version) => version.firstPublishedAt || version.id === shared.activeHtmlVersionId || version.id === shared.previousHtmlVersionId) },
+              { title: 'Черновики общего HTML', versions: sharedDrafts },
+            ].map((group) => <div key={group.title}>
+              <h3>{group.title}</h3>
+              {group.versions.length ? <div className={styles.tableScroll}>
+                <table className={styles.table}>
+                  <thead><tr><th scope="col">Версия / загружена, МСК</th><th scope="col">Состояние</th><th scope="col">Действия</th></tr></thead>
+                  <tbody>{group.versions.map((version) => <tr key={version.id} data-version-audience="support-shared" data-version-id={version.id}>
+                    <td><strong>{version.originalName}</strong><small>#{version.id} · {Math.ceil(version.fileSize / 1024)} КБ · {version.format === 'route-planner-v1' ? 'Компоновщик · JSON' : 'Парольный .ktsp'}</small><small>{formatDashboardDate(version.createdAt)}</small></td>
+                    <td>{version.id === shared?.activeHtmlVersionId ? 'Опубликована' : version.id === shared?.previousHtmlVersionId ? 'Предыдущая' : version.firstPublishedAt ? 'Архив' : 'Черновик'}</td>
+                    <td><div className={styles.actions}>
+                      <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={sharedPreview && previewSelection.versionId === version.id} onClick={() => showSharedPreview(version.id)}>Предпросмотр общего HTML</button>
+                      {version.id !== shared?.activeHtmlVersionId ? <button className={styles.primary} type="button" disabled={busy} onClick={() => void publishShared(version.id)}>{version.id === shared?.previousHtmlVersionId ? 'Вернуть общий HTML' : 'Опубликовать общий HTML'}</button> : null}
+                      <button className={styles.danger} type="button" disabled={busy || version.id === shared?.activeHtmlVersionId}
+                        aria-label={`Удалить общий HTML «${version.originalName}», версия #${version.id}`}
+                        title={version.id === shared?.activeHtmlVersionId ? 'Сначала опубликуйте другую версию общего HTML' : undefined}
+                        onClick={() => void deleteSharedHtml(version.id)}>Удалить</button>
+                    </div></td>
+                  </tr>)}</tbody>
+                </table>
+              </div> : <p className={styles.empty}>{group.title === 'Рабочие версии' ? 'Рабочий общий HTML ещё не опубликован.' : 'Неопубликованных черновиков нет.'}</p>}
+            </div>)}
+          </section> : null}
+        </div>
+        <p className={styles.muted}>Действующую HTML-версию удалить нельзя — сначала опубликуйте другую. Удаление HTML не затрагивает личные снимки.{shared?.htmlVersions.some((version) => version.format === 'route-planner-v1') ? ' При удалении неактивного HTML компоновщика удаляются и все JSON-снимки, привязанные к этой версии.' : ''}</p>
       </section>
 
       <ManagerDashboardImportJournal key={JSON.stringify([overview.imports, overview.importsNextCursor])}

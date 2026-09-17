@@ -4,7 +4,7 @@ import type { PoolClient } from 'pg';
 import {
   getManagerEmailHash, inspectPersonalSnapshot, PERSONAL_DASHBOARD_HTML_MAX_BYTES,
   PERSONAL_DASHBOARD_MANAGER_MAX_BYTES, PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS,
-  PERSONAL_DASHBOARD_RETENTION_DAYS, personalDashboardSafeFilename, personalDashboardToday,
+  personalDashboardSafeFilename, personalDashboardToday,
   PersonalDashboardError, type PersonalSnapshotMetadata,
 } from '../managerDashboardDomain';
 import type { PersonalDashboardHtmlVersion } from './managerDashboardRepo';
@@ -15,6 +15,7 @@ import {
 } from '../supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles } from '../topDashboardDataStorage';
 import { withTransaction } from './client';
+import { enqueueDashboardFilesForDeletion } from './dashboardFileCleanupRepo';
 import { ensureSiteSchema } from './schema';
 
 export type SupportSharedDashboardSnapshot = PersonalSnapshotMetadata & {
@@ -226,7 +227,7 @@ export async function activateSupportSharedDashboardHtml(input: {
   if (input.expectedActiveVersionId !== null) positiveId(input.expectedActiveVersionId);
   const publishedBy = actor(input.actorId);
   await ensureSiteSchema();
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     const state = await sharedState(client, true);
     if (idOrNull(state.active_html_version_id) !== input.expectedActiveVersionId) {
       throw new PersonalDashboardError('STATE_CONFLICT', 'Публикация уже изменилась; обновите страницу');
@@ -239,9 +240,25 @@ export async function activateSupportSharedDashboardHtml(input: {
       await client.query(`update support_shared_dashboard_state set previous_html_version_id=active_html_version_id,
         active_html_version_id=$1,updated_by=$2,updated_at=now() where id=1`, [input.versionId, publishedBy]);
     }
+    // Collect associated JSON paths before the HTML cascade removes their metadata.
+    // The previous HTML keeps its own JSON pair, so rolling back restores that binding.
+    const files = await client.query<{ storage_path: string }>(`select s.storage_path
+      from support_shared_dashboard_json_snapshots s
+      join support_shared_dashboard_html_versions v on v.id=s.html_version_id
+      cross join support_shared_dashboard_state st
+      where st.id=1 and v.first_published_at is not null
+        and v.id is distinct from st.active_html_version_id and v.id is distinct from st.previous_html_version_id`);
+    await client.query(`delete from support_shared_dashboard_html_versions v using support_shared_dashboard_state st
+      where st.id=1 and v.first_published_at is not null
+        and v.id is distinct from st.active_html_version_id and v.id is distinct from st.previous_html_version_id`);
+    const paths = files.rows.map((file) => file.storage_path);
+    await enqueueDashboardFilesForDeletion(client, paths);
     return { activeHtmlVersionId: input.versionId, previousHtmlVersionId: idOrNull(state.active_html_version_id) === input.versionId
-      ? idOrNull(state.previous_html_version_id) : idOrNull(state.active_html_version_id) };
+      ? idOrNull(state.previous_html_version_id) : idOrNull(state.active_html_version_id), paths };
   });
+  // Uncertain/failed commits never delete files; cleanup runs only after a confirmed commit.
+  await deleteTopDashboardDataFiles(result.paths).catch(() => { console.error('Shared route planner file cleanup failed'); });
+  return { activeHtmlVersionId: result.activeHtmlVersionId, previousHtmlVersionId: result.previousHtmlVersionId };
 }
 
 export async function deleteSupportSharedDashboardHtml(input: { versionId: number; actorId: string }) {
@@ -262,7 +279,9 @@ export async function deleteSupportSharedDashboardHtml(input: { versionId: numbe
         updated_by=$2,updated_at=now() where id=1`, [input.versionId, deletedBy]);
     const deleted = await client.query(`delete from support_shared_dashboard_html_versions where id=$1 returning id`, [input.versionId]);
     if (deleted.rowCount !== 1) throw new PersonalDashboardError('STATE_CONFLICT', 'HTML-версия уже изменилась; обновите страницу');
-    return { deletedVersionId: input.versionId, paths: files.map((file) => file.storage_path) };
+    const paths = files.map((file) => file.storage_path);
+    await enqueueDashboardFilesForDeletion(client, paths);
+    return { deletedVersionId: input.versionId, paths };
   });
   // Delete files only after a confirmed database commit; an uncertain commit must retain recoverable bytes.
   await deleteTopDashboardDataFiles(result.paths).catch(() => { console.error('Shared route planner file cleanup failed'); });
@@ -382,8 +401,8 @@ export async function importSupportSharedDashboardJson(input: {
     const active = current.rows.find((row) => row.id === jsonState.rows[0].active_snapshot_id);
     if (active && Date.parse(input.savedAt) < Date.parse(active.saved_at)) throw new PersonalDashboardError('STALE_SNAPSHOT', 'Более старый JSON не заменяет текущий');
     if (active && Date.parse(input.savedAt) === Date.parse(active.saved_at)) throw new PersonalDashboardError('SAME_TIME_CONFLICT', 'За это время уже есть другой JSON');
-    const retained = current.rows.slice(0, SUPPORT_SHARED_JSON_MAX_VERSIONS - 1);
-    const remove = current.rows.filter((row) => !retained.includes(row));
+    // Keep the prior active JSON for this HTML, even if it is not the newest inserted row.
+    const remove = current.rows.filter((row) => row.id !== jsonState.rows[0].active_snapshot_id);
     const quota = await client.query<{ bytes: string }>(`select coalesce(sum(file_size),0)::text as bytes from support_shared_dashboard_json_snapshots`);
     if (Number(quota.rows[0].bytes) - remove.reduce((sum, row) => sum + Number(row.file_size), 0) + input.fileSize > SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES) {
       throw new PersonalDashboardError('SNAPSHOT_QUOTA', 'Достигнут лимит хранения общих JSON: 1 ГиБ; текущие данные сохранены');
@@ -396,8 +415,10 @@ export async function importSupportSharedDashboardJson(input: {
     await client.query(`update support_shared_dashboard_json_state set previous_snapshot_id=active_snapshot_id,
       active_snapshot_id=$2,updated_by=$3,updated_at=now() where html_version_id=$1`, [input.htmlVersionId, row.id, uploadedBy]);
     if (remove.length) await client.query(`delete from support_shared_dashboard_json_snapshots where html_version_id=$1 and id=any($2::bigint[])`, [input.htmlVersionId, remove.map((item) => item.id)]);
+    const prunedStoragePaths = remove.map((item) => item.storage_path);
+    await enqueueDashboardFilesForDeletion(client, prunedStoragePaths);
     return { status: 'imported', snapshot: mapJson({ ...row, active_snapshot_id: row.id, previous_snapshot_id: jsonState.rows[0].active_snapshot_id }),
-      prunedStoragePaths: remove.map((item) => item.storage_path) };
+      prunedStoragePaths };
   });
 }
 
@@ -427,9 +448,8 @@ export async function importSupportSharedDashboardSnapshot(input: {
     const active = current.rows.find((row) => row.id === state.active_snapshot_id);
     if (active && active.issued > metadata.issued) throw new PersonalDashboardError('STALE_SNAPSHOT', 'Более старый снимок не заменяет текущий');
     if (active && active.issued === metadata.issued) throw new PersonalDashboardError('SAME_DAY_CONFLICT', 'За эту дату уже есть другой общий снимок');
-    const retentionBefore = Date.now() - PERSONAL_DASHBOARD_RETENTION_DAYS * 86_400_000;
     // The current copy becomes the previous copy and is retained regardless of age.
-    const retained = current.rows.filter((row) => row.id === state.active_snapshot_id || new Date(row.received_at).getTime() >= retentionBefore);
+    const retained = current.rows.filter((row) => row.id === state.active_snapshot_id);
     if (retained.length + 1 > PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS
       || retained.reduce((sum, row) => sum + Number(row.file_size), 0) + metadata.fileSize > PERSONAL_DASHBOARD_MANAGER_MAX_BYTES) {
       throw new PersonalDashboardError('SNAPSHOT_QUOTA', 'Достигнут лимит хранения общих снимков; текущие данные сохранены');

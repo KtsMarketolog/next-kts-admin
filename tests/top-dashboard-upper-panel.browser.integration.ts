@@ -112,6 +112,19 @@ async function main() {
         await page.goto(`${origin}/?case=multiple`);
         const sales = page.getByLabel('Выбрать данные: Продажи', { exact: true });
         await sales.setInputFiles([json('sales.json', 1), json('inventory.json', 2)]);
+        const assertHistoryBelowReport = async () => {
+          assert.deepEqual(await page.evaluate(() => {
+            const preview = document.querySelector('.topDashboardPreviewCard');
+            const data = document.getElementById('top-dashboard-data-history');
+            const html = document.getElementById('top-dashboard-html-history');
+            return [Boolean(preview && data && (preview.compareDocumentPosition(data) & Node.DOCUMENT_POSITION_FOLLOWING)),
+              Boolean(data && html && (data.compareDocumentPosition(html) & Node.DOCUMENT_POSITION_FOLLOWING))];
+          }), [true, true], 'both histories follow the report, in desktop and mobile layouts');
+        };
+        await assertHistoryBelowReport();
+        await page.setViewportSize({ width: 390, height: 844 });
+        await assertHistoryBelowReport();
+        await page.setViewportSize({ width: 1440, height: 1000 });
         assert.equal(await sales.getAttribute('multiple'), '');
         await page.getByRole('button', { name: 'Заменить для всех', exact: true }).click();
         await page.waitForFunction(() => (window as any).fixtureStatuses.includes('Данные обновлены для всех пользователей'));

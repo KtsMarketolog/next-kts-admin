@@ -17,6 +17,7 @@ import {
   TopDashboardBlockDataStateConflictError,
   TopDashboardBlockNotFoundError,
   TopDashboardDataCompatibilityError,
+  TopDashboardDataStorageLimitError,
   TopDashboardStateConflictError,
 } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
@@ -188,6 +189,7 @@ export async function PUT(request: Request, context: Context) {
   }
 
   let pendingFile: PendingTopDashboardDataFile | undefined;
+  let databaseAttempted = false;
   try {
     const overview = await getTopDashboardBlockOverview(blockId);
     const expectedActiveHtmlVersionId = overview.activeVersionId;
@@ -318,6 +320,7 @@ export async function PUT(request: Request, context: Context) {
     const persistedUpload = { ...parsed.parsed.upload };
     delete persistedUpload.pendingFile;
     const actor = getTopDashboardActor(session);
+    databaseAttempted = true;
     const result = await createAndActivateTopDashboardBlockDataVersion({
       blockId,
       expectedActiveVersionId: parsed.parsed.expectedActiveVersionId,
@@ -397,12 +400,18 @@ export async function PUT(request: Request, context: Context) {
     if (error instanceof TopDashboardBlockNotFoundError) {
       return Response.json({ error: error.message }, { status: 404 });
     }
+    if (error instanceof TopDashboardDataStorageLimitError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
     if (
       error instanceof TopDashboardActiveHtmlRequiredError
       || error instanceof TopDashboardDataCompatibilityError
     ) {
       return Response.json({ error: error.message }, { status: 422 });
     }
+    // A lost COMMIT acknowledgement may leave the new file referenced by active
+    // data. Only known rejections above prove it is safe to discard that file.
+    if (databaseAttempted) pendingFile?.preserve();
     console.error('Failed to upload TOP dashboard data', error);
     return Response.json({ error: 'Не удалось сохранить данные дашборда' }, { status: 500 });
   } finally {

@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 
 export const PERSONAL_DASHBOARD_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
 export const PERSONAL_DASHBOARD_HTML_MAX_BYTES = 5 * 1024 * 1024;
-// 14 daily maximum-size files (112 MiB) plus room for the next atomic replacement.
+// Successful imports retain the current and previous working snapshots, regardless of age.
+// The byte quota is evaluated against that retained pair before an atomic replacement.
 export const PERSONAL_DASHBOARD_MANAGER_MAX_BYTES = 128 * 1024 * 1024;
-export const PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS = 32;
-export const PERSONAL_DASHBOARD_RETENTION_DAYS = 14;
+export const PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS = 2;
 
 /** Snapshot business dates and the 10:00 delivery deadline use Moscow time. */
 export function personalDashboardToday(now = new Date()): string {

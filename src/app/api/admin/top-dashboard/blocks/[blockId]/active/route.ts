@@ -11,6 +11,7 @@ import {
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
 import {
   detectTopDashboardDataContract,
 } from '@/shared/lib/topDashboardContentSecurity';
@@ -80,7 +81,7 @@ export async function PUT(request: Request, context: Context) {
     }
 
     const actor = getTopDashboardActor(session);
-    const state = await activateTopDashboardBlockVersion({
+    const { prunedStoragePaths, ...state } = await activateTopDashboardBlockVersion({
       blockId,
       versionId,
       expectedActiveVersionId,
@@ -88,6 +89,9 @@ export async function PUT(request: Request, context: Context) {
       expectedProfile,
       adminUserId: actor.adminUserId,
       managerId: actor.managerId,
+    });
+    await deleteTopDashboardDataFiles(prunedStoragePaths).catch((error) => {
+      console.error('Failed to remove pruned TOP dashboard data files', error);
     });
 
     if (state.change !== 'unchanged') {

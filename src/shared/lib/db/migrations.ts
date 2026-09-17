@@ -117,6 +117,45 @@ export async function applyPersonalDashboardAudienceMigration(client: PoolClient
   `);
 }
 
+/** Additive only: seed/trim history inside successful block mutations, never at startup. */
+export async function applyTopDashboardDataContextStateMigration(client: PoolClient) {
+  await client.query(`
+    create table dashboard_file_cleanup_queue (
+      storage_path text primary key check (
+        storage_path ~ '^[0-9a-f]{2}/[0-9a-f]{64}-[0-9a-f-]{36}\\.bin$'
+      ),
+      created_at timestamptz not null default now()
+    );
+    create index dashboard_file_cleanup_queue_created_idx
+      on dashboard_file_cleanup_queue(created_at, storage_path);
+    create table top_dashboard_block_data_context_state (
+      block_id bigint not null references top_dashboard_blocks(id) on delete cascade,
+      context_key text not null,
+      bound_html_version_id bigint,
+      active_version_id bigint,
+      previous_version_id bigint,
+      primary key (block_id, context_key),
+      foreign key (block_id, bound_html_version_id)
+        references top_dashboard_block_versions(block_id, id) on delete cascade,
+      foreign key (block_id, active_version_id)
+        references top_dashboard_block_data_versions(block_id, id)
+        on delete no action deferrable initially deferred,
+      foreign key (block_id, previous_version_id)
+        references top_dashboard_block_data_versions(block_id, id)
+        on delete no action deferrable initially deferred,
+      check (active_version_id is null or previous_version_id is null or active_version_id <> previous_version_id),
+      check (
+        (bound_html_version_id is not null and context_key = 'html:' || bound_html_version_id::text)
+        or (bound_html_version_id is null and context_key in (
+          'purchases-v1:purchases',
+          'kts-bundle-v1:sales-analytics',
+          'kts-bundle-v1:assortment-optimization'
+        ))
+      )
+    );
+  `);
+}
+
 const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {
     id: '202606010001_runtime_schema_baseline',
@@ -764,6 +803,11 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
     id: '202609170001_support_shared_route_planner',
     description: 'Add HTML-bound route planner JSON files without changing encrypted shared or personal snapshots',
     apply: applySupportSharedRoutePlannerMigration,
+  },
+  {
+    id: '202609170002_top_dashboard_data_context_state',
+    description: 'Remember TOP data rollback pairs and queue committed dashboard file removals without pruning existing history',
+    apply: applyTopDashboardDataContextStateMigration,
   },
 ];
 

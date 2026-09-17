@@ -9,7 +9,6 @@ import {
   PERSONAL_DASHBOARD_HTML_MAX_BYTES,
   PERSONAL_DASHBOARD_MANAGER_MAX_BYTES,
   PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS,
-  PERSONAL_DASHBOARD_RETENTION_DAYS,
   personalDashboardToday,
   personalDashboardSafeFilename,
   PersonalDashboardError,
@@ -282,6 +281,10 @@ export async function activatePersonalDashboardHtml(input: { versionId: number; 
       await client.query(`update personal_dashboard_html_state set previous_version_id=active_version_id,
         active_version_id=$1,updated_by=$2,updated_at=now() where audience=$3`, [input.versionId, publishedBy, audience]);
     }
+    // Protect the committed pair by pointer, not upload order; unpublished drafts are independent.
+    await client.query(`delete from personal_dashboard_html_versions v using personal_dashboard_html_state st
+      where st.audience=$1 and v.audience=st.audience and v.first_published_at is not null
+        and v.id is distinct from st.active_version_id and v.id is distinct from st.previous_version_id`, [audience]);
     // Deliberately no snapshot mutations: HTML publication/rollback never clears personal data.
     return { audience, activeHtmlVersionId: input.versionId,
       previousHtmlVersionId: Number(state.active_version_id) === input.versionId ? idOrNull(state.previous_version_id) : idOrNull(state.active_version_id) };
@@ -385,9 +388,9 @@ export async function importPersonalDashboardSnapshot(input: ImportPersonalDashb
     const latestBound = current.rows.find((row) => row.email_hash === metadata!.emailHash && row.id === row.active_snapshot_id);
     if (latestBound && latestBound.issued > metadata.issued) return logImport(client, input, 'stale', 'STALE_SNAPSHOT', metadata, managerId);
     if (latestBound && latestBound.issued === metadata.issued) return logImport(client, input, 'conflict', 'SAME_DAY_CONFLICT', metadata, managerId);
-    const retentionBefore = Date.now() - PERSONAL_DASHBOARD_RETENTION_DAYS * 86_400_000;
-    // Keep the current good copy as well as the incoming one, even when more than 14 days old.
-    const retained = current.rows.filter((row, index) => index === 0 || row.id === row.active_snapshot_id || new Date(row.received_at).getTime() >= retentionBefore);
+    // The actual active snapshot becomes previous, even if its date/order/email binding changed.
+    // Compute quota before any mutation, then prune only after the new active pointer is stored.
+    const retained = current.rows.filter((row) => row.id === row.active_snapshot_id);
     if (retained.length + 1 > PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS
       || retained.reduce((sum, row) => sum + Number(row.file_size), 0) + metadata.fileSize > PERSONAL_DASHBOARD_MANAGER_MAX_BYTES) {
       return logImport(client, input, 'quota', 'SNAPSHOT_QUOTA', metadata, managerId);

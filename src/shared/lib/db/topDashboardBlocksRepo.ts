@@ -1,7 +1,9 @@
 import type { PoolClient } from 'pg';
 
+import { detectTopDashboardDataContract } from '../topDashboardContentSecurity';
 import { TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
+import { enqueueDashboardFilesForDeletion } from './dashboardFileCleanupRepo';
 import { ensureSiteSchema } from './schema';
 import {
   TopDashboardActiveHtmlRequiredError,
@@ -110,7 +112,6 @@ export type CreateTopDashboardBlockVersionResult = {
 
 const TOP_DASHBOARD_VERSION_LIMIT = 50;
 const TOP_DASHBOARD_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
-const TOP_DASHBOARD_DATA_VERSION_LIMIT = 10;
 const TOP_DASHBOARD_BLOCK_TITLE_MAX_LENGTH = 120;
 
 type Queryable = Pick<PoolClient, 'query'>;
@@ -304,6 +305,169 @@ function assertValidDashboardDataContract(
   }
 }
 
+function dashboardDataContextKey(
+  snapshotFormat: TopDashboardSnapshotFormat,
+  profile: TopDashboardProfile,
+  htmlVersionId: number,
+) {
+  return isGenericDashboardDataContract(snapshotFormat, profile)
+    ? `html:${htmlVersionId}`
+    : `${snapshotFormat}:${profile}`;
+}
+
+/** Called only under the block lock during a successful mutation, never on reads. */
+async function initializeDashboardDataContexts(client: Queryable, blockId: number) {
+  // Older inactive HTMLs had no persisted pointers. Initialize only missing contexts
+  // deterministically; once saved, a rollback selection must outrank upload order.
+  await client.query(
+    `with ranked as (
+       select versions.id, versions.bound_html_version_id,
+         case when versions.bound_html_version_id is not null
+           then 'html:' || versions.bound_html_version_id::text
+           else versions.snapshot_format || ':' || versions.dashboard_profile
+         end as context_key,
+         row_number() over (
+           partition by versions.snapshot_format, versions.dashboard_profile, versions.bound_html_version_id
+           order by case when versions.id = state.active_version_id then 0
+                         when versions.id = state.previous_version_id then 1 else 2 end,
+                    versions.created_at desc, versions.id desc
+         ) as position
+       from top_dashboard_block_data_versions versions
+       join top_dashboard_block_data_state state on state.block_id = versions.block_id
+       where versions.block_id = $1
+     )
+     insert into top_dashboard_block_data_context_state
+       (block_id, context_key, bound_html_version_id, active_version_id, previous_version_id)
+     select $1, context_key, bound_html_version_id,
+       max(id) filter (where position = 1), max(id) filter (where position = 2)
+     from ranked where position <= 2 group by context_key, bound_html_version_id
+     on conflict (block_id, context_key) do nothing`,
+    [blockId],
+  );
+  await saveDashboardDataContext(client, blockId);
+}
+
+/** The published global pointers are authoritative for the currently selected context. */
+async function saveDashboardDataContext(client: Queryable, blockId: number) {
+  await client.query(
+    `insert into top_dashboard_block_data_context_state
+       (block_id, context_key, bound_html_version_id, active_version_id, previous_version_id)
+     select state.block_id,
+       case when active.bound_html_version_id is not null
+         then 'html:' || active.bound_html_version_id::text
+         else active.snapshot_format || ':' || active.dashboard_profile
+       end,
+       active.bound_html_version_id, active.id, previous.id
+     from top_dashboard_block_data_state state
+     join top_dashboard_block_data_versions active
+       on active.block_id = state.block_id and active.id = state.active_version_id
+     left join top_dashboard_block_data_versions previous
+       on previous.block_id = state.block_id and previous.id = state.previous_version_id
+       and previous.snapshot_format = active.snapshot_format
+       and previous.dashboard_profile = active.dashboard_profile
+       and previous.bound_html_version_id is not distinct from active.bound_html_version_id
+     where state.block_id = $1
+     on conflict (block_id, context_key) do update
+       set active_version_id = excluded.active_version_id,
+           previous_version_id = excluded.previous_version_id`,
+    [blockId],
+  );
+}
+
+async function pruneDashboardDataVersions(client: Queryable, blockId: number) {
+  const retainedHtml = await client.query<{
+    id: string;
+    html_content: string;
+    first_published_at: string | null;
+  }>(
+    `select versions.id::text,
+       case when versions.first_published_at is not null then versions.html_content else '' end as html_content,
+       versions.first_published_at::text
+     from top_dashboard_block_versions versions
+     join top_dashboard_block_state state on state.block_id = versions.block_id
+     where versions.block_id = $1 and (
+       versions.id = state.active_version_id or versions.id = state.previous_version_id
+       or versions.first_published_at is null
+     )`,
+    [blockId],
+  );
+  const retainedContexts = new Set<string>();
+  let preserveUnknownNativeContexts = false;
+  for (const html of retainedHtml.rows) {
+    // Generic data is inseparable from its exact HTML, including legacy drafts.
+    retainedContexts.add(`html:${html.id}`);
+    if (html.first_published_at === null) continue;
+    const contract = detectTopDashboardDataContract(html.html_content);
+    if (contract.snapshotFormat && contract.profile) {
+      retainedContexts.add(dashboardDataContextKey(contract.snapshotFormat, contract.profile, Number(html.id)));
+    } else {
+      // A legacy HTML with an unrecognized contract cannot safely authorize removal.
+      preserveUnknownNativeContexts = true;
+    }
+  }
+  // Always protect the committed active pair even if an older HTML detector differs.
+  await client.query(
+    `delete from top_dashboard_block_data_context_state contexts
+     where contexts.block_id = $1
+       and not (contexts.context_key = any($2::text[]))
+       and not ($3::boolean and contexts.bound_html_version_id is null)
+       and not exists (
+         select 1 from top_dashboard_block_data_state state
+         where state.block_id = contexts.block_id
+           and state.active_version_id = contexts.active_version_id
+       )`,
+    [blockId, [...retainedContexts], preserveUnknownNativeContexts],
+  );
+  // Drop obsolete legacy pointers before deleting their rows (the FKs are RESTRICT).
+  await client.query(
+    `update top_dashboard_block_data_state state
+     set previous_version_id = null
+     where state.block_id = $1 and state.previous_version_id is not null
+       and not exists (
+         select 1 from top_dashboard_block_data_context_state contexts
+         where contexts.block_id = state.block_id and (
+           contexts.active_version_id = state.previous_version_id
+           or contexts.previous_version_id = state.previous_version_id
+         )
+       )`,
+    [blockId],
+  );
+  const pruned = await client.query<{ id: string; storage_path: string | null }>(
+    `delete from top_dashboard_block_data_versions versions
+     where versions.block_id = $1
+       and not exists (
+         select 1 from top_dashboard_block_data_context_state contexts
+         where contexts.block_id = versions.block_id and (
+           contexts.active_version_id = versions.id or contexts.previous_version_id = versions.id
+         )
+       )
+       and not exists (
+         select 1 from top_dashboard_block_data_state state
+         where state.block_id = versions.block_id and (
+           state.active_version_id = versions.id or state.previous_version_id = versions.id
+         )
+       )
+     returning versions.id::text, versions.storage_path`,
+    [blockId],
+  );
+  const prunedStoragePaths = pruned.rows.flatMap((row) => row.storage_path ? [row.storage_path] : []);
+  await enqueueDashboardFilesForDeletion(client, prunedStoragePaths);
+  return { prunedVersionIds: pruned.rows.map((row) => Number(row.id)), prunedStoragePaths };
+}
+
+async function pruneDashboardPublishedHtml(client: Queryable, blockId: number) {
+  // Data/context cleanup runs first; bound data can then cascade without stale pointers.
+  await client.query(
+    `delete from top_dashboard_block_versions versions
+     using top_dashboard_block_state state
+     where versions.block_id = $1 and state.block_id = versions.block_id
+       and versions.first_published_at is not null
+       and versions.id <> coalesce(state.active_version_id, 0)
+       and versions.id <> coalesce(state.previous_version_id, 0)`,
+    [blockId],
+  );
+}
+
 async function assertExpectedActiveHtmlVersion(
   client: Queryable,
   blockId: number,
@@ -371,6 +535,20 @@ export class TopDashboardBlockStateNotFoundError extends Error {
   constructor() {
     super('Состояние блока не найдено');
     this.name = 'TopDashboardBlockStateNotFoundError';
+  }
+}
+
+export class TopDashboardDraftLimitError extends Error {
+  constructor() {
+    super('Недостаточно места для HTML. Удалите ненужные черновики и повторите загрузку.');
+    this.name = 'TopDashboardDraftLimitError';
+  }
+}
+
+export class TopDashboardDataStorageLimitError extends Error {
+  constructor() {
+    super('Недостаточно места для нового файла данных. Сохранённые версии не изменены.');
+    this.name = 'TopDashboardDataStorageLimitError';
   }
 }
 
@@ -645,6 +823,7 @@ export async function deleteTopDashboardBlock(
     );
     const deleted = deletedResult.rows[0];
     if (!deleted) throw new TopDashboardBlockNotFoundError();
+    await enqueueDashboardFilesForDeletion(client, dataVersions?.storage_paths ?? []);
 
     return {
       deletedBlock: {
@@ -790,6 +969,37 @@ export async function createAndActivateTopDashboardBlockDataVersion(
       throw new TopDashboardBlockDataStateConflictError(currentActiveVersionId);
     }
 
+    const duplicate = await client.query<TopDashboardBlockDataVersionRow & { storage_path: string | null }>(
+      `select id::text, original_name, file_size::text, uncompressed_size::text, sha256,
+         snapshot_format, dashboard_profile, bound_html_version_id::text, storage_path,
+         coalesce(
+           (select name from admin_users where id = uploaded_by_admin_user_id),
+           (select name from wholesale_managers where id = uploaded_by_manager_id)
+         ) as uploaded_by_name, created_at::text
+       from top_dashboard_block_data_versions
+       where block_id = $1 and id = $2 and sha256 = $3
+         and snapshot_format = $4 and dashboard_profile = $5
+         and bound_html_version_id is not distinct from $6::bigint`,
+      [input.blockId, currentActiveVersionId, input.sha256, input.snapshotFormat,
+        input.dashboardProfile, input.boundHtmlVersionId],
+    );
+    if (duplicate.rows[0]) {
+      // Only the redundant new file may be discarded; old history is untouched.
+      const prunedStoragePaths = input.storagePath && input.storagePath !== duplicate.rows[0].storage_path
+        ? [input.storagePath] : [];
+      await enqueueDashboardFilesForDeletion(client, prunedStoragePaths);
+      return {
+        version: mapDataVersion(duplicate.rows[0], currentActiveVersionId, numericId(state.previous_version_id)),
+        activeVersionId: Number(duplicate.rows[0].id),
+        previousVersionId: numericId(state.previous_version_id),
+        updatedAt: state.updated_at,
+        prunedVersionIds: [],
+        prunedStoragePaths,
+      };
+    }
+
+    await initializeDashboardDataContexts(client, input.blockId);
+
     const versionResult = await client.query<TopDashboardBlockDataVersionRow>(
       `insert into top_dashboard_block_data_versions (
          block_id,
@@ -851,47 +1061,18 @@ export async function createAndActivateTopDashboardBlockDataVersion(
     );
     const updatedState = updatedStateResult.rows[0];
 
-    const prunedResult = await client.query<{ id: string; storage_path: string | null }>(
-      `with state as (
-         select active_version_id, previous_version_id
-         from top_dashboard_block_data_state
-         where block_id = $3
-       ), protected_versions as (
-         select
-           count(*) as version_count,
-           coalesce(sum(versions.file_size), 0) as stored_bytes
-         from top_dashboard_block_data_versions versions
-         cross join state
-         where versions.block_id = $3
-           and (
-             versions.id = state.active_version_id
-             or versions.id = state.previous_version_id
-           )
-       ), ranked as (
-         select
-           versions.id,
-           row_number() over (order by versions.created_at desc, versions.id desc) as position,
-           sum(versions.file_size) over (order by versions.created_at desc, versions.id desc) as running_bytes,
-           protected_versions.version_count as protected_version_count,
-           protected_versions.stored_bytes as protected_stored_bytes
-         from top_dashboard_block_data_versions versions
-         cross join state
-         cross join protected_versions
-         where versions.block_id = $3
-           and versions.id <> coalesce(state.active_version_id, 0)
-           and versions.id <> coalesce(state.previous_version_id, 0)
-       )
-       delete from top_dashboard_block_data_versions versions
-       using ranked
-       where versions.block_id = $3
-         and versions.id = ranked.id
-         and (
-           ranked.position + ranked.protected_version_count > $1
-           or ranked.running_bytes + ranked.protected_stored_bytes > $2
-         )
-       returning versions.id::text, versions.storage_path`,
-      [TOP_DASHBOARD_DATA_VERSION_LIMIT, TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES, input.blockId],
+    await saveDashboardDataContext(client, input.blockId);
+    const pruned = await pruneDashboardDataVersions(client, input.blockId);
+    const retainedBytes = await client.query<{ stored_bytes: string }>(
+      `select coalesce(sum(file_size), 0)::text as stored_bytes
+       from top_dashboard_block_data_versions where block_id = $1`,
+      [input.blockId],
     );
+    // Required rollback pairs never compete for quota by evicting each other.
+    // Reject the new upload and roll back pruning/state together instead.
+    if (Number(retainedBytes.rows[0].stored_bytes) > TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES) {
+      throw new TopDashboardDataStorageLimitError();
+    }
 
     await client.query(
       `update top_dashboard_blocks
@@ -905,17 +1086,14 @@ export async function createAndActivateTopDashboardBlockDataVersion(
       activeVersionId: versionId,
       previousVersionId: numericId(updatedState.previous_version_id),
       updatedAt: updatedState.updated_at,
-      prunedVersionIds: prunedResult.rows.map((row) => Number(row.id)),
-      prunedStoragePaths: prunedResult.rows.flatMap((row) => (
-        row.storage_path ? [row.storage_path] : []
-      )),
+      ...pruned,
     };
   });
 }
 
 export async function activateTopDashboardBlockDataVersion(
   input: ActivateTopDashboardBlockDataVersionInput,
-): Promise<ActivateTopDashboardBlockDataVersionResult> {
+): Promise<ActivateTopDashboardBlockDataVersionResult & { prunedStoragePaths: string[] }> {
   await ensureSiteSchema();
 
   return withTransaction(async (client) => {
@@ -973,8 +1151,11 @@ export async function activateTopDashboardBlockDataVersion(
         previousVersionId: numericId(state.previous_version_id),
         updatedAt: state.updated_at,
         change: 'unchanged',
+        prunedStoragePaths: [],
       };
     }
+
+    await initializeDashboardDataContexts(client, input.blockId);
 
     const updatedStateResult = await client.query<TopDashboardStateRow>(
       `update top_dashboard_block_data_state
@@ -989,6 +1170,9 @@ export async function activateTopDashboardBlockDataVersion(
     );
     const updatedState = updatedStateResult.rows[0];
 
+    await saveDashboardDataContext(client, input.blockId);
+    const pruned = await pruneDashboardDataVersions(client, input.blockId);
+
     await client.query(
       `update top_dashboard_blocks
        set updated_at = now()
@@ -1001,6 +1185,7 @@ export async function activateTopDashboardBlockDataVersion(
       previousVersionId: numericId(updatedState.previous_version_id),
       updatedAt: updatedState.updated_at,
       change: 'rolled_back',
+      prunedStoragePaths: pruned.prunedStoragePaths,
     };
   });
 }
@@ -1124,6 +1309,18 @@ export async function createTopDashboardBlockVersion(
     );
     if (!stateResult.rows[0]) throw new TopDashboardBlockStateNotFoundError();
 
+    const quota = await client.query<{ version_count: string; stored_bytes: string }>(
+      `select count(*)::text as version_count, coalesce(sum(file_size), 0)::text as stored_bytes
+       from top_dashboard_block_versions where block_id = $1`,
+      [input.blockId],
+    );
+    if (
+      Number(quota.rows[0].version_count) >= TOP_DASHBOARD_VERSION_LIMIT
+      || Number(quota.rows[0].stored_bytes) + input.fileSize > TOP_DASHBOARD_STORAGE_LIMIT_BYTES
+    ) {
+      throw new TopDashboardDraftLimitError();
+    }
+
     const result = await client.query<TopDashboardVersionRow>(
       `insert into top_dashboard_block_versions (
          block_id,
@@ -1158,90 +1355,6 @@ export async function createTopDashboardBlockVersion(
       ],
     );
 
-    const pruneCandidatesResult = await client.query<{ id: string }>(
-      `with state as (
-         select active_version_id, previous_version_id
-         from top_dashboard_block_state
-         where block_id = $3
-       ), protected_versions as (
-         select
-           count(*) as version_count,
-           coalesce(sum(versions.file_size), 0) as stored_bytes
-         from top_dashboard_block_versions versions
-         cross join state
-         where versions.block_id = $3
-           and (
-             versions.id = state.active_version_id
-             or versions.id = state.previous_version_id
-           )
-       ), ranked as (
-         select
-           versions.id,
-           row_number() over (order by versions.created_at desc, versions.id desc) as position,
-           sum(versions.file_size) over (order by versions.created_at desc, versions.id desc) as running_bytes,
-           protected_versions.version_count as protected_version_count,
-           protected_versions.stored_bytes as protected_stored_bytes
-         from top_dashboard_block_versions versions
-         cross join state
-         cross join protected_versions
-         where versions.block_id = $3
-           and versions.id <> coalesce(state.active_version_id, 0)
-           and versions.id <> coalesce(state.previous_version_id, 0)
-       )
-       select ranked.id::text
-       from ranked
-       where ranked.position + ranked.protected_version_count > $1
-          or ranked.running_bytes + ranked.protected_stored_bytes > $2`,
-      [TOP_DASHBOARD_VERSION_LIMIT, TOP_DASHBOARD_STORAGE_LIMIT_BYTES, input.blockId],
-    );
-    const pruneCandidateIds = pruneCandidatesResult.rows.map((row) => Number(row.id));
-    let prunedStoragePaths: string[] = [];
-
-    if (pruneCandidateIds.length > 0) {
-      const prunedDataFilesResult = await client.query<{ storage_path: string }>(
-        `select storage_path
-         from top_dashboard_block_data_versions
-         where block_id = $1
-           and bound_html_version_id = any($2::bigint[])
-           and storage_path is not null`,
-        [input.blockId, pruneCandidateIds],
-      );
-      prunedStoragePaths = prunedDataFilesResult.rows.map((row) => row.storage_path);
-
-      await client.query(
-        `with doomed_data_versions as (
-           select id
-           from top_dashboard_block_data_versions
-           where block_id = $1
-             and bound_html_version_id = any($2::bigint[])
-         )
-         update top_dashboard_block_data_state data_state
-         set active_version_id = case
-               when data_state.active_version_id in (select id from doomed_data_versions)
-                 then null
-               else data_state.active_version_id
-             end,
-             previous_version_id = case
-               when data_state.previous_version_id in (select id from doomed_data_versions)
-                 then null
-               else data_state.previous_version_id
-             end,
-             updated_at = now()
-         where data_state.block_id = $1
-           and (
-             data_state.active_version_id in (select id from doomed_data_versions)
-             or data_state.previous_version_id in (select id from doomed_data_versions)
-           )`,
-        [input.blockId, pruneCandidateIds],
-      );
-      await client.query(
-        `delete from top_dashboard_block_versions
-         where block_id = $1
-           and id = any($2::bigint[])`,
-        [input.blockId, pruneCandidateIds],
-      );
-    }
-
     await client.query(
       `update top_dashboard_blocks
        set updated_at = now()
@@ -1251,7 +1364,7 @@ export async function createTopDashboardBlockVersion(
 
     return {
       version: mapVersion(result.rows[0], null),
-      prunedStoragePaths,
+      prunedStoragePaths: [],
     };
   });
 }
@@ -1385,7 +1498,7 @@ export async function getPublishedTopDashboardBlockVersionContent(
 
 export async function activateTopDashboardBlockVersion(
   input: ActivateTopDashboardBlockVersionInput,
-): Promise<ActivateTopDashboardVersionResult> {
+): Promise<ActivateTopDashboardVersionResult & { prunedStoragePaths: string[] }> {
   await ensureSiteSchema();
 
   return withTransaction(async (client) => {
@@ -1417,6 +1530,16 @@ export async function activateTopDashboardBlockVersion(
 
     assertValidDashboardDataContract(input.expectedSnapshotFormat, input.expectedProfile);
 
+    if (currentActiveVersionId === input.versionId) {
+      return {
+        activeVersionId: input.versionId,
+        previousVersionId: numericId(state.previous_version_id),
+        updatedAt: state.updated_at,
+        change: 'unchanged',
+        prunedStoragePaths: [],
+      };
+    }
+
     const dataResult = await client.query<{
       active_version_id: string | null;
       snapshot_format: TopDashboardSnapshotFormat | null;
@@ -1439,7 +1562,6 @@ export async function activateTopDashboardBlockVersion(
     );
     const dataState = dataResult.rows[0];
     if (!dataState) throw new TopDashboardBlockDataStateNotFoundError();
-    let clearDataState = false;
     if (dataState.active_version_id !== null) {
       if (!dataState.snapshot_format || !dataState.dashboard_profile) {
         throw new TopDashboardBlockDataVersionNotFoundError();
@@ -1454,24 +1576,8 @@ export async function activateTopDashboardBlockVersion(
       );
       const activeDataBinding = numericId(dataState.bound_html_version_id);
 
-      if (targetIsGeneric || activeDataIsGeneric) {
-        clearDataState = !(
-          targetIsGeneric
-          && activeDataIsGeneric
-          && activeDataBinding === input.versionId
-        );
-        if (!clearDataState) {
-          assertDashboardDataCompatibility({
-            htmlVersionId: input.versionId,
-            htmlSnapshotFormat: input.expectedSnapshotFormat,
-            htmlProfile: input.expectedProfile,
-            dataSnapshotFormat: dataState.snapshot_format,
-            dataProfile: dataState.dashboard_profile,
-            dataBoundHtmlVersionId: activeDataBinding,
-            action: 'html',
-          });
-        }
-      } else {
+      // Native JSON retains its existing format/profile compatibility checks.
+      if (!targetIsGeneric && !activeDataIsGeneric) {
         assertDashboardDataCompatibility({
           htmlVersionId: input.versionId,
           htmlSnapshotFormat: input.expectedSnapshotFormat,
@@ -1484,27 +1590,22 @@ export async function activateTopDashboardBlockVersion(
       }
     }
 
-    if (clearDataState) {
-      await client.query(
-        `update top_dashboard_block_data_state
-         set active_version_id = null,
-             previous_version_id = null,
-             updated_by_admin_user_id = $2,
-             updated_by_manager_id = $3,
-             updated_at = now()
-         where block_id = $1`,
-        [input.blockId, input.adminUserId, input.managerId],
-      );
-    }
-
-    if (currentActiveVersionId === input.versionId) {
-      return {
-        activeVersionId: input.versionId,
-        previousVersionId: numericId(state?.previous_version_id),
-        updatedAt: state?.updated_at ?? new Date().toISOString(),
-        change: 'unchanged',
-      };
-    }
+    await initializeDashboardDataContexts(client, input.blockId);
+    const targetContext = await client.query<TopDashboardStateRow>(
+      `select active_version_id::text, previous_version_id::text
+       from top_dashboard_block_data_context_state
+       where block_id = $1 and context_key = $2`,
+      [input.blockId, dashboardDataContextKey(input.expectedSnapshotFormat!, input.expectedProfile!, input.versionId)],
+    );
+    // A new generic HTML starts empty; a rollback restores its exact saved pair.
+    await client.query(
+      `update top_dashboard_block_data_state
+       set active_version_id = $2, previous_version_id = $3,
+           updated_by_admin_user_id = $4, updated_by_manager_id = $5, updated_at = now()
+       where block_id = $1`,
+      [input.blockId, numericId(targetContext.rows[0]?.active_version_id),
+        numericId(targetContext.rows[0]?.previous_version_id), input.adminUserId, input.managerId],
+    );
 
     await client.query(
       `update top_dashboard_block_versions
@@ -1534,6 +1635,9 @@ export async function activateTopDashboardBlockVersion(
     );
     const updatedState = updatedStateResult.rows[0];
 
+    const pruned = await pruneDashboardDataVersions(client, input.blockId);
+    await pruneDashboardPublishedHtml(client, input.blockId);
+
     await client.query(
       `update top_dashboard_blocks
        set updated_at = now()
@@ -1546,6 +1650,7 @@ export async function activateTopDashboardBlockVersion(
       previousVersionId: numericId(updatedState.previous_version_id),
       updatedAt: updatedState.updated_at,
       change: version.first_published_at ? 'rolled_back' : 'published',
+      prunedStoragePaths: pruned.prunedStoragePaths,
     };
   });
 }
@@ -1677,6 +1782,8 @@ export async function deleteTopDashboardBlockVersion(input: {
       [input.blockId],
     );
 
+    const deletedStoragePaths = boundDataFilesResult.rows.map((row) => row.storage_path);
+    await enqueueDashboardFilesForDeletion(client, deletedStoragePaths);
     return {
       blockId: input.blockId,
       deletedVersion: {
@@ -1690,7 +1797,7 @@ export async function deleteTopDashboardBlockVersion(input: {
       previousVersionId,
       updatedAt,
       replacedPreviousVersion,
-      deletedStoragePaths: boundDataFilesResult.rows.map((row) => row.storage_path),
+      deletedStoragePaths,
     };
   });
 }

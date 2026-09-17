@@ -227,8 +227,7 @@ function management(options: {
     (form.props.onSubmit as (event: unknown) => void)({ preventDefault() {} });
   };
   const row = (audience: audiences.PersonalDashboardAudience, id: number) => {
-    const item = elements(group(audience)).find((node) => node.type === 'tr' && elements(node.props.children).some((node) => node.type === 'small'
-      && Array.isArray(node.props.children) && node.props.children.includes(id)));
+    const item = elements(render()).find((node) => node.type === 'tr' && node.props['data-version-audience'] === audience && node.props['data-version-id'] === id);
     assert.ok(item, `Missing ${audience} version #${id}`); return item;
   };
   const versionButton = (audience: audiences.PersonalDashboardAudience, id: number, title: string) => {
@@ -258,7 +257,7 @@ test('management shows both independently labelled groups together without tabs 
     assert.equal(group.props['aria-labelledby'], `manager-dashboard-heading-${audience}`);
     assert.equal(elements(group).filter((node) => node.props.id === `manager-dashboard-heading-${audience}`).length, 1);
     assert.match(text(group), new RegExp(`Only ${audience} manager`));
-    assert.match(text(group), new RegExp(`${audience}-11.html`));
+    assert.match(text(group), new RegExp(`Опубликована версия #${audience === 'development' ? 11 : 21}`));
     assert.doesNotMatch(text(group), new RegExp(`Only ${otherAudience} manager|${otherAudience}-11.html|Общая загрузка|Журнал импорта|Проверить почту сейчас`));
     assert.equal(elements(group).filter((node) => node.props.id === `manager-dashboard-html-${audience}`).length, 1);
     assert.equal(elements(group).some((node) => node.props.id === 'manager-dashboard-snapshots'), false);
@@ -289,6 +288,44 @@ test('management remounts the journal when its first page or cursor changes, not
   assert.notEqual(original.key, changedRows.key);
   const changedCursor = management({ overview: { ...overview, importsNextCursor: 'older-page' } }).find(ManagerDashboardImportJournal) as Element & { key: string };
   assert.notEqual(original.key, changedCursor.key);
+});
+
+test('working HTML and separate draft lists follow all management work, while latest draft actions stay above', () => {
+  for (const audience of [undefined, 'development', 'support'] as const) {
+    const overview = { ...managementOverview(), supportShared: sharedOverview() };
+    const view = management({ overview, audience });
+    const tree = elements(view.render());
+    const history = tree.findIndex((node) => node.props.id === 'manager-dashboard-html-history');
+    assert.ok(history > tree.findIndex((node) => node.props.id === 'manager-dashboard-snapshots'));
+    assert.ok(history < tree.findIndex((node) => node.type === ManagerDashboardImportJournal));
+    assert.ok(tree.filter((node) => node.type === 'tr' && node.props['data-version-id']).every((node) => tree.indexOf(node) > history), 'every full HTML version list belongs to the bottom history');
+    const ids = tree.map((node) => node.props.id).filter((id): id is string => typeof id === 'string');
+    assert.equal(new Set(ids).size, ids.length, 'moving sections never duplicates a DOM id');
+    if (audience !== 'support') {
+      const upload = view.group('development');
+      assert.match(text(upload), /Последний черновик HTML/);
+      assert.ok(elements(upload).some((node) => node.type === 'button' && text(node) === 'Опубликовать группе'));
+      assert.equal(elements(upload).filter((node) => node.type === 'tr' && node.props['data-version-id']).length, 0);
+      view.preview('development', 12);
+      const previewed = elements(view.render());
+      assert.ok(previewed.findIndex((node) => node.props.id === 'manager-dashboard-html-preview') < previewed.findIndex((node) => node.props.id === 'manager-dashboard-html-history'));
+    }
+  }
+});
+
+test('viewer places personal and shared history after every report for KTSP and HTML-bound JSON', () => {
+  for (const shared of [sharedOverview(), sharedJsonOverview()]) {
+    const html = render({ ...base, audience: 'support', snapshot, history: [snapshot, { ...snapshot, id: 16 }], supportShared: shared });
+    const history = html.indexOf('id="manager-dashboard-data-history"');
+    assert.ok(history > html.lastIndexOf('</iframe>'), 'history is after both frames in the DOM');
+    assert.ok(html.indexOf('id="manager-dashboard-history"') > history);
+    assert.ok(html.indexOf('id="manager-dashboard-shared-history"') > history);
+    assert.equal((html.match(/id="manager-dashboard-history"/g) ?? []).length, 1);
+    assert.equal((html.match(/id="manager-dashboard-shared-history"/g) ?? []).length, 1);
+    const unmatched = render({ ...base, audience: 'support', bindingStatus: 'ambiguous_email', snapshot, history: [snapshot, { ...snapshot, id: 16 }], supportShared: shared });
+    assert.doesNotMatch(unmatched, /id="manager-dashboard-history"|synthetic-manager.ktsp/);
+    assert.match(unmatched, /id="manager-dashboard-shared-history"/);
+  }
 });
 
 test('empty support HTML stays independent from existing development versions and both upload forms remain visible', () => {
@@ -606,8 +643,7 @@ test('deleting inactive route planner HTML discloses removal of its bound JSON h
 });
 
 function sharedVersionButton(view: ReturnType<typeof management>, id: number, label: string) {
-  const section = view.find('section', (props) => props.id === 'manager-dashboard-shared-support');
-  const row = elements(section).find((node) => node.type === 'tr' && elements(node).some((child) => child.type === 'strong' && text(child) === `shared-${id}.html`));
+  const row = elements(view.render()).find((node) => node.type === 'tr' && node.props['data-version-audience'] === 'support-shared' && node.props['data-version-id'] === id);
   assert.ok(row);
   const button = elements(row).find((node) => node.type === 'button' && text(node) === label);
   assert.ok(button, `Missing shared #${id} ${label}`);
@@ -777,6 +813,9 @@ test('personal and shared history, reload and binding changes keep independent f
   }, testModule, testModule.exports);
   let overview: View = { ...base, audience: 'support', snapshot, history: [snapshot, { ...snapshot, id: 16 }], supportShared: sharedOverview() };
   const renderState = () => {
+    if (!stateByComponent.has('root')) stateByComponent.set('root', []);
+    slots = stateByComponent.get('root')!;
+    cursor = 0;
     const tree = testModule.exports.ManagerDashboardViewer({ overview, loading: false, onReload: async () => { reloadCount++; return true; } });
     return (tree.props.children as Array<Element & { key: string | null }>).flatMap((child) => {
       if (!child || typeof child.type !== 'function') return [];

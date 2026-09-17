@@ -3,6 +3,7 @@ import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import {
   createTopDashboardBlockVersion,
   TopDashboardBlockNotFoundError,
+  TopDashboardDraftLimitError,
 } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
@@ -86,6 +87,9 @@ export async function POST(request: Request, context: Context) {
   } catch (error) {
     if (error instanceof TopDashboardBlockNotFoundError) {
       return errorResponse(error.message, 404);
+    }
+    if (error instanceof TopDashboardDraftLimitError) {
+      return errorResponse(error.message, 409);
     }
     console.error('Failed to upload TOP dashboard block HTML', error);
     return errorResponse('Не удалось загрузить HTML-файл', 500);

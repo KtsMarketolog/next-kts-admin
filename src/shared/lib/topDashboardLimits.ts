@@ -19,8 +19,8 @@ export const TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES =
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES * 1024 * 1024;
 export const TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL = '2 ГБ';
 
-// Keep enough room for the active version, the rollback version and one additional
-// historical snapshot even when every file reaches the upload limit.
+// Unchanged per-block disk safety cap. Protected current/previous data pairs for
+// retained HTMLs must fit together; uploads reject rather than evict rollback data.
 export const TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES = TOP_DASHBOARD_DATA_STORED_MAX_BYTES * 3;
 
 export const TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES = 512 * 1024;

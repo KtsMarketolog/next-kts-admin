@@ -5,6 +5,8 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
+import { cleanupDashboardFilesAfterCommit, scheduleDashboardFileCleanup } from './dashboardFileCleanup';
+
 const STORAGE_PATH_PATTERN = /^[0-9a-f]{2}\/[0-9a-f]{64}-[0-9a-f-]{36}\.bin$/u;
 
 export class TopDashboardDataStreamError extends Error {
@@ -44,6 +46,8 @@ export async function ensureTopDashboardDataStorage() {
 
 export async function cleanupStaleTopDashboardIncomingFiles(maxAgeMs = 6 * 60 * 60 * 1000) {
   const directory = await ensureTopDashboardDataStorage();
+  // Only previously committed deletions are retried; this never prunes database history on startup.
+  scheduleDashboardFileCleanup(directory);
   const incomingDirectory = path.join(directory, '.incoming');
   const cutoff = Date.now() - maxAgeMs;
   const entries = await readdir(incomingDirectory, { withFileTypes: true });
@@ -169,9 +173,6 @@ export async function openTopDashboardDataFile(
 
 export async function deleteTopDashboardDataFiles(storagePaths: readonly string[]) {
   const uniquePaths = [...new Set(storagePaths.filter((value) => STORAGE_PATH_PATTERN.test(value)))];
-  await Promise.all(uniquePaths.map(async (storagePath) => {
-    await unlink(absoluteStoragePath(storagePath)).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ENOENT') throw error;
-    });
-  }));
+  if (!uniquePaths.length) return;
+  await cleanupDashboardFilesAfterCommit(storageDirectory(), uniquePaths);
 }
