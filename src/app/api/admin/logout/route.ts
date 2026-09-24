@@ -15,7 +15,9 @@ export async function POST(request: Request) {
           ? 'admintop'
           : session?.role === 'top'
             ? 'top'
-            : 'admin',
+            : session?.role === 'purchaser'
+              ? 'purchaser'
+              : 'admin',
     adminUserId: session?.adminUserId,
     managerId: session?.managerId,
     sessionId: session?.sessionId,

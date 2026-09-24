@@ -1,3 +1,4 @@
+import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
 import {
   isTopDashboardManagementSession,
   requireTopDashboardSession,
@@ -29,6 +30,9 @@ export async function GET(request: Request, context: Context) {
   const blockId = parsePositiveId(rawBlockId);
   const versionId = parsePositiveId(rawVersionId);
   if (!blockId) return Response.json({ error: 'Некорректный блок' }, { status: 400 });
+  if (!canReadTopDashboardBlock(session, blockId)) {
+    return Response.json({ error: 'Нет доступа к этому отчёту' }, { status: 403, headers: { 'Cache-Control': 'private, no-store' } });
+  }
   if (!versionId) return Response.json({ error: 'Некорректная версия HTML' }, { status: 400 });
   if (!isTopDashboardBlockFrameRequest(request, blockId, versionId)) {
     return Response.json(

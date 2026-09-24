@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     if (!query || !versionId || (query.has('snapshot') && !snapshotId)) return personalJson({error: 'Некорректная версия'}, 400);
     const preview = query.get('preview') === '1';
     if ((preview && access.mode !== 'manage') || (!preview && access.mode !== 'view') || (preview && snapshotId)) return personalJson({error: 'Нет доступа'}, 403);
-    const version = await getSupportSharedDashboardHtml(versionId, preview, access.manager?.id);
+    const version = await getSupportSharedDashboardHtml(versionId, preview, access.viewer);
     if (!version) return personalJson({error: 'Версия HTML недоступна'}, 404);
     if (version.format === 'route-planner-v1') {
       let jsonSnapshotId: number | undefined;
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
         if (selected && selected.htmlVersionId !== versionId) return personalJson({error: 'Снимок недоступен'}, 404);
         jsonSnapshotId = selected?.id;
       } else {
-        const overview = await getSupportSharedDashboardOverview(access.manager!.id);
+        const overview = await getSupportSharedDashboardOverview(access.viewer!);
         const selected = snapshotId ? overview.jsonHistory.find((item) => item.id === snapshotId) : overview.jsonSnapshot;
         if (overview.activeHtmlVersionId !== versionId || (snapshotId && !selected)
           || (selected && selected.htmlVersionId !== versionId)) return personalJson({error: 'Снимок недоступен'}, 404);
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
     let selectedId: number | undefined;
     let emptyState: 'no_snapshot' | 'expired' | undefined;
     if (!preview) {
-      const overview = await getSupportSharedDashboardOverview(access.manager!.id);
+      const overview = await getSupportSharedDashboardOverview(access.viewer!);
       const selected = snapshotId ? overview.history.find((item) => item.id === snapshotId) : overview.snapshot;
       if (snapshotId && !selected) return personalJson({error: 'Снимок недоступен'}, 404);
       if (!selected) emptyState = 'no_snapshot';

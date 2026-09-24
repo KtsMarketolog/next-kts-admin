@@ -8,9 +8,9 @@ const COOKIE_NAME = 'kts_admin_session';
 const PASSWORD_KEYLEN = 64;
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 100;
 
-export type AdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
+export type AdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'purchaser';
 export type AdminManagerSessionRole = 'manager' | 'support_manager';
-export type AdminUserSessionRole = 'admin' | 'wholesale_admin' | 'top' | 'admintop';
+export type AdminUserSessionRole = 'admin' | 'wholesale_admin' | 'top' | 'admintop' | 'purchaser';
 
 export type AdminSession = {
   role: AdminSessionRole;
@@ -18,6 +18,7 @@ export type AdminSession = {
   managerId?: number;
   canAccessTopDashboard?: boolean;
   canManageTopDashboard?: boolean;
+  dashboardAccess?: string[];
   sessionId?: string;
 };
 
@@ -79,12 +80,14 @@ export function isTopDashboardSession(
   | (AdminSession & { role: 'admin' })
   | (AdminSession & { role: 'admintop'; adminUserId: number })
   | (AdminSession & { role: 'top'; adminUserId: number })
+  | (AdminSession & { role: 'purchaser'; adminUserId: number })
   | (AdminSession & {
       role: AdminManagerSessionRole;
       managerId: number;
       canAccessTopDashboard: true;
     }) {
   if (session?.role === 'admin') return true;
+  if (session?.role === 'purchaser') return hasPersistedAdminUserId(session) && Boolean(session.sessionId);
   if (session?.role === 'top' || session?.role === 'admintop') {
     return hasPersistedAdminUserId(session);
   }
@@ -121,7 +124,7 @@ export async function createAdminSession(
   role: AdminUserSessionRole = 'admin',
   options: CreateSessionOptions = {},
 ) {
-  if ((role === 'top' || role === 'admintop') && !options.adminUserId) {
+  if ((role === 'top' || role === 'admintop' || role === 'purchaser') && !options.adminUserId) {
     throw new Error('TOP session requires an admin user id');
   }
   return createEmployeeSession({ role, adminUserId: options.adminUserId ?? undefined }, options);
@@ -130,7 +133,7 @@ export async function createAdminSession(
 export async function createEmployeeSession(session: AdminSession, options: CreateSessionOptions = {}) {
   const adminUserId = session.adminUserId ?? options.adminUserId ?? null;
   if (
-    (session.role === 'top' || session.role === 'admintop')
+    (session.role === 'top' || session.role === 'admintop' || session.role === 'purchaser')
     && (!Number.isInteger(adminUserId) || Number(adminUserId) <= 0)
   ) {
     throw new Error('Top session requires an admin user');
@@ -183,6 +186,7 @@ export async function getAdminSession(): Promise<AdminSession | null> {
         managerId: storedSession.managerId,
         canAccessTopDashboard: storedSession.canAccessTopDashboard,
         canManageTopDashboard: storedSession.canManageTopDashboard,
+        dashboardAccess: storedSession.dashboardAccess,
         sessionId: storedSession.sessionId,
       };
     }

@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { PersonalDashboardError } from '../src/shared/lib/managerDashboardDomain';
 import * as security from '../src/shared/lib/managerDashboardSecurity';
 import * as origin from '../src/shared/lib/originProtection';
+import * as dashboardAccess from '../src/shared/lib/dashboardAccess';
 
 function compile<T>(filename: string, modules: Record<string, unknown>): T {
   const code = ts.transpileModule(readFileSync(new URL(filename, import.meta.url), 'utf8'), {
@@ -17,17 +18,17 @@ function compile<T>(filename: string, modules: Record<string, unknown>): T {
   }, loaded, loaded.exports, {error: () => {}});
   return loaded.exports;
 }
-type Role = 'admin' | 'admintop' | 'support_manager' | 'manager' | 'top' | null;
+type Role = 'admin' | 'admintop' | 'support_manager' | 'manager' | 'top' | 'purchaser' | null;
 function api(role: Role = 'admin', options: {
   sessionId?: string | null; inactive?: boolean; limited?: boolean; busy?: boolean;
   preflightError?: Error; prepareError?: Error; importError?: Error; duplicate?: boolean;
-  missingSnapshot?: boolean; readError?: Error;
+  missingSnapshot?: boolean; readError?: Error; grants?: string[];
 } = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
   const observe = (name: string, fn: (...args: unknown[]) => unknown = () => undefined) => async (...args: unknown[]) => {
     calls.push({name, args}); return fn(...args);
   };
-  const session = role ? {role, sessionId: options.sessionId === undefined ? 'synthetic' : options.sessionId, adminUserId: 7, managerId: 20} : null;
+  const session = role ? {role, sessionId: options.sessionId === undefined ? 'synthetic' : options.sessionId, adminUserId: 7, managerId: 20, dashboardAccess: options.grants ?? []} : null;
   const base = compile<typeof import('../src/app/api/admin/manager-dashboard/_shared')>('../src/app/api/admin/manager-dashboard/_shared.ts', {
     '@/shared/lib/adminAuth': {getAdminSession: async () => session},
     '@/shared/lib/adminSecurity': {enforceAdminActionRateLimit: async () => options.limited ? new Response(null, {status: 429}) : null},
@@ -35,7 +36,13 @@ function api(role: Role = 'admin', options: {
     '@/shared/lib/managerDashboardSecurity': security, '@/shared/lib/originProtection': origin,
   });
   const shared = compile<typeof import('../src/app/api/admin/manager-dashboard/shared/_shared')>(
-    '../src/app/api/admin/manager-dashboard/shared/_shared.ts', {'../_shared': base});
+    '../src/app/api/admin/manager-dashboard/shared/_shared.ts', {'../_shared': base,
+      '@/shared/lib/adminAuth': {getAdminSession: async () => session},
+      '@/shared/lib/adminSecurity': {enforceAdminActionRateLimit: async () => options.limited ? new Response(null, {status: 429}) : null},
+      '@/shared/lib/db/wholesaleAdminRepo/managerRepo': {getWholesaleManagerById: async () => ({id: 20, role, isActive: !options.inactive})},
+      '@/shared/lib/dashboardAccess': dashboardAccess,
+      '@/shared/lib/managerDashboardSecurity': security, '@/shared/lib/originProtection': origin,
+    });
   const pending = {fileSize: 18, sha256: 'a'.repeat(64), firstBytes: Buffer.from('{"'), temporaryPath: '/synthetic',
     commit: observe('commit', () => 'aa/file.bin'), discard: observe('discard'), preserve: observe('preserve')};
   const snapshot = {id: 9, htmlVersionId: 8, originalName: 'маршруты.json', fileSize: 18, sha256: 'a'.repeat(64),
@@ -143,8 +150,8 @@ test('invalid streamed JSON releases the cross-worker slot before returning the 
   assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'release']);
 });
 
-test('normal JSON GET remains support-only and rejects personal manager selectors', async () => {
-  for (const role of ['admin', 'admintop', 'manager', 'top', null] as const) {
+test('normal JSON GET permits support or assigned purchaser only and rejects personal manager selectors', async () => {
+  for (const role of ['admin', 'admintop', 'manager', 'top', 'purchaser', null] as const) {
     const harness = api(role);
     assert.ok([401, 403].includes((await harness.route.GET(new Request(`${URL_ROOT}?version=8`))).status));
     assert.deepEqual(harness.calls, []);
@@ -166,6 +173,15 @@ test('normal JSON GET remains support-only and rejects personal manager selector
   assert.equal(response.headers.get('x-kts-shared-version'), '8');
   assert.equal(response.headers.get('x-kts-shared-filename'), encodeURIComponent('маршруты.json'));
   assert.equal(response.headers.get('x-personal-email'), null);
+  const purchaser = api('purchaser', {grants: ['route-planner']});
+  const buyerResponse = await purchaser.route.GET(new Request(`${URL_ROOT}?version=8&snapshot=9`));
+  assert.equal(buyerResponse.status, 200);
+  assert.deepEqual(purchaser.calls, [{name: 'read', args: [{purchaserId: 7}, 8, 9]}]);
+  const buyerPreview = api('purchaser', {grants: ['route-planner']});
+  assert.equal((await buyerPreview.route.GET(new Request(`${URL_ROOT}?version=8&preview=1`))).status, 403);
+  assert.deepEqual(buyerPreview.calls, []);
+  assert.equal((await buyerPreview.route.POST(upload())).status, 403);
+  assert.deepEqual(buyerPreview.calls, []);
 });
 
 test('JSON preview requires a persisted administrator session and never uses manager reads', async () => {

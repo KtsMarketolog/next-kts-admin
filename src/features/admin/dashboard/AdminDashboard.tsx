@@ -3,7 +3,7 @@
 import Link from 'next/link';
 
 import styles from '@/app/admin/admin.module.scss';
-import { MANAGER_DASHBOARD_TITLES, type PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
+import type { PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
 const interactiveCardClassName = `${styles.dashboardCard} ${styles.dashboardCardInteractive}`;
 
@@ -12,6 +12,7 @@ type AdminDashboardProps = {
   topDashboardMode: 'manage' | 'view' | null;
   managerDashboardMode: 'manage' | 'view' | null;
   managerDashboardAudience?: PersonalDashboardAudience | null;
+  canAccessReportsCatalog?: boolean;
   isTopAreaOnlyUser: boolean;
   wholesaleHref: '/admin/wholesale/admin' | '/admin/wholesale/manager';
 };
@@ -20,56 +21,25 @@ export function AdminDashboard({
   canAccessSite,
   topDashboardMode,
   managerDashboardMode,
-  managerDashboardAudience = null,
+  canAccessReportsCatalog,
   isTopAreaOnlyUser,
   wholesaleHref,
 }: AdminDashboardProps) {
-  const isTopDashboardManager = topDashboardMode === 'manage';
-  const managerDashboardAudiences: PersonalDashboardAudience[] = managerDashboardMode === 'manage'
-    ? ['development', 'support']
-    : managerDashboardMode === 'view' && managerDashboardAudience
-      ? [managerDashboardAudience]
-      : [];
-  const managerDashboardCards = managerDashboardAudiences.map((audience) => (
-    <Link
-      key={audience}
-      className={interactiveCardClassName}
-      href={`/admin/manager-dashboard?audience=${audience}`}
-      replace
-      scroll={false}
-    >
-      <div>
-        <h2>{MANAGER_DASHBOARD_TITLES[audience]}</h2>
-        <p>{audience === 'development'
-          ? managerDashboardMode === 'manage'
-            ? 'HTML-дашборды менеджеров развития, личные данные и журнал загрузки.'
-            : 'Ваш персональный отчёт с автоматически загруженными данными.'
-          : managerDashboardMode === 'manage'
-            ? 'Личные и общие дашборды менеджеров сопровождения, данные и журнал загрузки.'
-            : 'Ваш личный и общие дашборды менеджеров сопровождения.'}</p>
-      </div>
-      <span className={styles.dashboardCardLink}>Открыть</span>
-    </Link>
-  ));
+  const hasReports = canAccessReportsCatalog ?? Boolean(topDashboardMode || managerDashboardMode);
 
   if (isTopAreaOnlyUser) {
     return (
       <section
-        className={`${styles.dashboardGrid} ${managerDashboardCards.length ? '' : styles.dashboardGridSingle}`}
+        className={`${styles.dashboardGrid} ${styles.dashboardGridSingle}`}
         aria-label="Разделы панели управления"
       >
         <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
           <div>
-            <h2>{isTopDashboardManager ? 'HTML-страницы и отчёты' : 'Готовые отчёты'}</h2>
-            <p>
-              {isTopDashboardManager
-                ? 'Управление HTML-дашбордами, данными и опубликованными версиями.'
-                : 'Готовые дашборды с актуальными данными для просмотра результатов бизнеса.'}
-            </p>
+            <h2>HTML-страницы и отчёты</h2>
+            <p>Доступные дашборды и отчёты с актуальными данными.</p>
           </div>
           <span className={styles.dashboardCardLink}>Открыть</span>
         </Link>
-        {managerDashboardCards}
       </section>
     );
   }
@@ -86,15 +56,11 @@ export function AdminDashboard({
         </Link>
       ) : null}
 
-      {topDashboardMode ? (
+      {hasReports ? (
         <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
           <div>
-            <h2>{isTopDashboardManager ? 'HTML-страницы и отчёты' : 'Готовые отчёты'}</h2>
-            <p>
-              {isTopDashboardManager
-                ? 'Отдельные блоки с HTML-дашбордами, загрузкой, предпросмотром и историей версий.'
-                : 'Опубликованные дашборды с актуальными данными в защищённом режиме.'}
-            </p>
+            <h2>HTML-страницы и отчёты</h2>
+            <p>Дашборды МР и МС, компоновщик рейсов и другие доступные вам отчёты.</p>
           </div>
           <span className={styles.dashboardCardLink}>Открыть</span>
         </Link>
@@ -123,7 +89,6 @@ export function AdminDashboard({
         </div>
         <span className={styles.dashboardCardLink}>Открыть</span>
       </Link>
-      {managerDashboardCards}
     </section>
   );
 }

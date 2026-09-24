@@ -17,6 +17,7 @@ import * as multiFileUploadModule from '../src/app/api/admin/top-dashboard/block
 import * as streamUploadModule from '../src/app/api/admin/top-dashboard/blocks/streamDataUpload';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
 import * as dashboardErrors from '../src/shared/lib/db/topDashboardDomain';
+import * as dashboardAccess from '../src/shared/lib/dashboardAccess';
 import {
   TopDashboardBlockNotFoundError,
   TopDashboardDataStorageLimitError,
@@ -293,6 +294,7 @@ function directRouteHarness(options: {
     },
   };
   const dependencies: Record<string, unknown> = {
+    '@/shared/lib/dashboardAccess': dashboardAccess,
     'node:stream': {},
     '@/shared/lib/adminAuth': {
       async requireTopDashboardManagementSession() {

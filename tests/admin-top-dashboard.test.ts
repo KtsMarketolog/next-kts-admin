@@ -284,7 +284,10 @@ test('active TOP dashboard versions have a dedicated deletion conflict', () => {
 });
 
 test('admin users screen exposes separate single-role TOP and Admin TOP tabs', () => {
-  assert.deepEqual(USER_TABS.map((tab) => tab.value), ['admin', 'top', 'admintop']);
+  assert.deepEqual(USER_TABS.map((tab) => tab.value), ['admin', 'top', 'admintop', 'purchaser']);
+  assert.equal(tabForRole('purchaser'), 'purchaser');
+  assert.equal(defaultRoleForTab('purchaser'), 'purchaser');
+  assert.deepEqual(roleOptionsForTab('purchaser'), [{ value: 'purchaser', label: 'Закупщик — просмотр' }]);
   assert.equal(tabForRole('top'), 'top');
   assert.equal(tabForRole('admintop'), 'admintop');
   assert.equal(defaultRoleForTab('top'), 'top');

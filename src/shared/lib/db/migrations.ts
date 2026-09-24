@@ -809,6 +809,26 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
     description: 'Remember TOP data rollback pairs and queue committed dashboard file removals without pruning existing history',
     apply: applyTopDashboardDataContextStateMigration,
   },
+  {
+    id: '202609240001_purchaser_dashboard_access',
+    description: 'Add explicit read-only dashboard grants for purchaser accounts without changing existing roles or reports',
+    apply: async (client) => {
+      await client.query(`
+        create table admin_user_dashboard_access (
+          user_id bigint not null references admin_users(id) on delete cascade,
+          key text not null check (
+            key = 'route-planner'
+            or key ~ '^top:[1-9][0-9]{0,15}$'
+          ),
+          top_block_id bigint generated always as (
+            case when key like 'top:%' then substring(key from 5)::bigint else null end
+          ) stored references top_dashboard_blocks(id) on delete cascade,
+          created_at timestamptz not null default now(),
+          primary key (user_id, key)
+        );
+      `);
+    },
+  },
 ];
 
 async function ensureSchemaMigrationsTable() {

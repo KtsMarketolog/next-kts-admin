@@ -1,3 +1,4 @@
+import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
 import {
   getTopDashboardActor,
   isTopDashboardManagementSession,
@@ -37,6 +38,9 @@ export async function GET(_request: Request, context: Context) {
   const { blockId: rawBlockId } = await context.params;
   const blockId = parsePositiveId(rawBlockId);
   if (!blockId) return Response.json({ error: 'Некорректный блок' }, { status: 400 });
+  if (!canReadTopDashboardBlock(session, blockId)) {
+    return Response.json({ error: 'Нет доступа к этому отчёту' }, { status: 403, headers: { 'Cache-Control': 'private, no-store' } });
+  }
 
   try {
     const overview = isTopDashboardManagementSession(session)

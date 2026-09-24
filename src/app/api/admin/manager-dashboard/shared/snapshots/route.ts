@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const query = sharedQuery(request, ['snapshot']);
     const id = parsePersonalDashboardId(query?.get('snapshot') ?? null);
     if (!query || (query.has('snapshot') && !id)) return personalJson({error: 'Некорректные параметры снимка'}, 400);
-    const snapshot = await getSupportSharedDashboardSnapshot(access.manager!.id, id ?? undefined);
+    const snapshot = await getSupportSharedDashboardSnapshot(access.viewer!, id ?? undefined);
     if (!snapshot) return personalJson({error: 'Общий снимок не найден или недоступен'}, 404);
     return new Response(new Uint8Array(snapshot.bytes), {headers: {
       ...PERSONAL_PRIVATE_HEADERS, 'Content-Type': 'application/octet-stream',

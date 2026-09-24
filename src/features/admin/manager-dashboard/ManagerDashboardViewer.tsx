@@ -18,20 +18,25 @@ type ViewerProps = {
 
 export function ManagerDashboardViewer({ overview, loading, onReload }: ViewerProps) {
   const personalSelection = useReportSelection(managerDashboardViewIdentity(overview));
-  const sharedVersion = overview.supportShared?.htmlVersions.find((item) => item.id === overview.supportShared?.activeHtmlVersionId);
-  const sharedSelection = useReportSelection(JSON.stringify([overview.audience, overview.supportShared?.activeHtmlVersionId, sharedVersion?.format]));
   return (
     <div className={styles.stack}>
       <PersonalDashboardViewer key={personalSelection.identity} overview={overview} loading={loading} onReload={onReload} selection={personalSelection} />
-      {overview.audience === 'support' ? <SharedDashboardViewer key={sharedSelection.identity} shared={overview.supportShared} loading={loading} onReload={onReload} selection={sharedSelection} /> : null}
-      <DashboardDataHistory overview={overview} personalSelection={personalSelection} sharedSelection={sharedSelection} />
+      <DashboardDataHistory overview={overview} personalSelection={personalSelection} />
     </div>
   );
 }
 
-// Keep both report selections independent while rendering their controls together
-// below the reports. Reset synchronously on identity changes so stale personal
-// data cannot appear for another recipient, even for one render.
+export function RoutePlannerViewer({ shared, loading, onReload }: Omit<SharedViewerProps, 'selection'>) {
+  const version = shared?.htmlVersions.find((item) => item.id === shared.activeHtmlVersionId);
+  const selection = useReportSelection(JSON.stringify(['route-planner', shared?.activeHtmlVersionId, version?.format]));
+  return <div className={styles.stack}>
+    <SharedDashboardViewer key={selection.identity} shared={shared} loading={loading} onReload={onReload} selection={selection} />
+    <SharedDataHistory shared={shared} selection={selection} />
+  </div>;
+}
+
+// Reset synchronously on identity changes so stale personal data cannot appear
+// for another recipient, even for one render.
 function useReportSelection(identity: string) {
   const empty = { identity, historicalId: null as number | null, revision: 0 };
   const [stored, setStored] = useState(empty);
@@ -128,7 +133,7 @@ function SharedJsonDashboardViewer({ shared, loading, onReload, versionId, selec
   return (
     <section className={styles.panel} aria-labelledby="manager-dashboard-shared-heading">
       <div className={styles.sectionHeading}>
-        <div><h2 id="manager-dashboard-shared-heading">Общий дашборд</h2><p>Один отчёт для всех менеджеров по сопровождению. Опубликованный JSON загружается автоматически, без email и пароля.</p></div>
+        <div><h2 id="manager-dashboard-shared-heading">Компоновщик рейсов</h2><p>Общий отчёт для сотрудников с доступом. Опубликованный JSON загружается автоматически, без email и пароля.</p></div>
         <button className={styles.secondary} type="button" disabled={loading} onClick={async () => {
           if (await onReload('shared')) selection.reload();
         }}>{loading ? 'Обновляем…' : 'Перезагрузить общий отчёт'}</button>
@@ -157,7 +162,7 @@ function SharedKtspDashboardViewer({ shared, loading, onReload, selection }: Sha
   return (
     <section className={styles.panel} aria-labelledby="manager-dashboard-shared-heading">
       <div className={styles.sectionHeading}>
-        <div><h2 id="manager-dashboard-shared-heading">Общий дашборд</h2><p>Один отчёт для всех менеджеров по сопровождению.</p></div>
+        <div><h2 id="manager-dashboard-shared-heading">Компоновщик рейсов</h2><p>Общий отчёт для сотрудников с доступом.</p></div>
         <button className={styles.secondary} type="button" disabled={loading} onClick={async () => {
           if (await onReload('shared')) selection.reload();
         }}>{loading ? 'Обновляем…' : 'Перезагрузить общий отчёт'}</button>
@@ -179,32 +184,40 @@ function SharedKtspDashboardViewer({ shared, loading, onReload, selection }: Sha
   );
 }
 
-function DashboardDataHistory({ overview, personalSelection, sharedSelection }: {
-  overview: ViewerOverview; personalSelection: ReportSelection; sharedSelection: ReportSelection;
+function DashboardDataHistory({ overview, personalSelection }: {
+  overview: ViewerOverview; personalSelection: ReportSelection;
 }) {
   const personalHistory = overview.bindingStatus === 'matched' ? overview.history.filter((snapshot) => snapshot.id !== overview.snapshot?.id) : [];
-  const shared = overview.audience === 'support' ? overview.supportShared : null;
+  if (!personalHistory.length) return null;
+  return (
+    <section id="manager-dashboard-data-history" className={styles.panel} aria-labelledby="manager-dashboard-data-history-heading">
+      <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-data-history-heading">История данных</h2><p>Хранятся текущий и один предыдущий рабочий снимок. Выбор предыдущего файла меняет только этот отчёт.</p></div></div>
+      <div className={styles.actions}>
+        <label className={styles.inlineLabel} htmlFor="manager-dashboard-history">Версия данных</label>
+        <select id="manager-dashboard-history" value={personalHistory.some((snapshot) => snapshot.id === personalSelection.historicalId) ? personalSelection.historicalId! : ''} onChange={(event) => personalSelection.setHistoricalId(event.target.value ? Number(event.target.value) : null)}>
+          <option value="">Текущий файл</option>
+          {personalHistory.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{formatDashboardDate(snapshot.issued)} — {snapshot.originalName}</option>)}
+        </select>
+      </div>
+    </section>
+  );
+}
+
+function SharedDataHistory({ shared, selection }: Pick<SharedViewerProps, 'shared' | 'selection'>) {
   const sharedVersion = shared?.htmlVersions.find((item) => item.id === shared.activeHtmlVersionId);
   const sharedUsesJson = sharedVersion?.format === 'route-planner-v1';
   const currentSharedId = sharedUsesJson ? shared?.jsonSnapshot?.htmlVersionId === sharedVersion.id ? shared.jsonSnapshot.id : null : shared?.snapshot?.id;
   const sharedHistory = sharedUsesJson
     ? (shared?.jsonHistory ?? []).filter((snapshot) => snapshot.htmlVersionId === sharedVersion.id && snapshot.id !== currentSharedId).map((snapshot) => ({ ...snapshot, date: snapshot.savedAt }))
     : (shared?.history ?? []).filter((snapshot) => snapshot.id !== currentSharedId).map((snapshot) => ({ ...snapshot, date: snapshot.issued }));
-  if (!personalHistory.length && !sharedHistory.length) return null;
+  if (!sharedHistory.length) return null;
   return (
     <section id="manager-dashboard-data-history" className={styles.panel} aria-labelledby="manager-dashboard-data-history-heading">
       <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-data-history-heading">История данных</h2><p>Хранятся текущий и один предыдущий рабочий снимок. Выбор предыдущего файла меняет только соответствующий отчёт.</p></div></div>
       <div className={styles.stack}>
-        {personalHistory.length ? <div className={styles.actions}>
-          <label className={styles.inlineLabel} htmlFor="manager-dashboard-history">Версия данных</label>
-          <select id="manager-dashboard-history" value={personalHistory.some((snapshot) => snapshot.id === personalSelection.historicalId) ? personalSelection.historicalId! : ''} onChange={(event) => personalSelection.setHistoricalId(event.target.value ? Number(event.target.value) : null)}>
-            <option value="">Текущий файл</option>
-            {personalHistory.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{formatDashboardDate(snapshot.issued)} — {snapshot.originalName}</option>)}
-          </select>
-        </div> : null}
         {sharedHistory.length ? <div className={styles.actions}>
           <label className={styles.inlineLabel} htmlFor="manager-dashboard-shared-history">Версия общих данных</label>
-          <select id="manager-dashboard-shared-history" value={sharedHistory.some((snapshot) => snapshot.id === sharedSelection.historicalId) ? sharedSelection.historicalId! : ''} onChange={(event) => sharedSelection.setHistoricalId(event.target.value ? Number(event.target.value) : null)}>
+          <select id="manager-dashboard-shared-history" value={sharedHistory.some((snapshot) => snapshot.id === selection.historicalId) ? selection.historicalId! : ''} onChange={(event) => selection.setHistoricalId(event.target.value ? Number(event.target.value) : null)}>
             <option value="">Текущий общий файл</option>
             {sharedHistory.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{formatDashboardDate(snapshot.date)} — {snapshot.originalName}</option>)}
           </select>

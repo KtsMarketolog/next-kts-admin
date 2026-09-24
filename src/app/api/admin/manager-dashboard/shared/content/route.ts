@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       || (referer.searchParams.get('preview') === '1') !== preview) {
       return personalJson({error: 'HTML доступен только в защищённом просмотре'}, 403);
     }
-    const version = await getSupportSharedDashboardHtml(versionId, preview, access.manager?.id);
+    const version = await getSupportSharedDashboardHtml(versionId, preview, access.viewer);
     if (!version) return personalJson({error: 'Версия HTML недоступна'}, 404);
     const routePlanner = version.format === 'route-planner-v1';
     const html = routePlanner ? injectSupportSharedRoutePlannerAdapter(version.htmlContent)

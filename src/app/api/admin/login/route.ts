@@ -112,7 +112,7 @@ async function finishLogin(input: {
     return Response.json({ ok: true, role: actor.role });
   }
 
-  if ((actor.role === 'top' || actor.role === 'admintop') && !actor.adminUserId) {
+  if ((actor.role === 'top' || actor.role === 'admintop' || actor.role === 'purchaser') && !actor.adminUserId) {
     return Response.json({ error: 'Invalid session' }, { status: 401 });
   }
   if (actor.adminUserId) {
@@ -158,7 +158,7 @@ async function finishLogin(input: {
 async function startTwoFactor(input: {
   login: string;
   actorType: 'admin' | 'manager';
-  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'purchaser';
   email: string;
   loginSessionId: string;
   adminUserId?: number | null;

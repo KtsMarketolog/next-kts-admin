@@ -104,8 +104,19 @@ function mapSnapshot(row: SnapshotRow, state: StateRow): SupportSharedDashboardS
     expired: row.expires < personalDashboardToday() };
 }
 
-/** managerId must come from the verified persisted session. Email does not grant access to this report. */
-async function authorizeSupportManager(client: PoolClient, managerId: number) {
+export type SharedDashboardViewer = number | { purchaserId: number };
+
+/** The principal comes only from a persisted session. Grants are rechecked in the read transaction. */
+async function authorizeSupportViewer(client: PoolClient, viewer: SharedDashboardViewer) {
+  if (typeof viewer === 'object' && viewer !== null) {
+    positiveId(viewer.purchaserId);
+    const grant = await client.query(`select au.id from admin_users au
+      join admin_user_dashboard_access a on a.user_id=au.id and a.key='route-planner'
+      where au.id=$1 and au.role='purchaser' and au.is_active=true for share of au,a`, [viewer.purchaserId]);
+    if (!grant.rows.length) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');
+    return;
+  }
+  const managerId = viewer;
   positiveId(managerId);
   const result = await client.query<{ role: string | null; is_active: boolean }>(
     `select role,is_active from wholesale_managers where id=$1 for share`, [managerId]);
@@ -122,16 +133,15 @@ async function sharedState(client: PoolClient, mutation = false): Promise<StateR
   return result.rows[0];
 }
 
-/** Omitting managerId is an administrator-only contract; the route must verify that role. */
-export async function getSupportSharedDashboardOverview(managerId?: number): Promise<SupportSharedDashboardOverview> {
-  if (managerId !== undefined) positiveId(managerId);
+/** Omitting viewer is an administrator-only contract; viewers never receive drafts. */
+export async function getSupportSharedDashboardOverview(viewer?: SharedDashboardViewer): Promise<SupportSharedDashboardOverview> {
   await ensureSiteSchema();
   return withTransaction(async (client) => {
-    if (managerId !== undefined) await authorizeSupportManager(client, managerId);
+    if (viewer !== undefined) await authorizeSupportViewer(client, viewer);
     const state = await sharedState(client);
     const versions = await client.query<HtmlRow>(`select ${HTML_SELECT} from support_shared_dashboard_html_versions
-      ${managerId === undefined ? '' : 'where id=$1 and first_published_at is not null'} order by id desc`,
-    managerId === undefined ? [] : [state.active_html_version_id]);
+      ${viewer === undefined ? '' : 'where id=$1 and first_published_at is not null'} order by id desc`,
+    viewer === undefined ? [] : [state.active_html_version_id]);
     const snapshots = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT} from support_shared_dashboard_snapshots
       order by issued desc,id desc limit ${PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS}`);
     const history = snapshots.rows.map((row) => mapSnapshot(row, state));
@@ -142,19 +152,19 @@ export async function getSupportSharedDashboardOverview(managerId?: number): Pro
         where s.html_version_id=$1 order by s.id desc limit ${SUPPORT_SHARED_JSON_MAX_VERSIONS}`, [activeHtml.id])).rows.map(mapJson) : [];
     return { htmlVersions: versions.rows.map((row) => mapHtml(row, state)),
       activeHtmlVersionId: idOrNull(state.active_html_version_id),
-      previousHtmlVersionId: managerId === undefined ? idOrNull(state.previous_html_version_id) : null,
+      previousHtmlVersionId: viewer === undefined ? idOrNull(state.previous_html_version_id) : null,
       snapshot: history.find((snapshot) => snapshot.status === 'active') ?? null, history,
       jsonSnapshot: jsonHistory.find((snapshot) => snapshot.status === 'active') ?? null, jsonHistory };
   });
 }
 
 /** preview=true is administrator-only. Published reads always recheck the support account inside this transaction. */
-export async function getSupportSharedDashboardHtml(id: number | undefined, preview: boolean, managerId?: number) {
+export async function getSupportSharedDashboardHtml(id: number | undefined, preview: boolean, viewer?: SharedDashboardViewer) {
   if (id !== undefined) positiveId(id);
-  if (!preview) positiveId(managerId as number);
+  if (!preview && viewer === undefined) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');
   await ensureSiteSchema();
   return withTransaction(async (client) => {
-    if (!preview) await authorizeSupportManager(client, managerId as number);
+    if (!preview) await authorizeSupportViewer(client, viewer!);
     const state = await sharedState(client);
     const selectedId = id ?? idOrNull(state.active_html_version_id);
     if (selectedId === null || (!preview && selectedId !== idOrNull(state.active_html_version_id))) return null;
@@ -170,12 +180,11 @@ export async function getSupportSharedDashboardHtml(id: number | undefined, prev
   });
 }
 
-export async function getSupportSharedDashboardSnapshot(managerId: number, id?: number) {
-  positiveId(managerId);
+export async function getSupportSharedDashboardSnapshot(viewer: SharedDashboardViewer, id?: number) {
   if (id !== undefined) positiveId(id);
   await ensureSiteSchema();
   return withTransaction(async (client) => {
-    await authorizeSupportManager(client, managerId);
+    await authorizeSupportViewer(client, viewer);
     const state = await sharedState(client);
     const selectedId = id ?? idOrNull(state.active_snapshot_id);
     if (selectedId === null) return null;
@@ -312,14 +321,14 @@ export async function assertSupportSharedJsonUploadTarget(htmlVersionId: number,
   });
 }
 
-export async function getSupportSharedDashboardJsonSnapshot(managerId: number, htmlVersionId: number, id?: number) {
-  positiveId(managerId); positiveId(htmlVersionId);
+export async function getSupportSharedDashboardJsonSnapshot(viewer: SharedDashboardViewer, htmlVersionId: number, id?: number) {
+  positiveId(htmlVersionId);
   if (id !== undefined) positiveId(id);
   await ensureSiteSchema();
   let stream: Awaited<ReturnType<typeof openVerifiedSupportSharedRoutePlannerFile>> | undefined;
   try {
     return await withTransaction(async (client) => {
-      await authorizeSupportManager(client, managerId);
+      await authorizeSupportViewer(client, viewer);
       const state = await sharedState(client);
       await requireActiveJsonHtml(client, state, htmlVersionId);
       const result = await client.query<JsonRow>(`select ${JSON_SELECT} from support_shared_dashboard_json_snapshots s

@@ -72,6 +72,12 @@ export type ManagerDashboardSharedJsonSnapshot = {
   status: 'active' | 'previous' | 'archived';
 };
 
+/** Standalone shared report: never carries a personal manager/email identity. */
+export type RoutePlannerOverview = {
+  mode: 'manage' | 'view';
+  supportShared: ManagerDashboardSupportShared | null;
+};
+
 export type ManagerDashboardOverview = {
   mode: 'manage';
   groups: ManagerDashboardGroup[];

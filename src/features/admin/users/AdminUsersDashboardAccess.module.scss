@@ -1,0 +1,130 @@
+.accessFieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #e1e3ee;
+  border-radius: 10px;
+  background: #fff;
+
+  legend {
+    padding: 0 6px;
+    font-weight: 700;
+    color: #302662;
+  }
+}
+
+.accessFieldset .help {
+  margin: 0 0 10px;
+  color: #6f7182;
+  font-size: 13px;
+  line-height: 1.5;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.accessFieldset .options label.option {
+  display: flex;
+  grid-column: auto;
+  grid-row: auto;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e1e3ee;
+  border-radius: 8px;
+  cursor: pointer;
+
+  &:hover {
+    background: #f7f4ff;
+    border-color: #b8acd9;
+  }
+
+  &:focus-within {
+    outline: 2px solid #7968ae;
+    outline-offset: 2px;
+  }
+
+  input {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    min-height: 18px !important;
+    margin: 2px 0 0;
+    padding: 0;
+    accent-color: #260b86;
+    cursor: pointer;
+  }
+
+  span {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    color: #242633;
+    font-size: 14px;
+    font-weight: 400;
+    text-transform: none;
+    overflow-wrap: anywhere;
+  }
+
+  small {
+    color: #6f7182;
+    line-height: 1.4;
+  }
+}
+
+.error {
+  color: #b42318;
+  font-size: 13px;
+
+  p {
+    margin: 0 0 10px;
+  }
+}
+
+.purchaserCreate > .accessFieldset {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+.purchaserCreate > button:last-child {
+  grid-row: 4;
+}
+
+@media (max-width: 1100px) {
+  .purchaserCreate.purchaserCreate,
+  .purchaserFields.purchaserFields {
+    display: flex;
+    flex-wrap: wrap;
+
+    > label {
+      flex: 1 1 calc(50% - 10px);
+    }
+  }
+
+  .purchaserCreate > .accessFieldset,
+  .purchaserCreate > button:last-child {
+    flex: 1 1 100%;
+    box-sizing: border-box;
+    grid-row: auto;
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .purchaserCreate.purchaserCreate > label,
+  .purchaserFields.purchaserFields > label {
+    flex-basis: 100%;
+  }
+
+  .options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

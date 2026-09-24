@@ -30,37 +30,34 @@ function managerCards(html: string) {
     .map((match) => ({ href: match[1], html: match[2] }));
 }
 
-test('admin and admintop home layouts expose distinct development and support cards', () => {
+test('admin and admintop home layouts expose one reports catalog instead of standalone MR/MS cards', () => {
   for (const isTopAreaOnlyUser of [false, true]) {
-    const cards = managerCards(render({
+    const html = render({
       canAccessSite: !isTopAreaOnlyUser,
       topDashboardMode: 'manage',
       managerDashboardMode: 'manage',
       isTopAreaOnlyUser,
       wholesaleHref: '/admin/wholesale/admin',
-    }));
-    assert.deepEqual(cards.map((card) => card.href), [
-      '/admin/manager-dashboard?audience=development',
-      '/admin/manager-dashboard?audience=support',
-    ]);
-    assert.match(cards[0].html, /<h2>Дашборды МР<\/h2>/);
-    assert.match(cards[1].html, /<h2>Дашборды МС<\/h2>/);
-    assert.match(cards[1].html, /Личные и общие дашборды менеджеров сопровождения/);
+    });
+    assert.deepEqual(managerCards(html), []);
+    assert.equal([...html.matchAll(/href="\/admin\/top"/g)].length, 1);
+    assert.match(html, /<h2>HTML-страницы и отчёты<\/h2>/);
   }
 });
 
-test('each manager sees only the card for their verified audience', () => {
+test('managers without general TOP permission can reach their reports through the catalog', () => {
   for (const managerDashboardAudience of ['development', 'support'] as const) {
-    const cards = managerCards(render({ managerDashboardMode: 'view', managerDashboardAudience }));
-    assert.equal(cards.length, 1);
-    assert.equal(cards[0].href, `/admin/manager-dashboard?audience=${managerDashboardAudience}`);
-    assert.match(cards[0].html, managerDashboardAudience === 'development'
-      ? /<h2>Дашборды МР<\/h2>/
-      : /<h2>Дашборды МС<\/h2>/);
-    if (managerDashboardAudience === 'support') {
-      assert.match(cards[0].html, /Ваш личный и общие дашборды/);
-    }
+    const html = render({ managerDashboardMode: 'view', managerDashboardAudience });
+    assert.deepEqual(managerCards(html), []);
+    assert.equal([...html.matchAll(/href="\/admin\/top"/g)].length, 1);
   }
+});
+
+test('a purchaser-style reports-only home never shows operational or management sections', () => {
+  const html = render({ isTopAreaOnlyUser: true, canAccessReportsCatalog: true, topDashboardMode: 'view' });
+  assert.match(html, /href="\/admin\/top"/);
+  assert.doesNotMatch(html, /href="\/admin\/(site|clients|analogs|wholesale)/);
+  assert.deepEqual(managerCards(html), []);
 });
 
 test('no manager permission or missing viewer audience exposes no dashboard card', () => {

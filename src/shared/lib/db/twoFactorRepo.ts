@@ -11,7 +11,7 @@ export type TwoFactorChallengeActor =
       challengeId: string;
       createdAt: string;
       actorType: 'admin';
-      role: 'admin' | 'wholesale_admin' | 'top' | 'admintop';
+      role: 'admin' | 'wholesale_admin' | 'top' | 'admintop' | 'purchaser';
       login: string;
       adminUserId?: number;
     }
@@ -50,7 +50,7 @@ function hashTwoFactorCode(challengeId: string, loginSessionId: string, code: st
 export async function createTwoFactorChallenge(input: {
   login: string;
   actorType: TwoFactorActorType;
-  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'client';
+  role: 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'purchaser' | 'client';
   adminUserId?: number | null;
   managerId?: number | null;
   clientUserId?: number | null;
@@ -174,6 +174,7 @@ export async function consumeTwoFactorChallenge(input: {
     && row.role !== 'wholesale_admin'
     && row.role !== 'top'
     && row.role !== 'admintop'
+    && row.role !== 'purchaser'
   ) return null;
 
   return {

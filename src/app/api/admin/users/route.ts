@@ -1,13 +1,14 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireAdminSession } from '@/shared/lib/adminAuth';
-import { createAccessUser, getAccessUsers, type AccessUserRole } from '@/shared/lib/db';
+import { createAccessUser, getAccessUsers, getTopDashboardBlocks, type AccessUserRole } from '@/shared/lib/db';
+import { PURCHASER_DASHBOARD_REPORT_OPTIONS, parseDashboardAccess } from '@/shared/lib/dashboardAccess';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
-const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager', 'top', 'admintop']);
+const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager', 'top', 'admintop', 'purchaser']);
 
 function normalizeRole(value: unknown): AccessUserRole | null {
   return typeof value === 'string' && ACCESS_ROLES.has(value as AccessUserRole) ? (value as AccessUserRole) : null;
@@ -27,8 +28,15 @@ export async function GET() {
   const { denied, session } = await requireAdminSession();
   if (denied) return denied;
 
-  const users = await getAccessUsers(session.adminUserId ?? null);
-  return Response.json({ users });
+  const [users, blocks] = await Promise.all([
+    getAccessUsers(session.adminUserId ?? null),
+    getTopDashboardBlocks(),
+  ]);
+  const dashboardOptions = [
+    ...PURCHASER_DASHBOARD_REPORT_OPTIONS,
+    ...blocks.map((block) => ({ key: `top:${block.id}`, title: block.title })),
+  ];
+  return Response.json({ users, dashboardOptions }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
 export async function POST(request: Request) {
@@ -46,6 +54,8 @@ export async function POST(request: Request) {
   const email = normalizeTextField(body.email, 160);
   const password = typeof body.password === 'string' ? body.password : '';
   const role = normalizeRole(body.role);
+  const dashboardAccess = body.dashboardAccess === undefined ? undefined : parseDashboardAccess(body.dashboardAccess);
+  if (dashboardAccess === null) return badRequest('Некорректный список доступных дашбордов');
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
   if (body.canManageTopDashboard !== undefined && typeof body.canManageTopDashboard !== 'boolean') {
     return badRequest('Некорректное значение доступа «Админ TOP»');
@@ -72,6 +82,7 @@ export async function POST(request: Request) {
       role,
       isActive,
       canManageTopDashboard,
+      dashboardAccess,
       supportManagerId,
       passwordHash: hashPassword(password),
     });
@@ -92,6 +103,7 @@ export async function POST(request: Request) {
         role: user.role,
         source: user.source,
         canManageTopDashboard: user.canManageTopDashboard,
+        dashboardAccess: user.dashboardAccess,
       },
     });
 

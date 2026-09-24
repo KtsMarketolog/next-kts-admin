@@ -5,6 +5,7 @@ import {
   requireTopDashboardSession,
 } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
+import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
 import {
   createTopDashboardBlock,
   getPublishedTopDashboardBlocks,
@@ -27,7 +28,7 @@ export async function GET() {
       ? await getTopDashboardBlocks()
       : await getPublishedTopDashboardBlocks();
     return Response.json(
-      { blocks },
+      { blocks: blocks.filter((block) => canReadTopDashboardBlock(session, block.id)) },
       { headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {

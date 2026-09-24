@@ -1,9 +1,12 @@
 import type { Dispatch, SetStateAction } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
+import type { DashboardAccessOption } from '@/shared/lib/dashboardAccess';
 
 import { ROLE_LABELS, USER_TABS, addButtonLabel, roleOptionsForTab } from './AdminUsersConfig';
 import type { AccessUser, AccessUserRole, Draft, UserTab } from './AdminUsersTypes';
+import { AdminUsersDashboardAccessFields } from './AdminUsersDashboardAccessFields';
+import accessStyles from './AdminUsersDashboardAccess.module.scss';
 
 type AdminUsersViewProps = {
   users: AccessUser[];
@@ -15,6 +18,10 @@ type AdminUsersViewProps = {
   busyId: string | null;
   savedId: string | null;
   loading: boolean;
+  dashboardOptions: DashboardAccessOption[] | null;
+  dashboardOptionsLoading: boolean;
+  dashboardOptionsError: string | null;
+  reloadDashboardOptions: () => Promise<void>;
   passwordDrafts: Record<string, string>;
   passwordEditIds: Record<string, boolean>;
   setPasswordDrafts: Dispatch<SetStateAction<Record<string, string>>>;
@@ -37,6 +44,10 @@ export function AdminUsersView({
   busyId,
   savedId,
   loading,
+  dashboardOptions,
+  dashboardOptionsLoading,
+  dashboardOptionsError,
+  reloadDashboardOptions,
   passwordDrafts,
   passwordEditIds,
   setPasswordDrafts,
@@ -49,6 +60,7 @@ export function AdminUsersView({
   deleteUser,
 }: AdminUsersViewProps) {
   const activeRoleOptions = roleOptionsForTab(activeTab);
+  const purchaserSaveBlocked = dashboardOptionsLoading || dashboardOptions === null;
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -67,7 +79,7 @@ export function AdminUsersView({
         ))}
       </div>
 
-      <div className={`${styles.userCreateCard} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
+      <div className={`${styles.userCreateCard} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''} ${activeTab === 'purchaser' ? accessStyles.purchaserCreate : ''}`}>
         <div className={styles.autofillGuard} aria-hidden="true">
           <input tabIndex={-1} autoComplete="username" />
           <input tabIndex={-1} type="password" autoComplete="current-password" />
@@ -150,7 +162,22 @@ export function AdminUsersView({
             Активен
           </label>
         </div>
-        <button className={savedId === 'new' ? styles.savedButton : undefined} disabled={busyId === 'new'} onClick={createUser}>
+        {draft.role === 'purchaser' && (
+          <AdminUsersDashboardAccessFields
+            value={draft.dashboardAccess}
+            options={dashboardOptions}
+            loading={dashboardOptionsLoading}
+            error={dashboardOptionsError}
+            disabled={busyId === 'new'}
+            onRetry={reloadDashboardOptions}
+            onChange={(dashboardAccess) => setDraft((current) => ({ ...current, dashboardAccess }))}
+          />
+        )}
+        <button
+          className={savedId === 'new' ? styles.savedButton : undefined}
+          disabled={busyId === 'new' || (draft.role === 'purchaser' && purchaserSaveBlocked)}
+          onClick={createUser}
+        >
           {savedId === 'new' ? 'Сохранено' : addButtonLabel(activeTab)}
         </button>
       </div>
@@ -167,7 +194,7 @@ export function AdminUsersView({
 
             return (
               <article className={styles.userAccessCard} key={user.id}>
-                <div className={`${styles.userAccessFields} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''}`}>
+                <div className={`${styles.userAccessFields} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''} ${activeTab === 'purchaser' ? accessStyles.purchaserFields : ''}`}>
                   <label>
                     <span>Имя</span>
                     <input value={user.name} onChange={(event) => updateUser(user.id, { name: event.target.value })} />
@@ -233,6 +260,18 @@ export function AdminUsersView({
                   </label>
                 </div>
 
+                {user.role === 'purchaser' && (
+                  <AdminUsersDashboardAccessFields
+                    value={user.dashboardAccess}
+                    options={dashboardOptions}
+                    loading={dashboardOptionsLoading}
+                    error={dashboardOptionsError}
+                    disabled={busyId === user.id}
+                    onRetry={reloadDashboardOptions}
+                    onChange={(dashboardAccess) => updateUser(user.id, { dashboardAccess })}
+                  />
+                )}
+
                 <div className={styles.userAccessMeta}>
                   <div className={styles.userAccessToggles}>
                     {user.role === 'top' && (
@@ -283,7 +322,7 @@ export function AdminUsersView({
                     </button>
                     <button
                       className={savedId === user.id ? styles.savedButton : undefined}
-                      disabled={busyId === user.id}
+                      disabled={busyId === user.id || (user.role === 'purchaser' && purchaserSaveBlocked)}
                       onClick={() => saveUser(user)}
                     >
                       {savedId === user.id ? 'Сохранено' : 'Сохранить'}

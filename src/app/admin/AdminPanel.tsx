@@ -19,6 +19,7 @@ import { TopDashboardViewer } from '@/features/admin/top-dashboard/TopDashboardV
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
 import type { AdminSection, SettingKey } from '@/features/admin/types';
 import type { AdminSession } from '@/shared/lib/adminAuth';
+import { canAccessReportsCatalog, getReportEntries } from '@/shared/lib/dashboardAccess';
 
 import { AdminSiteContent } from './AdminSiteContent';
 import { AdminSiteSidebar } from './AdminSiteSidebar';
@@ -45,6 +46,7 @@ function canRoleAccessTopDashboard(
   return role === 'admin'
     || role === 'admintop'
     || role === 'top'
+    || role === 'purchaser'
     || (isManagerRole(role) && explicitPermission === true);
 }
 
@@ -58,7 +60,7 @@ function canRoleManageTopDashboard(
 }
 
 function isTopAreaOnlyRole(role: AdminSession['role'] | null | undefined) {
-  return role === 'top' || role === 'admintop';
+  return role === 'top' || role === 'admintop' || role === 'purchaser';
 }
 
 export default function AdminPanel({
@@ -73,6 +75,7 @@ export default function AdminPanel({
   const [authenticated, setAuthenticated] = useState(Boolean(initialSession));
   const [sessionReady, setSessionReady] = useState(Boolean(initialSession));
   const [sessionRole, setSessionRole] = useState<AdminSession['role'] | null>(initialSession?.role ?? null);
+  const [reportSession, setReportSession] = useState<AdminSession | null>(initialSession);
   const [canAccessTopDashboard, setCanAccessTopDashboard] = useState(
     canRoleAccessTopDashboard(initialSession?.role, initialSession?.canAccessTopDashboard),
   );
@@ -83,6 +86,7 @@ export default function AdminPanel({
     if (isTopAreaOnlyRole(initialSession?.role)) return initialArea === 'top' ? 'top' : 'home';
     return initialSession?.role !== 'admin' && initialArea === 'site' ? 'home' : initialArea;
   });
+  const canAccessCatalog = canAccessReportsCatalog(reportSession);
   const [activeSection, setActiveSection] = useState<AdminSection>('info');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -134,7 +138,7 @@ export default function AdminPanel({
 
   const switchArea = (area: AdminArea) => {
     if (area === 'top') {
-      if (!canAccessTopDashboard) return;
+      if (!canAccessCatalog) return;
       router.replace('/admin/top', { scroll: false });
       return;
     }
@@ -189,12 +193,14 @@ export default function AdminPanel({
 
       if (!session?.authenticated) {
         setSessionRole(null);
+        setReportSession(null);
         setCanAccessTopDashboard(false);
         setCanManageTopDashboard(false);
         setAuthenticated(false);
       } else {
         const nextRole = normalizeSessionRole(session.role);
         setSessionRole(nextRole);
+        setReportSession(nextRole ? {...session, role: nextRole} : null);
         setCanAccessTopDashboard(
           canRoleAccessTopDashboard(nextRole, session.canAccessTopDashboard),
         );
@@ -258,6 +264,7 @@ export default function AdminPanel({
           const nextRole = normalizeSessionRole(data.role);
           if (!nextRole) {
             setSessionRole(null);
+            setReportSession(null);
             setCanAccessTopDashboard(false);
             setCanManageTopDashboard(false);
             setAuthenticated(false);
@@ -269,6 +276,8 @@ export default function AdminPanel({
             data.canAccessTopDashboard,
           );
           setSessionRole(nextRole);
+          const nextReportSession = {...data, role: nextRole};
+          setReportSession(nextReportSession);
           setCanAccessTopDashboard(nextCanAccessTopDashboard);
           setCanManageTopDashboard(
             canRoleManageTopDashboard(nextRole, data.canManageTopDashboard),
@@ -282,10 +291,13 @@ export default function AdminPanel({
             if (!isTopPath && !isHomePath) {
               router.replace('/admin', { scroll: false });
             }
+            if (nextRole === 'purchaser' && isHomePath) router.replace('/admin/top', { scroll: false });
             return;
           }
           if (nextRole !== 'admin') {
-            if (isTopDashboardPath(pathname) && !nextCanAccessTopDashboard) {
+            const topAllowed = /^\/admin\/top\/?$/.test(pathname)
+              ? canAccessReportsCatalog(nextReportSession) : nextCanAccessTopDashboard;
+            if (isTopDashboardPath(pathname) && !topAllowed) {
               router.replace('/admin', { scroll: false });
               return;
             }
@@ -299,6 +311,7 @@ export default function AdminPanel({
           });
         } else {
           setSessionRole(null);
+          setReportSession(null);
           setCanAccessTopDashboard(false);
           setCanManageTopDashboard(false);
           setAuthenticated(false);
@@ -310,6 +323,7 @@ export default function AdminPanel({
         console.error('Failed to verify admin session', error);
         if (!authenticatedRef.current) {
           setSessionRole(null);
+          setReportSession(null);
           setCanAccessTopDashboard(false);
           setCanManageTopDashboard(false);
           setAuthenticated(false);
@@ -330,12 +344,14 @@ export default function AdminPanel({
       if (!isTopPath && !isHomePath) {
         router.replace('/admin', { scroll: false });
       }
+      if (sessionRole === 'purchaser' && isHomePath) router.replace('/admin/top', { scroll: false });
       return;
     }
 
     if (isTopDashboardPath(pathname)) {
-      setActiveArea(canAccessTopDashboard ? 'top' : 'home');
-      if (sessionReady && sessionRole && !canAccessTopDashboard) {
+      const allowed = /^\/admin\/top\/?$/.test(pathname) ? canAccessCatalog : canAccessTopDashboard;
+      setActiveArea(allowed ? 'top' : 'home');
+      if (sessionReady && sessionRole && !allowed) {
         router.replace('/admin', { scroll: false });
       }
       return;
@@ -369,7 +385,7 @@ export default function AdminPanel({
     }
 
     setActiveArea(initialArea);
-  }, [canAccessTopDashboard, initialArea, pathname, router, sessionReady, sessionRole]);
+  }, [canAccessCatalog, canAccessTopDashboard, initialArea, pathname, router, sessionReady, sessionRole]);
 
   useEffect(() => {
     if (pathname.startsWith('/admin/site/users')) {
@@ -450,9 +466,7 @@ export default function AdminPanel({
         ? canManageTopDashboard
           ? 'Редактор HTML-страницы'
           : 'Готовый отчёт'
-        : canManageTopDashboard
-          ? 'HTML-страницы и отчёты'
-          : 'Готовые отчёты'
+        : 'HTML-страницы и отчёты'
       : activeArea === 'site'
         ? 'Управление сайтом'
         : activeArea === 'wholesale'
@@ -485,6 +499,7 @@ export default function AdminPanel({
         onLogout={async () => {
           await fetch('/api/admin/logout', { method: 'POST' });
           setSessionRole(null);
+          setReportSession(null);
           setCanAccessTopDashboard(false);
           setCanManageTopDashboard(false);
           setAuthenticated(false);
@@ -497,6 +512,7 @@ export default function AdminPanel({
       {activeArea === 'home' && (
         <AdminDashboard
           canAccessSite={sessionRole === 'admin'}
+          canAccessReportsCatalog={canAccessCatalog}
           topDashboardMode={topDashboardMode}
           managerDashboardMode={sessionRole === 'admin' || sessionRole === 'admintop' ? 'manage' : isManagerRole(sessionRole) ? 'view' : null}
           managerDashboardAudience={sessionRole === 'manager' ? 'development' : sessionRole === 'support_manager' ? 'support' : null}
@@ -524,7 +540,10 @@ export default function AdminPanel({
           )
         ) : (
           <AdminTopDashboardCatalog
+            key={JSON.stringify([reportSession?.role, reportSession?.adminUserId, reportSession?.managerId, reportSession?.dashboardAccess, canAccessTopDashboard])}
             canManage={canManageTopDashboard}
+            canReadTopBlocks={canAccessTopDashboard}
+            reportEntries={getReportEntries(reportSession)}
             showStatus={showStatus}
           />
         )

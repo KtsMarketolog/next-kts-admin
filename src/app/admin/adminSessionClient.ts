@@ -2,7 +2,7 @@ import type { AdminSession } from '@/shared/lib/adminAuth';
 
 import { isManagerRole } from './adminPanelConfig';
 
-export type AdminSessionResponse = {
+export type AdminSessionResponse = Partial<Omit<AdminSession, 'role'>> & {
   authenticated?: boolean;
   role?: AdminSession['role'] | null;
   canAccessTopDashboard?: boolean;
@@ -46,6 +46,6 @@ export async function fetchAdminSessionWithRetry(attempts = 4) {
 
 export function normalizeSessionRole(role: AdminSessionResponse['role']) {
   if (isManagerRole(role)) return role as AdminSession['role'];
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'top' || role === 'admintop') return role;
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'top' || role === 'admintop' || role === 'purchaser') return role;
   return null;
 }

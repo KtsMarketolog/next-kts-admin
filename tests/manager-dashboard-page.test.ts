@@ -77,6 +77,8 @@ test('query parameters never grant dashboard access to missing or unauthorized s
     { role: 'support_manager', managerId: 0, sessionId: 'synthetic' },
     { role: 'wholesale_admin', adminUserId: 3, sessionId: 'synthetic' },
     { role: 'top', adminUserId: 3, sessionId: 'synthetic' },
+    { role: 'purchaser', adminUserId: 3, sessionId: 'synthetic', dashboardAccess: ['route-planner', 'top:7'] },
+    { role: 'purchaser', adminUserId: 3, sessionId: 'synthetic', dashboardAccess: ['manager:development', 'manager:support'] },
   ];
   for (const session of sessions) {
     for (const audience of [undefined, 'development', 'support']) {

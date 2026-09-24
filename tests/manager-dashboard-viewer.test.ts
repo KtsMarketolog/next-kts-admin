@@ -11,6 +11,7 @@ import ts from 'typescript';
 
 import * as audiences from '../src/shared/lib/managerDashboardAudience';
 import { isManagerRole } from '../src/app/admin/adminPanelConfig';
+import { getReportEntries } from '../src/shared/lib/dashboardAccess';
 import * as sharedJsonUpload from '../src/features/admin/manager-dashboard/sharedJsonUpload';
 
 import type { ManagerDashboardOverview, ManagerDashboardSnapshot } from '../src/features/admin/manager-dashboard/types';
@@ -19,7 +20,7 @@ import type { ManagerDashboardOverview, ManagerDashboardSnapshot } from '../src/
 const requireForViewer = createRequire(import.meta.url);
 const previousStyleLoader = requireForViewer.extensions['.scss'];
 requireForViewer.extensions['.scss'] = (module) => { module.exports = {}; };
-const { ManagerDashboardViewer, managerDashboardViewIdentity } = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardViewer.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardViewer');
+const { ManagerDashboardViewer, RoutePlannerViewer, managerDashboardViewIdentity } = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardViewer.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardViewer');
 const parts = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardParts.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardParts');
 const { ManagerDashboardImportJournal } = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardImportJournal.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardImportJournal');
 const { ManagerDashboardManagement } = requireForViewer('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx') as typeof import('../src/features/admin/manager-dashboard/ManagerDashboardManagement');
@@ -38,6 +39,10 @@ const base: View = {
 
 function render(overview: View) {
   return renderToStaticMarkup(createElement(ManagerDashboardViewer, { overview, loading: false, onReload: async () => true }));
+}
+
+function renderShared(shared: Manage['supportShared']) {
+  return renderToStaticMarkup(createElement(RoutePlannerViewer, { shared, loading: false, onReload: async () => true }));
 }
 
 function frameUrl(html: string) {
@@ -155,6 +160,7 @@ function text(node: unknown): string {
 // refs. No browser, server, application auth, real payload or mutation is used.
 function management(options: {
   overview?: Manage; busy?: boolean;
+  section?: 'personal' | 'shared';
   audience?: audiences.PersonalDashboardAudience;
   confirm?: () => boolean;
   mutate?: (path: string, init: RequestInit) => Promise<import('../src/features/admin/manager-dashboard/types').ManagerDashboardMutationResult | null>;
@@ -194,7 +200,7 @@ function management(options: {
   let focusedInput = '';
   const render = () => {
     cursor = 0;
-    const tree = testModule.exports.ManagerDashboardManagement({ overview, audience: options.audience, busy: options.busy ?? false, mutate: async (path: string, init: RequestInit) => {
+    const tree = testModule.exports.ManagerDashboardManagement({ overview, section: options.section, audience: options.audience, busy: options.busy ?? false, mutate: async (path: string, init: RequestInit) => {
       requests.push({ path, init });
       return options.mutate ? options.mutate(path, init) : { results: overview.imports };
     } });
@@ -243,6 +249,10 @@ function management(options: {
   return { render, find, group, versionButton, selectFiles, submit, preview, settle, requests, confirmations, inputs, focusedInput: () => focusedInput };
 }
 
+function sharedManagement(options: Parameters<typeof management>[0] = {}) {
+  return management({ overview: { ...managementOverview(), supportShared: sharedOverview() }, ...options, section: 'shared' });
+}
+
 test('management shows both independently labelled groups together without tabs and keeps common controls below them', () => {
   const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview: managementOverview(), busy: false, mutate: async () => null }));
   assert.doesNotMatch(html, /role="tab(?:list|panel)?"|manager-dashboard-tab-/);
@@ -267,7 +277,7 @@ test('management shows both independently labelled groups together without tabs 
   assert.equal(tree.filter((node) => node.type === 'button' && text(node.props.children) === 'Проверить почту сейчас').length, 0);
   assert.doesNotMatch(html, /Почт|почт|Ежедневное обновление/);
   assert.equal((html.match(/Личный HTML дашборда/g) ?? []).length, 2);
-  assert.equal((html.match(/Общий HTML дашборда<\/h2>/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /manager-dashboard-shared-|Общий HTML дашборда/);
   assert.equal(tree.filter((node) => node.type === ManagerDashboardImportJournal).length, 1);
   assert.equal((html.match(/Журнал импорта/g) ?? []).length, 1);
   const journal = view.find(ManagerDashboardImportJournal);
@@ -313,18 +323,42 @@ test('working HTML and separate draft lists follow all management work, while la
   }
 });
 
-test('viewer places personal and shared history after every report for KTSP and HTML-bound JSON', () => {
+test('route-planner management keeps version history below upload and preview without any personal controls', () => {
+  for (const shared of [sharedOverview(), sharedJsonOverview()]) {
+    const view = sharedManagement({ overview: { ...managementOverview(), supportShared: shared } });
+    (sharedVersionButton(view, 33, 'Предпросмотр общего HTML').props.onClick as () => void)();
+    const tree = elements(view.render());
+    const history = tree.findIndex((node) => node.props.id === 'manager-dashboard-html-history');
+    assert.ok(history > tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-support'));
+    assert.ok(history > tree.findIndex((node) => node.props.id === 'manager-dashboard-html-preview'));
+    const rows = tree.filter((node) => node.type === 'tr' && node.props['data-version-id']);
+    assert.equal(rows.length, 3);
+    assert.ok(rows.every((node) => node.props['data-version-audience'] === 'support-shared' && tree.indexOf(node) > history));
+    assert.equal(tree.some((node) => node.type === ManagerDashboardImportJournal), false);
+    const ids = tree.map((node) => node.props.id).filter((id): id is string => typeof id === 'string');
+    assert.equal(new Set(ids).size, ids.length);
+    assert.equal(ids.some((id) => /^manager-dashboard-(?:group-|snapshots$|html-development$|html-support$)/.test(id)), false);
+  }
+});
+
+test('separate personal and route-planner pages keep their own history below the report for KTSP and HTML-bound JSON', () => {
   for (const shared of [sharedOverview(), sharedJsonOverview()]) {
     const html = render({ ...base, audience: 'support', snapshot, history: [snapshot, { ...snapshot, id: 16 }], supportShared: shared });
     const history = html.indexOf('id="manager-dashboard-data-history"');
-    assert.ok(history > html.lastIndexOf('</iframe>'), 'history is after both frames in the DOM');
+    assert.ok(history > html.lastIndexOf('</iframe>'), 'personal history follows the personal frame');
     assert.ok(html.indexOf('id="manager-dashboard-history"') > history);
-    assert.ok(html.indexOf('id="manager-dashboard-shared-history"') > history);
     assert.equal((html.match(/id="manager-dashboard-history"/g) ?? []).length, 1);
-    assert.equal((html.match(/id="manager-dashboard-shared-history"/g) ?? []).length, 1);
+    assert.doesNotMatch(html, /manager-dashboard-shared-history|shared\/frame/);
+    const route = renderShared(shared);
+    const sharedHistory = route.indexOf('id="manager-dashboard-data-history"');
+    assert.ok(sharedHistory > route.lastIndexOf('</iframe>'), 'shared history follows the route-planner frame');
+    assert.ok(route.indexOf('id="manager-dashboard-shared-history"') > sharedHistory);
+    assert.equal((route.match(/id="manager-dashboard-shared-history"/g) ?? []).length, 1);
+    assert.doesNotMatch(route, /id="manager-dashboard-history"|synthetic-manager.ktsp/);
     const unmatched = render({ ...base, audience: 'support', bindingStatus: 'ambiguous_email', snapshot, history: [snapshot, { ...snapshot, id: 16 }], supportShared: shared });
     assert.doesNotMatch(unmatched, /id="manager-dashboard-history"|synthetic-manager.ktsp/);
-    assert.match(unmatched, /id="manager-dashboard-shared-history"/);
+    assert.doesNotMatch(unmatched, /id="manager-dashboard-shared-history"/);
+    assert.equal(renderShared(shared), route, 'personal binding does not change the separate common report');
   }
 });
 
@@ -500,20 +534,34 @@ test('external busy blocks uploads, previews, publications and shared controls f
   }
   view.selectFiles('manager-dashboard-snapshots', [new File(['synthetic'], 'support.ktsp')]);
   view.submit('manager-dashboard-snapshots');
-  view.selectFiles('manager-dashboard-shared-html', [new File(['<html>shared</html>'], 'shared.html')]);
-  view.submit('manager-dashboard-shared-html');
-  view.selectFiles('manager-dashboard-shared-snapshot', [new File(['synthetic'], 'shared.ktsp')]);
-  view.submit('manager-dashboard-shared-snapshot');
+  const shared = sharedManagement({ busy: true });
+  shared.selectFiles('manager-dashboard-shared-html', [new File(['<html>shared</html>'], 'shared.html')]);
+  shared.submit('manager-dashboard-shared-html');
+  shared.selectFiles('manager-dashboard-shared-snapshot', [new File(['synthetic'], 'shared.ktsp')]);
+  shared.submit('manager-dashboard-shared-snapshot');
+  for (const label of ['Предпросмотр общего HTML', 'Опубликовать общий HTML', 'Удалить']) {
+    const button = sharedVersionButton(shared, 33, label);
+    assert.equal(button.props.disabled, true);
+    (button.props.onClick as () => void)();
+  }
   assert.equal(view.requests.length, 0);
   assert.equal(view.confirmations.length, 0);
   assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
+  assert.equal(shared.requests.length, 0);
+  assert.equal(shared.confirmations.length, 0);
+  assert.equal(elements(shared.render()).some((node) => node.type === parts.SharedDashboardFrame), false);
 });
 
-test('support manager dashboard card keeps the shared manager-role guard', () => {
+test('report navigation keeps personal audience guards and exposes the route planner separately to support', () => {
   assert.equal(isManagerRole('manager'), true);
   assert.equal(isManagerRole('support_manager'), true);
   assert.equal(isManagerRole('wholesale_admin'), false);
-  assert.match(readFileSync(new URL('../src/app/admin/AdminPanel.tsx', import.meta.url), 'utf8'), /managerDashboardMode=\{[^\n]+isManagerRole\(sessionRole\) \? 'view' : null\}/);
+  const identity = { managerId: 2, sessionId: 'synthetic-session' };
+  assert.deepEqual(getReportEntries({ ...identity, role: 'manager' }).map((entry) => entry.key), ['manager:development']);
+  assert.deepEqual(getReportEntries({ ...identity, role: 'support_manager' }).map((entry) => entry.key), ['manager:support', 'route-planner']);
+  assert.deepEqual(getReportEntries({ ...identity, role: 'wholesale_admin' }), []);
+  assert.deepEqual(getReportEntries({ role: 'support_manager', sessionId: 'synthetic-session' }), []);
+  assert.deepEqual(getReportEntries({ role: 'support_manager', managerId: 2 }), []);
 });
 
 function sharedOverview(): NonNullable<Manage['supportShared']> {
@@ -545,9 +593,7 @@ test('MR/MS management pages isolate HTML and manager lists but preserve the sha
     assert.match(html, new RegExp(`Only ${audience} manager`));
     assert.doesNotMatch(html, new RegExp(`manager-dashboard-group-${other}|manager-dashboard-html-${other}|Only ${other} manager`));
     assert.equal((html.match(/Личный HTML дашборда/g) ?? []).length, 1);
-    assert.equal((html.match(/Общий HTML дашборда<\/h2>/g) ?? []).length, audience === 'support' ? 1 : 0);
-    if (audience === 'support') assert.match(html, /route-current.json/);
-    else assert.doesNotMatch(html, /manager-dashboard-shared-json|route-current.json|shared-31.html/);
+    assert.doesNotMatch(html, /manager-dashboard-shared-|route-current.json|shared-31.html/);
     assert.equal((html.match(/id="manager-dashboard-snapshots"/g) ?? []).length, 1);
     assert.equal((html.match(/Журнал импорта/g) ?? []).length, 1);
     assert.match(html, /common-development.ktsp/);
@@ -565,42 +611,47 @@ test('MR/MS management pages isolate HTML and manager lists but preserve the sha
 
 test('shared JSON mode hides legacy email/password fields and binds upload to the active HTML version', () => {
   const overview = { ...managementOverview(), supportShared: sharedJsonOverview() };
-  const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview, busy: false, mutate: async () => null }));
+  const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview, section: 'shared', busy: false, mutate: async () => null }));
   assert.match(html, /manager-dashboard-shared-json/);
   assert.match(html, /JSON-снимок компоновщика · до 100 МБ/);
   assert.match(html, /route-current.json/);
   assert.doesNotMatch(html, /manager-dashboard-shared-email|manager-dashboard-shared-snapshot|shared-current.ktsp/);
-  for (const audience of ['development', 'support']) assert.match(html, new RegExp(`manager-dashboard-html-${audience}`));
-  assert.match(html, /manager-dashboard-snapshots/);
+  assert.doesNotMatch(html, /manager-dashboard-html-development|manager-dashboard-html-support|manager-dashboard-snapshots|Журнал импорта|Only development|Only support/);
 });
 
 test('shared JSON viewer uses JSON metadata and frame ID without email/password or stale legacy data', () => {
-  const html = render({ ...base, audience: 'support', bindingStatus: 'missing_email', email: '', supportShared: sharedJsonOverview() });
+  const html = renderShared(sharedJsonOverview());
   assert.match(html, /route-current.json|route-previous.json/);
   assert.doesNotMatch(html, /shared-current.ktsp|shared-previous.ktsp|введите пароль от общего файла/);
   assert.match(html, /JSON загружается автоматически, без email и пароля/);
   const urls = [...html.matchAll(/<iframe[^>]+src="([^"]+)"/g)].map((match) => new URL(match[1].replaceAll('&amp;', '&'), 'https://example.test'));
-  assert.equal(urls[1].searchParams.get('snapshot'), '217');
-  assert.equal(urls[1].searchParams.get('version'), '31');
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0].pathname, '/api/admin/manager-dashboard/shared/frame');
+  assert.equal(urls[0].searchParams.get('snapshot'), '217');
+  assert.equal(urls[0].searchParams.get('version'), '31');
   const shared = sharedJsonOverview();
   shared.jsonSnapshot!.htmlVersionId = 99;
   shared.jsonHistory!.forEach((item) => { item.htmlVersionId = 99; });
-  const incompatible = render({ ...base, audience: 'support', supportShared: shared });
+  const incompatible = renderShared(shared);
   assert.match(incompatible, /JSON для этой версии общего HTML ещё не загружен/);
   assert.doesNotMatch(incompatible, /route-current.json|route-previous.json|snapshot=217|snapshot=216/);
-  assert.doesNotMatch(render({ ...base, supportShared: sharedJsonOverview() }), /route-current.json|shared\/frame/);
+  for (const audience of ['development', 'support'] as const) {
+    assert.doesNotMatch(render({ ...base, audience, supportShared: sharedJsonOverview() }), /route-current.json|shared\/frame/);
+  }
 });
 
 test('shared JSON upload sends one bounded gzip request with exact version and snapshot CAS, without recipient email', async () => {
   const overview = { ...managementOverview(), supportShared: sharedJsonOverview() };
-  const view = management({ overview });
+  const view = sharedManagement({ overview });
+  const personal = management({ overview, audience: 'support' });
   const file = new File(['{"snapshot":true,"orders":[]}'], 'общий_снимок.json');
   view.selectFiles('manager-dashboard-shared-json', [file]);
-  view.selectFiles('manager-dashboard-html-support', [new File(['html'], 'personal.html')]);
+  personal.selectFiles('manager-dashboard-html-support', [new File(['html'], 'personal.html')]);
   view.submit('manager-dashboard-shared-json');
   view.submit('manager-dashboard-shared-json');
   (sharedVersionButton(view, 33, 'Опубликовать общий HTML').props.onClick as () => void)();
-  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-html-support').props.disabled, true);
+  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-shared-html').props.disabled, true);
+  assert.equal(personal.find('input', (props) => props.id === 'manager-dashboard-html-support').props.disabled, false);
   for (let attempt = 0; attempt < 100 && view.requests.length === 0; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
   await view.settle();
   assert.equal(view.requests.length, 1);
@@ -611,15 +662,16 @@ test('shared JSON upload sends one bounded gzip request with exact version and s
   });
   assert.equal(gunzipSync(Buffer.from(await (view.requests[0].init.body as Blob).arrayBuffer())).toString(), await file.text());
   assert.equal(view.inputs.get('manager-dashboard-shared-json')!.value, '');
-  assert.equal(view.inputs.get('manager-dashboard-html-support')!.value, 'synthetic-selection');
+  assert.equal(personal.inputs.get('manager-dashboard-html-support')!.value, 'synthetic-selection');
+  assert.equal(personal.requests.length, 0);
   assert.equal(view.confirmations.length, 1);
-  assert.match(view.confirmations[0], /ВСЕХ менеджеров по сопровождению/);
+  assert.match(view.confirmations[0], /ВСЕХ сотрудников с доступом к компоновщику/);
   assert.match(view.confirmations[0], /shared-31.html/);
 });
 
 test('shared JSON cancelled confirmation and preparation failure preserve files and do not mutate', async () => {
   for (const confirm of [false, true]) {
-    const view = management({ overview: { ...managementOverview(), supportShared: sharedJsonOverview() }, confirm: () => confirm });
+    const view = sharedManagement({ overview: { ...managementOverview(), supportShared: sharedJsonOverview() }, confirm: () => confirm });
     view.selectFiles('manager-dashboard-shared-json', [new File(['bad extension'], 'personal.ktsp')]);
     view.submit('manager-dashboard-shared-json');
     await view.settle();
@@ -631,7 +683,7 @@ test('shared JSON cancelled confirmation and preparation failure preserve files 
 });
 
 test('deleting inactive route planner HTML discloses removal of its bound JSON history while protecting the active report', async () => {
-  const view = management({ overview: { ...managementOverview(), supportShared: sharedJsonOverview() } });
+  const view = sharedManagement({ overview: { ...managementOverview(), supportShared: sharedJsonOverview() } });
   (sharedVersionButton(view, 33, 'Удалить').props.onClick as () => void)();
   await view.settle();
   assert.equal(view.requests[0].path, '/shared/html?id=33');
@@ -650,22 +702,26 @@ function sharedVersionButton(view: ReturnType<typeof management>, id: number, la
   return button;
 }
 
-test('support shows separate personal and shared reports even when personal email is missing or ambiguous', () => {
+test('the separate route-planner page stays available independently of missing or ambiguous personal email', () => {
   for (const bindingStatus of ['matched', 'missing_email', 'ambiguous_email'] as const) {
     const html = render({ ...base, audience: 'support', bindingStatus, email: '', snapshot, supportShared: sharedOverview() });
     assert.match(html, /Личный дашборд/);
-    assert.match(html, /Общий дашборд/);
+    assert.doesNotMatch(html, /Компоновщик рейсов|shared-current.ktsp|manager-dashboard-shared-history|shared\/frame/);
     const urls = [...html.matchAll(/<iframe[^>]+src="([^"]+)"/g)].map((match) => new URL(match[1].replaceAll('&amp;', '&'), 'https://example.test'));
-    assert.equal(urls.length, 2);
+    assert.equal(urls.length, 1);
     assert.equal(urls[0].pathname, '/api/admin/manager-dashboard/frame');
-    assert.equal(urls[1].pathname, '/api/admin/manager-dashboard/shared/frame');
-    assert.equal(urls[1].searchParams.get('version'), '31');
-    assert.equal(urls[1].searchParams.get('snapshot'), '117');
-    assert.equal(urls[1].searchParams.has('audience'), false);
-    assert.equal(urls[1].searchParams.has('email'), false);
-    assert.match(html, /shared-current.ktsp/);
-    assert.match(html, /manager-dashboard-shared-history/);
     assert.equal(urls[0].searchParams.has('snapshot'), bindingStatus === 'matched');
+    const route = renderShared(sharedOverview());
+    assert.match(route, /Компоновщик рейсов/);
+    const sharedUrls = [...route.matchAll(/<iframe[^>]+src="([^"]+)"/g)].map((match) => new URL(match[1].replaceAll('&amp;', '&'), 'https://example.test'));
+    assert.equal(sharedUrls.length, 1);
+    assert.equal(sharedUrls[0].pathname, '/api/admin/manager-dashboard/shared/frame');
+    assert.equal(sharedUrls[0].searchParams.get('version'), '31');
+    assert.equal(sharedUrls[0].searchParams.get('snapshot'), '117');
+    assert.equal(sharedUrls[0].searchParams.has('audience'), false);
+    assert.equal(sharedUrls[0].searchParams.has('email'), false);
+    assert.match(route, /shared-current.ktsp|manager-dashboard-shared-history/);
+    assert.doesNotMatch(route, /synthetic-manager.ktsp|Личный дашборд/);
   }
   const development = render({ ...base, supportShared: sharedOverview() });
   assert.doesNotMatch(development, /Общий дашборд|shared-current.ktsp|shared\/frame/);
@@ -685,7 +741,8 @@ test('shared publication works without preview and keeps its own namespace when 
   overview.supportShared = sharedOverview();
   overview.groups[1].htmlVersions[1].id = 32;
   overview.groups[1].previousHtmlVersionId = 32;
-  const view = management({ overview });
+  const view = sharedManagement({ overview });
+  const personal = management({ overview, audience: 'support' });
   const initialPublish = sharedVersionButton(view, 33, 'Опубликовать общий HTML');
   assert.equal(initialPublish.props.disabled, false);
   (initialPublish.props.onClick as () => void)();
@@ -693,7 +750,7 @@ test('shared publication works without preview and keeps its own namespace when 
   assert.equal(view.requests[0].path, '/shared/publish');
   assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { versionId: 33, expectedActiveVersionId: 31 });
   assert.equal(elements(view.render()).some((node) => node.type === parts.SharedDashboardFrame), false);
-  view.preview('support', 32);
+  personal.preview('support', 32);
   const publish = () => sharedVersionButton(view, 32, 'Вернуть общий HTML');
   assert.equal(publish().props.disabled, false);
   (publish().props.onClick as () => void)();
@@ -705,16 +762,18 @@ test('shared publication works without preview and keeps its own namespace when 
   assert.equal(view.find(parts.SharedDashboardFrame).props.preview, true);
   assert.equal(view.find(parts.SharedDashboardFrame).props.snapshotId, undefined);
   assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
-  assert.equal(view.versionButton('support', 32, 'Вернуть группе').props.disabled, false);
+  assert.equal(personal.find(parts.DashboardFrame).props.versionId, 32);
+  assert.equal(personal.versionButton('support', 32, 'Вернуть группе').props.disabled, false);
+  assert.equal(personal.requests.length, 0);
   for (const confirmation of view.confirmations) {
-    assert.match(confirmation, /всех менеджеров по сопровождению/);
+    assert.match(confirmation, /всех сотрудников с доступом к компоновщику/);
     assert.match(confirmation, /Личные дашборды и личные файлы менеджеров сохранятся/);
   }
 });
 
 test('shared HTML deletion protects active version and closes only a matching shared preview', async () => {
   const overview = { ...managementOverview(), supportShared: sharedOverview() };
-  const view = management({ overview });
+  const view = sharedManagement({ overview });
   const active = sharedVersionButton(view, 31, 'Удалить');
   assert.equal(active.props.disabled, true);
   (active.props.onClick as () => void)();
@@ -729,8 +788,9 @@ test('shared HTML deletion protects active version and closes only a matching sh
 
 test('shared HTML upload uses its own namespace and preserves personal file selections', async () => {
   const overview = { ...managementOverview(), supportShared: sharedOverview() };
-  const view = management({ overview, mutate: async () => ({ version: overview.supportShared.htmlVersions[2] }) });
-  view.selectFiles('manager-dashboard-html-support', [new File(['<html>personal</html>'], 'personal.html')]);
+  const view = sharedManagement({ overview, mutate: async () => ({ version: overview.supportShared.htmlVersions[2] }) });
+  const personal = management({ overview, audience: 'support' });
+  personal.selectFiles('manager-dashboard-html-support', [new File(['<html>personal</html>'], 'personal.html')]);
   view.selectFiles('manager-dashboard-shared-html', [new File(['<html>shared</html>'], 'shared.html')]);
   view.submit('manager-dashboard-shared-html');
   await view.settle();
@@ -738,12 +798,13 @@ test('shared HTML upload uses its own namespace and preserves personal file sele
   assert.deepEqual([...(view.requests[0].init.body as FormData).keys()], ['file']);
   assert.equal(view.find(parts.SharedDashboardFrame).props.versionId, 33);
   assert.equal(view.inputs.get('manager-dashboard-shared-html')!.value, '');
-  assert.equal(view.inputs.get('manager-dashboard-html-support')!.value, 'synthetic-selection');
+  assert.equal(personal.inputs.get('manager-dashboard-html-support')!.value, 'synthetic-selection');
+  assert.equal(personal.requests.length, 0);
 });
 
 test('shared snapshot publication validates email and size, requires explicit confirmation and sends compare-and-swap identity', async () => {
   const overview = { ...managementOverview(), supportShared: sharedOverview() };
-  const view = management({ overview });
+  const view = sharedManagement({ overview });
   const id = 'manager-dashboard-shared-snapshot';
   view.selectFiles(id, [new File(['synthetic'], 'shared.ktsp')]);
   view.submit(id);
@@ -765,13 +826,13 @@ test('shared snapshot publication validates email and size, requires explicit co
   assert.equal(form.get('email'), 'shared@example.test');
   assert.equal(form.get('expectedActiveSnapshotId'), '117');
   assert.equal(form.get('confirmShared'), 'true');
-  assert.match(view.confirmations[0], /ВСЕХ менеджеров по сопровождению/);
+  assert.match(view.confirmations[0], /ВСЕХ сотрудников с доступом к компоновщику/);
   assert.match(view.confirmations[0], /Личные дашборды и личные файлы всех менеджеров сохранятся/);
   assert.equal(view.inputs.get(id)!.value, '');
 });
 
 test('cancelling shared publication preserves file selection and does not start a mutation', async () => {
-  const view = management({ overview: { ...managementOverview(), supportShared: sharedOverview() }, confirm: () => false });
+  const view = sharedManagement({ overview: { ...managementOverview(), supportShared: sharedOverview() }, confirm: () => false });
   view.inputs.get('manager-dashboard-shared-email')!.value = 'shared@example.test';
   view.selectFiles('manager-dashboard-shared-snapshot', [new File(['synthetic'], 'shared.ktsp')]);
   view.submit('manager-dashboard-shared-snapshot');
@@ -788,11 +849,12 @@ test('cancelling shared publication preserves file selection and does not start 
   assert.equal(view.find(parts.SharedDashboardFrame).props.versionId, 32);
 });
 
-test('personal and shared history, reload and binding changes keep independent frame state', async () => {
+test('separate personal and shared viewers preserve independent history, reload failures and identity changes', async () => {
   const stateByComponent = new Map<string, unknown[]>();
   let slots: unknown[] = [];
   let cursor = 0;
-  let reloadCount = 0;
+  const reloads: Array<'personal' | 'shared' | undefined> = [];
+  let reloadSucceeds = true;
   const hooks = { useState(initial: unknown) {
     const index = cursor++;
     const currentSlots = slots;
@@ -807,35 +869,42 @@ test('personal and shared history, reload and binding changes keep independent f
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardViewer.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
-  const testModule = { exports: {} as { ManagerDashboardViewer: (props: unknown) => Element } };
+  const testModule = { exports: {} as { ManagerDashboardViewer: (props: unknown) => Element; RoutePlannerViewer: (props: unknown) => Element } };
   new Function('require', 'module', 'exports', code)((name: string) => {
     assert.ok(name in modules, `Unexpected dependency: ${name}`); return modules[name];
   }, testModule, testModule.exports);
   let overview: View = { ...base, audience: 'support', snapshot, history: [snapshot, { ...snapshot, id: 16 }], supportShared: sharedOverview() };
-  const renderState = () => {
-    if (!stateByComponent.has('root')) stateByComponent.set('root', []);
-    slots = stateByComponent.get('root')!;
+  let shared = sharedOverview();
+  const partComponents = new Set(Object.values(parts));
+  const callComponent = (component: (props: unknown) => unknown, props: unknown, key: string) => {
+    if (!stateByComponent.has(key)) stateByComponent.set(key, []);
+    slots = stateByComponent.get(key)!;
     cursor = 0;
-    const tree = testModule.exports.ManagerDashboardViewer({ overview, loading: false, onReload: async () => { reloadCount++; return true; } });
-    return (tree.props.children as Array<Element & { key: string | null }>).flatMap((child) => {
-      if (!child || typeof child.type !== 'function') return [];
-      const componentKey = `${child.type.name}:${child.key}`;
-      if (!stateByComponent.has(componentKey)) stateByComponent.set(componentKey, []);
-      slots = stateByComponent.get(componentKey)!;
-      cursor = 0;
-      const rendered = child.type(child.props);
-      // The shared wrapper selects either the legacy password viewer or the
-      // JSON viewer. Both keep their state underneath the version-keyed wrapper.
-      return elements(typeof rendered.type === 'function' ? rendered.type(rendered.props) : rendered);
-    });
+    return component(props);
   };
-  const node = (predicate: (value: Element) => boolean) => {
-    const found = renderState().find(predicate);
+  const expand = (value: unknown, path: string): Element[] => {
+    if (Array.isArray(value)) return value.flatMap((child, index) => expand(child, `${path}/${index}`));
+    if (!value || typeof value !== 'object' || !('props' in value)) return [];
+    const item = value as Element & { key?: string | null };
+    if (typeof item.type === 'function' && !partComponents.has(item.type as never)) {
+      const key = `${path}/${item.type.name}:${item.key}`;
+      return expand(callComponent(item.type as (props: unknown) => unknown, item.props, key), key);
+    }
+    return [item, ...expand(item.props.children, path)];
+  };
+  const renderState = (report: 'personal' | 'shared') => {
+    const onReload = async (kind?: 'personal' | 'shared') => { reloads.push(kind); return reloadSucceeds; };
+    const component = report === 'personal' ? testModule.exports.ManagerDashboardViewer : testModule.exports.RoutePlannerViewer;
+    const props = report === 'personal' ? { overview, loading: false, onReload } : { shared, loading: false, onReload };
+    return expand(callComponent(component, props, report), report);
+  };
+  const node = (report: 'personal' | 'shared', predicate: (value: Element) => boolean) => {
+    const found = renderState(report).find(predicate);
     assert.ok(found); return found;
   };
-  const frame = (shared: boolean) => node((value) => value.type === (shared ? parts.SharedDashboardFrame : parts.DashboardFrame));
+  const frame = (shared: boolean) => node(shared ? 'shared' : 'personal', (value) => value.type === (shared ? parts.SharedDashboardFrame : parts.DashboardFrame));
   const select = (id: string, value: string) => {
-    (node((item) => item.props.id === id).props.onChange as (event: unknown) => void)({ target: { value } });
+    (node(id.includes('-shared-') ? 'shared' : 'personal', (item) => item.props.id === id).props.onChange as (event: unknown) => void)({ target: { value } });
   };
   select('manager-dashboard-history', '16');
   assert.equal(frame(false).props.snapshotId, 16);
@@ -843,10 +912,15 @@ test('personal and shared history, reload and binding changes keep independent f
   select('manager-dashboard-shared-history', '116');
   assert.equal(frame(false).props.snapshotId, 16);
   assert.equal(frame(true).props.snapshotId, 116);
-  await (node((item) => item.type === 'button' && text(item) === 'Перезагрузить общий отчёт').props.onClick as () => Promise<void>)();
-  assert.equal(reloadCount, 1);
+  await (node('shared', (item) => item.type === 'button' && text(item) === 'Перезагрузить общий отчёт').props.onClick as () => Promise<void>)();
+  assert.deepEqual(reloads, ['shared']);
   assert.equal(frame(true).props.revision, 1);
   assert.equal(frame(false).props.revision, 0);
+  reloadSucceeds = false;
+  await (node('personal', (item) => item.type === 'button' && text(item) === 'Перезагрузить отчёт').props.onClick as () => Promise<void>)();
+  assert.deepEqual(reloads, ['shared', 'personal']);
+  assert.equal(frame(false).props.snapshotId, 16);
+  assert.equal(frame(false).props.revision, 0, 'a failed reload does not remount or lose the selected report');
   overview = { ...overview, email: '', bindingStatus: 'missing_email' };
   assert.equal(frame(false).props.snapshotId, undefined);
   assert.equal(frame(true).props.snapshotId, 116);
@@ -854,6 +928,11 @@ test('personal and shared history, reload and binding changes keep independent f
   overview = { ...overview, email: 'new@example.test', bindingStatus: 'matched' };
   assert.equal(frame(false).props.snapshotId, 17);
   assert.equal(frame(true).props.snapshotId, 116);
+  shared = { ...shared, activeHtmlVersionId: 32 };
+  assert.equal(frame(true).props.snapshotId, 117, 'changing the common HTML resets only its history selection');
+  assert.equal(frame(true).props.revision, 0);
+  assert.equal(frame(false).props.snapshotId, 17);
+  assert.equal(frame(false).props.revision, 0);
 });
 
 function largePersonalFiles(count: number, mib = 8) {
@@ -924,9 +1003,9 @@ test('personal selection holds the mutation lock across every request and blocks
   const finishes: Array<(result: import('../src/features/admin/manager-dashboard/types').ManagerDashboardMutationResult) => void> = [];
   const view = management({ mutate: () => new Promise((resolve) => finishes.push(resolve)) });
   view.selectFiles('manager-dashboard-snapshots', largePersonalFiles(4));
-  view.selectFiles('manager-dashboard-shared-html', [new File(['<html>synthetic</html>'], 'shared.html')]);
+  view.selectFiles('manager-dashboard-html-support', [new File(['<html>synthetic</html>'], 'support.html')]);
   const stalePreview = view.versionButton('support', 22, 'Предпросмотр').props.onClick as () => void;
-  const staleUpload = view.find('form', (props) => elements(props.children).some((node) => node.props.id === 'manager-dashboard-shared-html')).props.onSubmit as (event: unknown) => void;
+  const staleUpload = view.find('form', (props) => elements(props.children).some((node) => node.props.id === 'manager-dashboard-html-support')).props.onSubmit as (event: unknown) => void;
   view.submit('manager-dashboard-snapshots');
   stalePreview();
   staleUpload({ preventDefault() {} });
@@ -935,13 +1014,13 @@ test('personal selection holds the mutation lock across every request and blocks
   finishes[0]({ results: [{ originalName: 'personal-1.ktsp', status: 'imported' }, { originalName: 'personal-2.ktsp', status: 'imported' }] });
   await view.settle();
   assert.equal(view.requests.length, 2);
-  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-shared-html').props.disabled, true);
+  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-html-support').props.disabled, true);
   stalePreview();
   staleUpload({ preventDefault() {} });
   assert.equal(view.requests.length, 2);
   assert.equal(elements(view.render()).some((node) => node.type === parts.DashboardFrame), false);
   finishes[1]({ results: [{ originalName: 'personal-3.ktsp', status: 'imported' }, { originalName: 'personal-4.ktsp', status: 'imported' }] });
   await view.settle();
-  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-shared-html').props.disabled, false);
-  assert.equal(view.inputs.get('manager-dashboard-shared-html')!.value, 'synthetic-selection');
+  assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-html-support').props.disabled, false);
+  assert.equal(view.inputs.get('manager-dashboard-html-support')!.value, 'synthetic-selection');
 });

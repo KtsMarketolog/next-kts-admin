@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 
 import { getAdminSession, isTopDashboardSession } from '@/shared/lib/adminAuth';
+import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
 
 import AdminPanel from '../../AdminPanel';
 
@@ -25,6 +26,7 @@ export default async function AdminTopBlockPage({ params }: AdminTopBlockPagePro
   if (session && !isTopDashboardSession(session)) {
     redirect('/admin');
   }
+  if (session && !canReadTopDashboardBlock(session, blockId)) notFound();
 
   return (
     <AdminPanel

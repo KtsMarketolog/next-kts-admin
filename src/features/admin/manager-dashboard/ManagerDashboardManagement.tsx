@@ -5,7 +5,7 @@ import { PERSONAL_DASHBOARD_AUDIENCE_LABELS, type PersonalDashboardAudience } fr
 import { DashboardFrame, SharedDashboardFrame, formatDashboardDate, ImportResults, SnapshotStatus } from './ManagerDashboardParts';
 import { ManagerDashboardImportJournal } from './ManagerDashboardImportJournal';
 import { prepareSharedJsonUpload } from './sharedJsonUpload';
-import type { ManagerDashboardGroup, ManagerDashboardHtmlVersion, ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview } from './types';
+import type { ManagerDashboardGroup, ManagerDashboardHtmlVersion, ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview, RoutePlannerOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
@@ -14,16 +14,20 @@ const MAX_SELECTION_FILE_BYTES = 63 * 1024 * 1024;
 // Each request stays comfortably below the reverse proxy's 25 MiB body limit.
 const MAX_REQUEST_FILE_BYTES = 16 * 1024 * 1024;
 const AUDIENCES: PersonalDashboardAudience[] = ['development', 'support'];
+const NO_PERSONAL_GROUPS: ManagerDashboardGroup[] = [];
 
 type ManagementProps = {
-  overview: Extract<ManagerDashboardOverview, { mode: 'manage' }>;
+  overview: Extract<ManagerDashboardOverview, { mode: 'manage' }> | RoutePlannerOverview;
+  section?: 'personal' | 'shared';
   audience?: PersonalDashboardAudience | null;
   busy: boolean;
   mutate: (path: string, init: RequestInit, successMessage: string) => Promise<ManagerDashboardMutationResult | null>;
   onAccessDenied?: () => void;
 };
 
-export function ManagerDashboardManagement({ overview, audience = null, busy: externalBusy, mutate: performMutation, onAccessDenied }: ManagementProps) {
+export function ManagerDashboardManagement({ overview, section = 'personal', audience = null, busy: externalBusy, mutate: performMutation, onAccessDenied }: ManagementProps) {
+  const personalOverview = section === 'personal' && 'groups' in overview ? overview : null;
+  const groups = personalOverview?.groups ?? NO_PERSONAL_GROUPS;
   const [pending, setPending] = useState(false);
   const [previewSelection, setPreviewSelection] = useState<{ audience: PersonalDashboardAudience | 'support-shared'; versionId: number } | null>(null);
   const [fileErrors, setFileErrors] = useState<Partial<Record<PersonalDashboardAudience, string>>>({});
@@ -42,8 +46,8 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
   const audienceGrid = useRef<HTMLDivElement>(null);
   const mutationRef = useRef(false);
   const busy = externalBusy || pending;
-  const previewGroup = overview.groups.find((item) => item.audience === previewSelection?.audience);
-  const shared = audience === 'development' ? undefined : overview.supportShared;
+  const previewGroup = groups.find((item) => item.audience === previewSelection?.audience);
+  const shared = section === 'shared' ? overview.supportShared : undefined;
   const sharedActiveHtml = shared?.htmlVersions.find((version) => version.id === shared.activeHtmlVersionId);
   const sharedDrafts = shared?.htmlVersions.filter((version) => !version.firstPublishedAt && version.id !== shared.activeHtmlVersionId && version.id !== shared.previousHtmlVersionId) ?? [];
   const sharedUsesJson = sharedActiveHtml?.format === 'route-planner-v1';
@@ -79,7 +83,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
     desktop.addEventListener('change', update);
     update();
     return () => { observer.disconnect(); desktop.removeEventListener('change', update); };
-  }, [overview.groups, audience]);
+  }, [groups, audience]);
 
   useEffect(() => {
     if (!previewSelection) return;
@@ -99,13 +103,13 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
 
   function showPreview(audience: PersonalDashboardAudience, versionId: number) {
     if (busy || mutationRef.current) return;
-    const group = overview.groups.find((item) => item.audience === audience);
+    const group = groups.find((item) => item.audience === audience);
     if (group?.htmlVersions.some((version) => version.id === versionId)) setPreviewSelection({ audience, versionId });
   }
 
   async function uploadHtml(event: FormEvent<HTMLFormElement>, audience: PersonalDashboardAudience) {
     event.preventDefault();
-    const group = overview.groups.find((item) => item.audience === audience);
+    const group = groups.find((item) => item.audience === audience);
     if (busy || mutationRef.current || !group) return;
     const input = htmlInputs[audience].current;
     const file = input?.files?.[0];
@@ -127,7 +131,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
   }
 
   async function publish(audience: PersonalDashboardAudience, versionId: number) {
-    const group = overview.groups.find((item) => item.audience === audience);
+    const group = groups.find((item) => item.audience === audience);
     if (busy || mutationRef.current || !group) return;
     const version = group.htmlVersions.find((item) => item.id === versionId);
     if (!version || versionId === group.activeHtmlVersionId) return;
@@ -142,7 +146,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
   }
 
   async function deleteHtml(audience: PersonalDashboardAudience, versionId: number) {
-    const group = overview.groups.find((item) => item.audience === audience);
+    const group = groups.find((item) => item.audience === audience);
     if (busy || mutationRef.current || !group || versionId === group.activeHtmlVersionId) return;
     const version = group.htmlVersions.find((item) => item.id === versionId);
     if (!version) return;
@@ -251,11 +255,11 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
     const version = shared.htmlVersions.find((item) => item.id === versionId);
     if (!version || versionId === shared.activeHtmlVersionId) return;
     const rollback = versionId === shared.previousHtmlVersionId;
-    if (!window.confirm(`${rollback ? 'Вернуть' : 'Опубликовать'} общий HTML «${version.originalName}», версия #${versionId}, для всех менеджеров по сопровождению?${version.format === 'route-planner-v1' ? '\n\nДля этой версии используется отдельный JSON-снимок. После публикации загрузите его ниже, если он ещё не загружен.' : ''}\n\nЛичные дашборды и личные файлы менеджеров сохранятся.`)) return;
+    if (!window.confirm(`${rollback ? 'Вернуть' : 'Опубликовать'} общий HTML «${version.originalName}», версия #${versionId}, для всех сотрудников с доступом к компоновщику?${version.format === 'route-planner-v1' ? '\n\nДля этой версии используется отдельный JSON-снимок. После публикации загрузите его ниже, если он ещё не загружен.' : ''}\n\nЛичные дашборды и личные файлы менеджеров сохранятся.`)) return;
     await mutate('/shared/publish', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ versionId, expectedActiveVersionId: shared.activeHtmlVersionId }),
-    }, `Общий HTML ${rollback ? 'восстановлен' : 'опубликован'} для всех менеджеров по сопровождению.`);
+    }, `Общий HTML ${rollback ? 'восстановлен' : 'опубликован'} для всех сотрудников с доступом к компоновщику.`);
   }
 
   async function deleteSharedHtml(versionId: number) {
@@ -285,13 +289,13 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
       setSharedError('Укажите email получателя, использованный при создании общего файла.');
       return;
     }
-    if (!window.confirm(`Опубликовать общий файл «${file.name}» для ВСЕХ менеджеров по сопровождению?\n\nОн заменит текущий общий файл данных. Личные дашборды и личные файлы всех менеджеров сохранятся.`)) return;
+    if (!window.confirm(`Опубликовать общий файл «${file.name}» для ВСЕХ сотрудников с доступом к компоновщику?\n\nОн заменит текущий общий файл данных. Личные дашборды и личные файлы всех менеджеров сохранятся.`)) return;
     const form = new FormData();
     form.append('file', file);
     form.append('email', email);
     form.append('expectedActiveSnapshotId', String(shared?.snapshot?.id ?? null));
     form.append('confirmShared', 'true');
-    const result = await mutate('/shared/snapshots', { method: 'POST', body: form }, 'Общий файл опубликован для всех менеджеров по сопровождению.');
+    const result = await mutate('/shared/snapshots', { method: 'POST', body: form }, 'Общий файл опубликован для всех сотрудников с доступом к компоновщику.');
     if (result && sharedSnapshotInput.current) sharedSnapshotInput.current.value = '';
   }
 
@@ -301,7 +305,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
     const file = sharedJsonInput.current?.files?.[0];
     if (!file) return;
     setSharedError('');
-    if (!window.confirm(`Опубликовать JSON «${file.name}» для ВСЕХ менеджеров по сопровождению?\n\nHTML: «${sharedActiveHtml.originalName}», версия #${sharedActiveHtml.id}.\nОн заменит текущий общий JSON этой версии. Предыдущий файл сохранится, личные дашборды не изменятся.`)) return;
+    if (!window.confirm(`Опубликовать JSON «${file.name}» для ВСЕХ сотрудников с доступом к компоновщику?\n\nHTML: «${sharedActiveHtml.originalName}», версия #${sharedActiveHtml.id}.\nОн заменит текущий общий JSON этой версии. Предыдущий файл сохранится, личные дашборды не изменятся.`)) return;
     // Hold the same guard while compressing, not only while the request runs.
     mutationRef.current = true;
     setPending(true);
@@ -318,7 +322,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
           'X-KTS-Shared-Filename': encodeURIComponent(file.name),
           'X-KTS-Shared-Confirm': 'true',
         },
-      }, 'Общий JSON опубликован для всех менеджеров по сопровождению. При открытии общего дашборда он загрузится автоматически.');
+      }, 'Общий JSON опубликован для всех сотрудников с доступом к компоновщику. При открытии отчёта он загрузится автоматически.');
       if (result && sharedJsonInput.current) sharedJsonInput.current.value = '';
     } catch (cause) {
       setSharedError(cause instanceof Error ? cause.message : 'Не удалось подготовить или загрузить JSON. Проверьте текущую версию перед повторной попыткой.');
@@ -353,9 +357,9 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
 
   return (
     <div className={styles.stack}>
-      <div ref={audienceGrid} className={`${styles.audienceGrid}${audience ? ` ${styles.audienceGridSingle}` : ''}`}>
+      {personalOverview ? <div ref={audienceGrid} className={`${styles.audienceGrid}${audience ? ` ${styles.audienceGridSingle}` : ''}`}>
         {(audience ? [audience] : AUDIENCES).map((audience) => {
-          const group = overview.groups.find((item) => item.audience === audience);
+          const group = groups.find((item) => item.audience === audience);
           const label = PERSONAL_DASHBOARD_AUDIENCE_LABELS[audience];
           const drafts = group?.htmlVersions.filter((version) => !version.firstPublishedAt && version.id !== group.activeHtmlVersionId && version.id !== group.previousHtmlVersionId) ?? [];
           return (
@@ -398,7 +402,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
                             ? <p className={styles.warning}>Email совпадает у нескольких менеджеров. Исправьте его в карточках, чтобы назначать файлы автоматически.</p>
                             : manager.isActive !== false && (manager.bindingStatus === 'unknown' || !manager.email)
                               ? <p className={styles.warning}>Для назначения файла нужен уникальный email в карточке менеджера.</p> : null}</td>
-                          <td><SnapshotStatus snapshot={manager.snapshot} status={manager.snapshotStatus} expectedIssuedAfter={overview.expectedIssuedAfter} />{manager.snapshot ? <><small>{manager.snapshot.originalName}</small><small>Подготовлен: {formatDashboardDate(manager.snapshot.issued)} · до {formatDashboardDate(manager.snapshot.expires)} (МСК)</small></> : null}</td>
+                          <td><SnapshotStatus snapshot={manager.snapshot} status={manager.snapshotStatus} expectedIssuedAfter={personalOverview.expectedIssuedAfter} />{manager.snapshot ? <><small>{manager.snapshot.originalName}</small><small>Подготовлен: {formatDashboardDate(manager.snapshot.issued)} · до {formatDashboardDate(manager.snapshot.expires)} (МСК)</small></> : null}</td>
                         </tr>
                       ))}</tbody>
                     </table>
@@ -409,11 +413,11 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
             </section>
           );
         })}
-      </div>
+      </div> : null}
 
-      {audience !== 'development' ? <section id="manager-dashboard-shared-support" className={styles.panel} aria-labelledby="manager-dashboard-shared-management-heading">
+      {section === 'shared' ? <section id="manager-dashboard-shared-support" className={styles.panel} aria-labelledby="manager-dashboard-shared-management-heading">
         <div className={styles.sectionHeading}>
-          <div><h2 id="manager-dashboard-shared-management-heading">Общий HTML дашборда</h2><p>Дополнительный отчёт для всех менеджеров по сопровождению: отдельный HTML и один общий файл данных.</p></div>
+          <div><h2 id="manager-dashboard-shared-management-heading">HTML компоновщика рейсов</h2><p>Самостоятельный общий отчёт: отдельный HTML и один общий файл данных для сотрудников с доступом.</p></div>
           <span className={styles.badge}>{shared?.activeHtmlVersionId ? `Опубликована версия #${shared.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
         </div>
         <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedHtml(event)}>
@@ -432,7 +436,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
           </div></div>
           : <p className={styles.empty}>{shared?.htmlVersions.length ? 'Неопубликованных черновиков нет.' : 'Общий HTML ещё не загружен. Загрузите файл и опубликуйте версию. Предпросмотр доступен по желанию.'}</p>}
         {sharedUsesJson ? <div className={styles.preview}>
-          <div className={styles.sectionHeading}><div><h3>Общий файл данных JSON</h3><p>Один снимок компоновщика автоматически открывается у всех менеджеров по сопровождению. Email и пароль не нужны. Личные .ktsp не изменяются.</p></div><span className={styles.badge} data-status={shared?.jsonSnapshot ? 'current' : 'missing'}>{shared?.jsonSnapshot ? 'Данные получены' : 'Данные ещё не поступили'}</span></div>
+          <div className={styles.sectionHeading}><div><h3>Общий файл данных JSON</h3><p>Один снимок компоновщика автоматически открывается у всех сотрудников с доступом. Email и пароль не нужны. Личные .ktsp не изменяются.</p></div><span className={styles.badge} data-status={shared?.jsonSnapshot ? 'current' : 'missing'}>{shared?.jsonSnapshot ? 'Данные получены' : 'Данные ещё не поступили'}</span></div>
           {shared?.jsonSnapshot ? <dl className={styles.metadata}>
             <div><dt>Текущий общий файл</dt><dd>{shared.jsonSnapshot.originalName}</dd></div>
             <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(shared.jsonSnapshot.savedAt)}</dd></div>
@@ -448,7 +452,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
             {sharedJsonProgress ? <p className={styles.notice} role="status">{sharedJsonProgress}</p> : null}
           </form>
         </div> : <div className={styles.preview}>
-          <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех менеджеров по сопровождению. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>
+          <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех сотрудников с доступом. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>
           {shared?.snapshot ? <dl className={styles.metadata}>
             <div><dt>Текущий общий файл</dt><dd>{shared.snapshot.originalName}</dd></div>
             <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(shared.snapshot.issued)}</dd></div>
@@ -469,7 +473,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
       </section> : null}
 
       {preview && (previewGroup || sharedPreview) ? <section id="manager-dashboard-html-preview" ref={previewPanel} className={`${styles.panel} ${styles.fullWidthPreview}`} aria-labelledby="manager-dashboard-preview-heading" tabIndex={-1}>
-        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {sharedPreview ? 'Общий дашборд сопровождения' : PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup!.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. {sharedJsonPreview ? 'Общий JSON, привязанный к этой версии HTML, загружается автоматически, если он опубликован. Личные данные менеджеров не загружаются.' : sharedPreview ? 'Общие и личные данные не загружаются.' : 'Личные данные менеджеров не загружаются.'}</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
+        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {sharedPreview ? 'Компоновщик рейсов' : PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup!.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. {sharedJsonPreview ? 'Общий JSON, привязанный к этой версии HTML, загружается автоматически, если он опубликован. Личные данные менеджеров не загружаются.' : sharedPreview ? 'Общие и личные данные не загружаются.' : 'Личные данные менеджеров не загружаются.'}</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
           if (busy || mutationRef.current) return;
           setPreviewSelection(null);
           (sharedPreview ? sharedHtmlInput : htmlInputs[previewGroup!.audience]).current?.focus();
@@ -478,7 +482,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
           : <DashboardFrame key={`${previewGroup!.audience}:${preview.id}`} audience={previewGroup!.audience} versionId={preview.id} preview />}
       </section> : null}
 
-      <section className={styles.panel}>
+      {personalOverview ? <section className={styles.panel}>
         <div className={styles.sectionHeading}>
           <div><h2>Общая загрузка личных файлов</h2><p>Ручная загрузка личных файлов для обеих групп. В одном пакете можно смешивать .ktsp менеджеров по развитию и сопровождению: получатель определяется по email, указанному при создании файла, а группа — по его роли в системе.</p></div>
         </div>
@@ -490,12 +494,12 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
           </div>
         </form>
         <ImportResults results={results} title="Результат последней операции" />
-      </section>
+      </section> : null}
 
       <section id="manager-dashboard-html-history" className={styles.panel} aria-labelledby="manager-dashboard-html-history-heading">
         <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-html-history-heading">История HTML и откат</h2><p>Действующий и один предыдущий рабочий HTML для каждого отчёта. Неопубликованные черновики перечислены отдельно.</p></div></div>
         <div className={styles.stack}>
-          {overview.groups.filter((group) => !audience || group.audience === audience).map((group) => {
+          {groups.filter((group) => !audience || group.audience === audience).map((group) => {
             const versions = group.htmlVersions.filter((version) => version.firstPublishedAt || version.id === group.activeHtmlVersionId || version.id === group.previousHtmlVersionId);
             const drafts = group.htmlVersions.filter((version) => !version.firstPublishedAt && version.id !== group.activeHtmlVersionId && version.id !== group.previousHtmlVersionId);
             return <section key={group.audience} id={`manager-dashboard-history-${group.audience}`} aria-labelledby={`manager-dashboard-history-heading-${group.audience}`}>
@@ -505,7 +509,7 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
             </section>;
           })}
           {shared ? <section id="manager-dashboard-history-support-shared" aria-labelledby="manager-dashboard-history-heading-support-shared">
-            <h3 id="manager-dashboard-history-heading-support-shared">Общий дашборд сопровождения</h3>
+            <h3 id="manager-dashboard-history-heading-support-shared">Компоновщик рейсов</h3>
             {[
               { title: 'Рабочие версии', versions: shared.htmlVersions.filter((version) => version.firstPublishedAt || version.id === shared.activeHtmlVersionId || version.id === shared.previousHtmlVersionId) },
               { title: 'Черновики общего HTML', versions: sharedDrafts },
@@ -534,8 +538,8 @@ export function ManagerDashboardManagement({ overview, audience = null, busy: ex
         <p className={styles.muted}>Действующую HTML-версию удалить нельзя — сначала опубликуйте другую. Удаление HTML не затрагивает личные снимки.{shared?.htmlVersions.some((version) => version.format === 'route-planner-v1') ? ' При удалении неактивного HTML компоновщика удаляются и все JSON-снимки, привязанные к этой версии.' : ''}</p>
       </section>
 
-      <ManagerDashboardImportJournal key={JSON.stringify([overview.imports, overview.importsNextCursor])}
-        imports={overview.imports} nextCursor={overview.importsNextCursor} busy={busy} onAccessDenied={onAccessDenied} />
+      {personalOverview ? <ManagerDashboardImportJournal key={JSON.stringify([personalOverview.imports, personalOverview.importsNextCursor])}
+        imports={personalOverview.imports} nextCursor={personalOverview.importsNextCursor} busy={busy} onAccessDenied={onAccessDenied} /> : null}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import * as html from '../src/shared/lib/managerDashboardHtml';
 import * as routePlannerHtml from '../src/shared/lib/supportSharedRoutePlannerHtml';
 import * as origin from '../src/shared/lib/originProtection';
 import * as upload from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
+import * as dashboardAccess from '../src/shared/lib/dashboardAccess';
 
 function compile<T>(filename: string, modules: Record<string, unknown>): T {
   const source = readFileSync(new URL(filename, import.meta.url), 'utf8');
@@ -22,12 +23,12 @@ function compile<T>(filename: string, modules: Record<string, unknown>): T {
 const fixture = '<html><body><input id="fileInp"><script>let FILE=null;function gate(){} function tryOpen(){} function decryptFile(){} const fmt="kts-personal",emailHash="";</script></body></html>';
 const routeFixture = '<html><head></head><body><input id="snapIn"><script>const S={}; function revive(x){return x;} function loadSnapshot(j){S.orders = revive(j.orders);} function handleFiles(list){} const snapshot={app:"компоновщик"};window.UI = {};</script></body></html>';
 const sharedSnapshot = {id: 31, email: 'shared@example.test', originalName: 'shared.ktsp', issued: '2026-09-16', expires: '2099-12-31', expired: false};
-type Role = 'admin' | 'admintop' | 'manager' | 'support_manager' | 'top' | null;
+type Role = 'admin' | 'admintop' | 'manager' | 'support_manager' | 'top' | 'purchaser' | null;
 type Route = {GET(request: Request): Promise<Response>; POST(request: Request): Promise<Response>; DELETE(request: Request): Promise<Response>};
 
-function routes(role: Role = 'support_manager', options: {inactive?: boolean; currentRole?: string; limit?: boolean; noSnapshot?: boolean; expired?: boolean; routePlanner?: boolean; foreignPreviewSnapshot?: boolean} = {}) {
+function routes(role: Role = 'support_manager', options: {grants?: string[]; inactive?: boolean; currentRole?: string; limit?: boolean; noSnapshot?: boolean; expired?: boolean; routePlanner?: boolean; foreignPreviewSnapshot?: boolean} = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
-  const session = role ? {role, sessionId: 'synthetic-session', adminUserId: 2, managerId: 71} : null;
+  const session = role ? {role, sessionId: 'synthetic-session', adminUserId: 2, managerId: 71, dashboardAccess: options.grants ?? []} : null;
   const manager = {id: 71, role: options.currentRole ?? role, email: '', isActive: !options.inactive};
   const base = compile<typeof import('../src/app/api/admin/manager-dashboard/_shared')>(
     '../src/app/api/admin/manager-dashboard/_shared.ts', {
@@ -37,7 +38,13 @@ function routes(role: Role = 'support_manager', options: {inactive?: boolean; cu
       '@/shared/lib/managerDashboardSecurity': security, '@/shared/lib/originProtection': origin,
     });
   const shared = compile<typeof import('../src/app/api/admin/manager-dashboard/shared/_shared')>(
-    '../src/app/api/admin/manager-dashboard/shared/_shared.ts', {'../_shared': base});
+    '../src/app/api/admin/manager-dashboard/shared/_shared.ts', {'../_shared': base,
+      '@/shared/lib/adminAuth': {getAdminSession: async () => session},
+      '@/shared/lib/adminSecurity': {enforceAdminActionRateLimit: async () => options.limit ? new Response(null, {status: 429}) : null},
+      '@/shared/lib/db/wholesaleAdminRepo/managerRepo': {getWholesaleManagerById: async () => manager},
+      '@/shared/lib/dashboardAccess': dashboardAccess,
+      '@/shared/lib/managerDashboardSecurity': security, '@/shared/lib/originProtection': origin,
+    });
   const observed = (name: string, fn: (...args: unknown[]) => unknown) => async (...args: unknown[]) => {
     calls.push({name, args}); return fn(...args);
   };
@@ -75,7 +82,10 @@ function routes(role: Role = 'support_manager', options: {inactive?: boolean; cu
     '@/shared/lib/db/supportSharedDashboardRepo': repo,
     '@/shared/lib/managerDashboardSecurity': security, './_shared': base,
   });
-  return {frame: route('frame'), content: route('content'), snapshots: route('snapshots'), html: route('html'), publish: route('publish'), overview: overviewRoute, calls};
+  const sharedOverviewRoute = compile<Route>('../src/app/api/admin/manager-dashboard/shared/route.ts', {
+    '@/shared/lib/db/supportSharedDashboardRepo': repo, '../_shared': base, './_shared': shared,
+  });
+  return {frame: route('frame'), content: route('content'), snapshots: route('snapshots'), html: route('html'), publish: route('publish'), overview: overviewRoute, sharedOverview: sharedOverviewRoute, calls};
 }
 
 const ROOT = 'https://example.test/api/admin/manager-dashboard/shared/';
@@ -266,15 +276,35 @@ test('shared upload needs explicit group-sharing confirmation, single file and s
   assert.deepEqual(api.calls, []);
 });
 
-test('overview exposes shared reports only to administrators and support, without a mail schedule', async () => {
+test('personal overview no longer exposes the separate route planner', async () => {
   for (const role of ['admin', 'admintop', 'manager', 'support_manager'] as const) {
     const api = routes(role);
     const response = await api.overview.GET(request(''));
     const body = await response.json();
     assert.equal(response.status, 200);
-    assert.equal('supportShared' in body, role !== 'manager');
+    assert.equal('supportShared' in body, false);
     assert.equal('mail' in body, false);
     assert.equal('expectedBy' in body, false);
-    assert.deepEqual(api.calls.filter((call) => call.name === 'overview').map((call) => call.args), role === 'manager' ? [] : role === 'support_manager' ? [[71]] : [[]]);
+    assert.deepEqual(api.calls.filter((call) => call.name === 'overview'), []);
+  }
+});
+
+test('purchaser route-planner grant permits published viewing only, without a manager identity', async () => {
+  const allowed = routes('purchaser', {grants: ['route-planner'], routePlanner: true});
+  assert.equal((await allowed.sharedOverview.GET(request(''))).status, 200);
+  assert.equal((await allowed.frame.GET(request('frame?version=22'))).status, 200);
+  assert.equal((await allowed.frame.GET(request('frame?version=23&preview=1'))).status, 403);
+  assert.equal((await allowed.publish.POST(request('publish', json({versionId: 23})))).status, 403);
+  assert.equal((await allowed.html.DELETE(request('html?version=23', {method: 'DELETE'}))).status, 403);
+  assert.ok(allowed.calls.filter((c) => c.name === 'overview').every((c) => JSON.stringify(c.args) === '[{"purchaserId":2}]'));
+  assert.equal((await allowed.overview.GET(request(''))).status, 403);
+
+  for (const grants of [[], ['manager:support'], ['top:22']]) {
+    const denied = routes('purchaser', {grants});
+    assert.equal((await denied.sharedOverview.GET(request(''))).status, 403);
+    assert.equal((await denied.frame.GET(request('frame?version=22'))).status, 403);
+    assert.equal((await denied.content.GET(request('content?version=22'))).status, 403);
+    assert.equal((await denied.snapshots.GET(request('snapshots'))).status, 403);
+    assert.deepEqual(denied.calls, []);
   }
 });

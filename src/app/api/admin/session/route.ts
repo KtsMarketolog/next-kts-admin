@@ -13,6 +13,10 @@ export async function GET() {
     return Response.json({
       authenticated: true,
       role: session.role,
+      adminUserId: session.adminUserId,
+      managerId: session.managerId,
+      sessionId: session.sessionId,
+      dashboardAccess: [],
       canAccessTopDashboard: isTopDashboardSession(session),
       canManageTopDashboard: isTopDashboardManagementSession(session),
       manager: manager
@@ -23,14 +27,18 @@ export async function GET() {
             email: manager.email,
           }
         : null,
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   }
 
   return Response.json({
     authenticated: Boolean(session),
     role: session?.role ?? null,
+    adminUserId: session?.adminUserId,
+    managerId: session?.managerId,
+    sessionId: session?.sessionId,
     canAccessTopDashboard: isTopDashboardSession(session),
     canManageTopDashboard: isTopDashboardManagementSession(session),
+    dashboardAccess: session?.role === 'purchaser' ? session.dashboardAccess ?? [] : [],
     manager: null,
-  });
+  }, { headers: { 'Cache-Control': 'private, no-store' } });
 }

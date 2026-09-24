@@ -1,5 +1,5 @@
-export type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
-export type UserTab = 'admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
+export type AccessUserRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'purchaser';
+export type UserTab = 'admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'purchaser';
 
 export type AccessUser = {
   id: string;
@@ -11,6 +11,7 @@ export type AccessUser = {
   role: AccessUserRole;
   isActive: boolean;
   canManageTopDashboard: boolean;
+  dashboardAccess: string[];
   accesses: string[];
   priceListCount: number;
   supportManagerId: number | null;
@@ -28,6 +29,7 @@ export type Draft = {
   password: string;
   isActive: boolean;
   canManageTopDashboard: boolean;
+  dashboardAccess: string[];
 };
 
 export const EMPTY_DRAFT: Draft = {
@@ -39,4 +41,5 @@ export const EMPTY_DRAFT: Draft = {
   password: '',
   isActive: true,
   canManageTopDashboard: false,
+  dashboardAccess: [],
 };

@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     if ((preview && access.mode !== 'manage') || (!preview && access.mode !== 'view')) return personalJson({error: 'Нет доступа к JSON'}, 403);
     const snapshot = preview
       ? await getSupportSharedDashboardJsonPreviewSnapshot(version, id ?? undefined)
-      : await getSupportSharedDashboardJsonSnapshot(access.manager!.id, version, id ?? undefined);
+      : await getSupportSharedDashboardJsonSnapshot(access.viewer!, version, id ?? undefined);
     if (!snapshot) return personalJson({error: 'JSON не найден или недоступен'}, 404);
     return new Response(Readable.toWeb(snapshot.stream) as ReadableStream<Uint8Array>, {headers: {
       ...PERSONAL_PRIVATE_HEADERS, 'Content-Type': 'application/json; charset=utf-8',

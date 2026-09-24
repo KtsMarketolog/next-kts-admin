@@ -1,10 +1,11 @@
 import { randomBytes, randomUUID } from 'crypto';
 
 import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
+import { parseDashboardAccess } from '../dashboardAccess';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop';
+export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'purchaser';
 
 export type StoredAdminSession = {
   sessionId: string;
@@ -13,6 +14,7 @@ export type StoredAdminSession = {
   managerId?: number;
   canAccessTopDashboard?: boolean;
   canManageTopDashboard?: boolean;
+  dashboardAccess?: string[];
   createdAt: string;
   expiresAt: string;
 };
@@ -40,6 +42,7 @@ function normalizeRole(role: string): StoredAdminSessionRole | null {
     || role === 'support_manager'
     || role === 'top'
     || role === 'admintop'
+    || role === 'purchaser'
   ) {
     return role;
   }
@@ -91,6 +94,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     admin_is_active: boolean | null;
     admin_role: string | null;
     admin_can_manage_top_dashboard: boolean | null;
+    dashboard_access: string[];
     manager_is_active: boolean | null;
     manager_role: string | null;
     manager_can_access_top_dashboard: boolean | null;
@@ -108,6 +112,8 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
        au.is_active as admin_is_active,
        au.role as admin_role,
        au.can_manage_top_dashboard as admin_can_manage_top_dashboard,
+       array(select access.key from admin_user_dashboard_access access
+             where access.user_id = au.id order by access.key) as dashboard_access,
        wm.is_active as manager_is_active,
        coalesce(nullif(wm.role, ''), 'manager') as manager_role,
        wm.can_access_top_dashboard as manager_can_access_top_dashboard,
@@ -143,7 +149,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     return null;
   }
 
-  if ((role === 'top' || role === 'admintop') && !row.admin_user_id) {
+  if ((role === 'top' || role === 'admintop' || role === 'purchaser') && !row.admin_user_id) {
     await revokeStoredAdminSession(token);
     return null;
   }
@@ -168,6 +174,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     role,
     adminUserId: row.admin_user_id ? Number(row.admin_user_id) : undefined,
     managerId: row.manager_id ? Number(row.manager_id) : undefined,
+    dashboardAccess: role === 'purchaser' ? parseDashboardAccess(row.dashboard_access) ?? [] : undefined,
     canAccessTopDashboard: isStoredManagerRole(role)
       ? row.manager_can_access_top_dashboard === true || row.manager_can_manage_top_dashboard === true
       : undefined,

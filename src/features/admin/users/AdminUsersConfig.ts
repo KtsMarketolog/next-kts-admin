@@ -10,6 +10,7 @@ export const ROLE_LABELS: Record<AccessUserRole, string> = {
   support_manager: 'Менеджер по сопровождению',
   top: 'TOP — просмотр',
   admintop: 'Админ TOP — управление',
+  purchaser: 'Закупщик — просмотр',
 };
 
 const ADMIN_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
@@ -33,17 +34,23 @@ const ADMINTOP_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
   { value: 'admintop', label: 'Админ TOP — управление' },
 ];
 
+const PURCHASER_ROLE_OPTIONS: Array<{ value: AccessUserRole; label: string }> = [
+  { value: 'purchaser', label: ROLE_LABELS.purchaser },
+];
+
 export const USER_TABS: Array<{ value: UserTab; label: string }> = [
   { value: 'admin', label: 'Админ' },
   { value: 'top', label: 'TOP' },
   { value: 'admintop', label: 'Админ TOP' },
+  { value: 'purchaser', label: 'Закупщик' },
 ];
 
 export function isUserTab(value: string | null): value is UserTab {
-  return value === 'admin' || value === 'top' || value === 'admintop';
+  return value === 'admin' || value === 'top' || value === 'admintop' || value === 'purchaser';
 }
 
 export function tabForRole(role: AccessUserRole): UserTab {
+  if (role === 'purchaser') return 'purchaser';
   if (role === 'admintop') return 'admintop';
   if (role === 'top') return 'top';
   if (role === 'support_manager') return 'support_manager';
@@ -52,6 +59,7 @@ export function tabForRole(role: AccessUserRole): UserTab {
 }
 
 export function roleOptionsForTab(tab: UserTab) {
+  if (tab === 'purchaser') return PURCHASER_ROLE_OPTIONS;
   if (tab === 'admintop') return ADMINTOP_ROLE_OPTIONS;
   if (tab === 'top') return TOP_ROLE_OPTIONS;
   if (tab === 'manager') return MANAGER_ROLE_OPTIONS;
@@ -60,6 +68,7 @@ export function roleOptionsForTab(tab: UserTab) {
 }
 
 export function defaultRoleForTab(tab: UserTab): AccessUserRole {
+  if (tab === 'purchaser') return 'purchaser';
   if (tab === 'admintop') return 'admintop';
   if (tab === 'top') return 'top';
   if (tab === 'manager') return 'manager';
@@ -73,10 +82,12 @@ export function emptyDraftForTab(tab: UserTab): Draft {
     role: defaultRoleForTab(tab),
     supportManagerId: tab === 'manager' ? EMPTY_DRAFT.supportManagerId : null,
     canManageTopDashboard: false,
+    dashboardAccess: [],
   };
 }
 
 export function addButtonLabel(tab: UserTab) {
+  if (tab === 'purchaser') return 'Добавить закупщика';
   if (tab === 'admintop') return 'Добавить администратора TOP';
   if (tab === 'top') return 'Добавить сотрудника TOP';
   if (tab === 'manager') return 'Добавить менеджера по развитию';

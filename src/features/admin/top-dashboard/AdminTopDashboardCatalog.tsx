@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
+import type { DashboardAccessOption } from '@/shared/lib/dashboardAccess';
 
 type TopDashboardBlock = {
   id: number;
@@ -19,8 +20,11 @@ type TopDashboardBlock = {
 
 type AdminTopDashboardCatalogProps = {
   canManage: boolean;
+  canReadTopBlocks?: boolean;
+  reportEntries?: DashboardAccessOption[];
   showStatus: (message: string) => void;
 };
+const EMPTY_REPORT_ENTRIES: NonNullable<AdminTopDashboardCatalogProps['reportEntries']> = [];
 
 function formatDate(value: string | null) {
   if (!value) return 'Ещё не обновлялась';
@@ -52,7 +56,7 @@ function blockDescription(block: TopDashboardBlock) {
   return 'HTML ещё не загружен';
 }
 
-export function AdminTopDashboardCatalog({ canManage, showStatus }: AdminTopDashboardCatalogProps) {
+export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, reportEntries = EMPTY_REPORT_ENTRIES, showStatus }: AdminTopDashboardCatalogProps) {
   const router = useRouter();
   const [blocks, setBlocks] = useState<TopDashboardBlock[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +72,12 @@ export function AdminTopDashboardCatalog({ canManage, showStatus }: AdminTopDash
   }, [showStatus]);
 
   const loadBlocks = useCallback(async () => {
+    if (!canReadTopBlocks) {
+      setBlocks([]);
+      setLoadError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const response = await fetch('/api/admin/top-dashboard/blocks', {
@@ -94,7 +104,7 @@ export function AdminTopDashboardCatalog({ canManage, showStatus }: AdminTopDash
     } finally {
       setLoading(false);
     }
-  }, [canManage]);
+  }, [canManage, canReadTopBlocks]);
 
   useEffect(() => {
     void loadBlocks();
@@ -150,13 +160,13 @@ export function AdminTopDashboardCatalog({ canManage, showStatus }: AdminTopDash
       <div className={styles.sectionHeader}>
         <div>
           <p>{canManage ? 'HTML-страницы' : 'Опубликованные дашборды'}</p>
-          <h2>{canManage ? 'HTML-страницы и отчёты' : 'Готовые отчёты'}</h2>
+          <h2>HTML-страницы и отчёты</h2>
         </div>
         <span className={styles.headingMeta}>
           {loadError && blocks.length === 0
             ? 'Список недоступен'
-            : `${blocks.length} ${pluralize(
-              blocks.length,
+            : `${blocks.length + reportEntries.length} ${pluralize(
+              blocks.length + reportEntries.length,
               canManage ? 'блок' : 'отчёт',
               canManage ? 'блока' : 'отчёта',
               canManage ? 'блоков' : 'отчётов',
@@ -166,11 +176,19 @@ export function AdminTopDashboardCatalog({ canManage, showStatus }: AdminTopDash
 
       <p className={styles.topDashboardCatalogIntro}>
         {canManage
-          ? 'Каждый блок хранит собственную HTML-страницу и отдельную историю до 50 версий и 100 МБ. Количество блоков не ограничено.'
+          ? 'Личные дашборды МР и МС, компоновщик рейсов и самостоятельные HTML-отчёты. У каждого отчёта собственные данные и история версий.'
           : 'Откройте нужный отчёт — актуальные данные уже сохранены и загрузятся автоматически.'}
       </p>
 
       <div className={styles.topDashboardCatalogGrid} aria-busy={loading}>
+        {reportEntries.filter((entry) => entry.href).map((entry) => (
+          <Link className={styles.topDashboardCatalogCard} href={entry.href!} key={entry.key} scroll={false}>
+            <span className={styles.topDashboardCatalogEyebrow}>Раздел отчётов</span>
+            <strong>{entry.title}</strong>
+            <span className={styles.topDashboardCatalogDescription}>{entry.description}</span>
+            <span className={styles.topDashboardCatalogOpen}>Открыть <span aria-hidden>→</span></span>
+          </Link>
+        ))}
         {blocks.map((block) => (
           <Link
             className={styles.topDashboardCatalogCard}
@@ -249,7 +267,7 @@ export function AdminTopDashboardCatalog({ canManage, showStatus }: AdminTopDash
         <p className={styles.topDashboardCatalogLoading}>
           {canManage ? 'Загружаем блоки…' : 'Загружаем готовые отчёты…'}
         </p>
-      ) : !canManage && !loadError && blocks.length === 0 ? (
+      ) : !canManage && !loadError && blocks.length === 0 && reportEntries.length === 0 ? (
         <div className={styles.topDashboardDataEmpty}>
           <strong>Готовых отчётов пока нет</strong>
           <span>Они появятся здесь после публикации администратором.</span>

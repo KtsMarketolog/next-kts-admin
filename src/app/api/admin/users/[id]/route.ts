@@ -1,5 +1,6 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireAdminSession } from '@/shared/lib/adminAuth';
+import { parseDashboardAccess } from '@/shared/lib/dashboardAccess';
 import {
   deleteAccessUser,
   revokeAdminUserSessions,
@@ -13,7 +14,7 @@ import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
-const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager', 'top', 'admintop']);
+const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager', 'top', 'admintop', 'purchaser']);
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -57,6 +58,8 @@ export async function PUT(request: Request, context: Context) {
   const email = normalizeTextField(body.email, 160);
   const password = typeof body.password === 'string' ? body.password : '';
   const role = normalizeRole(body.role);
+  const dashboardAccess = body.dashboardAccess === undefined ? undefined : parseDashboardAccess(body.dashboardAccess);
+  if (dashboardAccess === null) return badRequest('Некорректный список доступных дашбордов');
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
   if (body.canManageTopDashboard !== undefined && typeof body.canManageTopDashboard !== 'boolean') {
     return badRequest('Некорректное значение доступа «Админ TOP»');
@@ -83,6 +86,7 @@ export async function PUT(request: Request, context: Context) {
         role,
         isActive,
         canManageTopDashboard: role === 'top' && body.canManageTopDashboard === true,
+        dashboardAccess,
         supportManagerId,
         passwordHash: password ? hashPassword(password) : undefined,
       },
@@ -120,6 +124,8 @@ export async function PUT(request: Request, context: Context) {
         permissionsChanged: result.permissionsChanged,
         previousCanManageTopDashboard: result.previous.canManageTopDashboard,
         canManageTopDashboard: result.user.canManageTopDashboard,
+        previousDashboardAccess: result.previous.dashboardAccess,
+        dashboardAccess: result.user.dashboardAccess,
         passwordChanged: result.passwordChanged,
         isActive: result.user.isActive,
       },

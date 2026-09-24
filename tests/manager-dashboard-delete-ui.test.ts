@@ -57,6 +57,7 @@ const parts = {
 };
 function management(options: {
   overview?: Manage;
+  section?: 'personal' | 'shared';
   busy?: boolean;
   confirm?: () => boolean;
   mutate?: (path: string, init: RequestInit) => Promise<ManagerDashboardMutationResult | null>;
@@ -96,7 +97,7 @@ function management(options: {
   const requests: Array<{ path: string; init: RequestInit; message: string }> = [];
   const render = () => {
     cursor = 0;
-    return testModule.exports.ManagerDashboardManagement({ overview: data, busy: options.busy ?? false,
+    return testModule.exports.ManagerDashboardManagement({ overview: data, section: options.section ?? 'personal', busy: options.busy ?? false,
       mutate: async (path: string, init: RequestInit, message: string) => {
         requests.push({ path, init, message });
         return options.mutate ? options.mutate(path, init) : { message: 'Synthetic deletion succeeded' };
@@ -138,12 +139,31 @@ function management(options: {
   return { render, button, click, sharedButton, clickShared, preview, sharedPreview, closePreview, settle, requests, confirmations, data };
 }
 
+test('personal management excludes route planner controls and history even if a legacy response includes them', () => {
+  const tree = elements(management().render());
+  assert.ok(tree.some((node) => node.props.id === 'manager-dashboard-group-development'));
+  assert.ok(tree.some((node) => node.props.id === 'manager-dashboard-group-support'));
+  assert.ok(tree.some((node) => node.props.id === 'manager-dashboard-snapshots'));
+  assert.ok(!tree.some((node) => node.props.id === 'manager-dashboard-shared-support'));
+  assert.ok(!tree.some((node) => node.props.id === 'manager-dashboard-history-support-shared'));
+});
+
+test('standalone shared management excludes all personal manager data, imports and upload controls', () => {
+  const rendered = management({section: 'shared'}).render();
+  const tree = elements(rendered);
+  assert.ok(tree.some((node) => node.props.id === 'manager-dashboard-shared-support'));
+  assert.ok(tree.some((node) => node.props.id === 'manager-dashboard-history-support-shared'));
+  assert.ok(!tree.some((node) => String(node.props.id ?? '').startsWith('manager-dashboard-group-')));
+  assert.ok(!tree.some((node) => node.props.id === 'manager-dashboard-snapshots'));
+  assert.doesNotMatch(text(rendered), /Synthetic development|Synthetic support|Общая загрузка личных файлов/);
+});
+
 test('shared JSON preview uses only the selected HTML data revision and explains automatic loading', () => {
   const data = overview();
   const shared = data.supportShared!;
   shared.htmlVersions[0].format = 'route-planner-v1';
   shared.htmlVersions[1].format = 'route-planner-v1';
-  const view = management({ overview: data });
+  const view = management({ overview: data, section: 'shared' });
   view.clickShared(21, 'Предпросмотр общего HTML');
   assert.equal(view.sharedPreview()?.props.revision, 0, 'preview starts without data');
   assert.equal(view.sharedPreview()?.props.preview, true);
@@ -165,8 +185,8 @@ test('shared JSON preview uses only the selected HTML data revision and explains
   assert.equal(view.sharedPreview()?.props.revision, 0, 'unrelated JSON uploads leave another HTML preview alone');
 });
 
-test('legacy shared and personal previews keep data-free copy and ignore shared JSON changes', () => {
-  const view = management();
+test('legacy shared and personal previews stay on separate pages and ignore unrelated JSON changes', () => {
+  const view = management({section: 'shared'});
   view.clickShared(21, 'Предпросмотр общего HTML');
   assert.match(text(view.render()), /Общие и личные данные не загружаются/);
   assert.equal(view.sharedPreview()?.props.revision, 0);
@@ -174,12 +194,13 @@ test('legacy shared and personal previews keep data-free copy and ignore shared 
     sha256: 'a'.repeat(64), savedAt: '2026-09-17T05:00:00Z', receivedAt: '2026-09-17T06:00:00Z', status: 'active' };
   assert.equal(view.sharedPreview()?.props.revision, 0, 'JSON metadata never enables refresh of a password preview');
 
-  view.click('development', 1, 'Предпросмотр');
-  assert.match(text(view.render()), /Личные данные менеджеров не загружаются/);
-  assert.doesNotMatch(text(view.render()), /Общий JSON, привязанный/);
-  assert.deepEqual(view.preview()?.props, { audience: 'development', versionId: 1, preview: true });
-  view.data.supportShared!.jsonSnapshot = { ...view.data.supportShared!.jsonSnapshot!, id: 302 };
-  assert.deepEqual(view.preview()?.props, { audience: 'development', versionId: 1, preview: true });
+  const personal = management();
+  personal.click('development', 1, 'Предпросмотр');
+  assert.match(text(personal.render()), /Личные данные менеджеров не загружаются/);
+  assert.doesNotMatch(text(personal.render()), /Общий JSON, привязанный/);
+  assert.deepEqual(personal.preview()?.props, { audience: 'development', versionId: 1, preview: true });
+  personal.data.supportShared!.jsonSnapshot = { ...view.data.supportShared!.jsonSnapshot!, id: 302 };
+  assert.deepEqual(personal.preview()?.props, { audience: 'development', versionId: 1, preview: true });
 });
 
 test('management exposes named delete controls for both groups and protects their active HTML versions', async () => {
@@ -376,17 +397,17 @@ test('personal publication still works after closing its preview and with anothe
 
 test('shared publication and rollback do not need a preview or inherit the personal publication identity', async () => {
   for (const id of [22, 23]) {
-    for (const previewState of ['none', 'closed', 'personal'] as const) {
+    for (const previewState of ['none', 'closed'] as const) {
       const data = overview();
       data.groups[1].htmlVersions[3].id = id;
-      const view = management({ overview: data });
+      const view = management({ overview: data, section: 'shared' });
       const before = structuredClone(data);
       const label = id === 22 ? 'Вернуть общий HTML' : 'Опубликовать общий HTML';
       if (previewState === 'closed') {
         view.clickShared(id, 'Предпросмотр общего HTML');
         assert.equal(view.sharedPreview()?.props.versionId, id);
         view.closePreview();
-      } else if (previewState === 'personal') view.click('support', id, 'Предпросмотр');
+      }
       assert.equal(view.sharedButton(id, label).props.disabled, false);
       view.clickShared(id, label);
       await view.settle();
@@ -396,9 +417,9 @@ test('shared publication and rollback do not need a preview or inherit the perso
       assert.deepEqual(JSON.parse(view.requests[0].init.body as string), { versionId: id, expectedActiveVersionId: 21 });
       assert.equal(view.confirmations.length, 1);
       assert.ok(view.confirmations[0].includes(`shared-${id}.html`));
-      assert.match(view.confirmations[0], /всех менеджеров по сопровождению/);
+      assert.match(view.confirmations[0], /всех сотрудников с доступом к компоновщику/);
       assert.match(view.confirmations[0], /Личные дашборды и личные файлы менеджеров сохранятся/);
-      assert.equal(view.preview()?.props.audience, previewState === 'personal' ? 'support' : undefined);
+      assert.equal(view.preview(), undefined);
       assert.equal(view.sharedPreview(), undefined);
       assert.deepEqual(data, before);
     }
@@ -407,24 +428,27 @@ test('shared publication and rollback do not need a preview or inherit the perso
 
 test('cancelling direct publication leaves both personal groups and shared state unchanged', async () => {
   const view = management({ confirm: () => false });
+  const shared = management({ confirm: () => false, section: 'shared' });
   const before = structuredClone(view.data);
   view.click('development', 4, 'Опубликовать группе');
   view.click('support', 12, 'Вернуть группе');
-  view.clickShared(23, 'Опубликовать общий HTML');
+  shared.clickShared(23, 'Опубликовать общий HTML');
   await view.settle();
-  assert.equal(view.confirmations.length, 3);
+  assert.equal(view.confirmations.length + shared.confirmations.length, 3);
   assert.equal(view.requests.length, 0);
   assert.equal(view.preview(), undefined);
   assert.equal(view.sharedPreview(), undefined);
   assert.deepEqual(view.data, before);
   assert.equal(view.button('development', 4, 'Опубликовать группе').props.disabled, false);
-  assert.equal(view.sharedButton(23, 'Опубликовать общий HTML').props.disabled, false);
+  assert.equal(shared.sharedButton(23, 'Опубликовать общий HTML').props.disabled, false);
+  assert.equal(shared.requests.length, 0);
 });
 
 test('external busy blocks direct publication for both personal groups and shared HTML before confirmation', async () => {
   const view = management({ busy: true });
+  const shared = management({ busy: true, section: 'shared' });
   const actions = [view.button('development', 4, 'Опубликовать группе'), view.button('support', 12, 'Вернуть группе'),
-    view.sharedButton(23, 'Опубликовать общий HTML')];
+    shared.sharedButton(23, 'Опубликовать общий HTML')];
   for (const action of actions) {
     assert.equal(action.props.disabled, true);
     (action.props.onClick as () => void)();
@@ -432,20 +456,23 @@ test('external busy blocks direct publication for both personal groups and share
   await view.settle();
   assert.equal(view.confirmations.length, 0);
   assert.equal(view.requests.length, 0);
+  assert.equal(shared.requests.length, 0);
+  assert.equal(shared.confirmations.length, 0);
 });
 
-test('direct publication serializes same-tick double clicks across personal and shared HTML with exact CAS targets', async () => {
+test('direct publication serializes same-tick double clicks within each page with exact CAS targets', async () => {
   for (const first of ['development', 'support', 'shared'] as const) {
     let finish!: (result: ManagerDashboardMutationResult | null) => void;
-    const view = management({ mutate: () => new Promise((resolve) => { finish = resolve; }) });
-    const stale = {
+    const view = management({ section: first === 'shared' ? 'shared' : 'personal', mutate: () => new Promise((resolve) => { finish = resolve; }) });
+    const stale = first === 'shared' ? {
+      shared: view.sharedButton(23, 'Опубликовать общий HTML').props.onClick as () => void,
+    } : {
       development: view.button('development', 4, 'Опубликовать группе').props.onClick as () => void,
       support: view.button('support', 12, 'Вернуть группе').props.onClick as () => void,
-      shared: view.sharedButton(23, 'Опубликовать общий HTML').props.onClick as () => void,
     };
-    stale[first]();
-    stale[first]();
-    for (const click of Object.values(stale)) click();
+    stale[first]!();
+    stale[first]!();
+    for (const click of Object.values(stale)) click!();
     await view.settle();
     assert.equal(view.confirmations.length, 1);
     assert.equal(view.requests.length, 1);
@@ -453,14 +480,12 @@ test('direct publication serializes same-tick double clicks across personal and 
     assert.deepEqual(JSON.parse(view.requests[0].init.body as string), first === 'shared'
       ? { versionId: 23, expectedActiveVersionId: 21 }
       : { audience: first, versionId: first === 'development' ? 4 : 12, expectedActiveVersionId: first === 'development' ? 1 : 11 });
-    assert.equal(view.button('development', 4, 'Опубликовать группе').props.disabled, true);
-    assert.equal(view.button('support', 12, 'Вернуть группе').props.disabled, true);
-    assert.equal(view.sharedButton(23, 'Опубликовать общий HTML').props.disabled, true);
+    const action = () => first === 'shared' ? view.sharedButton(23, 'Опубликовать общий HTML') : view.button(first, first === 'development' ? 4 : 12, first === 'development' ? 'Опубликовать группе' : 'Вернуть группе');
+    assert.equal(action().props.disabled, true);
     finish(null);
     await view.settle();
-    assert.equal(view.button('development', 4, 'Опубликовать группе').props.disabled, false);
-    assert.equal(view.sharedButton(23, 'Опубликовать общий HTML').props.disabled, false);
-    stale[first]();
+    assert.equal(action().props.disabled, false);
+    stale[first]!();
     assert.equal(view.requests.length, 2, 'failed publication releases the common guard for retry');
     assert.equal(view.confirmations.length, 2);
     assert.deepEqual(view.requests[1].init, view.requests[0].init);

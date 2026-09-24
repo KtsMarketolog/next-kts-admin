@@ -9,16 +9,14 @@ import { MANAGER_DASHBOARD_TITLES, type PersonalDashboardAudience } from '@/shar
 
 import { ManagerDashboardManagement } from './ManagerDashboardManagement';
 import { ManagerDashboardViewer, managerDashboardViewIdentity } from './ManagerDashboardViewer';
+import { RoutePlannerDashboard } from './RoutePlannerDashboard';
 import type { ManagerDashboardMutationResult, ManagerDashboardOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
 const API_PATH = '/api/admin/manager-dashboard';
 
 function reportVersionsChanged(next: Extract<ManagerDashboardOverview, { mode: 'view' }>, current: Extract<ManagerDashboardOverview, { mode: 'view' }>) {
-  return next.htmlVersion?.id !== current.htmlVersion?.id || next.snapshot?.id !== current.snapshot?.id
-    || next.supportShared?.activeHtmlVersionId !== current.supportShared?.activeHtmlVersionId
-    || next.supportShared?.snapshot?.id !== current.supportShared?.snapshot?.id
-    || next.supportShared?.jsonSnapshot?.id !== current.supportShared?.jsonSnapshot?.id;
+  return next.htmlVersion?.id !== current.htmlVersion?.id || next.snapshot?.id !== current.snapshot?.id;
 }
 
 async function readResponse(response: Response) {
@@ -32,7 +30,11 @@ async function readResponse(response: Response) {
   return data;
 }
 
-export function ManagerDashboard({ mode, audience = null }: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null }) {
+export function ManagerDashboard(props: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null; section?: 'personal' | 'shared' }) {
+  return props.section === 'shared' ? <RoutePlannerDashboard mode={props.mode} /> : <PersonalManagerDashboard {...props} />;
+}
+
+function PersonalManagerDashboard({ mode, audience = null }: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null }) {
   const router = useRouter();
   const [overview, setOverview] = useState<ManagerDashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,7 +45,7 @@ export function ManagerDashboard({ mode, audience = null }: { mode: 'manage' | '
   const requestRevision = useRef(0);
   const busyRef = useRef(false);
 
-  const load = useCallback(async (report?: 'personal' | 'shared', previous?: ManagerDashboardOverview | null) => {
+  const load = useCallback(async () => {
     const revision = ++requestRevision.current;
     setLoading(true);
     try {
@@ -55,16 +57,8 @@ export function ManagerDashboard({ mode, audience = null }: { mode: 'manage' | '
       const next = await readResponse(response) as ManagerDashboardOverview;
       if (next.mode !== mode) throw new Error('Права доступа изменились. Откройте раздел заново.');
       if (revision === requestRevision.current) {
-        let updated = next;
-        if (previous?.mode === 'view' && next.mode === 'view' && previous.audience === 'support' && next.audience === 'support') {
-          if (report === 'shared' && managerDashboardViewIdentity(previous) === managerDashboardViewIdentity(next)) {
-            updated = { ...previous, supportShared: next.supportShared };
-          } else if (report === 'personal') {
-            updated = { ...next, supportShared: previous.supportShared };
-          }
-        }
-        setOverview(updated);
-        setUpdateAvailable(next.mode === 'view' && updated.mode === 'view' && reportVersionsChanged(next, updated));
+        setOverview(next);
+        setUpdateAvailable(false);
       }
     } finally {
       if (revision === requestRevision.current) setLoading(false);
@@ -94,15 +88,10 @@ export function ManagerDashboard({ mode, audience = null }: { mode: 'manage' | '
         }
         const next = await readResponse(response) as ManagerDashboardOverview;
         if (!disposed && next.mode === 'view') {
-          const sharedChanged = next.supportShared?.activeHtmlVersionId !== overview.supportShared?.activeHtmlVersionId
-            || next.supportShared?.snapshot?.id !== overview.supportShared?.snapshot?.id
-            || next.supportShared?.jsonSnapshot?.id !== overview.supportShared?.jsonSnapshot?.id;
           if (managerDashboardViewIdentity(next) !== managerDashboardViewIdentity(overview)) {
-            // Clear personal data immediately when its recipient changes. A support
-            // manager's open shared report keeps its own explicit refresh boundary.
-            const keepShared = next.audience === 'support' && overview.audience === 'support';
-            setOverview(keepShared ? { ...next, supportShared: overview.supportShared } : next);
-            setUpdateAvailable(keepShared && sharedChanged);
+            // Clear personal data immediately when its recipient changes.
+            setOverview(next);
+            setUpdateAvailable(false);
             return;
           }
           setUpdateAvailable(reportVersionsChanged(next, overview));
@@ -126,10 +115,10 @@ export function ManagerDashboard({ mode, audience = null }: { mode: 'manage' | '
     };
   }, [overview, router]);
 
-  async function refresh(report?: 'personal' | 'shared') {
+  async function refresh() {
     setError('');
     try {
-      await load(report, overview);
+      await load();
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось обновить данные.');
@@ -169,14 +158,14 @@ export function ManagerDashboard({ mode, audience = null }: { mode: 'manage' | '
       <div className={adminStyles.topbar}>
         <div><p>Панель управления</p><h1>{displayedAudience ? MANAGER_DASHBOARD_TITLES[displayedAudience] : mode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h1></div>
         <div className={adminStyles.topbarActions}>
-          <Link className={styles.secondary} href="/admin">В панель управления</Link>
+          <Link className={styles.secondary} href="/admin/top">К списку отчётов</Link>
           <button className={styles.secondary} type="button" disabled={loading || busy} onClick={() => void refresh()}>{loading ? 'Обновляем…' : 'Обновить'}</button>
         </div>
       </div>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {message ? <p className={styles.notice} role="status">{message}</p> : null}
       {updateAvailable ? <div className={styles.notice} role="status">
-        <p>Доступна новая версия дашборда или данных. Обновите отчёт, когда будете готовы. Для зашифрованного .ktsp пароль потребуется ввести снова; общий JSON открывается без пароля.</p>
+        <p>Доступна новая версия дашборда или данных. Обновите отчёт, когда будете готовы. Для зашифрованного .ktsp пароль потребуется ввести снова.</p>
         <button className={styles.secondary} type="button" disabled={loading || busy} onClick={() => void refresh()}>Открыть обновление</button>
       </div> : null}
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}

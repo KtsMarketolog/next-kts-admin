@@ -1,9 +1,10 @@
 import type { PoolClient } from 'pg';
 
+import { parseDashboardAccess } from '../dashboardAccess';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 
-export type AdminUserRole = 'admin' | 'wholesale_admin' | 'top' | 'admintop';
+export type AdminUserRole = 'admin' | 'wholesale_admin' | 'top' | 'admintop' | 'purchaser';
 export type ManagerAccessRole = 'manager' | 'support_manager';
 export type AccessUserRole = AdminUserRole | ManagerAccessRole;
 export type AccessUserSource = 'admin' | 'manager';
@@ -30,6 +31,7 @@ export type AccessUser = {
   role: AccessUserRole;
   isActive: boolean;
   canManageTopDashboard: boolean;
+  dashboardAccess: string[];
   accesses: string[];
   priceListCount: number;
   supportManagerId: number | null;
@@ -46,6 +48,7 @@ type AccessUserInput = {
   role: AccessUserRole;
   isActive: boolean;
   canManageTopDashboard: boolean;
+  dashboardAccess?: string[];
   passwordHash?: string;
   supportManagerId?: number | null;
 };
@@ -76,7 +79,7 @@ function normalizeLogin(login: string) {
 }
 
 function normalizeAdminRole(role: string): AdminUserRole {
-  if (role === 'admin' || role === 'wholesale_admin' || role === 'top' || role === 'admintop') return role;
+  if (role === 'admin' || role === 'wholesale_admin' || role === 'top' || role === 'admintop' || role === 'purchaser') return role;
   throw new Error('Некорректная роль пользователя');
 }
 
@@ -88,6 +91,7 @@ function normalizeAccessRole(role: string): AccessUserRole | null {
     || role === 'support_manager'
     || role === 'top'
     || role === 'admintop'
+    || role === 'purchaser'
   ) {
     return role;
   }
@@ -111,6 +115,7 @@ function accessLabels(role: AccessUserRole, canManageTopDashboard: boolean) {
       : ['HTML-страницы: просмотр'];
   }
   if (role === 'admintop') return ['HTML-страницы: управление'];
+  if (role === 'purchaser') return ['Только выбранные дашборды: просмотр'];
   if (role === 'support_manager') return ['Прайсы менеджера'];
   return ['Свои прайсы'];
 }
@@ -130,6 +135,7 @@ function mapAccessUser(row: AccessUserRow, currentAdminUserId?: number | null): 
     role,
     isActive: row.is_active,
     canManageTopDashboard,
+    dashboardAccess: [],
     accesses: accessLabels(role, canManageTopDashboard),
     priceListCount: Number(row.price_list_count),
     supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
@@ -146,6 +152,45 @@ function parseAccessUserId(id: string): ParsedAccessUserId | null {
   const numericId = Number(numeric);
   if ((source !== 'admin' && source !== 'manager') || !Number.isInteger(numericId) || numericId <= 0) return null;
   return { source, numericId };
+}
+
+async function getDashboardAccess(client: Pick<PoolClient, 'query'>, userId: number) {
+  const result = await client.query<{ key: string }>(
+    'select key from admin_user_dashboard_access where user_id = $1 order by key',
+    [userId],
+  );
+  return parseDashboardAccess(result.rows.map((row) => row.key)) ?? [];
+}
+
+/** User changes and access changes share a transaction; no partial profile can be saved. */
+async function saveDashboardAccess(
+  client: Pick<PoolClient, 'query'>,
+  userId: number,
+  role: AccessUserRole,
+  value: string[] | undefined,
+  previous?: AccessUser,
+) {
+  const parsed = value === undefined ? undefined : parseDashboardAccess(value);
+  if (parsed === null) throw new Error('Некорректный список доступных дашбордов');
+  const next = role === 'purchaser'
+    ? parsed ?? (previous?.role === 'purchaser' ? previous.dashboardAccess : [])
+    : [];
+  const topIds = next.filter((key) => key.startsWith('top:')).map((key) => Number(key.slice(4)));
+  if (topIds.length) {
+    const blocks = await client.query<{ id: string }>(
+      'select id::text from top_dashboard_blocks where id = any($1::bigint[]) for key share',
+      [topIds],
+    );
+    if (blocks.rows.length !== topIds.length) throw new Error('Один из выбранных дашбордов не существует');
+  }
+  await client.query('delete from admin_user_dashboard_access where user_id = $1', [userId]);
+  if (next.length) {
+    await client.query(
+      'insert into admin_user_dashboard_access (user_id, key) select $1, unnest($2::text[])',
+      [userId, next],
+    );
+  }
+  return next;
 }
 
 async function assertLoginAvailable(
@@ -306,10 +351,26 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
       login asc
   `);
 
-  return result.rows.map((row) => mapAccessUser(row, currentAdminUserId));
+  const users = result.rows.map((row) => mapAccessUser(row, currentAdminUserId));
+  const purchasers = users.filter((user) => user.source === 'admin' && user.role === 'purchaser');
+  if (purchasers.length) {
+    const grants = await query<{ user_id: string; key: string }>(
+      'select user_id::text, key from admin_user_dashboard_access where user_id = any($1::bigint[]) order by key',
+      [purchasers.map((user) => user.numericId)],
+    );
+    for (const user of purchasers) {
+      user.dashboardAccess = parseDashboardAccess(
+        grants.rows.filter((grant) => Number(grant.user_id) === user.numericId).map((grant) => grant.key),
+      ) ?? [];
+    }
+  }
+  return users;
 }
 
 export async function createAccessUser(input: AccessUserInput & { passwordHash: string }): Promise<AccessUser> {
+  if (input.dashboardAccess !== undefined && parseDashboardAccess(input.dashboardAccess) === null) {
+    throw new Error('Некорректный список доступных дашбордов');
+  }
   await ensureSiteSchema();
   return withTransaction(async (client) => {
     await assertLoginAvailable(input.login, undefined, client);
@@ -367,7 +428,9 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
         input.isActive,
       ],
     );
-    return mapAccessUser(result.rows[0]);
+    const user = mapAccessUser(result.rows[0]);
+    user.dashboardAccess = await saveDashboardAccess(client, user.numericId, user.role, input.dashboardAccess);
+    return user;
   });
 }
 
@@ -382,6 +445,9 @@ export async function updateAccessUser(
   permissionsChanged: boolean;
   passwordChanged: boolean;
 }> {
+  if (input.dashboardAccess !== undefined && parseDashboardAccess(input.dashboardAccess) === null) {
+    throw new Error('Некорректный список доступных дашбордов');
+  }
   await ensureSiteSchema();
   const parsed = parseAccessUserId(id);
   if (!parsed) throw new Error('Некорректный пользователь');
@@ -407,12 +473,15 @@ export async function updateAccessUser(
            updated_at::text
          from admin_users
          where id = $1
-         limit 1`,
+         limit 1 for update`,
         [parsed.numericId],
       );
       const existingRow = existingResult.rows[0];
       if (!existingRow) throw new Error('Пользователь не найден');
       const previous = mapAccessUser(existingRow, currentAdminUserId);
+      previous.dashboardAccess = previous.role === 'purchaser'
+        ? await getDashboardAccess(client, previous.numericId)
+        : [];
       const isSelf = previous.isCurrent;
       const nextRole = input.role;
       const nextCanManageTopDashboard = normalizeTopManagementAccess(
@@ -465,7 +534,7 @@ export async function updateAccessUser(
           previous,
           user: mapAccessUser(insertResult.rows[0], currentAdminUserId),
           roleChanged: true,
-          permissionsChanged: previous.canManageTopDashboard,
+          permissionsChanged: previous.canManageTopDashboard || previous.dashboardAccess.length > 0,
           passwordChanged: Boolean(input.passwordHash),
         };
       }
@@ -507,11 +576,16 @@ export async function updateAccessUser(
           input.isActive,
         ],
       );
+      const user = mapAccessUser(updateResult.rows[0], currentAdminUserId);
+      user.dashboardAccess = await saveDashboardAccess(
+        client, user.numericId, nextRole, input.dashboardAccess, previous,
+      );
       return {
         previous,
-        user: mapAccessUser(updateResult.rows[0], currentAdminUserId),
+        user,
         roleChanged: previous.role !== nextRole || previous.isActive !== input.isActive,
-        permissionsChanged: previous.canManageTopDashboard !== nextCanManageTopDashboard,
+        permissionsChanged: previous.canManageTopDashboard !== nextCanManageTopDashboard
+          || JSON.stringify(previous.dashboardAccess) !== JSON.stringify(user.dashboardAccess),
         passwordChanged: Boolean(input.passwordHash),
       };
     }
@@ -585,11 +659,13 @@ export async function updateAccessUser(
         ],
       );
       await client.query(`delete from wholesale_managers where id = $1`, [parsed.numericId]);
+      const user = mapAccessUser(insertResult.rows[0], currentAdminUserId);
+      user.dashboardAccess = await saveDashboardAccess(client, user.numericId, user.role, input.dashboardAccess);
       return {
         previous,
-        user: mapAccessUser(insertResult.rows[0], currentAdminUserId),
+        user,
         roleChanged: true,
-        permissionsChanged: nextCanManageTopDashboard,
+        permissionsChanged: nextCanManageTopDashboard || user.dashboardAccess.length > 0,
         passwordChanged: Boolean(input.passwordHash),
       };
     }
