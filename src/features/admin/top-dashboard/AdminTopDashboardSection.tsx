@@ -262,6 +262,17 @@ function normalizeTopDashboardDataContract(value: unknown): TopDashboardDataCont
   };
 }
 
+type UploadFeedback = { kind: 'error' | 'success'; message: string };
+
+function UploadFeedbackMessage({ feedback, id }: { feedback: UploadFeedback | null; id: string }) {
+  if (!feedback) return null;
+  return <p
+    id={id}
+    className={`${styles.topDashboardUploadFeedback} ${feedback.kind === 'error' ? styles.topDashboardUploadError : styles.topDashboardUploadSuccess}`}
+    role={feedback.kind === 'error' ? 'alert' : 'status'}
+  >{feedback.message}</p>;
+}
+
 export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashboardSectionProps) {
   const router = useRouter();
   const previewFrameRef = useTopDashboardDownloadBridge(showStatus);
@@ -270,6 +281,8 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedDataFile, setSelectedDataFile] = useState<File | null>(null);
+  const [htmlUploadFeedback, setHtmlUploadFeedback] = useState<UploadFeedback | null>(null);
+  const [dataUploadFeedback, setDataUploadFeedback] = useState<UploadFeedback | null>(null);
   const [selectedTargetFiles, setSelectedTargetFiles] = useState<Record<string, File[]>>({});
   const [runtimeUploadTargets, setRuntimeUploadTargets] = useState<{
     blockId: number;
@@ -299,6 +312,11 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
   const apiBasePath = `/api/admin/top-dashboard/blocks/${blockId}`;
+
+  const reportUploadFeedback = (target: 'html' | 'data', message: string, kind: UploadFeedback['kind'] = 'error') => {
+    (target === 'html' ? setHtmlUploadFeedback : setDataUploadFeedback)({ kind, message });
+    showStatusRef.current(message);
+  };
 
   useEffect(() => {
     showStatusRef.current = showStatus;
@@ -368,6 +386,8 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   }, [apiBasePath]);
 
   useEffect(() => {
+    setHtmlUploadFeedback(null);
+    setDataUploadFeedback(null);
     void loadOverview();
     return () => {
       overviewRequestIdRef.current += 1;
@@ -530,8 +550,9 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
 
   const chooseTargetFiles = (descriptor: TopDashboardUploadTarget, files: File[]) => {
     if (!canUploadData || busyAction !== null) return;
+    setDataUploadFeedback(null);
     if (!descriptor.multiple && !descriptor.directory && files.length > 1) {
-      showStatusRef.current('Для этого поля отчёт принимает один файл. Для других полей выберите данные отдельно.');
+      reportUploadFeedback('data', 'Для этого поля отчёт принимает один файл. Для других полей выберите данные отдельно.');
       return;
     }
     const next = { ...selectedTargetFiles, [topDashboardUploadTargetKey(descriptor.target)]: files };
@@ -543,29 +564,31 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       setSelectedTargetFiles(next);
       setSelectedDataHtmlVersionId(overview?.activeVersionId ?? null);
     } catch (error) {
-      showStatusRef.current(error instanceof Error ? error.message : 'Не удалось подготовить выбранные файлы');
+      reportUploadFeedback('data', error instanceof Error ? error.message : 'Не удалось подготовить выбранные файлы');
     }
   };
 
   const chooseFile = (file: File | null) => {
+    setHtmlUploadFeedback(null);
     if (!file) {
       setSelectedFile(null);
       return;
     }
     if (!/\.html?$/i.test(file.name)) {
       setSelectedFile(null);
-      showStatusRef.current('Выберите файл с расширением .html или .htm');
+      reportUploadFeedback('html', 'Выберите файл с расширением .html или .htm');
       return;
     }
     if (file.size <= 0 || file.size > MAX_HTML_BYTES) {
       setSelectedFile(null);
-      showStatusRef.current('HTML-файл должен быть непустым и не больше 5 МБ');
+      reportUploadFeedback('html', 'HTML-файл должен быть непустым и не больше 5 МБ');
       return;
     }
     setSelectedFile(file);
   };
 
   const chooseDataFile = (file: File | null) => {
+    setDataUploadFeedback(null);
     if (!file) {
       setSelectedDataFile(null);
       setSelectedDataHtmlVersionId(null);
@@ -574,7 +597,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     if (!canUploadData) {
       setSelectedDataFile(null);
       setSelectedDataHtmlVersionId(null);
-      showStatusRef.current(
+      reportUploadFeedback('data',
         usesUniversalDataUpload
           ? 'Для этого HTML выберите файлы внутри предпросмотра'
           : 'Для опубликованной HTML-страницы не удалось определить способ загрузки данных',
@@ -584,13 +607,13 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     if (!usesUniversalDataUpload && !/\.json(?:\.gz)?$/i.test(file.name)) {
       setSelectedDataFile(null);
       setSelectedDataHtmlVersionId(null);
-      showStatusRef.current('Выберите файл с расширением .json или .json.gz');
+      reportUploadFeedback('data', 'Выберите файл с расширением .json или .json.gz');
       return;
     }
     if (file.size <= 0 || file.size > TOP_DASHBOARD_DATA_MAX_BYTES) {
       setSelectedDataFile(null);
       setSelectedDataHtmlVersionId(null);
-      showStatusRef.current(
+      reportUploadFeedback('data',
         `Файл данных должен быть непустым и не больше ${TOP_DASHBOARD_DATA_MAX_MEGABYTES} МБ`,
       );
       return;
@@ -600,8 +623,9 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
   };
 
   const uploadVersion = async () => {
+    setHtmlUploadFeedback(null);
     if (!selectedFile) {
-      showStatusRef.current('Сначала выберите HTML-файл');
+      reportUploadFeedback('html', 'Сначала выберите HTML-файл');
       return;
     }
 
@@ -615,31 +639,37 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         credentials: 'same-origin',
       });
       if (!response.ok) {
-        showStatusRef.current(await readError(response, 'Не удалось загрузить HTML-файл'));
+        reportUploadFeedback('html', await readError(response, 'Не удалось загрузить HTML-файл'));
         return;
       }
 
       const data = await response.json().catch(() => ({}));
       const versionId = Number(data.version?.id);
+      if (!Number.isSafeInteger(versionId) || versionId <= 0) {
+        reportUploadFeedback('html', 'Сервер не подтвердил номер новой HTML-версии. Проверьте историю перед повторной загрузкой.');
+        return;
+      }
+      const savedName = typeof data.version?.originalName === 'string' ? data.version.originalName : selectedFile.name;
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      await loadOverview(Number.isInteger(versionId) ? versionId : null);
+      const refreshed = await loadOverview(versionId);
       setPreviewRevision((current) => current + 1);
-      showStatusRef.current('Новая версия загружена как черновик');
+      reportUploadFeedback('html', `HTML «${savedName}» сохранён как черновик #${versionId}. Текущая публикация не изменена.${refreshed ? '' : ' Список версий не обновился — обновите страницу.'}`, 'success');
     } catch {
-      showStatusRef.current('Не удалось загрузить HTML-файл');
+      reportUploadFeedback('html', 'Не удалось получить подтверждение загрузки HTML. Проверьте историю версий перед повторной попыткой.');
     } finally {
       setBusyAction(null);
     }
   };
 
   const uploadDataVersion = async () => {
+    setDataUploadFeedback(null);
     if (!overview || (usesUniversalDataUpload ? !selectedFileCount : !selectedDataFile)) {
-      showStatusRef.current('Сначала выберите файл данных');
+      reportUploadFeedback('data', 'Сначала выберите файл данных');
       return;
     }
     if (!overview.activeVersionId) {
-      showStatusRef.current('Сначала опубликуйте HTML-страницу');
+      reportUploadFeedback('data', 'Сначала опубликуйте HTML-страницу');
       return;
     }
     if (selectedDataHtmlVersionId !== overview.activeVersionId) {
@@ -647,20 +677,20 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       setSelectedTargetFiles({});
       setSelectedDataHtmlVersionId(null);
       if (dataFileInputRef.current) dataFileInputRef.current.value = '';
-      showStatusRef.current('HTML-страница изменилась. Выберите файл данных заново.');
+      reportUploadFeedback('data', 'HTML-страница изменилась. Выберите файл данных заново.');
       return;
     }
     if (overview.activeDataContract.mode === 'disabled') {
-      showStatusRef.current('Для опубликованной HTML-страницы не удалось определить способ загрузки данных');
+      reportUploadFeedback('data', 'Для опубликованной HTML-страницы не удалось определить способ загрузки данных');
       return;
     }
     if (overview.activeDataContract.htmlVersionId !== overview.activeVersionId) {
-      showStatusRef.current('Активная HTML-страница изменилась. Обновите страницу и повторите.');
+      reportUploadFeedback('data', 'Активная HTML-страница изменилась. Обновите страницу и повторите.');
       await loadOverview(selectedVersionId);
       return;
     }
     if (overview.activeDataContract.mode === 'generic' && !dataUploadTargets.length) {
-      showStatusRef.current('Дождитесь определения полей загрузки в опубликованном HTML');
+      reportUploadFeedback('data', 'Дождитесь определения полей загрузки в опубликованном HTML');
       return;
     }
     if (usesUniversalDataUpload && activeDataVersion) {
@@ -707,9 +737,9 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         });
         setSelectedTargetFiles({});
         setSelectedDataHtmlVersionId(null);
-        await loadOverview(selectedVersionId);
+        const refreshed = await loadOverview(selectedVersionId);
         setPreviewRevision((current) => current + 1);
-        showStatusRef.current(activeDataVersion ? 'Данные обновлены для всех пользователей' : 'Данные сохранены для всех пользователей');
+        reportUploadFeedback('data', `Данные сохранены для всех пользователей.${refreshed ? ` Текущая версия #${refreshed.data.activeVersionId}.` : ' Список версий не обновился — обновите страницу.'}`, 'success');
         return;
       }
       const headers: Record<string, string> = {
@@ -725,7 +755,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
         try {
           body = encodeTopDashboardMultiFileBlobSnapshot({ targets: uploadTargets });
         } catch (error) {
-          showStatusRef.current(error instanceof Error ? error.message : 'Не удалось подготовить выбранные файлы');
+          reportUploadFeedback('data', error instanceof Error ? error.message : 'Не удалось подготовить выбранные файлы');
           return;
         }
         headers['X-KTS-Top-Dashboard-Multi-File'] = '1';
@@ -744,20 +774,28 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       if (!response.ok) {
         const message = await readError(response, 'Не удалось сохранить данные дашборда');
         if (response.status === 409) await loadOverview(selectedVersionId);
-        showStatusRef.current(message);
+        reportUploadFeedback('data', message);
         return;
       }
+
+      const result = await response.json().catch(() => ({}));
+      const savedVersionId = Number(result.version?.id);
+      if (!Number.isSafeInteger(savedVersionId) || savedVersionId <= 0 || result.state?.activeVersionId !== savedVersionId) {
+        reportUploadFeedback('data', 'Сервер не подтвердил новую активную версию данных. Проверьте историю перед повторной загрузкой.');
+        return;
+      }
+      const savedName = typeof result.version?.originalName === 'string' ? result.version.originalName : selectedDataFile?.name;
 
       setSelectedDataFile(null);
       setSelectedTargetFiles({});
       setSelectedDataHtmlVersionId(null);
       if (dataFileInputRef.current) dataFileInputRef.current.value = '';
-      await loadOverview(selectedVersionId);
+      const refreshed = await loadOverview(selectedVersionId);
       setPreviewRevision((current) => current + 1);
-      showStatusRef.current(activeDataVersion ? 'Данные обновлены для всех пользователей' : 'Данные сохранены для всех пользователей');
+      reportUploadFeedback('data', `Данные${savedName ? ` «${savedName}»` : ''} сохранены для всех пользователей, версия #${savedVersionId}.${refreshed ? '' : ' Список версий не обновился — обновите страницу.'}`, 'success');
     } catch (error) {
       if (usesRuntimeUploadTargets) await loadOverview(selectedVersionId);
-      showStatusRef.current(error instanceof Error ? error.message : 'Не удалось сохранить данные дашборда');
+      reportUploadFeedback('data', `${error instanceof Error ? error.message : 'Не удалось сохранить данные дашборда'}. Подтверждение сохранения не получено; проверьте историю перед повторной загрузкой.`);
     } finally {
       setBusyAction(null);
     }
@@ -1105,6 +1143,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                 type="file"
                 accept=".html,.htm,text/html"
                 disabled={busyAction !== null}
+                aria-describedby={htmlUploadFeedback ? 'top-dashboard-html-upload-feedback' : undefined}
                 onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
               />
             </label>
@@ -1122,6 +1161,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
               {busyAction === 'upload' ? 'Загружаем…' : 'Загрузить как черновик'}
             </button>
           </div>
+          <UploadFeedbackMessage feedback={htmlUploadFeedback} id="top-dashboard-html-upload-feedback" />
         </div>
         <p className={styles.mutedText}>{activeVersion ? `Сейчас опубликован: ${activeVersion.originalName}, версия #${activeVersion.id}.` : 'HTML ещё не опубликован.'}</p>
         {latestDraft ? <article className={styles.topDashboardVersionRow}>
@@ -1210,6 +1250,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                             if (input && descriptor.directory) input.setAttribute('webkitdirectory', '');
                           }}
                           disabled={busyAction !== null || !canUploadData}
+                          aria-describedby={dataUploadFeedback ? 'top-dashboard-data-upload-feedback' : undefined}
                           onChange={(event) => {
                             chooseTargetFiles(descriptor, Array.from(event.target.files ?? []));
                             event.target.value = '';
@@ -1272,6 +1313,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                   ? undefined
                   : '.json,.json.gz,application/json,application/gzip'}
                 disabled={busyAction !== null || !overview || !canUploadData}
+                aria-describedby={dataUploadFeedback ? 'top-dashboard-data-upload-feedback' : undefined}
                 onChange={(event) => chooseDataFile(event.target.files?.[0] ?? null)}
               />
             </label>
@@ -1297,6 +1339,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                   : 'Сохранить для всех'}
             </button>
           </div>}
+          <UploadFeedbackMessage feedback={dataUploadFeedback} id="top-dashboard-data-upload-feedback" />
         </div>
 
         {activeDataVersion ? (

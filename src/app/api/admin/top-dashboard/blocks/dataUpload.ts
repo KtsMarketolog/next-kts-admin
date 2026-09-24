@@ -471,11 +471,15 @@ function detectDashboardProfile(
   if (snapshotFormat === 'purchases-v1') return 'purchases';
 
   const salesKeys = ['plan', 'hr', 'timesheets', 'opex', 'alloc'];
-  const assortmentKeys = ['actual', 'reserve', 'transit', 'otherWh'];
+  // `actual` is also exported by current sales analytics (actual stock). It is
+  // a legacy assortment fallback, not evidence of a conflicting profile.
+  const assortmentKeys = ['reserve', 'transit', 'otherWh'];
   const hasSalesKeys = salesKeys.some((key) => signature.extraKeys.has(key));
   const hasAssortmentKeys = assortmentKeys.some((key) => signature.extraKeys.has(key));
-  if (hasSalesKeys === hasAssortmentKeys) return null;
-  return hasSalesKeys ? 'sales-analytics' : 'assortment-optimization';
+  if (hasSalesKeys && hasAssortmentKeys) return null;
+  if (hasSalesKeys) return 'sales-analytics';
+  if (hasAssortmentKeys || signature.extraKeys.has('actual')) return 'assortment-optimization';
+  return null;
 }
 
 export async function readTopDashboardDataUpload(request: Request): Promise<UploadResult> {

@@ -214,6 +214,29 @@
   margin: 0 auto;
 }
 
+.topDashboardUploadCard .topDashboardUploadFeedback {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.topDashboardUploadCard .topDashboardUploadError {
+  border-color: #e6b8b8;
+  background: #fff7f7;
+  color: #8d2525;
+}
+
+.topDashboardUploadCard .topDashboardUploadSuccess {
+  border-color: #b8dfc6;
+  background: #f1fbf5;
+  color: #186a39;
+}
+
 .topDashboardBlockHeading {
   min-width: 0;
 }

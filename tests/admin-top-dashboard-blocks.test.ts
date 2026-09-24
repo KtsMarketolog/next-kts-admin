@@ -719,7 +719,7 @@ test('TOP dashboard profiles KTS bundles by direct extra keys and fails ambiguou
       n: 1,
       dict: {},
       cols: {},
-      extra: { plan: {}, actual: {} },
+      extra: { plan: {}, actual: {}, reserve: {} },
     }),
   ], 'ambiguous.json')));
   assert.equal(ambiguous.error, undefined);
