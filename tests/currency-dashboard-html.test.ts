@@ -7,7 +7,7 @@ import ts from 'typescript';
 import { buildCurrencyDashboardContentSecurityPolicy, renderCurrencyDashboardHtml } from '../src/shared/lib/currencyDashboardHtml';
 
 const nonce = '01234567-89ab-4cde-8fab-0123456789ab';
-const html = renderCurrencyDashboardHtml(nonce, 'https://example.test');
+const html = renderCurrencyDashboardHtml(nonce, 'https://example.test', true);
 const script = html.match(/<script>([\s\S]*)<\/script>/)![1];
 const ast = ts.createSourceFile('currency.js', script, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
 function fn(name: string) {
@@ -45,6 +45,22 @@ test('rendering rejects invalid nonce and non-origin parent URLs', () => {
   for (const value of ['javascript:alert(1)', 'https://example.test/path', 'https://example.test/', 'https://user:pass@example.test', 'null']) {
     assert.throws(() => renderCurrencyDashboardHtml(nonce, value));
   }
+});
+
+test('rendering defaults to read-only and viewer RPC refuses mutations before messaging the host', async () => {
+  const viewerHtml = renderCurrencyDashboardHtml(nonce, 'https://example.test');
+  assert.match(viewerHtml, /"canManage":false/);
+  assert.match(html, /"canManage":true/);
+  const requests: unknown[] = [];
+  const context = createContext({ window: { parent: { postMessage(message: unknown) { requests.push(message); } }, addEventListener() {} }, setTimeout: () => 1, clearTimeout() {} });
+  const viewerScript = viewerHtml.match(/<script>([\s\S]*)<\/script>/)![1];
+  runInContext(viewerScript.slice(0, viewerScript.indexOf('const CODES=')), context);
+  for (const method of ['snapshot:save', 'snapshot:rollback']) {
+    await assert.rejects(runInContext(`rpc('${method}')`, context), { code: 'CURRENCY_READ_ONLY', status: 403 });
+  }
+  assert.equal(requests.length, 0);
+  runInContext("rpc('snapshot:get')", context);
+  assert.equal(requests.length, 1, 'Viewer can still read shared data');
 });
 
 test('manual numbers and dates reject permissive parseFloat cases; rendered text escapes HTML', () => {
@@ -124,11 +140,13 @@ test('iframe RPC rejects forged parent/origin/nonce messages and uses string req
   assert.equal(runInContext('rpcPending.size', context), 0);
 });
 
-function sharedHarness() {
+function sharedHarness(canManage = true) {
   const nodes = new Map<string, { textContent: string; disabled: boolean; classList: { add(): void; remove(): void }; addEventListener(): void }>();
   const document = { getElementById(id: string) { if (!nodes.has(id)) nodes.set(id, { textContent: '', disabled: false, classList: { add() {}, remove() {} }, addEventListener() {} }); return nodes.get(id)!; }, querySelectorAll() { return []; } };
   const context = createContext({ document, console });
   runInContext(`
+    const CAN_MANAGE=${canManage};
+    ${fn('requireManage')}
     ${variable('MANUAL_KEYS')}
     ${variable('memoryStore')}
     ${variable('store')}
@@ -142,6 +160,15 @@ function sharedHarness() {
   `, context);
   return { context, nodes };
 }
+
+test('viewer cannot save/import shared patches and rollback remains disabled after data refreshes', async () => {
+  const { context, nodes } = sharedHarness(false);
+  await assert.rejects(runInContext("saveSharedPatch({kts_cpsRates:{eur:110}},'Импорт',true)", context), { code: 'CURRENCY_READ_ONLY', status: 403 });
+  assert.equal(runInContext("store.get('kts_cpsRates').eur", context), 100);
+  assert.equal(runInContext('resolveRpc', context), undefined, 'No mutation RPC is sent');
+  runInContext('sharedEnvelope.previous=sharedEnvelope.current;updateHistoryStatus();setSharedBusy(true);setSharedBusy(false)', context);
+  assert.equal(nodes.get('rollbackShared')!.disabled, true);
+});
 
 test('shared changes become visible only after server success; CAS failure preserves old data and drafts', async () => {
   const { context, nodes } = sharedHarness();

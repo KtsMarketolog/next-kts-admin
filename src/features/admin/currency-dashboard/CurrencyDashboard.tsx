@@ -7,7 +7,7 @@ import { CURRENCY_RPC_CHANNEL, CURRENCY_RPC_MAX_BYTES, parseCurrencyRpcRequest }
 
 import styles from './currency-dashboard.module.scss';
 
-export function CurrencyDashboard({ nonce }: { nonce: string }) {
+export function CurrencyDashboard({ nonce, canManage }: { nonce: string; canManage: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const container = useRef<HTMLElement>(null);
   const [error, setError] = useState('');
@@ -43,7 +43,9 @@ export function CurrencyDashboard({ nonce }: { nonce: string }) {
         });
         const result = await response.json();
         if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
+          if (response.status === 403 && result.code === 'CURRENCY_READ_ONLY') {
+            setError('Доступен только просмотр. Нет прав на изменение общих данных дашборда.');
+          } else if (response.status === 401 || response.status === 403) {
             setError('Доступ к отчёту завершён. Войдите в кабинет повторно. Несохранённые поля не отправлены.');
           }
           reply({ error: { message: result.error ?? 'Не удалось выполнить запрос', status: response.status, code: result.code } });
@@ -76,7 +78,7 @@ export function CurrencyDashboard({ nonce }: { nonce: string }) {
   return (
     <main className={styles.root} ref={container}>
       <div className={styles.toolbar}>
-        <div><h1>Курсы валют и медь</h1><p>Общие данные для Админа и Админ TOP · авторский дашборд V21</p></div>
+        <div><h1>Курсы валют и медь</h1><p>Общие данные для Админа, Админ TOP и TOP · авторский дашборд V21{!canManage && ' · только просмотр'}</p></div>
         <nav aria-label="Навигация отчёта">
           <Link href="/admin/top">К списку отчётов</Link>
           <button type="button" onClick={fullScreen}>На весь экран</button>

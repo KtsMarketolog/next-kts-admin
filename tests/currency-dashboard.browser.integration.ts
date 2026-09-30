@@ -105,8 +105,9 @@ async function main() {
       const common = { 'Cache-Control': 'no-store' };
       if (url.pathname === '/') {
         const unsafe = url.searchParams.has('unsafe');
+        const viewer = url.searchParams.has('viewer');
         response.writeHead(200, { ...common, 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': 'fixture-auth=secret; SameSite=Strict' }).end(`<!doctype html><html><body style="margin:0">
-<iframe id="report" sandbox="${frameSandbox}" style="width:100%;height:1100px;border:0" src="/frame"></iframe><script>
+<iframe id="report" sandbox="${frameSandbox}" style="width:100%;height:1100px;border:0" src="/frame${viewer ? '?viewer=1' : ''}"></iframe><script>
 const channel='kts-currency-v1',nonce=${JSON.stringify(nonce)},frame=document.getElementById('report');
 window.addEventListener('message',async event=>{
 const m=event.data;if(event.source!==frame.contentWindow||event.origin!=='null'||m?.channel!==channel||m.nonce!==nonce||typeof m.id!=='string'||! /^[a-zA-Z0-9:_-]{1,100}$/.test(m.id))return;
@@ -115,7 +116,7 @@ const body=await response.json();frame.contentWindow.postMessage({channel,nonce,
 catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{message:error.message,status:500}},'*');}});
 </script></body></html>`);
       } else if (url.pathname === '/frame') {
-        const html = renderCurrencyDashboardHtml(nonce, origin);
+        const html = renderCurrencyDashboardHtml(nonce, origin, !url.searchParams.has('viewer'));
         response.writeHead(200, { ...common, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': buildCurrencyDashboardContentSecurityPolicy(html) }).end(html);
       } else if (url.pathname === '/rpc' && request.method === 'POST') {
         const chunks: Buffer[] = []; let bytes = 0;
@@ -178,7 +179,7 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
         await page.clock.setFixedTime(new Date(fixtureAt));
         await page.goto(origin + suffix);
         const report = page.frameLocator('#report');
-        const frame = page.frames().find((item: { url(): string }) => item.url().endsWith('/frame'));
+        const frame = page.frames().find((item: { url(): string }) => new URL(item.url()).pathname === '/frame');
         assert.ok(frame);
         try {
           await frame.waitForFunction(() => document.querySelector('#saveStatus')?.textContent?.includes('ревизия'));
@@ -257,6 +258,44 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
         }
         await second.page.screenshot({ path: path.join(output, `${engineName}-january.png`) });
 
+        const viewer = await createPage('/?viewer=1');
+        assert.equal(await viewer.report.locator('#readOnlyStatus').isVisible(), true);
+        assert.match(await viewer.report.locator('#cpsRates').innerText(), /123,45/);
+        for (const selector of ['#cpsForm input', '#cpsForm button', '#anForm textarea', '#anForm button', '#cuForm input', '#cuForm button', '#tOpen', '#snapFile', '#rollbackShared']) {
+          const controls = viewer.report.locator(selector);
+          for (let index = 0; index < await controls.count(); index += 1) assert.equal(await controls.nth(index).isDisabled(), true, selector);
+        }
+        assert.equal(await viewer.report.locator('#reloadShared').isEnabled(), true);
+        assert.equal(await viewer.report.locator('#tSnap').isEnabled(), true);
+        const viewerMethodsStart = methods.length;
+        const deniedWrites = await viewer.frame.evaluate(async () => {
+          const api = window as unknown as {
+            rpc(method: string): Promise<unknown>;
+            saveSharedPatch(patch: unknown, message: string, replace: boolean): Promise<unknown>;
+            setSharedBusy(busy: boolean): void;
+          };
+          const denied: string[] = [];
+          for (const action of [() => api.rpc('snapshot:save'), () => api.rpc('snapshot:rollback'), () => api.saveSharedPatch({}, 'Импорт', true)]) {
+            try { await action(); denied.push('unexpected success'); } catch (error) { denied.push((error as { code: string }).code); }
+          }
+          api.setSharedBusy(true); api.setSharedBusy(false);
+          return denied;
+        });
+        assert.deepEqual(deniedWrites, ['CURRENCY_READ_ONLY', 'CURRENCY_READ_ONLY', 'CURRENCY_READ_ONLY']);
+        assert.equal(methods.slice(viewerMethodsStart).some(method => ['snapshot:save', 'snapshot:rollback'].includes(method)), false);
+        assert.equal(await viewer.report.locator('#rollbackShared').isDisabled(), true, 'Busy cycles must not enable viewer mutations');
+        assert.equal(await viewer.report.locator('#tOpen').isDisabled(), true);
+        await viewer.report.locator('#reloadShared').click();
+        await viewer.report.locator('[data-page="pgSum"]').click();
+        await viewer.report.locator('#summaryMonth').fill('2026-01');
+        await viewer.report.locator('#summaryMonth').dispatchEvent('change');
+        assert.deepEqual(await viewer.report.locator('#sumTable tr td:first-child').allTextContents(), januaryDates);
+        const viewerDownloadEvent = viewer.page.waitForEvent('download');
+        await viewer.report.locator('#btnCsv').click();
+        assert.ok((await viewerDownloadEvent).suggestedFilename().includes('2026-01'), 'Viewer retains calendar and export access');
+        await viewer.page.screenshot({ path: path.join(output, `${engineName}-viewer.png`) });
+        assert.equal(successfulWrites, 2, 'Viewer actions never change shared data');
+
         const quotes = await second.report.locator('#moex td').allTextContents();
         staleSources = true;
         const stale = await createPage();
@@ -285,7 +324,7 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
         assert.deepEqual(serverErrors, [], 'All fixture RPC calls satisfy the real snapshot contract');
         assert.deepEqual(errors, [], 'No runtime errors in Chromium/WebKit');
         console.log(JSON.stringify({ engine: engineName, result: 'pass', hydration: 'two contexts', saveRequests, successfulWrites, revision: envelope.revision, calendarAndExports: 'January 2026', isolation, output }));
-        for (const item of [first, second, stale, escaped]) await item.context.close();
+        for (const item of [first, second, viewer, stale, escaped]) await item.context.close();
       } catch (error) {
         console.error(JSON.stringify({ engine: engineName, errors, warnings, serverErrors, methods, output })); throw error;
       } finally { await browser.close(); }

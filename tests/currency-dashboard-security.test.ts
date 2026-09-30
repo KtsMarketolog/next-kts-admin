@@ -11,18 +11,29 @@ import { getReportEntries, parseDashboardAccess, PURCHASER_DASHBOARD_REPORT_OPTI
 import * as rpc from '../src/shared/lib/currencyDashboardRpc';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 
-test('currency report belongs only to persisted Admin and Admin TOP, never general TOP grants', () => {
+test('currency report is available to persisted Admin, Admin TOP and TOP, without granting other roles access', () => {
   for (const role of ['admin', 'admintop', 'top', 'manager', 'support_manager', 'purchaser', 'wholesale_admin'] as const) {
     const session: AdminSession = { role, adminUserId: 5, managerId: 9, sessionId: 'synthetic',
       canAccessTopDashboard: true, canManageTopDashboard: true, dashboardAccess: ['currency-rates'] };
-    const expected = role === 'admin' || role === 'admintop';
+    const expected = role === 'admin' || role === 'admintop' || role === 'top';
     assert.equal(access.canAccessCurrencyDashboard(session), expected, role);
+    assert.equal(access.canManageCurrencyDashboard(session), expected, role);
     assert.equal(getReportEntries(session).some(({ key }) => key === 'currency-rates'), expected);
     assert.equal(access.canAccessCurrencyDashboard({ ...session, sessionId: undefined }), false);
   }
   assert.equal(access.canAccessCurrencyDashboard(null), false);
-  for (const adminUserId of [undefined, 0, -1, 1.5, Infinity]) {
-    assert.equal(access.canAccessCurrencyDashboard({ role: 'admintop', sessionId: 'x', adminUserId }), false);
+  for (const role of ['admintop', 'top'] as const) {
+    for (const adminUserId of [undefined, 0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      const session = { role, sessionId: 'x', adminUserId, canManageTopDashboard: true };
+      assert.equal(access.canAccessCurrencyDashboard(session), false);
+      assert.equal(access.canManageCurrencyDashboard(session), false);
+    }
+  }
+  for (const canManageTopDashboard of [undefined, false, true]) {
+    const session: AdminSession = { role: 'top', sessionId: 'x', adminUserId: 6, canManageTopDashboard };
+    assert.equal(access.canAccessCurrencyDashboard(session), true);
+    assert.equal(getReportEntries(session).some(({ key }) => key === 'currency-rates'), true);
+    assert.equal(access.canManageCurrencyDashboard(session), canManageTopDashboard === true);
   }
   assert.equal(parseDashboardAccess(['currency-rates']), null);
   assert.equal(PURCHASER_DASHBOARD_REPORT_OPTIONS.some(({ key }) => key === 'currency-rates'), false);
@@ -52,6 +63,7 @@ test('RPC streaming reader rejects oversize, malformed JSON and non-JSON bodies'
 
 function harness(relative: string, session: AdminSession | null) {
   const calls: string[] = [];
+  const framePermissions: boolean[] = [];
   const infrastructure = new Proxy({}, { get: (_target, key) => {
     if (String(key).endsWith('Error')) return class extends Error {};
     return async () => { calls.push(String(key)); return { revision: 0, current: null, previous: null }; };
@@ -75,7 +87,9 @@ function harness(relative: string, session: AdminSession | null) {
     '@/shared/lib/db/securityAuditRepo': infrastructure,
     '@/shared/lib/originProtection': { enforceSameOriginRequest },
     '@/shared/lib/currencyDashboardHtml': {
-      renderCurrencyDashboardHtml: () => { calls.push('html'); return '<html></html>'; },
+      renderCurrencyDashboardHtml: (_nonce: string, _origin: string, canManage: boolean) => {
+        calls.push('html'); framePermissions.push(canManage); return '<html></html>';
+      },
       buildCurrencyDashboardContentSecurityPolicy: () => "connect-src 'none'",
     },
   };
@@ -86,11 +100,11 @@ function harness(relative: string, session: AdminSession | null) {
     if (!(name in modules)) throw new Error(`Unexpected module ${name}`);
     return modules[name];
   }, Response, Request, URL, console });
-  return { exports, calls };
+  return { exports, calls, framePermissions };
 }
 
 test('actual API and HTML route reject unauthorized roles before data reads or source requests', async () => {
-  for (const session of [null, { role: 'admin' }, { role: 'top', adminUserId: 1, sessionId: 'x' },
+  for (const session of [null, { role: 'admin' }, { role: 'top', sessionId: 'x' },
     { role: 'purchaser', adminUserId: 1, sessionId: 'x', dashboardAccess: ['currency-rates'] },
     { role: 'support_manager', managerId: 1, sessionId: 'x', canManageTopDashboard: true }] as Array<AdminSession | null>) {
     for (const [relative, method] of [['route.ts', 'POST'], ['frame/route.ts', 'GET']]) {
@@ -101,6 +115,51 @@ test('actual API and HTML route reject unauthorized roles before data reads or s
       assert.match(response.headers.get('Cache-Control') ?? '', /no-store/);
     }
   }
+});
+
+test('TOP can read all report data but saving and rollback require the existing management grant', async () => {
+  const request = (method: string) => new Request('https://example.test/api/admin/currency-dashboard', {
+    method: 'POST', headers: { Origin: 'https://example.test', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ method, params: method === 'source' ? { kind: 'cbr-daily' }
+      : method.startsWith('snapshot:') && method !== 'snapshot:get' ? { expectedRevision: 0, snapshot: {} } : {} }),
+  });
+  for (const canManageTopDashboard of [false, true]) {
+    const session: AdminSession = { role: 'top', adminUserId: 6, sessionId: 'x', canManageTopDashboard };
+    for (const [method, expectedCall] of [
+      ['snapshot:get', 'readCurrencySnapshot'], ['baselines:get', 'getCurrencyBaselines'], ['source', 'source:cbr-daily'],
+    ]) {
+      const h = harness('route.ts', session);
+      assert.equal((await h.exports.POST(request(method))).status, 200);
+      assert.deepEqual(h.calls, ['limit', expectedCall]);
+    }
+    for (const [method, expectedCall] of [['snapshot:save', 'writeCurrencySnapshot'], ['snapshot:rollback', 'rollbackCurrencySnapshot']]) {
+      const h = harness('route.ts', session);
+      const response = await h.exports.POST(request(method));
+      assert.equal(response.status, canManageTopDashboard ? 200 : 403);
+      assert.deepEqual(h.calls, canManageTopDashboard ? ['limit', 'limit', expectedCall, 'recordSecurityEvent'] : ['limit']);
+      if (!canManageTopDashboard) assert.equal((await response.json()).code, 'CURRENCY_READ_ONLY');
+    }
+    const h = harness('frame/route.ts', session);
+    const response = await h.exports.GET(new Request('https://example.test/frame?nonce=01234567-89ab-4cde-8fab-0123456789ab', {
+      headers: { Referer: 'https://example.test/admin/top/currency-rates' },
+    }));
+    assert.equal(response.status, 200);
+    assert.deepEqual(h.framePermissions, [canManageTopDashboard]);
+  }
+});
+
+test('currency write permission is checked again when TOP management is revoked after opening', async () => {
+  const session: AdminSession = { role: 'top', adminUserId: 6, sessionId: 'x', canManageTopDashboard: true };
+  const h = harness('route.ts', session);
+  const request = () => new Request('https://example.test/api/admin/currency-dashboard', {
+    method: 'POST', headers: { Origin: 'https://example.test', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ method: 'snapshot:rollback', params: { expectedRevision: 0 } }),
+  });
+  assert.equal((await h.exports.POST(request())).status, 200);
+  h.calls.length = 0;
+  session.canManageTopDashboard = false;
+  assert.equal((await h.exports.POST(request())).status, 403);
+  assert.deepEqual(h.calls, ['limit']);
 });
 
 test('actual API rejects cross-site POST and accepts same-origin authorized read', async () => {

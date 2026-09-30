@@ -1,5 +1,5 @@
 import { getAdminSession } from '@/shared/lib/adminAuth';
-import { canAccessCurrencyDashboard, CURRENCY_PRIVATE_HEADERS } from '@/shared/lib/currencyDashboardAccess';
+import { canAccessCurrencyDashboard, canManageCurrencyDashboard, CURRENCY_PRIVATE_HEADERS } from '@/shared/lib/currencyDashboardAccess';
 import { renderCurrencyDashboardHtml, buildCurrencyDashboardContentSecurityPolicy } from '@/shared/lib/currencyDashboardHtml';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   const nonce = new URL(request.url).searchParams.get('nonce') ?? '';
   if (!/^[a-f0-9-]{36}$/.test(nonce)) return new Response('Некорректный запрос', { status: 400, headers: CURRENCY_PRIVATE_HEADERS });
   const parentOrigin = new URL(request.headers.get('referer') ?? request.url).origin;
-  const html = renderCurrencyDashboardHtml(nonce, parentOrigin);
+  const html = renderCurrencyDashboardHtml(nonce, parentOrigin, canManageCurrencyDashboard(session));
   return new Response(html, {
     headers: { ...CURRENCY_PRIVATE_HEADERS, 'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': buildCurrencyDashboardContentSecurityPolicy(html) },

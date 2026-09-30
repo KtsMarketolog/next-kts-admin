@@ -23,6 +23,7 @@ html{font-size:clamp(12.5px,0.72vw,26px);scroll-padding-top:env(safe-area-inset-
 *,*::before,*::after{box-sizing:inherit}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:1rem;line-height:1.45}
 button,input{font:inherit;color:inherit}
+button:disabled,input:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}
 :focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .cond{font-family:var(--cond);text-transform:uppercase;letter-spacing:.07em}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -276,7 +277,7 @@ table.sum td small{font-size:.8rem;margin-left:.3rem}
   <button class="tog" id="tVoice" aria-pressed="false" title="Голосовое сообщение об изменении курса">🗣 <span>голос</span></button>
   <button class="tog" id="tNotif" aria-pressed="false" title="Системные уведомления браузера">🔔 <span>уведомления</span></button>
   <button class="tog" id="tSnap" title="Скачать сохранённые общие данные в JSON">⤓ <span>снимок</span></button>
-  <button class="tog" id="tOpen" title="Проверить и сохранить снимок для всех администраторов">⤒ <span>открыть</span></button><input type="file" id="snapFile" accept=".js,.json" style="display:none">
+  <button class="tog" id="tOpen" title="Проверить и сохранить общие данные для всех пользователей отчёта">⤒ <span>открыть</span></button><input type="file" id="snapFile" accept=".js,.json" style="display:none">
   <span class="clock" id="clock">--:--</span>
 </div>
 
@@ -285,6 +286,7 @@ table.sum td small{font-size:.8rem;margin-left:.3rem}
 <div class="alert" id="alert" role="status" aria-live="polite"><span class="when" id="alertWhen"></span><span class="msg" id="alertMsg"></span><button class="x" id="alertX">свернуть</button></div>
 <div class="big-alert" id="bigAlert" role="alert"><div class="ico" id="bigIco">🔔</div><div><div class="ttl" id="bigTtl">Изменение курса</div><div class="txt" id="bigTxt"></div></div><div class="bar" id="bigBar"></div></div>
 <div class="snap-hint" id="snapHint"></div>
+<p class="hint" id="readOnlyStatus" role="status" style="padding:.5rem 1.1rem" hidden>Только просмотр. Изменять общие данные могут пользователи с правом управления отчётами.</p>
 <div class="snd-hint" id="sndHint">Звук включён, но браузер блокирует его до первого действия на странице. Щёлкните в любом месте один раз.</div>
 
 <div class="tabs" role="tablist">
@@ -370,7 +372,7 @@ table.sum td small{font-size:.8rem;margin-left:.3rem}
         <div class="expl" id="ex-cps"><dl>
           <dt>Зачем</dt><dd>Сравнить условия партнёра с официальным курсом.</dd>
           <dt>Как считается</dt><dd>Отклонение = (курс СПС-холод − курс ЦБ) / курс ЦБ.</dd>
-          <dt>Откуда данные</dt><dd>Вводится вручную из письма партнёра. После подтверждения сервера виден всем администраторам.</dd>
+          <dt>Откуда данные</dt><dd>Вводится вручную из письма партнёра. После подтверждения сервера виден всем пользователям отчёта.</dd>
           <dt>Осторожно</dt><dd>По условиям партнёра курс не действует на российские товары, акционный товар и поставки под заказ; счета действительны 4 календарных дня.</dd>
           <dd class="legal">Носит информационный характер</dd>
         </dl></div>
@@ -456,10 +458,13 @@ table.sum td small{font-size:.8rem;margin-left:.3rem}
 // The parent owns authentication, endpoints and source allowlists. This reviewed
 // document has an opaque origin and no network or cabinet-storage access.
 const KTS_CURRENCY_BOOTSTRAP = __KTS_CURRENCY_BOOTSTRAP__;
+const CAN_MANAGE = KTS_CURRENCY_BOOTSTRAP.canManage === true;
+function requireManage(){if(!CAN_MANAGE)throw Object.assign(new Error('Доступен только просмотр. Нет прав на изменение общих данных.'),{code:'CURRENCY_READ_ONLY',status:403});}
 const RPC_CHANNEL = 'kts-currency-v1', rpcPending = new Map();
 let rpcId = 0;
 function rpc(method,params={}){
   return new Promise((resolve,reject)=>{
+    if(method==='snapshot:save'||method==='snapshot:rollback')requireManage();
     if(rpcPending.size>=12){reject(new Error('Слишком много запросов. Повторите немного позже.'));return;}
     const id=String(++rpcId);
     const timer=setTimeout(()=>{rpcPending.delete(id);reject(new Error('Сервер не ответил вовремя. Данные не подтверждены.'));},60000);
@@ -648,7 +653,7 @@ function renderCps(){
 }
 document.getElementById("cpsForm").addEventListener("submit",async e=>{
   e.preventDefault();const f=e.target;
-  try{const next={eur:parseNumber(f.eur.value),cny:parseNumber(f.cny.value),usd:parseNumber(f.usd.value,{optional:true}),from:parseDate(f.from.value),to:parseDate(f.to.value)};
+  try{requireManage();const next={eur:parseNumber(f.eur.value),cny:parseNumber(f.cny.value),usd:parseNumber(f.usd.value,{optional:true}),from:parseDate(f.from.value),to:parseDate(f.to.value)};
     if(next.to<next.from)throw new Error('Дата окончания не может быть раньше начала.');
     await saveSharedPatch({kts_cpsRates:next},'Внутренний курс СПС-холод обновлён');f.closest('details').open=false;
   }catch(error){showSaveError(error);}
@@ -816,7 +821,7 @@ function renderAn(){
   const form=document.getElementById("anForm");if(!dirtyForms.has('anForm')&&!form.contains(document.activeElement))form.rows.value=a.rows.join("\n");
 }
 document.getElementById("anForm").addEventListener("submit",async e=>{e.preventDefault();
-  try{const rows=e.target.rows.value.split("\n").map(x=>x.trim()).filter(Boolean);
+  try{requireManage();const rows=e.target.rows.value.split("\n").map(x=>x.trim()).filter(Boolean);
     if(rows.length>50||rows.some(r=>r.length>1000||r.split('|').length!==5))throw new Error('До 50 строк. Каждая строка: источник | доллар | юань | горизонт | дата обзора.');
     await saveSharedPatch({kts_an:{upd:ruDate(iso(new Date())),rows}},'Прогнозы аналитиков обновлены');e.target.closest('details').open=false;
   }catch(error){showSaveError(error);}});
@@ -932,7 +937,7 @@ function renderCu(){
 }
 function cuRate2(){const b=baseOf("COPPER");if(b)return b.price+cuData().prem;const d=cuData(),all=cuSeries(),last=all[all.length-1];const fresh=d.lmci&&d.lmciDate&&(!last||d.lmciDate>=last.date);const base=fresh?d.lmci:(last&&last.m3!=null?last.m3:null);return base==null?null:base+d.prem;}
 document.getElementById('cuForm').addEventListener('submit',async e=>{e.preventDefault();const f=e.target;
-  try{const d=manualCopper(store.get('kts_cu')),pr=parseNumber(f.price.value,{optional:true}),lm=parseNumber(f.lmci.value,{optional:true}),date=parseDate(f.date.value);
+  try{requireManage();const d=manualCopper(store.get('kts_cu')),pr=parseNumber(f.price.value,{optional:true}),lm=parseNumber(f.lmci.value,{optional:true}),date=parseDate(f.date.value);
     d.prem=parseNumber(f.prem.value,{zero:true});if(lm!==null){d.lmci=lm;d.lmciDate=date;}
     if(pr!==null)d.rows=d.rows.filter(r=>r.date!==date).concat({date,price:pr}).sort((a,b)=>a.date.localeCompare(b.date));
     await saveSharedPatch({kts_cu:d},'Ручные данные меди обновлены');f.price.value='';f.lmci.value='';f.closest('details').open=false;
@@ -1100,7 +1105,7 @@ function makeSnapshot(){const data={};MANUAL_KEYS.forEach(k=>{const v=store.get(
 function updateHistoryStatus(){
   const current=sharedEnvelope.current,previous=sharedEnvelope.previous;
   document.getElementById('previousStatus').textContent=previous?'Предыдущая версия: '+formatSavedAt(previous.savedAt)+' МСК · '+previous.actor:'Предыдущей сохранённой версии пока нет.';
-  document.getElementById('rollbackShared').disabled=savingShared||!previous;
+  document.getElementById('rollbackShared').disabled=!CAN_MANAGE||savingShared||!previous;
   document.getElementById('saveStatus').textContent=current?'Общие данные сохранены '+formatSavedAt(current.savedAt)+' МСК · '+current.actor+' · ревизия '+sharedEnvelope.revision:'Общие данные ещё не сохранены. Показаны исходные авторские значения с указанными датами; они не являются новыми данными сервера.';
 }
 function installEnvelope(envelope,preserveDrafts=[]){
@@ -1120,8 +1125,9 @@ function showSaveError(error){
 }
 function setSharedBusy(busy){
   savingShared=busy;
-  document.querySelectorAll('#cpsForm button[type="submit"],#anForm button[type="submit"],#cuForm button[type="submit"],#reloadShared,#tOpen,#tSnap').forEach(b=>b.disabled=busy);
-  document.getElementById('rollbackShared').disabled=busy||!sharedEnvelope.previous;
+  document.querySelectorAll('#cpsForm input,#cpsForm button,#anForm textarea,#anForm button,#cuForm input,#cuForm button,#tOpen,#snapFile').forEach(b=>b.disabled=!CAN_MANAGE||busy);
+  document.querySelectorAll('#reloadShared,#tSnap').forEach(b=>b.disabled=busy);
+  document.getElementById('rollbackShared').disabled=!CAN_MANAGE||busy||!sharedEnvelope.previous;
 }
 async function loadShared(force=false){
   if(savingShared)return;
@@ -1132,6 +1138,7 @@ async function loadShared(force=false){
   installEnvelope(next);
 }
 async function saveSharedPatch(patch,message,replace=false){
+  requireManage();
   if(!sharedLoaded)throw new Error('Сначала загрузите актуальные общие данные с сервера.');
   if(savingShared)throw new Error('Дождитесь завершения текущего сохранения.');
   const snapshot=makeSnapshot();snapshot.data=manualSnapshotData(replace?patch:{...snapshot.data,...patch});
@@ -1147,7 +1154,8 @@ document.getElementById('reloadShared').onclick=async()=>{
   try{await loadShared(true);}catch(error){showSaveError(error);}
 };
 document.getElementById('rollbackShared').onclick=async()=>{
-  if(!sharedEnvelope.previous||!confirm('Вернуть общие данные от '+formatSavedAt(sharedEnvelope.previous.savedAt)+' МСК для всех администраторов?'))return;
+  try{requireManage();}catch(error){showSaveError(error);return;}
+  if(!sharedEnvelope.previous||!confirm('Вернуть общие данные от '+formatSavedAt(sharedEnvelope.previous.savedAt)+' МСК для всех пользователей отчёта?'))return;
   setSharedBusy(true);try{const next=await rpc('snapshot:rollback',{expectedRevision:sharedEnvelope.revision});installEnvelope(next);}
   catch(error){showSaveError(error);}finally{setSharedBusy(false);}
 };
@@ -1156,16 +1164,17 @@ document.getElementById('tSnap').onclick=()=>{
   const current=sharedEnvelope.current;
   dl('kts_currency_snapshot.json',new Blob([JSON.stringify({at:current.at,version:'V21',data:current.data},null,2)],{type:'application/json'}));
 };
-document.getElementById('tOpen').onclick=()=>document.getElementById('snapFile').click();
+document.getElementById('tOpen').onclick=()=>{try{requireManage();document.getElementById('snapFile').click();}catch(error){showSaveError(error);}};
 document.getElementById('snapFile').onchange=async e=>{
   const file=e.target.files[0];if(!file)return;
   try{
+    requireManage();
     if(file.size>2*1024*1024)throw new Error('Снимок ручных данных должен быть не больше 2 МБ.');
     const txt=await file.text(),start=txt.indexOf('{'),end=txt.lastIndexOf('}');
     const snapshot=JSON.parse(txt.slice(start,end+1));
     if(!snapshot?.data||typeof snapshot.data!=='object'||Array.isArray(snapshot.data))throw new Error('В файле нет данных снимка.');
     const data=manualSnapshotData(snapshot.data);if(!Object.keys(data).length)throw new Error('В файле нет поддерживаемых ручных данных.');
-    if(!confirm('Импортировать «'+file.name+'» и заменить общие ручные данные для всех администраторов?'))return;
+    if(!confirm('Импортировать «'+file.name+'» и заменить общие ручные данные для всех пользователей отчёта?'))return;
     await saveSharedPatch(data,'Импортирован общий снимок ручных данных',true);
   }catch(error){showSaveError(error);}finally{e.target.value='';}
 };
@@ -1204,6 +1213,7 @@ const tick=()=>document.getElementById("clock").textContent=new Date().toLocaleT
 const runningJobs=new Set();
 async function runJob(fn){if(runningJobs.has(fn))return;runningJobs.add(fn);try{await fn();}catch(error){setStatus();}finally{runningJobs.delete(fn);}}
 (async function init(){
+  document.getElementById('readOnlyStatus').hidden=CAN_MANAGE;setSharedBusy(false);
   state.cps=CPS_DEFAULT;renderCps();renderAn();renderLog();applyMini();sndHint();renderCu();setAuto(!!prefs.auto);
   try{await loadShared();}catch(error){showSaveError(error);}
   await refreshBaselines();

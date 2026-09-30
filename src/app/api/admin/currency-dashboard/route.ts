@@ -1,6 +1,6 @@
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { canAccessCurrencyDashboard, CURRENCY_PRIVATE_HEADERS } from '@/shared/lib/currencyDashboardAccess';
+import { canAccessCurrencyDashboard, canManageCurrencyDashboard, CURRENCY_PRIVATE_HEADERS } from '@/shared/lib/currencyDashboardAccess';
 import { CurrencyDashboardValidationError } from '@/shared/lib/currencyDashboardModel';
 import { CurrencyRequestError, readCurrencyRpcRequest } from '@/shared/lib/currencyDashboardRpc';
 import { CurrencySourceError, getCurrencySource } from '@/shared/lib/currencyDashboardSources';
@@ -33,6 +33,9 @@ export async function POST(request: Request) {
       if (typeof params.kind !== 'string') throw new CurrencyRequestError('Укажите источник данных');
       const { kind, ...sourceParams } = params;
       return json(await getCurrencySource(kind, sourceParams));
+    }
+    if (!canManageCurrencyDashboard(session)) {
+      return json({ error: 'Нет прав на изменение данных дашборда', code: 'CURRENCY_READ_ONLY' }, 403);
     }
     const writesLimited = await enforceAdminActionRateLimit(session, 'currency-dashboard-save', 60);
     if (writesLimited) return writesLimited;

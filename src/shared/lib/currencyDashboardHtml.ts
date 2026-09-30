@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 /** Reviewed application asset, never administrator-supplied executable HTML. */
-export function renderCurrencyDashboardHtml(nonce: string, parentOrigin: string): string {
+export function renderCurrencyDashboardHtml(nonce: string, parentOrigin: string, canManage = false): string {
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(nonce)) throw new Error('Invalid currency bridge nonce');
   const origin = new URL(parentOrigin);
   if (!['https:', 'http:'].includes(origin.protocol) || origin.origin !== parentOrigin) {
@@ -12,7 +12,7 @@ export function renderCurrencyDashboardHtml(nonce: string, parentOrigin: string)
   const html = readFileSync(path.join(process.cwd(), 'assets/currency-dashboard/kursy_valyut_v21.html'), 'utf8');
   const marker = '__KTS_CURRENCY_BOOTSTRAP__';
   if (html.split(marker).length !== 2) throw new Error('Invalid currency dashboard asset');
-  const configuration = JSON.stringify({ nonce, parentOrigin }).replace(/</g, '\\u003c');
+  const configuration = JSON.stringify({ nonce, parentOrigin, canManage }).replace(/</g, '\\u003c');
   return html.replace(marker, () => configuration);
 }
 
