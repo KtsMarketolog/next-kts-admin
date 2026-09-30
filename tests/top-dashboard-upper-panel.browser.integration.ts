@@ -133,18 +133,31 @@ async function main() {
         assert.equal(await page.locator('#top-dashboard-data-history').getByText('Версия данных #190', { exact: true }).count(), 0, 'previous HTML data stays stored but is not an archive in the current history');
         const sales = page.getByLabel('Выбрать данные: Продажи', { exact: true });
         await sales.setInputFiles([json('sales.json', 1), json('inventory.json', 2)]);
-        const assertHistoryBelowReport = async () => {
+        const assertManagementBelowReport = async () => {
           assert.deepEqual(await page.evaluate(() => {
             const preview = document.querySelector('.topDashboardPreviewCard');
+            const htmlUpload = document.querySelector('input[accept=".html,.htm,text/html"]')?.closest('section');
+            const dataUpload = document.querySelector('.topDashboardDataSection');
             const data = document.getElementById('top-dashboard-data-history');
             const html = document.getElementById('top-dashboard-html-history');
-            return [Boolean(preview && data && (preview.compareDocumentPosition(data) & Node.DOCUMENT_POSITION_FOLLOWING)),
-              Boolean(data && html && (data.compareDocumentPosition(html) & Node.DOCUMENT_POSITION_FOLLOWING))];
-          }), [true, true], 'both histories follow the report, in desktop and mobile layouts');
+            const sections = [preview, htmlUpload, dataUpload, data, html];
+            return {
+              previewFirst: preview === document.querySelector('.topDashboardLayout > section'),
+              domOrder: sections.slice(1).every((section, index) => Boolean(section && sections[index]
+                && (sections[index]!.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING))),
+              visualOrder: sections.slice(1).every((section, index) => Boolean(section && sections[index]
+                && sections[index]!.getBoundingClientRect().bottom <= section.getBoundingClientRect().top)),
+            };
+          }), { previewFirst: true, domOrder: true, visualOrder: true },
+          'report comes first, then HTML/data uploads and histories, in DOM and visual order');
         };
-        await assertHistoryBelowReport();
+        await assertManagementBelowReport();
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.screenshot({ path: path.join(screenshots, `${engine}-desktop-report-first.png`) });
         await page.setViewportSize({ width: 390, height: 844 });
-        await assertHistoryBelowReport();
+        await assertManagementBelowReport();
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.screenshot({ path: path.join(screenshots, `${engine}-mobile-report-first.png`) });
         await page.setViewportSize({ width: 1440, height: 1000 });
         assert.equal(await sales.getAttribute('multiple'), '');
         await page.getByRole('button', { name: 'Заменить для всех', exact: true }).click();

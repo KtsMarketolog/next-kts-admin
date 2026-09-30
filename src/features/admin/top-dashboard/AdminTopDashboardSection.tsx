@@ -1056,6 +1056,90 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
 
   return (
     <div className={styles.topDashboardLayout}>
+      <section
+        ref={previewCardRef}
+        className={`${styles.topDashboardPreviewCard}${isPreviewFullscreen ? ` ${styles.topDashboardPreviewFullscreen}` : ''}`}
+        aria-busy={loading}
+      >
+        <div className={styles.topDashboardPreviewHeader}>
+          <div>
+            <span className={styles.topDashboardEyebrow}>Предпросмотр в изолированном режиме</span>
+            <h2>{selectedVersion?.originalName ?? 'HTML ещё не загружен'}</h2>
+            {selectedVersion ? (
+              <div className={styles.topDashboardMeta}>
+                <span>Версия #{selectedVersion.id}</span>
+                <span>{formatFileSize(selectedVersion.fileSize)}</span>
+                <span>{formatDate(selectedVersion.createdAt)}</span>
+                <span>SHA-256: {selectedVersion.sha256.slice(0, 12)}…</span>
+              </div>
+            ) : null}
+          </div>
+          {selectedVersion ? (
+            <div className={styles.topDashboardPreviewActions}>
+              <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${selectedVersion.status}`]}`}>
+                {statusLabel(selectedVersion.status)}
+              </span>
+              <button
+                className={styles.secondary}
+                type="button"
+                disabled={busyAction !== null}
+                onClick={() => {
+                  void loadOverview(selectedVersion.id);
+                  setPreviewRevision((current) => current + 1);
+                }}
+              >
+                Обновить просмотр
+              </button>
+              <button
+                className={styles.secondary}
+                type="button"
+                aria-pressed={isPreviewFullscreen}
+                onClick={() => void togglePreviewFullscreen()}
+              >
+                {isPreviewFullscreen ? 'Выйти из полноэкранного режима' : 'На весь экран'}
+              </button>
+              {selectedVersion.status !== 'active' ? (
+                <button
+                  type="button"
+                  disabled={busyAction !== null}
+                  onClick={() => activateVersion(selectedVersion)}
+                >
+                  {busyAction === `activate:${selectedVersion.id}`
+                    ? 'Публикуем…'
+                    : selectedVersion.status === 'archived'
+                      ? 'Откатить на эту версию'
+                      : 'Опубликовать'}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        {loading && !overview ? (
+          <div className={styles.topDashboardEmpty}>Загружаем HTML-страницу…</div>
+        ) : selectedVersion ? (
+          <div className={styles.topDashboardFrameShell}>
+            <iframe
+              ref={previewFrameRef}
+              onLoad={probeRuntimeUploadTargets}
+              key={`${blockId}:${selectedVersion.id}:${previewRevision}`}
+              className={styles.topDashboardFrame}
+              src={`${apiBasePath}/versions/${selectedVersion.id}/frame?revision=${previewRevision}`}
+              title={`Предпросмотр ${selectedVersion.originalName}`}
+              sandbox="allow-scripts allow-same-origin allow-popups"
+              referrerPolicy="no-referrer"
+              allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
+              allowFullScreen
+            />
+          </div>
+        ) : (
+          <div className={styles.topDashboardEmpty}>
+            <strong>Нет загруженных версий</strong>
+            <span>Выберите HTML ниже — после загрузки здесь сразу откроется безопасный предпросмотр.</span>
+          </div>
+        )}
+      </section>
+
       <section className={styles.section}>
         <div className={styles.sectionHeader} aria-busy={busyAction === 'rename-block' || busyAction === 'delete-block'}>
           <div className={styles.topDashboardBlockHeading}>
@@ -1212,7 +1296,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
               </p>
             ) : usesUniversalDataUpload && !dataUploadTargets.length ? (
               <p>
-                Поля загрузки определяются в опубликованном отчёте. Откройте его просмотр ниже;
+                Поля загрузки определяются в опубликованном отчёте. Откройте его просмотр выше;
                 если поле создаётся после действия в отчёте, оно появится здесь после этого действия.
               </p>
             ) : usesUniversalDataUpload ? (
@@ -1369,90 +1453,6 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
           </div>
         )}
 
-      </section>
-
-      <section
-        ref={previewCardRef}
-        className={`${styles.topDashboardPreviewCard}${isPreviewFullscreen ? ` ${styles.topDashboardPreviewFullscreen}` : ''}`}
-        aria-busy={loading}
-      >
-        <div className={styles.topDashboardPreviewHeader}>
-          <div>
-            <span className={styles.topDashboardEyebrow}>Предпросмотр в изолированном режиме</span>
-            <h2>{selectedVersion?.originalName ?? 'HTML ещё не загружен'}</h2>
-            {selectedVersion ? (
-              <div className={styles.topDashboardMeta}>
-                <span>Версия #{selectedVersion.id}</span>
-                <span>{formatFileSize(selectedVersion.fileSize)}</span>
-                <span>{formatDate(selectedVersion.createdAt)}</span>
-                <span>SHA-256: {selectedVersion.sha256.slice(0, 12)}…</span>
-              </div>
-            ) : null}
-          </div>
-          {selectedVersion ? (
-            <div className={styles.topDashboardPreviewActions}>
-              <span className={`${styles.topDashboardStatus} ${styles[`topDashboardStatus${selectedVersion.status}`]}`}>
-                {statusLabel(selectedVersion.status)}
-              </span>
-              <button
-                className={styles.secondary}
-                type="button"
-                disabled={busyAction !== null}
-                onClick={() => {
-                  void loadOverview(selectedVersion.id);
-                  setPreviewRevision((current) => current + 1);
-                }}
-              >
-                Обновить просмотр
-              </button>
-              <button
-                className={styles.secondary}
-                type="button"
-                aria-pressed={isPreviewFullscreen}
-                onClick={() => void togglePreviewFullscreen()}
-              >
-                {isPreviewFullscreen ? 'Выйти из полноэкранного режима' : 'На весь экран'}
-              </button>
-              {selectedVersion.status !== 'active' ? (
-                <button
-                  type="button"
-                  disabled={busyAction !== null}
-                  onClick={() => activateVersion(selectedVersion)}
-                >
-                  {busyAction === `activate:${selectedVersion.id}`
-                    ? 'Публикуем…'
-                    : selectedVersion.status === 'archived'
-                      ? 'Откатить на эту версию'
-                      : 'Опубликовать'}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-
-        {loading && !overview ? (
-          <div className={styles.topDashboardEmpty}>Загружаем HTML-страницу…</div>
-        ) : selectedVersion ? (
-          <div className={styles.topDashboardFrameShell}>
-            <iframe
-              ref={previewFrameRef}
-              onLoad={probeRuntimeUploadTargets}
-              key={`${blockId}:${selectedVersion.id}:${previewRevision}`}
-              className={styles.topDashboardFrame}
-              src={`${apiBasePath}/versions/${selectedVersion.id}/frame?revision=${previewRevision}`}
-              title={`Предпросмотр ${selectedVersion.originalName}`}
-              sandbox="allow-scripts allow-same-origin allow-popups"
-              referrerPolicy="no-referrer"
-              allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
-              allowFullScreen
-            />
-          </div>
-        ) : (
-          <div className={styles.topDashboardEmpty}>
-            <strong>Нет загруженных версий</strong>
-            <span>Выберите HTML выше — после загрузки здесь сразу откроется безопасный предпросмотр.</span>
-          </div>
-        )}
       </section>
 
       <section id="top-dashboard-data-history" className={styles.section}>

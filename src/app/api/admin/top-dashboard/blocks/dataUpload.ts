@@ -123,6 +123,7 @@ type SnapshotSignatureTracker = {
   fields: Map<string, SnapshotField>;
   extraDepth: number | null;
   extraState: SignatureState;
+  extraKey: string | null;
   extraKeys: Set<string>;
 };
 
@@ -146,6 +147,10 @@ const SNAPSHOT_SIGNATURE_KEYS = new Set([
   'params',
 ]);
 
+const SALES_PROFILE_KEYS = ['plan', 'hr', 'timesheets', 'opex', 'alloc'];
+const ASSORTMENT_PROFILE_KEYS = ['reserve', 'transit', 'otherWh'];
+const SNAPSHOT_PROFILE_KEYS = new Set([...SALES_PROFILE_KEYS, ...ASSORTMENT_PROFILE_KEYS, 'actual']);
+
 function createSnapshotSignatureTracker(): SnapshotSignatureTracker {
   return {
     rootSeen: false,
@@ -156,6 +161,7 @@ function createSnapshotSignatureTracker(): SnapshotSignatureTracker {
     fields: new Map(),
     extraDepth: null,
     extraState: 'key',
+    extraKey: null,
     extraKeys: new Set(),
   };
 }
@@ -199,7 +205,7 @@ function inspectSnapshotSignatureToken(
     if (tracker.extraDepth !== null && tracker.depth === tracker.extraDepth) {
       if (tracker.extraState === 'key') {
         if (token === TokenType.STRING) {
-          tracker.extraKeys.add(value as string);
+          tracker.extraKey = SNAPSHOT_PROFILE_KEYS.has(value as string) ? value as string : null;
           tracker.extraState = 'colon';
         } else if (token === TokenType.RIGHT_BRACE) {
           tracker.depth -= 1;
@@ -216,10 +222,20 @@ function inspectSnapshotSignatureToken(
       }
 
       if (tracker.extraState === 'value') {
+        const field = tokenSnapshotField(token, value);
+        if (!field) return;
+        if (tracker.extraKey !== null) {
+          // Shared exports include null placeholders for unused report inputs.
+          // Track only non-null profile markers, with JSON's last-value-wins
+          // semantics, without retaining the potentially large nested values.
+          if (field.kind === 'null') tracker.extraKeys.delete(tracker.extraKey);
+          else tracker.extraKeys.add(tracker.extraKey);
+        }
+        tracker.extraKey = null;
         if (token === TokenType.LEFT_BRACE || token === TokenType.LEFT_BRACKET) {
           tracker.depth += 1;
           tracker.extraState = 'nested';
-        } else if (tokenSnapshotField(token, value)) {
+        } else {
           tracker.extraState = 'delimiter';
         }
         return;
@@ -275,6 +291,7 @@ function inspectSnapshotSignatureToken(
     if (tracker.key === 'extra') {
       tracker.extraKeys.clear();
       tracker.extraDepth = null;
+      tracker.extraKey = null;
     }
     recordTopLevelField(tracker, token, value);
     if (token === TokenType.LEFT_BRACE || token === TokenType.LEFT_BRACKET) {
@@ -470,12 +487,10 @@ function detectDashboardProfile(
 ): TopDashboardDataProfile | null {
   if (snapshotFormat === 'purchases-v1') return 'purchases';
 
-  const salesKeys = ['plan', 'hr', 'timesheets', 'opex', 'alloc'];
   // `actual` is also exported by current sales analytics (actual stock). It is
   // a legacy assortment fallback, not evidence of a conflicting profile.
-  const assortmentKeys = ['reserve', 'transit', 'otherWh'];
-  const hasSalesKeys = salesKeys.some((key) => signature.extraKeys.has(key));
-  const hasAssortmentKeys = assortmentKeys.some((key) => signature.extraKeys.has(key));
+  const hasSalesKeys = SALES_PROFILE_KEYS.some((key) => signature.extraKeys.has(key));
+  const hasAssortmentKeys = ASSORTMENT_PROFILE_KEYS.some((key) => signature.extraKeys.has(key));
   if (hasSalesKeys && hasAssortmentKeys) return null;
   if (hasSalesKeys) return 'sales-analytics';
   if (hasAssortmentKeys || signature.extraKeys.has('actual')) return 'assortment-optimization';

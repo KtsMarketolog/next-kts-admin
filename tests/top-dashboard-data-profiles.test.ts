@@ -28,12 +28,17 @@ const sales = bundle({
   actual: { rows: [], months: [], hasWh: true, hasCode: true },
   plan: { rows: [] }, hr: { rows: [] }, timesheets: [], opex: [], alloc: 'rev',
 });
+const salesWithEmptyReserve = bundle({ ...sales.extra, reserve: null });
 const assortment = bundle({ actual: {}, reserve: {}, transit: {}, otherWh: {} });
 const purchases = { v: 1, raw: { orders: [] }, meta: {}, params: {} };
 const url = 'https://kts-impex.ru/api/admin/top-dashboard/blocks/4/data';
 
 function uploadRequest(snapshot: unknown, compressed: boolean, streamed: boolean) {
   const json = Buffer.from(JSON.stringify(snapshot));
+  return uploadJsonRequest(json, compressed, streamed);
+}
+
+function uploadJsonRequest(json: Buffer<ArrayBuffer>, compressed: boolean, streamed: boolean) {
   const bytes = compressed ? gzipSync(json) : json;
   const name = compressed ? 'snapshot.json.gz' : 'snapshot.json';
   if (streamed) {
@@ -78,6 +83,11 @@ async function isolatedStorage(run: (directory: string) => Promise<void>) {
 test('TOP profile detection handles shared actual stock in plain/gzip and multipart/streamed uploads', async () => {
   const cases: Array<[string, unknown, dataUpload.TopDashboardDataProfile | null]> = [
     ['modern sales with actual stock', sales, 'sales-analytics'],
+    ['September sales with empty reserve', salesWithEmptyReserve, 'sales-analytics'],
+    ['sales with all empty assortment placeholders', bundle({ ...sales.extra, reserve: null, transit: null, otherWh: null }), 'sales-analytics'],
+    ['assortment with empty sales placeholders', bundle({ ...assortment.extra, plan: null, hr: null, timesheets: null, opex: null, alloc: null }), 'assortment-optimization'],
+    ['null markers do not identify a report', bundle({ plan: null, reserve: null, actual: null }), null],
+    ['nested marker inside unknown object stays ignored', bundle({ plan: {}, unknown: { reserve: {} }, reserve: null }), 'sales-analytics'],
     ['legacy sales', bundle({ plan: {} }), 'sales-analytics'],
     ['assortment', assortment, 'assortment-optimization'],
     ['legacy actual-only assortment', bundle({ actual: {} }), 'assortment-optimization'],
@@ -87,6 +97,9 @@ test('TOP profile detection handles shared actual stock in plain/gzip and multip
     ['unknown bundle', bundle({ stock: {} }), null],
     ...['reserve', 'transit', 'otherWh'].map((key): [string, unknown, null] => (
       [`conflicting sales and ${key}`, bundle({ ...sales.extra, [key]: {} }), null]
+    )),
+    ...[false, 0, '', [], {}].map((reserve): [string, unknown, null] => (
+      [`non-null reserve remains conflicting: ${JSON.stringify(reserve)}`, bundle({ ...sales.extra, reserve }), null]
     )),
   ];
   await isolatedStorage(async (directory) => {
@@ -108,6 +121,40 @@ test('TOP profile detection handles shared actual stock in plain/gzip and multip
             assert.equal(upload.uncompressedSize, json.length, context);
             assert.equal(upload.sha256, createHash('sha256').update(bytes).digest('hex'), context);
             assert.equal(result.parsed.expectedActiveVersionId, 84, context);
+          } finally {
+            await result.parsed.upload.pendingFile?.discard();
+          }
+        }
+      }
+    }
+    assert.deepEqual(await readdir(path.join(directory, '.incoming')), []);
+  });
+});
+
+test('TOP profile markers follow final JSON values and stay correct across stream chunk boundaries', async () => {
+  const prefix = '{"format":"kts-bundle","version":1,"n":1,"dict":{},"cols":{},';
+  const splitPrefix = `${prefix}"extra":{"plan":{},"padding":"`;
+  const beforeNull = '","reserve":';
+  const chunkBoundaryJson = `${splitPrefix}${'x'.repeat(65534 - Buffer.byteLength(splitPrefix + beforeNull))}${beforeNull}null}}`;
+  const cases: Array<[string, dataUpload.TopDashboardDataProfile | null]> = [
+    [`${prefix}"extra":{"plan":{},"reserve":{},"reserve":null}}`, 'sales-analytics'],
+    [`${prefix}"extra":{"plan":{},"reserve":null,"reserve":{}}}`, null],
+    [`${prefix}"extra":{"plan":{},"plan":null,"reserve":{}}}`, 'assortment-optimization'],
+    [`${prefix}"extra":{"reserve":{}},"extra":{"plan":{},"reserve":null}}`, 'sales-analytics'],
+    [chunkBoundaryJson, 'sales-analytics'],
+  ];
+  await isolatedStorage(async (directory) => {
+    for (const [json, profile] of cases) {
+      for (const compressed of [false, true]) {
+        for (const streamed of [false, true]) {
+          const { request } = uploadJsonRequest(Buffer.from(json), compressed, streamed);
+          const result = streamed
+            ? await dataUpload.readTopDashboardDataStreamUpload(request)
+            : await dataUpload.readTopDashboardDataUpload(request);
+          assert.equal(result.error, undefined);
+          assert.ok(result.parsed);
+          try {
+            assert.equal(result.parsed.upload.dashboardProfile, profile);
           } finally {
             await result.parsed.upload.pendingFile?.discard();
           }
@@ -221,10 +268,12 @@ test('TOP data route activates modern sales but rejects cross-profile and ambigu
   await isolatedStorage(async (directory) => {
     const cases: Array<[dataUpload.TopDashboardDataProfile, unknown, number]> = [
       ['sales-analytics', sales, 201],
+      ['sales-analytics', salesWithEmptyReserve, 201],
       ['assortment-optimization', assortment, 201],
       ['purchases', purchases, 201],
       ['sales-analytics', assortment, 422],
       ['assortment-optimization', sales, 422],
+      ['assortment-optimization', salesWithEmptyReserve, 422],
       ['purchases', sales, 422],
       ['sales-analytics', purchases, 422],
       ['sales-analytics', bundle({ ...sales.extra, reserve: {} }), 422],
