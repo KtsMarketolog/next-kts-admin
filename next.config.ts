@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
   deploymentId: process.env.DEPLOYMENT_VERSION,
   serverExternalPackages: ["pdfkit"],
   outputFileTracingRoot: __dirname,
+  outputFileTracingIncludes: {
+    '/api/admin/currency-dashboard/frame': ['./assets/currency-dashboard/**/*'],
+  },
   rewrites: async () => ({
     // beforeFiles is essential: the preserved legacy files still exist in public.
     // Only the descriptor-backed handlers may serve these stable download URLs.

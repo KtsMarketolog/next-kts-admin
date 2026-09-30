@@ -1,0 +1,13 @@
+[Unit]
+Description=KTS currency sources and 08:30 Moscow copper baseline
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/kts-currency-dashboard.env
+ExecStart=/usr/bin/node %h/.local/lib/kts-currency-dashboard/refresh.mjs
+TimeoutStartSec=100
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

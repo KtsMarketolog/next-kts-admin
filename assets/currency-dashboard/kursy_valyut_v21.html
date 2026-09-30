@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="author" content="ФАМ — авторская методика и разработка. Интеллектуальная собственность">
+<title>Курсы валют · V21 · ГК КТС</title>
+<style>
+:root{
+  --brand:#1B0389; --brand-deep:#0D185B; --brand-red:#C32133;
+  --ink:#0D185B; --ink2:#3B4272; --muted:#7B81A0;
+  --line:#D7D9E6; --line2:#EAEBF3; --bg:#EEEFF5; --surface:#FFFFFF;
+  --good:#1B7A4B; --bad:#C32133; --warn:#B26A00;
+  --band:#E4E1F4; --warn-bg:#F9E9EB; --good-bg:#E8F3ED;
+  --cond:"Arial Narrow","Roboto Condensed","Liberation Sans Narrow","DejaVu Sans Condensed",system-ui,sans-serif;
+  --body:system-ui,"Segoe UI",Roboto,Arial,sans-serif;
+  --mono:ui-monospace,Consolas,monospace;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+/* База — пропорции брендбука (12,5 px текст). На большом экране/ТВ всё масштабируется от ширины окна */
+html{font-size:clamp(12.5px,0.72vw,26px);scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:1rem;line-height:1.45}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.cond{font-family:var(--cond);text-transform:uppercase;letter-spacing:.07em}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---- Шапка ---- */
+.top{position:sticky;top:0;z-index:10;background:var(--brand-deep);color:#fff;height:3.7rem;display:flex;align-items:center;gap:1.1rem;padding:0 1.1rem}
+.logo{background:#fff;border-radius:4px;height:2.5rem;padding:0 .8rem;display:flex;align-items:center;gap:.45rem;color:var(--brand);font-family:var(--cond);font-weight:700;font-size:1.5rem;letter-spacing:.04em}
+.logo svg{height:1.9rem;width:auto;display:block}
+.ttl{font-family:var(--cond);text-transform:uppercase;letter-spacing:.08em;font-size:1.25rem;font-weight:700;white-space:nowrap}
+.ver{font-family:var(--cond);letter-spacing:.06em;font-size:.92rem;color:#AEB3D3;white-space:nowrap}
+.spacer{flex:1}
+.clock{font-family:var(--cond);font-size:1.6rem;font-weight:700;letter-spacing:.04em}
+.fam{font-family:var(--cond);text-transform:uppercase;letter-spacing:.08em;font-size:.84rem;color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:3px;padding:.25rem .6rem;white-space:nowrap}
+
+/* ---- Бегущая строка ---- */
+.ticker{background:var(--surface);border-bottom:1px solid var(--line);overflow:hidden;white-space:nowrap;height:3.2rem;display:flex;align-items:center}
+.ticker-track{display:inline-flex;animation:run 100s linear infinite;will-change:transform}
+.ticker:hover .ticker-track{animation-play-state:paused}
+.t-item{display:inline-flex;align-items:baseline;gap:.6rem;padding:0 1.8rem;border-right:1px solid var(--line2);font-size:1.3rem}
+.t-code{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.t-val{font-family:var(--cond);font-weight:700;color:var(--brand);font-size:1.45rem}
+.t-part .t-code{color:var(--brand-deep)}
+@keyframes run{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){.ticker{overflow-x:auto}.ticker-track{animation:none}}
+
+.wrap{max-width:1760px;margin:0 auto;padding:1.1rem 14px 1.6rem}
+.subhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:.5rem 2rem;margin-bottom:.9rem}
+.subhead h1{margin:0;font-family:var(--cond);text-transform:uppercase;letter-spacing:.07em;font-size:1.55rem;color:var(--brand)}
+.status{color:var(--ink2);font-size:.95rem}
+.dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;background:var(--good);margin-right:.4rem;vertical-align:middle}
+.dot.err{background:var(--bad)}
+
+/* ---- Плитки ---- */
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem;margin-bottom:.8rem}
+@media (max-width:1100px){.tiles{grid-template-columns:repeat(2,1fr)}}
+.tile{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:4px;padding:.7rem 1rem .6rem;text-align:left;display:flex;flex-direction:column;color:inherit}
+.rate-row{display:flex;align-items:flex-end;justify-content:space-between;gap:.6rem}
+.rate-row .chg{text-align:right;line-height:1.25}
+.tile-top{display:flex;justify-content:space-between;align-items:center}
+.code{font-family:var(--cond);font-weight:700;font-size:1.6rem;letter-spacing:.05em;color:var(--brand-deep)}
+.tag{font-family:var(--cond);font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;border-radius:3px;padding:.1rem .45rem;background:var(--line2);color:var(--ink2)}
+.name{color:var(--muted);font-size:.95rem}
+.rate{font-family:var(--cond);font-weight:700;font-size:2.7rem;line-height:1.1;color:var(--brand);margin-top:.35rem;font-variant-numeric:tabular-nums}
+.chg{font-family:var(--mono);font-size:.95rem;font-weight:600}
+.up{color:var(--bad)} .down{color:var(--good)} .flat{color:var(--muted)}
+.spark{width:100%;height:2.8rem;margin:.45rem 0 .3rem;display:block}
+.fc{display:flex;justify-content:space-between;gap:.5rem;font-size:.92rem;color:var(--muted);border-top:1px solid var(--line2);padding-top:.5rem}
+.fc b{font-family:var(--mono);color:var(--ink);font-weight:600}
+
+/* ---- Карточки ---- */
+.charts-card{margin-bottom:.9rem}
+.charts{display:grid;grid-template-columns:repeat(4,1fr);gap:.9rem}
+.ch h3{margin:0 0 .2rem;font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:1.05rem;color:var(--brand-deep)}
+.side{display:grid;grid-template-columns:repeat(6,1fr);gap:.9rem;align-items:stretch}
+@media (max-width:1400px){.charts{grid-template-columns:repeat(2,1fr)}.side{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:800px){.charts,.side{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:.9rem 1.1rem 1rem}
+.card-h{display:flex;justify-content:space-between;align-items:flex-start;gap:.8rem;flex-wrap:wrap}
+.card h2{margin:0;font-family:var(--cond);text-transform:uppercase;letter-spacing:.07em;font-size:1.2rem;color:var(--brand)}
+.hint{color:var(--muted);font-size:.95rem;margin:.15rem 0 .7rem}
+.how{background:none;border:1px solid var(--line);border-radius:3px;padding:.2rem .6rem;cursor:pointer;font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.82rem;color:var(--ink2)}
+.how[aria-expanded="true"]{border-color:var(--brand);color:var(--brand)}
+.expl{display:none;background:var(--bg);border-left:3px solid var(--brand);padding:.6rem .8rem;margin:0 0 .8rem;font-size:.95rem}
+.expl.open{display:block}
+.expl dl{display:grid;grid-template-columns:max-content 1fr;gap:.25rem 1rem;margin:0}
+.expl dt{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--ink2);font-size:.85rem;padding-top:.1rem}
+.expl dd{margin:0}
+.expl .legal{grid-column:1/-1;color:var(--brand-red);font-weight:700;margin-top:.3rem}
+
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg button{background:var(--surface);border:0;border-right:1px solid var(--line);padding:.35rem .8rem;cursor:pointer;font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.9rem;color:var(--ink2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--brand);color:#fff}
+.chart-box{position:relative;height:clamp(180px,21vh,700px)}
+.chart-box svg{display:block;width:100%;height:100%}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:3px;padding:.35rem .55rem;font-size:.9rem;display:none;white-space:nowrap}
+.tip b{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.82rem;color:var(--muted);display:block}
+.legend{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.9rem;color:var(--ink2);margin-top:.4rem}
+.legend i{display:inline-block;width:1.4rem;height:0;border-top:3px solid var(--brand);vertical-align:middle;margin-right:.4rem}
+.legend i.dash{border-top-style:dashed}
+.legend i.band{height:.7rem;border:0;background:var(--band)}
+
+.fc-row{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;margin-top:.5rem}
+.fc-cell{background:var(--bg);border-radius:4px;padding:.4rem .55rem}
+.fc-cell .l{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-size:.78rem}
+.fc-cell .v{font-family:var(--cond);font-weight:700;font-size:1.35rem;color:var(--brand);white-space:nowrap}
+.fc-cell .r{color:var(--muted);font-size:.8rem}
+
+/* партнёр */
+.state{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.85rem;border-radius:3px;padding:.15rem .55rem;display:inline-block;margin-bottom:.6rem}
+.state.ok{background:var(--good-bg);color:var(--good)}
+.state.bad{background:var(--warn-bg);color:var(--brand-red)}
+.p-row{display:grid;grid-template-columns:auto 1fr auto;gap:.8rem;align-items:baseline;border-bottom:1px solid var(--line2);padding:.45rem 0}
+.p-row:last-child{border-bottom:0}
+.p-row .c{font-family:var(--cond);font-weight:700;font-size:1.2rem;letter-spacing:.05em}
+.p-row .v{font-family:var(--cond);font-weight:700;font-size:1.8rem;color:var(--brand)}
+.p-row .d{text-align:right;font-size:.9rem;color:var(--muted)}
+details{margin-top:.6rem}
+summary{cursor:pointer;color:var(--brand);font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.9rem}
+.form{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.6rem}
+.form label{display:flex;flex-direction:column;gap:.2rem;font-family:var(--cond);text-transform:uppercase;letter-spacing:.05em;font-size:.82rem;color:var(--muted)}
+.form input{border:1px solid var(--line);border-radius:3px;padding:.4rem .5rem;background:var(--surface);font-family:var(--body);text-transform:none;letter-spacing:0;font-size:1rem;color:var(--ink)}
+.btn{grid-column:1/-1;background:var(--brand);color:#fff;border:0;border-radius:4px;padding:.55rem;cursor:pointer;font-family:var(--cond);text-transform:uppercase;letter-spacing:.07em;font-weight:700}
+
+table{width:100%;border-collapse:collapse;font-size:1rem}
+th{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.82rem;color:var(--muted);text-align:left;font-weight:400;border-bottom:1px solid var(--line);padding:.25rem 0}
+th:not(:first-child),td:not(:first-child){text-align:right}
+td{padding:.4rem 0;border-bottom:1px solid var(--line2)}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+td .pair{font-family:var(--cond);letter-spacing:.05em;font-weight:700}
+tr:last-child td{border-bottom:0}
+.empty{color:var(--muted)}
+.upd{color:var(--muted);font-size:.85rem;margin-top:.4rem}
+
+.err-box{display:none;background:var(--warn-bg);border-left:3px solid var(--brand-red);padding:.6rem .9rem;margin-bottom:.9rem}
+footer{margin-top:1rem;color:var(--muted);font-size:.9rem;display:flex;flex-wrap:wrap;justify-content:space-between;gap:.5rem 2rem}
+footer a{color:var(--brand)}
+
+
+/* переключатели и оповещения */
+.tog{background:none;border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:3px;padding:.25rem .6rem;cursor:pointer;font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.84rem;white-space:nowrap}
+.tog[aria-pressed="true"]{background:#fff;color:var(--brand)}
+.alert{display:none;background:var(--surface);border-left:4px solid var(--brand);border-bottom:1px solid var(--line);padding:.6rem 14px;align-items:center;gap:1rem;font-size:1.15rem}
+.alert.show{display:flex}
+.alert.risk{border-left-color:var(--brand-red)}
+.alert .when{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-size:.85rem;white-space:nowrap}
+.alert .msg{flex:1}
+.alert .x{background:none;border:1px solid var(--line);border-radius:3px;cursor:pointer;padding:.15rem .5rem;font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.82rem;color:var(--ink2)}
+/* крупное оповещение на 20 секунд */
+.big-alert{display:none;position:fixed;left:50%;top:9.5rem;transform:translateX(-50%);z-index:50;width:min(92vw,80rem);background:var(--surface);border:3px solid var(--brand-red);border-left:16px solid var(--brand-red);outline:6px solid rgba(195,33,51,.18);border-radius:6px;padding:1.1rem 1.6rem;box-shadow:0 1px 0 var(--line);align-items:center;gap:1.4rem}
+.big-alert.show{display:flex}
+.big-alert.risk{border-color:var(--brand-red);border-left-color:var(--brand-red)}
+.big-alert .ico{font-size:3.2rem;line-height:1;flex:0 0 auto}
+.big-alert .ttl{font-family:var(--cond);text-transform:uppercase;letter-spacing:.08em;font-size:1.1rem;color:var(--muted)}
+.big-alert .txt{font-family:var(--cond);font-weight:700;font-size:2rem;line-height:1.2;color:var(--brand-deep)}
+.big-alert.risk .txt{color:var(--brand-red)}
+.big-alert .bar{position:absolute;left:0;bottom:0;height:5px;background:var(--brand-red);width:100%;transform-origin:left;animation:shrink 20s linear forwards}
+.big-alert.risk .bar{background:var(--brand-red)}
+@keyframes shrink{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+.alert{font-size:1.35rem;border-left-color:var(--brand-red)}
+.alert.mini{font-size:.95rem;padding:.25rem 14px}
+.alert.mini .msg{font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alert .msg{font-weight:600}
+.snap-hint{display:none;background:var(--good-bg);border-left:3px solid var(--good);padding:.45rem 14px;font-size:.95rem}
+.snap-hint.show{display:block}
+.snd-hint{display:none;background:#FFF6D9;border-left:3px solid #C9A227;padding:.45rem 14px;font-size:.95rem}
+.snd-hint.show{display:block}
+.logcard{display:flex;flex-direction:column}
+.log{list-style:none;margin:.4rem 0 0;padding:0;font-size:1rem;flex:1;min-height:10rem;max-height:none;overflow:auto;scrollbar-width:thin}
+.log li{flex-direction:column;gap:.1rem;line-height:1.3}
+.log .when{font-size:.82rem}
+.log.full{max-height:none;font-size:1.05rem}
+.log li{padding:.25rem 0;border-bottom:1px solid var(--line2);display:flex;gap:.6rem}
+.log .when{font-family:var(--mono);color:var(--muted);white-space:nowrap}
+.impl{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin-top:.7rem}
+.impl div{background:var(--bg);border-radius:4px;padding:.45rem .6rem}
+.impl .l{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-size:.8rem}
+.impl .v{font-family:var(--cond);font-weight:700;font-size:1.5rem;color:var(--brand)}
+.impl .r{font-size:.85rem}
+textarea{width:100%;min-height:7rem;border:1px solid var(--line);border-radius:3px;padding:.4rem .5rem;font-family:var(--mono);font-size:.9rem;color:var(--ink);background:var(--surface)}
+
+/* вкладки */
+.tabs{background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.2rem;padding:0 14px;height:2.6rem}
+.tab{background:none;border:0;border-bottom:3px solid transparent;height:100%;padding:0 1rem;cursor:pointer;font-family:var(--cond);text-transform:uppercase;letter-spacing:.07em;font-size:1rem;color:var(--ink2)}
+.tab[aria-selected="true"]{color:var(--brand);border-bottom-color:var(--brand)}
+.tabs .auto{margin-left:auto;background:none;border:1px solid var(--line);border-radius:3px;padding:.2rem .6rem;cursor:pointer;font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.82rem;color:var(--ink2)}
+.tabs .auto[aria-pressed="true"]{background:var(--brand);color:#fff;border-color:var(--brand)}
+.page{display:none}.page.on{display:block}
+/* неделя */
+.week{display:grid;grid-template-columns:1fr;gap:.9rem}
+.wk{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:.8rem 1rem;display:grid;grid-template-columns:minmax(0,1.7fr) minmax(320px,1fr);gap:1rem;align-items:start}
+@media (max-width:1100px){.wk{grid-template-columns:1fr}}
+.wk h2{margin:0 0 .3rem;font-family:var(--cond);text-transform:uppercase;letter-spacing:.07em;font-size:1.15rem;color:var(--brand)}
+.wk .chart-box{height:clamp(160px,22vh,420px)}
+.wk table td,.wk table th{padding:.3rem .4rem}
+.wk table th{white-space:nowrap}
+/* сводка */
+.sum-wrap{overflow:auto;max-height:calc(100vh - 14rem);border:1px solid var(--line);border-radius:4px}
+table.sum{width:100%;border-collapse:separate;border-spacing:0;font-size:1.05rem}
+table.sum th{position:sticky;top:0;background:var(--brand-deep);color:#fff;font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.85rem;font-weight:400;padding:.5rem .6rem;text-align:right;border-bottom:1px solid var(--line);z-index:2}
+table.sum th:first-child,table.sum td:first-child{position:sticky;left:0;text-align:left;z-index:1;background:var(--surface)}
+table.sum th:first-child{z-index:3;background:var(--brand-deep)}
+table.sum td{padding:.4rem .6rem;border-bottom:1px solid var(--line2);text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+table.sum td:first-child{font-family:var(--cond);letter-spacing:.04em;font-weight:700;color:var(--brand-deep)}
+table.sum tr:nth-child(even) td{background:var(--bg)}
+table.sum tr:nth-child(even) td:first-child{background:var(--bg)}
+table.sum td small{font-size:.8rem;margin-left:.3rem}
+.sum-foot{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-top:.6rem;flex-wrap:wrap}
+.sum-foot .cnt{color:var(--muted);font-size:.9rem}
+.xbtn{background:var(--surface);border:1px solid var(--brand);color:var(--brand);border-radius:3px;padding:.3rem .8rem;cursor:pointer;font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;font-size:.85rem;margin-left:.4rem}
+.xbtn:hover{background:var(--brand);color:#fff}
+/* медь */
+.cu-big{display:grid;grid-template-columns:1fr;gap:.5rem;margin:.4rem 0}
+.cu-big div{background:var(--bg);border-radius:4px;padding:.45rem .6rem}
+.cu-big .l{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-size:.8rem}
+.cu-big .v{font-family:var(--cond);font-weight:700;font-size:1.55rem;color:var(--brand);white-space:nowrap}
+.cu-big .r{font-size:.85rem;color:var(--muted)}
+.cu-big .hl{border-left:3px solid var(--brand)}
+.live{background:var(--bg);border-left:3px solid var(--brand);border-radius:4px;padding:.5rem .7rem;margin:.5rem 0}
+.live .l{font-family:var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-size:.8rem}
+.live .row{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;flex-wrap:wrap}
+.live .v{font-family:var(--cond);font-weight:700;font-size:1.6rem;color:var(--brand);white-space:nowrap}
+.live .v small{font-size:.9rem;color:var(--muted);font-weight:400}
+.live .d{font-family:var(--mono);font-weight:600;font-size:1rem}
+.live .r{font-size:.85rem;color:var(--muted)}
+.tile .mx{font-size:.9rem;color:var(--ink2);margin-top:.15rem}
+.tile .mx b{font-family:var(--mono);font-weight:600}
+.links a{margin-right:.8rem;font-size:.9rem}
+@media (max-width:900px){.fam,.ver,.tog span{display:none}}
+@media print{.ticker,.seg,.how,details{display:none}.top{position:static}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="logo" aria-label="КТС"><svg class="logo-svg" viewBox="695.5 413.5 589.2 192.1" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="КТС"><path fill-rule="evenodd" fill="#1B0389" d="M 1107.84 469.32 L 1107.84 576.88 L 1076.50 576.88 L 1076.50 469.32 L 1028.26 469.32 L 992.50 509.88 L 1051.55 576.88 L 1012.5 576.88 L 953.40 509.83 C 973.09 487.48 992.76 465.28 1012.5 442.89 L 1177.15 443.23 L 1154.15 469.32 Z M 919.45 442.89 L 950.79 442.89 L 950.79 576.88 L 919.45 576.88 Z M 919.45 442.89 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 1223.65 578.69 C 1210.07 578.69 1197.75 575.77 1186.70 569.93 C 1175.78 563.96 1167.15 555.77 1160.80 545.36 C 1154.58 534.82 1151.46 522.95 1151.46 509.75 C 1151.46 496.54 1154.58 484.73 1160.80 474.32 C 1167.15 463.78 1175.78 455.59 1186.70 449.75 C 1197.75 443.78 1210.13 440.80 1223.84 440.80 C 1235.40 440.80 1245.81 442.83 1255.08 446.89 C 1264.48 450.96 1272.35 456.80 1278.70 464.41 L 1258.89 482.70 C 1249.87 472.29 1238.70 467.08 1225.37 467.08 C 1217.11 467.08 1209.75 468.92 1203.27 472.60 C 1196.80 476.16 1191.72 481.17 1188.03 487.65 C 1184.48 494.13 1182.70 501.49 1182.70 509.75 C 1182.70 518.00 1184.48 525.36 1188.03 531.84 C 1191.72 538.32 1196.80 543.39 1203.27 547.08 C 1209.75 550.63 1217.11 552.41 1225.37 552.41 C 1238.70 552.41 1249.87 547.14 1258.89 536.60 L 1278.70 554.89 C 1272.35 562.63 1264.48 568.53 1255.08 572.60 C 1245.68 576.66 1235.21 578.69 1223.65 578.69 Z M 1223.65 578.69 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 799.34 420.88 C 800.95 419.53 803.35 419.75 804.70 421.36 C 806.05 422.98 805.84 425.38 804.22 426.73 L 791.58 437.33 L 778.93 426.73 C 777.32 425.38 777.10 422.98 778.46 421.36 C 779.80 419.75 782.21 419.53 783.82 420.88 L 791.58 427.39 Z M 799.34 420.88 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 859.42 451.95 C 861.52 452.11 863.08 453.95 862.92 456.05 C 862.76 458.14 860.92 459.71 858.82 459.55 L 842.37 458.20 L 840.83 441.75 C 840.64 439.66 842.18 437.80 844.28 437.62 C 846.37 437.43 848.21 438.97 848.40 441.06 L 849.34 451.12 Z M 859.42 451.95 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 880.27 517.03 C 881.63 518.64 881.43 521.04 879.82 522.40 C 878.22 523.75 875.81 523.55 874.46 521.95 L 863.81 509.34 L 874.37 496.66 C 875.72 495.05 878.11 494.82 879.72 496.17 C 881.33 497.51 881.56 499.91 880.21 501.51 L 873.73 509.29 L 880.26 517.03 Z M 880.27 517.03 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 849.39 577.23 C 849.23 579.33 847.39 580.89 845.29 580.73 C 843.19 580.57 841.63 578.73 841.79 576.64 L 843.08 560.19 L 859.53 558.60 C 861.62 558.40 863.48 559.94 863.67 562.03 C 863.87 564.12 862.33 565.97 860.25 566.17 L 850.19 567.14 L 849.39 577.24 Z M 849.39 577.23 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 799.34 435.36 C 800.95 434.01 803.35 434.23 804.70 435.84 C 806.05 437.45 805.84 439.86 804.22 441.21 L 791.58 451.81 L 778.93 441.21 C 777.32 439.86 777.10 437.45 778.46 435.84 C 779.80 434.23 782.21 434.01 783.82 435.36 L 791.58 441.87 Z M 799.34 435.36 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 849.24 462.25 C 851.33 462.41 852.90 464.25 852.74 466.35 C 852.58 468.44 850.74 470.01 848.64 469.85 L 832.19 468.50 L 830.65 452.04 C 830.46 449.95 832.00 448.10 834.09 447.92 C 836.18 447.73 838.03 449.27 838.22 451.36 L 839.16 461.42 Z M 849.24 462.25 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 865.78 517.08 C 867.14 518.68 866.94 521.08 865.33 522.44 C 863.73 523.80 861.33 523.60 859.97 522 L 849.33 509.38 L 859.89 496.71 C 861.24 495.09 863.63 494.87 865.24 496.21 C 866.85 497.56 867.08 499.95 865.73 501.56 L 859.25 509.34 L 865.78 517.08 Z M 865.78 517.08 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 839.06 567.08 C 838.90 569.18 837.06 570.75 834.96 570.58 C 832.87 570.42 831.30 568.58 831.46 566.48 L 832.76 550.03 L 849.20 548.45 C 851.29 548.25 853.15 549.78 853.34 551.88 C 853.54 553.97 852.01 555.82 849.92 556.02 L 839.85 557 L 839.06 567.08 Z M 839.06 567.08 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 799.34 449.85 C 800.95 448.50 803.35 448.71 804.70 450.33 C 806.05 451.94 805.84 454.35 804.22 455.69 L 791.58 466.31 L 778.93 455.69 C 777.32 454.35 777.10 451.94 778.46 450.33 C 779.80 448.72 782.21 448.50 783.82 449.85 L 791.58 456.35 Z M 799.34 449.85 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 839.05 472.54 C 841.16 472.71 842.72 474.54 842.56 476.64 C 842.39 478.74 840.56 480.31 838.46 480.15 L 822.00 478.80 L 820.47 462.35 C 820.28 460.26 821.82 458.41 823.91 458.22 C 826.00 458.03 827.85 459.57 828.03 461.66 L 828.98 471.72 L 839.05 472.55 Z M 839.05 472.54 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 851.30 517.12 C 852.66 518.73 852.46 521.13 850.85 522.49 C 849.25 523.84 846.85 523.64 845.49 522.04 L 834.84 509.42 L 845.41 496.75 C 846.75 495.14 849.14 494.91 850.75 496.26 C 852.37 497.60 852.59 499.99 851.25 501.60 L 844.76 509.38 L 851.29 517.12 Z M 851.30 517.12 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 828.73 556.93 C 828.57 559.03 826.73 560.59 824.63 560.43 C 822.53 560.27 820.97 558.43 821.13 556.33 L 822.42 539.88 L 838.86 538.30 C 840.96 538.10 842.81 539.64 843.01 541.73 C 843.21 543.82 841.67 545.67 839.58 545.87 L 829.52 546.84 L 828.73 556.94 Z M 828.73 556.93 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 804.23 592.39 C 805.83 593.74 806.05 596.14 804.71 597.75 C 803.35 599.37 800.95 599.58 799.34 598.23 L 791.58 591.73 L 783.82 598.23 C 782.21 599.58 779.80 599.37 778.46 597.75 C 777.10 596.14 777.32 593.74 778.94 592.39 L 791.58 581.78 Z M 804.23 592.39 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 804.23 577.91 C 805.83 579.26 806.05 581.66 804.71 583.27 C 803.35 584.89 800.95 585.10 799.34 583.75 L 791.58 577.25 L 783.82 583.75 C 782.21 585.10 779.80 584.89 778.46 583.27 C 777.10 581.66 777.32 579.26 778.94 577.91 L 791.58 567.30 Z M 804.23 577.91 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 804.23 563.42 C 805.83 564.77 806.05 567.17 804.71 568.79 C 803.35 570.40 800.95 570.62 799.34 569.26 L 791.58 562.76 L 783.82 569.26 C 782.21 570.62 779.80 570.41 778.46 568.79 C 777.10 567.17 777.32 564.77 778.94 563.42 L 791.58 552.82 Z M 804.23 563.42 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 742.33 577.36 C 742.52 579.45 740.98 581.30 738.89 581.49 C 736.80 581.68 734.95 580.14 734.76 578.05 L 733.83 567.99 L 723.75 567.16 C 721.65 567 720.08 565.16 720.24 563.06 C 720.41 560.96 722.24 559.40 724.34 559.56 L 740.80 560.91 Z M 742.33 577.36 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 752.51 567.07 C 752.71 569.16 751.16 571.01 749.07 571.19 C 746.98 571.38 745.13 569.84 744.95 567.75 L 744.01 557.69 L 733.93 556.86 C 731.83 556.70 730.26 554.86 730.42 552.76 C 730.59 550.67 732.42 549.10 734.52 549.26 L 750.98 550.61 Z M 752.51 567.07 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 762.69 556.77 C 762.89 558.86 761.35 560.71 759.25 560.89 C 757.16 561.08 755.32 559.55 755.13 557.45 L 754.19 547.39 L 744.11 546.57 C 742.01 546.40 740.44 544.57 740.60 542.47 C 740.77 540.37 742.60 538.80 744.71 538.96 L 761.16 540.31 L 762.69 556.76 Z M 762.69 556.77 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 708.78 522.45 C 707.44 524.06 705.04 524.28 703.43 522.94 C 701.82 521.60 701.60 519.21 702.94 517.59 L 709.42 509.82 L 702.89 502.08 C 701.54 500.47 701.74 498.07 703.34 496.71 C 704.95 495.35 707.35 495.55 708.71 497.16 L 719.35 509.77 L 708.78 522.45 Z M 708.78 522.45 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 723.26 522.41 C 721.92 524.01 719.53 524.24 717.92 522.90 C 716.31 521.55 716.08 519.16 717.42 517.55 L 723.91 509.77 L 717.38 502.03 C 716.03 500.43 716.23 498.02 717.83 496.67 C 719.44 495.31 721.84 495.51 723.19 497.12 L 733.84 509.73 L 723.27 522.41 Z M 723.26 522.41 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 737.75 522.36 C 736.40 523.97 734.01 524.19 732.40 522.85 C 730.79 521.51 730.56 519.12 731.91 517.50 L 738.39 509.73 L 731.86 501.99 C 730.51 500.38 730.70 497.98 732.31 496.62 C 733.91 495.26 736.32 495.46 737.67 497.07 L 748.32 509.68 L 737.75 522.36 Z M 737.75 522.36 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 723.62 460.51 C 721.53 460.71 719.68 459.17 719.48 457.08 C 719.28 454.99 720.82 453.14 722.91 452.94 L 732.97 451.97 L 733.76 441.87 C 733.93 439.78 735.76 438.21 737.86 438.37 C 739.96 438.53 741.53 440.37 741.37 442.47 L 740.07 458.92 Z M 723.62 460.51 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 733.95 470.67 C 731.86 470.87 730.01 469.33 729.81 467.24 C 729.61 465.15 731.14 463.30 733.24 463.10 L 743.30 462.12 L 744.09 452.03 C 744.26 449.93 746.09 448.37 748.19 448.53 C 750.29 448.69 751.85 450.53 751.69 452.62 L 750.40 469.08 L 733.95 470.66 Z M 733.95 470.67 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 744.28 480.82 C 742.19 481.01 740.33 479.48 740.14 477.39 C 739.94 475.30 741.48 473.44 743.57 473.25 L 753.63 472.27 L 754.42 462.18 C 754.58 460.08 756.42 458.51 758.52 458.67 C 760.62 458.84 762.18 460.68 762.02 462.78 L 760.73 479.23 L 744.28 480.81 Z M 744.28 480.82 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 791.58 469.44 C 802.66 469.44 812.69 473.92 819.95 481.19 C 827.21 488.45 831.70 498.48 831.70 509.55 C 831.70 520.63 827.21 530.66 819.95 537.92 C 812.69 545.18 802.66 549.68 791.58 549.68 C 780.50 549.68 770.48 545.19 763.21 537.92 C 755.95 530.67 751.46 520.63 751.46 509.55 C 751.46 498.48 755.94 488.45 763.21 481.18 C 770.47 473.92 780.50 469.43 791.58 469.43 Z M 815.16 485.97 C 809.13 479.94 800.78 476.21 791.58 476.21 C 782.37 476.21 774.03 479.94 768.00 485.97 C 761.97 492.01 758.23 500.34 758.23 509.55 C 758.23 518.76 761.97 527.10 768.00 533.14 C 774.03 539.17 782.37 542.90 791.58 542.90 C 800.79 542.90 809.13 539.17 815.16 533.14 C 821.19 527.10 824.93 518.76 824.93 509.55 C 824.93 500.34 821.19 492.01 815.16 485.97 Z M 815.16 485.97 "/>
+<path fill-rule="nonzero" fill="#1B0389" d="M 791.58 481.16 C 799.42 481.16 806.52 484.33 811.66 489.48 C 816.80 494.62 819.98 501.72 819.98 509.55 C 819.98 517.40 816.80 524.5 811.66 529.63 C 806.52 534.78 799.42 537.95 791.58 537.95 C 783.74 537.95 776.64 534.78 771.50 529.63 C 766.37 524.49 763.18 517.39 763.18 509.55 C 763.18 501.72 766.36 494.61 771.50 489.48 C 776.64 484.34 783.74 481.16 791.58 481.16 Z M 806.87 494.26 C 802.96 490.35 797.56 487.92 791.58 487.92 C 785.60 487.92 780.20 490.35 776.28 494.26 C 772.37 498.17 769.95 503.58 769.95 509.55 C 769.95 515.53 772.37 520.93 776.28 524.85 C 780.20 528.76 785.61 531.18 791.58 531.18 C 797.56 531.18 802.96 528.76 806.87 524.85 C 810.78 520.93 813.21 515.53 813.21 509.55 C 813.21 503.58 810.78 498.17 806.87 494.26 Z M 806.87 494.26 "/>
+<path fill-rule="evenodd" fill="#1B0389" d="M 815.14 501.14 C 816.08 503.77 816.60 506.60 816.60 509.55 C 816.60 512.51 816.08 515.34 815.14 517.96 L 768.02 517.96 C 767.08 515.34 766.57 512.51 766.57 509.55 C 766.57 506.60 767.07 503.77 768.02 501.14 Z M 815.14 501.14 "/>
+<path fill-rule="evenodd" fill="#FFFFFF" d="M 791.58 484.54 C 802.53 484.54 811.83 491.58 815.22 501.37 L 767.94 501.37 C 771.33 491.58 780.63 484.54 791.58 484.54 Z M 791.58 484.54 "/>
+<path fill-rule="evenodd" fill="#C32133" d="M 815.22 517.75 C 811.83 527.53 802.53 534.57 791.58 534.57 C 780.64 534.57 771.33 527.53 767.94 517.75 Z M 815.22 517.75 "/></svg></div>
+  <span class="ttl">Курсы валют</span>
+  <span class="ver">V21 · 29.09.2026</span>
+  <span class="spacer"></span>
+  <button class="tog" id="tSound" aria-pressed="false" title="Звуковой сигнал при изменении курса">♪ <span>звук</span></button>
+  <button class="tog" id="tVoice" aria-pressed="false" title="Голосовое сообщение об изменении курса">🗣 <span>голос</span></button>
+  <button class="tog" id="tNotif" aria-pressed="false" title="Системные уведомления браузера">🔔 <span>уведомления</span></button>
+  <button class="tog" id="tSnap" title="Скачать сохранённые общие данные в JSON">⤓ <span>снимок</span></button>
+  <button class="tog" id="tOpen" title="Проверить и сохранить снимок для всех администраторов">⤒ <span>открыть</span></button><input type="file" id="snapFile" accept=".js,.json" style="display:none">
+  <span class="clock" id="clock">--:--</span>
+</div>
+
+<div class="ticker" aria-label="Бегущая строка курсов"><div class="ticker-track" id="ticker"><span class="t-item"><span class="t-code">Загрузка курсов…</span></span></div></div>
+
+<div class="alert" id="alert" role="status" aria-live="polite"><span class="when" id="alertWhen"></span><span class="msg" id="alertMsg"></span><button class="x" id="alertX">свернуть</button></div>
+<div class="big-alert" id="bigAlert" role="alert"><div class="ico" id="bigIco">🔔</div><div><div class="ttl" id="bigTtl">Изменение курса</div><div class="txt" id="bigTxt"></div></div><div class="bar" id="bigBar"></div></div>
+<div class="snap-hint" id="snapHint"></div>
+<div class="snd-hint" id="sndHint">Звук включён, но браузер блокирует его до первого действия на странице. Щёлкните в любом месте один раз.</div>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true" data-page="pgMain">Дашборд</button>
+  <button class="tab" role="tab" aria-selected="false" data-page="pgSum">Сводка за месяц</button>
+  <button class="tab" role="tab" aria-selected="false" data-page="pgWeek">Неделя онлайн</button>
+  <button class="auto" id="tAuto" aria-pressed="false" title="Переключать вкладки автоматически">авто-переключение</button>
+</div>
+
+<div class="wrap page" id="pgSum">
+  <div class="subhead"><h1>Сводная динамика курсов за месяц</h1><label>Месяц <input id="summaryMonth" type="month" min="2026-01"></label><span class="hint" style="margin:0">Календарный месяц: опубликованные курсы ЦБ и доступные котировки. Нет данных — прочерк. Красным — рост к предыдущему опубликованному курсу.</span></div>
+  <div class="sum-wrap"><table class="sum" id="sumTable"></table></div>
+  <div class="sum-foot"><span class="cnt" id="sumCnt"></span><span><button class="xbtn" id="btnCsv">CSV</button><button class="xbtn" id="btnXlsx">Excel</button></span></div>
+  <div class="card" style="margin-top:.9rem"><div class="card-h"><h2>Хронология изменений</h2></div><p class="hint">Сохранённые изменения общих данных и события текущего просмотра.</p><ul class="log full" id="logFull"></ul></div>
+</div>
+
+<div class="wrap page" id="pgWeek">
+  <div class="subhead"><h1>Динамика за неделю: медь, нефть, юань</h1><span class="hint" style="margin:0">Почасовые котировки Мосбиржи за 7 дней независимо от того, был ли дашборд открыт. Пунктир — база дня 08:30 МСК</span></div>
+  <div class="week" id="week"></div>
+  <div class="sum-foot"><span class="cnt" id="weekCnt"></span><span><button class="xbtn" id="btnWeekCsv">CSV</button><button class="xbtn" id="btnWeekXlsx">Excel</button></span></div>
+</div>
+
+<div class="wrap page on" id="pgMain">
+  <div class="subhead">
+    <h1 id="cbrDate">Официальный курс ЦБ РФ</h1>
+  </div>
+
+  <div class="err-box" id="errBox"></div>
+
+  <section class="tiles" id="tiles" aria-label="Курсы валют"></section>
+
+  <section class="card charts-card">
+      <div class="card-h">
+        <div>
+          <h2>Динамика и прогноз</h2>
+          <p class="hint">Курс ЦБ за последние месяцы и прогноз на 2 недели с коридором вероятных значений (95%)</p>
+        </div>
+        <div class="legend"><span><i></i>Курс ЦБ</span><span><i class="dash"></i>Прогнозный курс</span><span><i class="band"></i>Коридор 95%</span><button class="how" data-for="ex-chart" aria-expanded="false" style="margin-left:.6rem">как считается</button></div>
+      </div>
+      <div class="expl" id="ex-chart"><dl>
+        <dt>Зачем</dt><dd>Видеть направление курса и ожидаемый уровень для планирования закупок и цен.</dd>
+        <dt>Как считается</dt><dd>Модель Хольта (двойное экспоненциальное сглаживание) с затухающим трендом по официальным курсам ЦБ за ~95 дней. Параметры подбираются по минимуму ошибки на истории. Коридор — 95% диапазон, расширяется с горизонтом.</dd>
+        <dt>Откуда данные</dt><dd>Банк России через cbr-xml-daily.ru, текущий курс и архив по датам.</dd>
+        <dt>На что смотреть</dt><dd>Направление пунктира и ширину коридора: широкий коридор — высокая неопределённость.</dd>
+        <dt>Осторожно</dt><dd>Это статистическое продолжение тренда, а не экспертный прогноз. Решения ЦБ по ставке, санкции и другие события модель не учитывает.</dd>
+        <dt>Термины</dt><dd>Рост курса (красный) — рубль дешевеет, импорт дорожает. Снижение (зелёный) — рубль крепнет.</dd>
+        <dd class="legal">Носит информационный характер</dd>
+      </dl></div>
+      <div class="charts" id="charts"></div>
+  </section>
+
+  <section class="side">
+      <div class="card">
+        <div class="card-h"><h2>Медь LME</h2><button class="how" data-for="ex-cu" aria-expanded="false">как считается</button></div>
+        <p class="hint">Официальные цены LME, автоматически (Westmetall, публикация на следующий день)</p>
+        <div class="expl" id="ex-cu"><dl>
+          <dt>Зачем</dt><dd>Две цены меди, по которым считаются закупки: среднее LME за 5 дней и курс Jintian.</dd>
+          <dt>Как считается</dt><dd>Онлайн: фьючерс на медь Мосбиржи (COPPER) привязан к цене LME и торгуется с 09:00 до 23:50 МСК; задержка котировки до 15 минут. Базовый курс дня фиксируется в 08:30 МСК — это последняя цена на этот момент (расчётная цена вечера накануне); рядом показывается текущая цена и её отклонение от базы. Курс 1 — среднее пяти последних официальных LME Cash Settlement. Курс 2 — Jintian: базовая цена 08:30 плюс премия (по умолчанию 240 $) и текущая цена плюс премия. В рублях — по курсу ЦБ на сегодня.</dd>
+          <dt>Откуда данные</dt><dd>Таблица официальных цен LME на westmetall.com, обновляется раз в час. Это дневные официальные цены, они появляются на следующий рабочий день. Если нужна внутридневная котировка fx678, её можно внести вручную — она будет использоваться вместо дневной.</dd>
+          <dt>Осторожно</dt><dd>Если последняя запись старше 3 рабочих дней, блок помечается красным.</dd>
+          <dd class="legal">Носит информационный характер</dd>
+        </dl></div>
+        <div class="live" id="cuLive"><div class="l">LME онлайн · фьючерс COPPER Мосбиржи</div><div class="r">Загрузка…</div></div>
+        <div id="cuStatus"></div>
+        <div class="cu-big" id="cuBig"></div>
+        <table id="cuTable"></table>
+        <div class="links" style="margin-top:.5rem"><a href="https://www.lme.com/en/Metals/Non-ferrous/LME-Copper#Price+graphs" target="_blank" rel="noopener">lme.com</a><a href="https://quote.fx678.com/symbol/LMCI" target="_blank" rel="noopener">fx678 LMCI</a></div>
+        <div class="hint" id="cuSrc" style="margin:.4rem 0 0"></div>
+        <details><summary>Внести цену вручную</summary>
+          <form class="form" id="cuForm">
+            <label>Дата<input name="date" type="date"></label>
+            <label>Cash Settlement, $/т (если нет авто)<input name="price" inputmode="decimal" placeholder="14 735"></label>
+            <label>fx678 LMCI внутридневная, $/т<input name="lmci" inputmode="decimal" placeholder="14 700"></label>
+            <label>Премия Jintian, $/т<input name="prem" inputmode="decimal" placeholder="240"></label>
+            <button class="btn" type="submit">Сохранить</button>
+          </form>
+        </details>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Внутренний курс СПС-холод</h2><button class="how" data-for="ex-cps" aria-expanded="false">как считается</button></div>
+        <p class="hint">Из рассылки партнёра, на сайте не публикуется</p>
+        <div class="expl" id="ex-cps"><dl>
+          <dt>Зачем</dt><dd>Сравнить условия партнёра с официальным курсом.</dd>
+          <dt>Как считается</dt><dd>Отклонение = (курс СПС-холод − курс ЦБ) / курс ЦБ.</dd>
+          <dt>Откуда данные</dt><dd>Вводится вручную из письма партнёра. После подтверждения сервера виден всем администраторам.</dd>
+          <dt>Осторожно</dt><dd>По условиям партнёра курс не действует на российские товары, акционный товар и поставки под заказ; счета действительны 4 календарных дня.</dd>
+          <dd class="legal">Носит информационный характер</dd>
+        </dl></div>
+        <div id="cpsStatus"></div>
+        <div id="cpsRates"></div>
+        <details>
+          <summary>Обновить из новой рассылки</summary>
+          <form class="form" id="cpsForm">
+            <label>Евро, ₽<input name="eur" inputmode="decimal" placeholder="95,99"></label>
+            <label>Юань, ₽<input name="cny" inputmode="decimal" placeholder="12,39"></label>
+            <label>Доллар, ₽<input name="usd" inputmode="decimal" placeholder="необязательно"></label>
+            <span></span>
+            <label>Действует с<input name="from" type="date"></label>
+            <label>по (включительно)<input name="to" type="date"></label>
+            <button class="btn" type="submit">Сохранить курс</button>
+          </form>
+        </details>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Биржа онлайн</h2><button class="how" data-for="ex-moex" aria-expanded="false">как считается</button></div>
+        <p class="hint">Московская биржа, расчёты «завтра»</p>
+        <div class="expl" id="ex-moex"><dl>
+          <dt>Откуда данные</dt><dd>ISS API Московской биржи, обновление каждую минуту, задержка до 15 минут.</dd>
+          <dt>Осторожно</dt><dd>USD и EUR на бирже не торгуются; ночью и в выходные торгов нет. Тенге котируется за 100 KZT, как и у ЦБ.</dd>
+          <dd class="legal">Носит информационный характер</dd>
+        </dl></div>
+        <table id="moex"><tr><td class="empty">Загрузка…</td></tr></table>
+        <div class="impl" id="impl"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Прогнозы аналитиков</h2><button class="how" data-for="ex-an" aria-expanded="false">как считается</button></div>
+        <p class="hint" id="anHint">По обзорам РБК Инвестиций</p>
+        <div class="expl" id="ex-an"><dl>
+          <dt>Зачем</dt><dd>Сверить статистический прогноз дашборда с ожиданиями банков и брокеров.</dd>
+          <dt>Откуда данные</dt><dd>Сюжет «Курс рубля» на РБК и стратегии брокеров. Вносится вручную, страница не может читать РБК напрямую.</dd>
+          <dt>Осторожно</dt><dd>Прогнозы на конец года, не на ближайшие дни. Разброс между домами велик.</dd>
+          <dd class="legal">Носит информационный характер</dd>
+        </dl></div>
+        <table id="an"></table>
+        <details><summary>Обновить прогнозы</summary>
+          <form id="anForm" style="margin-top:.6rem">
+            <textarea name="rows" spellcheck="false"></textarea>
+            <div class="hint" style="margin:.3rem 0">Строка: источник | доллар | юань | горизонт | дата обзора</div>
+            <button class="btn" type="submit" style="width:100%">Сохранить</button>
+          </form>
+        </details>
+      </div>
+
+      <div class="card logcard">
+        <div class="card-h"><h2>Журнал изменений</h2></div>
+        <ul class="log" id="log"><li class="empty">Пока пусто</li></ul>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Мировой рынок</h2><button class="how" data-for="ex-world" aria-expanded="false">как считается</button></div>
+        <p class="hint">Нефть Brent и кросс-курсы к доллару США</p>
+        <div class="live" id="brLive"><div class="l">Нефть Brent · фьючерс Мосбиржи, $/баррель</div><div class="r">Загрузка…</div></div>
+        <div class="expl" id="ex-world"><dl>
+          <dt>Откуда данные</dt><dd>Brent — ближайший ликвидный фьючерс BR на Мосбирже (цена в долларах за баррель, задержка до 15 минут); база дня фиксируется в 08:30 МСК. Кросс-курсы — ExchangeRate-API (open.er-api.com), обновление раз в сутки.</dd>
+          <dd class="legal">Носит информационный характер</dd>
+        </dl></div>
+        <table id="world"><tr><td class="empty">Загрузка…</td></tr></table>
+        <div class="upd" id="worldUpd"></div>
+      </div>
+  </section>
+
+  <section class="card" style="margin-top:1rem" aria-label="Состояние источников">
+    <h2>Источники и сохранение</h2><div id="sourceStatus" class="hint" aria-live="polite">Получаем данные…</div>
+    <p id="saveStatus" role="status" aria-live="polite">Подключение к серверу…</p>
+    <button id="reloadShared" class="xbtn" type="button">Загрузить актуальные общие данные</button>
+    <p id="previousStatus" class="hint"></p>
+    <button id="rollbackShared" class="xbtn" type="button" disabled>Вернуть предыдущую версию данных</button>
+  </section>
+  <footer>
+    <span>Источники: <a href="https://www.cbr.ru/development/SXML/" target="_blank" rel="noopener">ЦБ РФ (официальные XML)</a>, <a href="https://www.moex.com/" target="_blank" rel="noopener">Мосбиржа</a>, <a href="https://www.exchangerate-api.com/" target="_blank" rel="noopener">ExchangeRate-API</a>, <a href="https://www.westmetall.com/en/markdaten.php?action=table&field=LME_Cu_cash" target="_blank" rel="noopener">Westmetall (LME)</a>. Прогнозы: <a href="https://www.rbc.ru/story/675de1859a79475ec8bb48c8" target="_blank" rel="noopener">РБК «Курс рубля»</a>, <a href="https://www.sberometer.ru/cbr/" target="_blank" rel="noopener">Сберометр</a>.</span>
+    <span>Методика и разработка — ФАМ</span>
+  </footer>
+</div>
+
+<script>
+// The parent owns authentication, endpoints and source allowlists. This reviewed
+// document has an opaque origin and no network or cabinet-storage access.
+const KTS_CURRENCY_BOOTSTRAP = __KTS_CURRENCY_BOOTSTRAP__;
+const RPC_CHANNEL = 'kts-currency-v1', rpcPending = new Map();
+let rpcId = 0;
+function rpc(method,params={}){
+  return new Promise((resolve,reject)=>{
+    if(rpcPending.size>=12){reject(new Error('Слишком много запросов. Повторите немного позже.'));return;}
+    const id=String(++rpcId);
+    const timer=setTimeout(()=>{rpcPending.delete(id);reject(new Error('Сервер не ответил вовремя. Данные не подтверждены.'));},60000);
+    rpcPending.set(id,{resolve,reject,timer});
+    window.parent.postMessage({channel:RPC_CHANNEL,nonce:KTS_CURRENCY_BOOTSTRAP.nonce,id,method,params},KTS_CURRENCY_BOOTSTRAP.parentOrigin);
+  });
+}
+window.addEventListener('message',event=>{
+  const m=event.data;
+  if(event.source!==window.parent||event.origin!==KTS_CURRENCY_BOOTSTRAP.parentOrigin||!m||m.channel!==RPC_CHANNEL||m.nonce!==KTS_CURRENCY_BOOTSTRAP.nonce)return;
+  const p=rpcPending.get(m.id);if(!p)return;rpcPending.delete(m.id);clearTimeout(p.timer);
+  if(m.error){const e=new Error(typeof m.error==='string'?m.error:m.error.message||'Не удалось выполнить запрос');e.code=m.error.code;e.status=m.error.status;p.reject(e);}else p.resolve(m.result);
+});
+const CODES=["USD","EUR","CNY","KZT"];
+const NAMES={USD:"Доллар США",EUR:"Евро",CNY:"Китайский юань",KZT:"Казахстанский тенге",KGS:"Киргизский сом",AED:"Дирхам ОАЭ",TRY:"Турецкая лира"};
+const HIST_DAYS=95;
+const CSS=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+const state={today:null,hist:{},h:10,world:null,moex:null,cps:null,errors:{}};
+
+const nf=(v,d=2)=>v==null||isNaN(v)?"—":new Intl.NumberFormat("ru-RU",{minimumFractionDigits:d,maximumFractionDigits:d}).format(v);
+const iso=d=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d));
+const ruDate=s=>{const [y,m,d]=s.slice(0,10).split("-");return `${d}.${m}.${y}`;};
+const ruDateLong=s=>{const d=new Date(s.slice(0,10)+"T12:00:00");return d.toLocaleDateString("ru-RU",{day:"numeric",month:"long"})+", "+d.toLocaleDateString("ru-RU",{weekday:"long"});};
+const MANUAL_KEYS=["kts_cpsRates","kts_an","kts_cu","kts_log"];
+const memoryStore=new Map();
+const store={get(k){return memoryStore.has(k)?JSON.parse(memoryStore.get(k)):null;},set(k,v){memoryStore.set(k,JSON.stringify(v));}};
+const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function parseNumber(value,{optional=false,zero=false}={}){
+  const s=String(value).trim().replace(/[\s\u00a0\u202f]/g,'');
+  if(!s&&optional)return null;
+  if(!/^\d+(?:[.,]\d+)?$/.test(s))throw new Error('Введите число без букв и знака минус.');
+  const n=Number(s.replace(',','.'));
+  if(!Number.isFinite(n)||n>100000000||(!zero&&n<=0))throw new Error('Значение должно быть положительным числом допустимого размера.');
+  return n;
+}
+function parseDate(value){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(Date.parse(value+'T12:00:00Z'))||new Date(value+'T12:00:00Z').toISOString().slice(0,10)!==value)throw new Error('Укажите корректную дату.');
+  return value;
+}
+const sourceStates={};
+const sourceNames={'cbr-daily':'ЦБ: текущий курс','cbr-history':'ЦБ: история','moex-currency':'Мосбиржа: валюты','moex-futures':'Мосбиржа: фьючерсы','moex-candles':'Мосбиржа: история','world':'Мировые курсы','copper':'LME Cash Settlement'};
+function sourceFailed(kind,error){sourceStates[kind]={...(sourceStates[kind]||{}),stale:true,error:error.message||String(error)};setStatus();}
+const cls=d=>Math.abs(d)<1e-9?"flat":(d>0?"up":"down");
+const arr=d=>Math.abs(d)<1e-9?"":(d>0?"▲":"▼");
+const sgn=d=>d>0?"+":(d<0?"−":"");
+
+async function getJSON(kind,params={}){
+  const statusKey=kind==='moex-candles'?[kind,params.secid,params.from,params.till].join(':'):kind;
+  if(kind==='moex-candles')sourceNames[statusKey]='Мосбиржа: '+params.secid+' ('+params.from+' — '+params.till+')';
+  try{
+    const result=await rpc('source',{kind,...params});
+    const info=result?._currencySource;
+    sourceStates[statusKey]={at:info?.fetchedAt||null,stale:!!info?.stale,error:info?.error||null,delay:info?.delayMinutes||0};
+    if(info?.stale||info?.error){sourceStates[statusKey].error=info.error||'Источник временно недоступен; показана последняя сохранённая копия.';}
+    setStatus();return result;
+  }catch(e){sourceStates[statusKey]={...(sourceStates[statusKey]||{}),stale:true,error:e.message};setStatus();throw e;}
+}
+
+/* ---------- ЦБ ---------- */
+function addToHist(j){const row={};CODES.forEach(c=>{const v=j.Valute[c];if(v)row[c]=[v.Value,v.Nominal];});state.hist[j.Date.slice(0,10)]=row;}
+async function loadToday(){const j=await getJSON('cbr-daily');state.today=j;addToHist(j);}
+async function loadHistory(onProgress){
+  const result=await getJSON('cbr-history',{from:'2026-01-01',till:iso(Date.now()+864e5)});
+  state.hist={...result.data};if(state.today)addToHist(state.today);
+  if(onProgress)onProgress();
+}
+function series(code){const keys=Object.keys(state.hist).sort().filter(k=>state.hist[k][code]);if(!keys.length)return [];const cutoff=iso(new Date(keys.at(-1)+'T12:00:00Z').getTime()-HIST_DAYS*864e5);return keys.filter(k=>k>=cutoff).map(k=>{const [v,n]=state.hist[k][code];return {date:k,v:v/n};});}
+
+/* ---------- Прогноз: Хольт с затухающим трендом ---------- */
+function holt(y){
+  let best=null;
+  for(const a of [.2,.3,.4,.5,.6,.7,.8])for(const b of [.02,.05,.1,.2,.3]){
+    let l=y[0],t=y[1]-y[0],sse=0,n=0;
+    for(let i=1;i<y.length;i++){const e=y[i]-(l+t);sse+=e*e;n++;const nl=a*y[i]+(1-a)*(l+t);t=b*(nl-l)+(1-b)*t;l=nl;}
+    if(!best||sse<best.sse)best={l,t,sse,n};
+  }
+  const sd=Math.sqrt(best.sse/Math.max(1,best.n-2)),phi=.92;
+  return h=>{const out=[];let damp=0;for(let k=1;k<=h;k++){damp+=Math.pow(phi,k);const yh=best.l+damp*best.t,w=1.96*sd*Math.sqrt(k);out.push({yh,lo:yh-w,hi:yh+w});}return out;};
+}
+function nextRateDates(last,h){const out=[];const d=new Date(last+"T12:00:00");while(out.length<h){d.setDate(d.getDate()+1);const w=d.getDay();if(w!==0&&w!==1)out.push(iso(d));}return out;}
+function forecast(code,h){const s=series(code);if(s.length<10)return null;const f=holt(s.map(p=>p.v))(h);const ds=nextRateDates(s[s.length-1].date,h);return f.map((p,i)=>({date:ds[i],...p}));}
+
+/* ---------- Плитки ---------- */
+function spark(vals){
+  if(vals.length<2)return "";
+  const w=200,h=40,min=Math.min(...vals),max=Math.max(...vals),r=(max-min)||1;
+  const pts=vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(h-3-(v-min)/r*(h-6)).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="${CSS("--brand")}" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts}"/></svg>`;
+}
+function renderTiles(){
+  const T=state.today;if(!T)return;
+  const el=document.getElementById("tiles");el.innerHTML="";
+  CODES.forEach(c=>{
+    const v=T.Valute[c];if(!v)return;
+    const d=v.Value-v.Previous,pct=d/v.Previous*100;
+    const s=series(c).slice(-30).map(p=>p.v*v.Nominal);
+    const f=forecast(c,21);
+    const b=document.createElement("button");
+    b.className="tile";b.setAttribute("aria-pressed",c===state.sel);
+    b.innerHTML=`<div class="tile-top"><span class="code">${c} <span class="name">${NAMES[c]}</span></span><span class="tag">за ${v.Nominal}</span></div>
+      <div class="rate-row"><div class="rate">${nf(v.Value,4)}</div><div class="chg ${cls(d)}">${arr(d)} ${sgn(d)}${nf(Math.abs(d),4)}<br>(${sgn(d)}${nf(Math.abs(pct),2)}%)</div></div>
+      <div class="mx" id="mx-${c}"></div>
+      <div class="fc"><span title="Прогнозный курс">прогноз 3 дня <b>${f?nf(f[2].yh*v.Nominal,2):"—"}</b></span><span>неделя <b>${f?nf(f[4].yh*v.Nominal,2):"—"}</b></span><span>месяц <b>${f?nf(f[20].yh*v.Nominal,2):"—"}</b></span></div>`;
+    b.disabled=true;
+    el.appendChild(b);
+  });
+  document.getElementById("cbrDate").textContent=`Официальный курс ЦБ РФ на ${ruDateLong(T.Date)}`;
+}
+
+/* ---------- График (собственный SVG, без внешних библиотек) ---------- */
+function renderChart(){
+  const wrap=document.getElementById("charts");if(!wrap.offsetParent)return;
+  CODES.forEach(c=>{
+    let el=document.getElementById("ch-"+c);
+    if(!el){el=document.createElement("div");el.className="ch";el.id="ch-"+c;
+      el.innerHTML=`<h3></h3><div class="chart-box"><div class="tip"></div></div><div class="fc-row"></div>`;wrap.appendChild(el);}
+    drawChart(c,el);
+  });
+}
+function drawChart(c,el){
+  const T=state.today;if(!T||!T.Valute[c])return;
+  const nom=T.Valute[c].Nominal;
+  const s=series(c),f=forecast(c,state.h)||[];
+  el.querySelector("h3").textContent=`${c} · ${NAMES[c]}${nom>1?` (за ${nom})`:""}`;
+  const box=el.querySelector(".chart-box");
+  box.querySelector("svg")?.remove();
+  if(s.length<2){box.insertAdjacentHTML("afterbegin",`<svg viewBox="0 0 10 10"><text x="0" y="5" font-size="1.2" fill="${CSS("--muted")}">Загружаю историю курсов…</text></svg>`);return;}
+  const W=box.clientWidth,H=box.clientHeight;
+  const fs=parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const m={l:fs*4.6,r:fs*1,t:fs*.8,b:fs*2};
+  const pts=[...s.map(p=>({date:p.date,v:p.v*nom,kind:"f"})),...f.map(p=>({date:p.date,v:p.yh*nom,lo:p.lo*nom,hi:p.hi*nom,kind:"p"}))];
+  const N=pts.length;
+  let lo=Math.min(...pts.map(p=>p.lo??p.v)),hi=Math.max(...pts.map(p=>p.hi??p.v));const pad=(hi-lo)*.06||1;lo-=pad;hi+=pad;
+  const X=i=>m.l+i/(N-1)*(W-m.l-m.r),Y=v=>m.t+(hi-v)/(hi-lo)*(H-m.t-m.b);
+  const brand=CSS("--brand"),muted=CSS("--muted"),line2=CSS("--line2"),band=CSS("--band"),ink2=CSS("--ink2");
+  let g="";
+  for(let k=0;k<=4;k++){const v=lo+(hi-lo)*k/4,y=Y(v);g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y}" y2="${y}" stroke="${line2}"/><text x="${m.l-fs*.5}" y="${y+fs*.35}" text-anchor="end" font-family="ui-monospace,Consolas,monospace" font-size="${fs*.85}" fill="${muted}">${nf(v,2)}</text>`;}
+  const step=Math.max(1,Math.ceil(N/5));
+  for(let i=0;i<N;i+=step)g+=`<text x="${X(i)}" y="${H-fs*.5}" text-anchor="middle" font-family="${CSS("--cond")}" font-size="${fs*.9}" fill="${muted}">${ruDate(pts[i].date).slice(0,5)}</text>`;
+  const li=s.length-1;
+  if(f.length){
+    const up=[`${X(li)},${Y(pts[li].v)}`],dn=[];
+    for(let i=li+1;i<N;i++){up.push(`${X(i)},${Y(pts[i].hi)}`);dn.unshift(`${X(i)},${Y(pts[i].lo)}`);}
+    g+=`<polygon points="${[...up,...dn].join(" ")}" fill="${band}"/>`;
+    g+=`<line x1="${X(li)}" x2="${X(li)}" y1="${m.t}" y2="${H-m.b}" stroke="${muted}" stroke-dasharray="2 4"/>`;
+    g+=`<polyline fill="none" stroke="${brand}" stroke-width="${fs*.2}" stroke-dasharray="${fs*.6} ${fs*.45}" points="${pts.slice(li).map((p,j)=>`${X(li+j)},${Y(p.v)}`).join(" ")}"/>`;
+  }
+  g+=`<polyline fill="none" stroke="${brand}" stroke-width="${fs*.22}" stroke-linejoin="round" points="${pts.slice(0,li+1).map((p,i)=>`${X(i)},${Y(p.v)}`).join(" ")}"/>`;
+  g+=`<circle cx="${X(li)}" cy="${Y(pts[li].v)}" r="${fs*.35}" fill="${brand}"/>`;
+  g+=`<line id="hov" y1="${m.t}" y2="${H-m.b}" stroke="${ink2}" stroke-width="1" visibility="hidden"/><circle id="hovDot" r="${fs*.35}" fill="#fff" stroke="${brand}" stroke-width="2" visibility="hidden"/>`;
+  box.insertAdjacentHTML("afterbegin",`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="График курса ${c}">${g}<rect x="${m.l}" y="0" width="${W-m.l-m.r}" height="${H}" fill="transparent" id="hit"/></svg>`);
+  const hit=box.querySelector("#hit"),tip=el.querySelector(".tip");
+  hit.onmousemove=e=>{
+    const r=box.getBoundingClientRect(),x=e.clientX-r.left;
+    const i=Math.max(0,Math.min(N-1,Math.round((x-m.l)/(W-m.l-m.r)*(N-1)))),p=pts[i];
+    const hv=box.querySelector("#hov"),hd=box.querySelector("#hovDot");
+    hv.setAttribute("x1",X(i));hv.setAttribute("x2",X(i));hv.setAttribute("visibility","visible");
+    hd.setAttribute("cx",X(i));hd.setAttribute("cy",Y(p.v));hd.setAttribute("visibility","visible");
+    tip.innerHTML=`<b>${ruDate(p.date)}${p.kind==="p"?" · прогноз":""}</b>${nf(p.v,4)} ₽${p.kind==="p"?`<br><span style="color:${muted}">коридор ${nf(p.lo,2)} – ${nf(p.hi,2)}</span>`:""}`;
+    tip.style.display="block";
+    const tx=X(i)+12+tip.offsetWidth>W?X(i)-12-tip.offsetWidth:X(i)+12;
+    tip.style.left=tx+"px";tip.style.top=m.t+"px";
+  };
+  hit.onmouseleave=()=>{tip.style.display="none";box.querySelector("#hov")?.setAttribute("visibility","hidden");box.querySelector("#hovDot")?.setAttribute("visibility","hidden");};
+
+  const full=forecast(c,21)||[],last=pts[li].v,row=el.querySelector(".fc-row");row.innerHTML="";
+  [[2,"3 дня"],[4,"Неделя"],[20,"Месяц"]].forEach(([i,l])=>{
+    const p=full[i];if(!p)return;const d=p.yh*nom-last;
+    row.insertAdjacentHTML("beforeend",`<div class="fc-cell"><div class="l">Прогноз · ${l} · ${ruDate(p.date).slice(0,5)}</div><div class="v">${nf(p.yh*nom,2)} <span class="chg ${cls(d)}" style="font-size:.85rem">${arr(d)}${nf(Math.abs(d/last*100),1)}%</span></div><div class="r">${nf(p.lo*nom,2)} – ${nf(p.hi*nom,2)}</div></div>`);
+  });
+}
+let rt;window.addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(()=>{renderChart();renderWeek();},150);});
+
+/* ---------- СПС-холод ---------- */
+const CPS_DEFAULT={eur:95.99,cny:12.39,usd:null,from:"2026-09-22",to:"2026-09-23"};
+function renderCps(){
+  const p=state.cps,T=state.today,k=iso(new Date()),active=k>=p.from&&k<=p.to;
+  document.getElementById("cpsStatus").innerHTML=`<span class="state ${active?"ok":"bad"}">${active?"Действует":"Срок истёк"}: ${ruDate(p.from)} – ${ruDate(p.to)}</span>`;
+  document.getElementById("cpsRates").innerHTML=[["EUR",p.eur],["CNY",p.cny],["USD",p.usd]].filter(r=>r[1]).map(([c,v])=>{
+    const cb=T&&T.Valute[c]?T.Valute[c].Value/T.Valute[c].Nominal:null,diff=cb?(v-cb)/cb*100:null;
+    return `<div class="p-row"><span class="c">${c}</span><span class="v">${nf(v,2)}</span><span class="d">ЦБ <span class="num">${nf(cb,2)}</span><br>${cb?`<span class="chg ${cls(diff)}">${sgn(diff)}${nf(Math.abs(diff),1)}% к ЦБ</span>`:""}</span></div>`;
+  }).join("");
+  const f=document.getElementById("cpsForm");
+  if(!dirtyForms.has('cpsForm')&&!f.contains(document.activeElement)){f.eur.value=p.eur??"";f.cny.value=p.cny??"";f.usd.value=p.usd??"";f.from.value=p.from;f.to.value=p.to;}
+}
+document.getElementById("cpsForm").addEventListener("submit",async e=>{
+  e.preventDefault();const f=e.target;
+  try{const next={eur:parseNumber(f.eur.value),cny:parseNumber(f.cny.value),usd:parseNumber(f.usd.value,{optional:true}),from:parseDate(f.from.value),to:parseDate(f.to.value)};
+    if(next.to<next.from)throw new Error('Дата окончания не может быть раньше начала.');
+    await saveSharedPatch({kts_cpsRates:next},'Внутренний курс СПС-холод обновлён');f.closest('details').open=false;
+  }catch(error){showSaveError(error);}
+});
+
+/* ---------- Мосбиржа ---------- */
+const MOEX_SEC=["CNYRUB_TOM","KZTRUB_TOM"];
+async function loadMoex(){
+  const j=await getJSON('moex-currency');
+  const md=j.marketdata,ci=n=>md.columns.indexOf(n);
+  state.moex=md.data.map(r=>({id:r[ci("SECID")],last:[r[ci('LAST')],r[ci('MARKETPRICE')],r[ci('WAPRICE')]].find(v=>typeof v==='number'&&Number.isFinite(v)&&v>0),chg:r[ci("LASTTOPREVPRICE")],time:r[ci("UPDATETIME")]||r[ci("SYSTIME")]})).filter(x=>x.last!=null);
+}
+function renderMoex(){
+  const t=document.getElementById("moex");
+  if(!state.moex||!state.moex.length){t.innerHTML=`<tr><td class="empty">${state.errors.moex?"Мосбиржа не отвечает, повтор через минуту":"Торгов сейчас нет (ночь или выходной)"}</td></tr>`;return;}
+  t.innerHTML=`<tr><th>Пара</th><th>Время</th><th>Курс, ₽</th><th>За день</th></tr>`+state.moex.map(m=>`<tr><td><span class="pair">${m.id.slice(0,3)}/RUB</span></td><td class="n">${m.time?String(m.time).slice(0,5):"—"}</td><td class="n">${nf(m.last,4)}</td><td class="n ${m.chg!=null?cls(m.chg):""}">${m.chg!=null?`${sgn(m.chg)}${nf(Math.abs(m.chg),2)}%`:"—"}</td></tr>`).join("");
+}
+
+/* ---------- Мировой рынок ---------- */
+async function loadWorld(){const j=await getJSON('world');if(j.result!=="success")throw new Error("Мировые курсы временно недоступны");state.world=j;}
+function renderWorld(){
+  const t=document.getElementById("world"),w=state.world;
+  if(!w){t.innerHTML=`<tr><td class="empty">Нет связи с источником мировых курсов</td></tr>`;return;}
+  const r=w.rates;
+  const pairs=[["EUR/USD",1/r.EUR,4],["GBP/USD",1/r.GBP,4],["USD/CNY",r.CNY,4],["USD/JPY",r.JPY,2],["USD/CHF",r.CHF,4],["USD/KZT",r.KZT,2]];
+  t.innerHTML=`<tr><th>Пара</th><th>Курс</th></tr>`+pairs.map(([p,v,d])=>`<tr><td><span class="pair">${p}</span></td><td class="n">${nf(v,d)}</td></tr>`).join("");
+  document.getElementById("worldUpd").textContent="Обновлено "+new Date(w.time_last_update_unix*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})+" МСК";
+}
+
+/* ---------- Бегущая строка ---------- */
+function renderTicker(){
+  const T=state.today;if(!T)return;
+  const it=[];
+  CODES.filter(c=>T.Valute[c]).forEach(c=>{const v=T.Valute[c],d=v.Value-v.Previous;
+    it.push(`<span class="t-item"><span class="t-code">${c}${v.Nominal>1?" ×"+v.Nominal:""}</span><span class="t-val">${nf(v.Value,2)}</span><span class="chg ${cls(d)}">${arr(d)} ${nf(Math.abs(d),2)}</span></span>`);});
+  const p=state.cps,k=iso(new Date()),active=k>=p.from&&k<=p.to;
+  [["EUR",p.eur],["CNY",p.cny],["USD",p.usd]].filter(r=>r[1]).forEach(([c,v])=>it.push(`<span class="t-item t-part"><span class="t-code">СПС-холод ${c}</span><span class="t-val">${nf(v,2)}</span><span class="t-code ${active?"":"up"}">${active?"до "+ruDate(p.to).slice(0,5):"срок истёк"}</span></span>`));
+  (state.moex||[]).forEach(m=>it.push(`<span class="t-item"><span class="t-code">Биржа ${m.id.slice(0,3)}</span><span class="t-val">${nf(m.last,3)}</span></span>`));
+  if(state.world){const r=state.world.rates;it.push(`<span class="t-item"><span class="t-code">EUR/USD</span><span class="t-val">${nf(1/r.EUR,4)}</span></span>`);}
+  CODES.forEach(c=>{const f=forecast(c,5);if(f&&T.Valute[c])it.push(`<span class="t-item"><span class="t-code">Прогноз ${c} на неделю</span><span class="t-val">${nf(f[4].yh*T.Valute[c].Nominal,2)}</span></span>`);});
+  {const d=cuData();const rows=cuSeries().slice(-5);if(rows.length){const avg=rows.reduce((a,r)=>a+r.price,0)/rows.length;it.push(`<span class="t-item"><span class="t-code">Медь LME ср. 5 дн.</span><span class="t-val">${nf(avg,0)} $</span></span>`);}
+  const bC=baseOf("COPPER"),cu=state.fut?.COPPER;
+  if(bC)it.push(`<span class="t-item"><span class="t-code">Медь Jintian база 08:30</span><span class="t-val">${nf(bC.price+d.prem,0)} $</span>${cu?.lastUsd!=null&&cu.secid===bC.secid?`<span class="chg ${cls(cu.lastUsd-bC.price)}">${arr(cu.lastUsd-bC.price)} ${nf(Math.abs(cu.lastUsd-bC.price),0)}</span>`:""}</span>`);
+  else{const r2=cuRate2();if(r2!=null)it.push(`<span class="t-item"><span class="t-code">Медь Jintian: LME + ${nf(d.prem,0)}</span><span class="t-val">${nf(r2,0)} $</span></span>`);}
+  const br=state.fut?.BR,bB=baseOf("BR");if(br?.last!=null)it.push(`<span class="t-item"><span class="t-code">Brent</span><span class="t-val">${nf(br.last,2)} $</span>${bB&&br.secid===bB.secid?`<span class="chg ${cls(br.last-bB.price)}">${arr(br.last-bB.price)} ${nf(Math.abs(br.last-bB.price),2)} к 08:30</span>`:""}</span>`);}
+  if(Object.values(sourceStates).some(s=>s.stale||s.error))it.push('<span class="t-item"><span class="t-code">Есть устаревшие или недоступные источники — смотрите состояние ниже</span></span>');
+  const html=it.join("");document.getElementById("ticker").innerHTML=html+html;
+}
+
+/* ---------- Оповещения: звук, голос, уведомления ---------- */
+const prefs=Object.assign({sound:false,voice:false,notif:false},store.get("kts_prefs")||{});
+let audio=null;
+function getAudio(){if(!audio){try{audio=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}return audio;}
+function chime(risk){
+  const a=getAudio();if(!a||a.state!=="running")return;
+  const notes=risk?[660,520,420,660,520,420]:[523,659,784,523,659,784];
+  notes.forEach((f,i)=>{const o=a.createOscillator(),g=a.createGain();o.type="sine";o.frequency.value=f;g.gain.value=0;o.connect(g);g.connect(a.destination);
+    const t=a.currentTime+i*.24+(i>=3?.35:0);g.gain.linearRampToValueAtTime(.35,t+.03);g.gain.exponentialRampToValueAtTime(.001,t+.55);o.start(t);o.stop(t+.6);});
+}
+function say(text){
+  if(!("speechSynthesis"in window))return;
+  const u=new SpeechSynthesisUtterance(text);u.lang="ru-RU";u.rate=.95;
+  const v=speechSynthesis.getVoices().find(x=>/ru/i.test(x.lang));if(v)u.voice=v;
+  speechSynthesis.cancel();speechSynthesis.speak(u);
+}
+function sysNotify(title,body){
+  if(!prefs.notif||!("Notification"in window)||Notification.permission!=="granted")return;
+  try{new Notification(title,{body,tag:"kts-rate",renotify:true,requireInteraction:true,silent:false});}catch(e){}
+}
+const speakNum=(v,d=2)=>nf(v,d).replace(/\u00a0/g,"");
+let bigT=null;
+function showStrip(e){const box=document.getElementById("alert");box.classList.toggle("risk",!!e.risk);box.classList.add("show");
+  document.getElementById("alertWhen").textContent=`${ruDate(e.t.slice(0,10)).slice(0,5)} ${new Date(e.t).toLocaleTimeString("ru-RU",MSK)}`;document.getElementById("alertMsg").textContent=e.msg;}
+function showBig(e,title){const b=document.getElementById("bigAlert");b.classList.toggle("risk",!!e.risk);
+  document.getElementById("bigIco").textContent=e.risk?"⚠":"🔔";document.getElementById("bigTtl").textContent=title;document.getElementById("bigTxt").textContent=e.msg;
+  const bar=document.getElementById("bigBar");bar.style.animation="none";void bar.offsetWidth;bar.style.animation="";
+  b.classList.add("show");clearTimeout(bigT);bigT=setTimeout(()=>b.classList.remove("show"),20000);}
+document.getElementById("bigAlert").onclick=()=>{document.getElementById("bigAlert").classList.remove("show");clearTimeout(bigT);};
+function announce(msg,{risk=false,speech=null,silent=false,title="Изменение курса"}={}){
+  const e={t:new Date().toISOString(),msg,risk};
+  showStrip(e);if(!silent)showBig(e,title);
+  const log=store.get("kts_log")||[];log.unshift(e);store.set("kts_log",log.slice(0,200));renderLog();
+  if(silent)return;
+  if(prefs.sound)chime(risk);
+  if(prefs.voice)setTimeout(()=>say(speech||msg),prefs.sound?800:0);
+  sysNotify("Курсы валют",msg);
+}
+function renderLog(){
+  const log=store.get("kts_log")||[];
+  const li=e=>`<li><span class="when">${escapeHtml(ruDate(e.t.slice(0,10)))} ${escapeHtml(new Date(e.t).toLocaleTimeString("ru-RU",MSK))}</span><span${e.risk?' class="up"':''}>${escapeHtml(e.msg)}</span></li>`;
+  document.getElementById("log").innerHTML=log.length?log.slice(0,15).map(li).join(""):'<li class="empty">Пока пусто</li>';
+  const f=document.getElementById("logFull");if(f)f.innerHTML=log.length?log.map(li).join(""):'<li class="empty">Пока пусто</li>';
+  if(log.length&&!document.getElementById("alert").classList.contains("show"))showStrip(log[0]);
+}
+function applyMini(){const box=document.getElementById("alert");box.classList.toggle("mini",!!prefs.alertMini);document.getElementById("alertX").textContent=prefs.alertMini?"развернуть":"свернуть";}
+document.getElementById("alertX").onclick=()=>{prefs.alertMini=!prefs.alertMini;store.set("kts_prefs",prefs);applyMini();};
+function sndHint(){const a=getAudio();document.getElementById("sndHint").classList.toggle("show",!!(prefs.sound||prefs.voice)&&(!a||a.state!=="running"));}
+document.addEventListener("pointerdown",()=>{const a=getAudio();if(a&&a.state!=="running")a.resume().then(sndHint).catch(()=>{});if("speechSynthesis"in window)speechSynthesis.getVoices();},{passive:true});
+document.addEventListener("visibilitychange",()=>{const a=getAudio();if(a&&a.state!=="running")a.resume().catch(()=>{});});
+function setTog(id,key){
+  const b=document.getElementById(id);b.setAttribute("aria-pressed",prefs[key]);
+  b.onclick=async()=>{prefs[key]=!prefs[key];
+    if(key==='notif'&&prefs.notif){prefs.notif=false;alert('Системные уведомления недоступны в защищённом окне. Используйте звук и голос при открытой вкладке.');}
+    store.set("kts_prefs",prefs);b.setAttribute("aria-pressed",prefs[key]);
+    const a=getAudio();if(a&&a.state!=="running")await a.resume().catch(()=>{});sndHint();
+    if(prefs[key]&&key==="sound")chime(false);
+    if(prefs[key]&&key==="voice")say("Голосовые сообщения включены");
+  };
+}
+["tSound|sound","tVoice|voice","tNotif|notif"].forEach(x=>{const [i,k]=x.split("|");setTog(i,k);});
+
+/* сравнение с последним объявленным состоянием */
+function checkCbrChange(){
+  const T=state.today;const seen=store.get("kts_seen")||{};
+  if(!seen.cbrDate){store.set("kts_seen",{...seen,cbrDate:T.Date});
+    announce(`Курс ЦБ на ${ruDate(T.Date)}: ${CODES.filter(c=>T.Valute[c]).map(c=>`${c} ${nf(T.Valute[c].Value,2)}`).join(", ")} — дашборд запущен`,{silent:true});return;}
+  if(seen.cbrDate===T.Date)return;
+  const N={USD:"доллар",EUR:"евро",CNY:"юань"};
+  const parts=[],sp=[];let risk=false;
+  CODES.forEach(c=>{const v=T.Valute[c];if(!v)return;const d=v.Value-v.Previous;if(d>0)risk=true;
+    parts.push(`${c} ${nf(v.Value,2)} (${sgn(d)}${nf(Math.abs(d),2)})`);
+    if(N[c])sp.push(`${N[c]} ${speakNum(v.Value)} рубля, ${d>0?"рост":d<0?"снижение":"без изменений"}${d?" на "+speakNum(Math.abs(d))+" рубля":""}`);});
+  announce(`Новый курс ЦБ на ${ruDate(T.Date)}: ${parts.join(", ")}`,{risk,title:"Центробанк установил новый курс",speech:`Внимание. Центробанк установил курс на ${ruDateLong(T.Date)}: ${sp.join("; ")}.`});
+  store.set("kts_seen",{...seen,cbrDate:T.Date});
+}
+const MOEX_THR=0.3; // % движения на бирже для оповещения
+function checkMoexChange(){
+  if(!state.moex)return;const seen=store.get("kts_seen")||{};seen.moex=seen.moex||{};let touched=false;
+  state.moex.forEach(m=>{const prev=seen.moex[m.id];
+    if(prev==null){seen.moex[m.id]=m.last;touched=true;return;}
+    const pct=(m.last-prev)/prev*100;
+    if(Math.abs(pct)>=MOEX_THR){const nm={CNY:"юань",KZT:"тенге",TRY:"лира",AED:"дирхам",KGS:"сом"}[m.id.slice(0,3)]||m.id;
+      announce(`Биржа: ${m.id.slice(0,3)}/RUB ${nf(m.last,4)}, ${sgn(pct)}${nf(Math.abs(pct),2)}% с последнего сигнала`,{risk:pct>0,title:"Движение на Мосбирже",speech:`На бирже ${nm} ${speakNum(m.last,m.last<1?4:2)}, ${pct>0?"вырос":"снизился"} на ${speakNum(Math.abs(pct),1)} процента`});
+      seen.moex[m.id]=m.last;touched=true;}
+  });
+  if(touched)store.set("kts_seen",seen);
+}
+
+/* ожидаемый курс ЦБ на завтра по бирже (оценка) */
+function renderImplied(){
+  const el=document.getElementById("impl");const T=state.today;
+  const cny=(state.moex||[]).find(m=>m.id==="CNYRUB_TOM");
+  if(!cny||!T){el.innerHTML="";return;}
+  const w=state.world?state.world.rates:null;
+  const out=[["CNY",cny.last,T.Valute.CNY]];
+  if(w){const usd=cny.last*w.CNY;out.push(["USD",usd,T.Valute.USD]);out.push(["EUR",usd/w.EUR,T.Valute.EUR]);}
+  el.innerHTML=out.map(([c,v,cur])=>{const d=cur?v-cur.Value/cur.Nominal:0;
+    return `<div><div class="l">оценка ЦБ на завтра, ${c}</div><div class="v">${nf(v,2)}</div><div class="r chg ${cls(d)}">${arr(d)} ${sgn(d)}${nf(Math.abs(d),2)} к текущему</div></div>`;}).join("")
+    +`<div style="grid-column:1/-1;background:none;padding:0" class="hint">Оценка: юань по биржевому курсу, доллар и евро через мировые кросс-курсы. ЦБ считает курс по торгам до 15:30 МСК.</div>`;
+}
+
+/* ---------- Прогнозы аналитиков (ручной ввод) ---------- */
+const AN_DEFAULT={upd:"24.09.2026",rows:[
+ "БКС Мир инвестиций | 80–85 | — | конец 2026 | 16.09.2026",
+ "СберИнвестиции, база | ~85 | ~12,5 | конец 2026 | 07.09.2026",
+ "СберИнвестиции, риск | 90–95 | — | сентябрь–октябрь | 07.09.2026",
+ "Альфа-Банк | 86 → 87,2 | 12,8 → 13,0 | окт → дек 2026 | 28.08.2026",
+ "Солид Инвестиции | 85–92 | — | конец 2026 | 02.09.2026",
+ "Опрос аналитиков ЦБ | 84,9 средн. | — | сент–дек 2026 | 02.09.2026"]};
+function renderAn(){
+  const a=store.get("kts_an")||AN_DEFAULT;
+  document.getElementById("anHint").textContent=`По обзорам РБК Инвестиций, сводка от ${a.upd}`;
+  document.getElementById("an").innerHTML=`<tr><th>Источник</th><th>USD</th><th>CNY</th><th>Горизонт</th></tr>`+
+    a.rows.map(r=>{const [src,usd,cny,hz,dt]=r.split("|").map(x=>escapeHtml(x.trim()));return `<tr><td>${src||""}<br><span class="hint" style="margin:0">${dt||""}</span></td><td class="n">${usd||"—"}</td><td class="n">${cny||"—"}</td><td>${hz||""}</td></tr>`;}).join("");
+  const form=document.getElementById("anForm");if(!dirtyForms.has('anForm')&&!form.contains(document.activeElement))form.rows.value=a.rows.join("\n");
+}
+document.getElementById("anForm").addEventListener("submit",async e=>{e.preventDefault();
+  try{const rows=e.target.rows.value.split("\n").map(x=>x.trim()).filter(Boolean);
+    if(rows.length>50||rows.some(r=>r.length>1000||r.split('|').length!==5))throw new Error('До 50 строк. Каждая строка: источник | доллар | юань | горизонт | дата обзора.');
+    await saveSharedPatch({kts_an:{upd:ruDate(iso(new Date())),rows}},'Прогнозы аналитиков обновлены');e.target.closest('details').open=false;
+  }catch(error){showSaveError(error);}});
+
+/* ---------- Биржа: дневной снимок для сводки + строка в плитках ---------- */
+function snapMoex(){
+  if(!state.moex)return;const h=store.get("kts_moexHist")||{};const k=iso(new Date());h[k]=h[k]||{};
+  state.moex.forEach(m=>h[k][m.id.slice(0,3)]=m.last);
+  const cutoff=iso(Date.now()-120*864e5);Object.keys(h).filter(d=>d<cutoff).forEach(d=>delete h[d]);
+  store.set("kts_moexHist",h);
+}
+function renderTileMoex(){
+  CODES.forEach(c=>{const el=document.getElementById("mx-"+c);if(!el)return;
+    const m=(state.moex||[]).find(x=>x.id.slice(0,3)===c);
+    el.innerHTML=m?`биржа <b>${nf(m.last,4)}</b> <span class="hint" style="margin:0">${String(m.time||"").slice(0,5)} МСК</span>`:`<span class="hint" style="margin:0">на бирже не торгуется</span>`;});
+}
+
+/* ---------- Фьючерсы Мосбиржи: медь (COPPER) и Brent (BR), база дня 08:30 МСК ---------- */
+const FUT_ASSETS={COPPER:"COPPER",BR:"BR"};
+function mskNow(){const p=new Intl.DateTimeFormat("ru-RU",{timeZone:"Europe/Moscow",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date()).reduce((a,x)=>(a[x.type]=x.value,a),{});return {date:`${p.year}-${p.month}-${p.day}`,min:(+p.hour%24)*60+ +p.minute,hm:`${p.hour}:${p.minute}`};}
+async function loadFutures(){
+  const j=await getJSON('moex-futures');
+  const sc=j.securities.columns,mc=j.marketdata.columns,si=n=>sc.indexOf(n),mi=n=>mc.indexOf(n);
+  const md={};j.marketdata.data.forEach(r=>md[r[mi("SECID")]]=r);
+  const today=mskNow().date,out={};
+  Object.keys(FUT_ASSETS).forEach(a=>{
+    const cands=j.securities.data.filter(r=>r[si("ASSETCODE")]===FUT_ASSETS[a]&&r[si("LASTTRADEDATE")]>=today).map(r=>{const m=md[r[si("SECID")]]||[];
+      return {secid:r[si("SECID")],name:r[si("SHORTNAME")],exp:r[si("LASTTRADEDATE")],prev:r[si("PREVSETTLEPRICE")],last:m[mi("LAST")],chg:m[mi("LASTTOPREVPRICE")],time:m[mi("UPDATETIME")],vol:m[mi("VOLTODAY")]||0,open:m[mi("OPEN")]};});
+    if(!cands.length)return;
+    cands.sort((x,y)=>x.exp<y.exp?-1:1);
+    // ближайший контракт, но если до экспирации меньше 3 дней или объём выше у следующего — берём следующий
+    let pick=cands[0];const daysLeft=(new Date(cands[0].exp)-new Date(today))/864e5;
+    if(cands[1]&&(daysLeft<3||cands[1].vol>cands[0].vol*2))pick=cands[1];
+    const pinned=state.base?.[a]?.secid;
+    if(pinned){const match=cands.find(c=>c.secid===pinned);if(!match)return;pick=match;}
+    pick.noTrades=!(pick.last>0);pick.last=pick.last>0?pick.last:(pick.prev>0?pick.prev:null);out[a]=pick;});
+  state.fut=out;
+  // COPPER is quoted in USD per tonne; never infer a unit from the price magnitude.
+  const cu=out.COPPER;
+  if(cu){cu.unit='USD';cu.lastUsd=cu.last>0?cu.last:null;cu.prevUsd=cu.prev>0?cu.prev:null;}
+}
+async function refreshBaselines(){
+  try{const all=await rpc('baselines:get');state.baselines=all;state.base=all[mskNow().date]||{};state.baselineError=null;}
+  catch(e){state.base=state.baselines?.[mskNow().date]||{};state.baselineError=e.message;}
+  setStatus();renderFutures();renderCu();renderSum();
+}
+function baseOf(a){return state.base?.[a]||null;}
+function liveBlock(a,cur,fmt,extra){
+  const b=baseOf(a),f=state.fut?.[a];if(!f||cur==null)return `<div class="r">${state.errors.fut?"Мосбиржа не отвечает":"Торгов нет (ночь или выходной)"}</div>`;
+  if(b&&b.secid!==f.secid)return '<div class="r">Обновляется контракт, соответствующий базе 08:30. Сравнение разных контрактов не выполняется.</div>';
+  const d=b?cur-b.price:null,pct=b?d/b.price*100:null;
+  return `<div class="row"><span class="v">${fmt(cur)}<small> ${escapeHtml(f.secid)}${f.time?" · "+escapeHtml(String(f.time).slice(0,5)):""}${f.noTrades?' · нет сделок, предыдущая расчётная цена':''}${sourceStates['moex-futures']?.stale?' · устаревшие данные':''}</small></span>
+    ${b?`<span class="d ${cls(d)}">${arr(d)} ${sgn(d)}${fmt(Math.abs(d))} (${sgn(pct)}${nf(Math.abs(pct),2)}%) к базе</span>`:`<span class="r">${mskNow().min<510?'База дня появится в 08:30 МСК':'База 08:30 не зафиксирована (проверьте серверное расписание)'}</span>`}</div>
+    <div class="row"><span class="r">База 08:30 МСК: <b>${b?fmt(b.price):"—"}</b>${b?" · "+escapeHtml(b.src)+(b.stale?' · устаревшая котировка':'')+(b.quoteAt?' · котировка '+escapeHtml(formatSavedAt(b.quoteAt))+' МСК':' · время котировки неизвестно')+(b.capturedAt?' · зафиксирована '+escapeHtml(formatSavedAt(b.capturedAt))+' МСК':''):""}</span><span class="r">за день ${f.chg!=null?`<span class="${cls(f.chg)}">${sgn(f.chg)}${nf(Math.abs(f.chg),2)}%</span>`:"—"}</span></div>${extra||""}`;
+}
+function renderFutures(){
+  const cu=state.fut?.COPPER,d=cuData(),usd=state.today?.Valute.USD?.Value;
+  const el=document.getElementById("cuLive");
+  const bC=baseOf("COPPER");const cur=cu?.lastUsd;
+  const extra=(cur!=null||bC)?`<div class="row" style="margin-top:.3rem"><span class="r">Jintian = база + ${nf(d.prem,0)} $: <b class="up" style="color:var(--brand)">${bC?nf(bC.price+d.prem,0)+" $":"—"}</b>${bC&&usd?" · "+nf((bC.price+d.prem)*usd/1000,2)+" ₽/кг":""}</span><span class="r">сейчас + ${nf(d.prem,0)} $: <b>${cur!=null?nf(cur+d.prem,0)+" $":"—"}</b></span></div>`:"";
+  el.innerHTML=`<div class="l">LME онлайн · фьючерс COPPER Мосбиржи, $/т</div>`+liveBlock("COPPER",cur,v=>nf(v,0),extra);
+  const br=state.fut?.BR;document.getElementById("brLive").innerHTML=`<div class="l">Нефть Brent · фьючерс Мосбиржи, $/баррель</div>`+liveBlock("BR",br?.last,v=>nf(v,2));
+}
+function checkFutChange(){
+  const seen=store.get("kts_seen")||{};seen.fut=seen.fut||{};let touched=false;
+  [["COPPER",0.5,"Медь LME онлайн","медь"],["BR",1.0,"Нефть Brent","нефть Брент"]].forEach(([a,thr,ttl,nm])=>{
+    const f=state.fut?.[a];const cur=a==="COPPER"?f?.lastUsd:f?.last;if(cur==null)return;
+    const prev=seen.fut[a];if(prev==null){seen.fut[a]=cur;touched=true;return;}
+    const pct=(cur-prev)/prev*100;
+    if(Math.abs(pct)>=thr){announce(`${ttl}: ${nf(cur,a==="BR"?2:0)} ${a==="BR"?"$/барр.":"$/т"}, ${sgn(pct)}${nf(Math.abs(pct),2)}% с последнего сигнала`,{risk:pct>0,title:a==="COPPER"?"Движение цены меди":"Движение цены нефти",speech:`${nm}: ${speakNum(cur,a==="BR"?2:0)}, ${pct>0?"рост":"снижение"} на ${speakNum(Math.abs(pct),1)} процента`});seen.fut[a]=cur;touched=true;}
+  });
+  if(touched)store.set("kts_seen",seen);
+}
+function snapFut(){if(!state.fut)return;const h=store.get("kts_moexHist")||{};const k=iso(new Date());h[k]=h[k]||{};
+  if(state.fut.COPPER?.lastUsd!=null)h[k].CUF=state.fut.COPPER.lastUsd;if(state.fut.BR?.last!=null)h[k].BR=state.fut.BR.last;store.set("kts_moexHist",h);}
+async function refreshFutures(){try{await loadFutures();state.errors.fut=false;checkFutChange();snapFut();}catch(e){state.errors.fut=true;sourceFailed('moex-futures',e);}renderFutures();renderCu();renderTicker();renderSum();}
+
+/* ---------- Медь: проверенные общие рыночные данные сервера ---------- */
+async function loadCopper(){
+  const result=await getJSON('copper');
+  if(!Array.isArray(result.rows)||!result.rows.length)throw new Error('Нет официальных цен LME');
+  state.copperAuto={rows:result.rows,at:result.fetched_at};
+}
+async function refreshCopper(){try{await loadCopper();state.errors.cu=false;}catch(e){state.errors.cu=true;sourceFailed('copper',e);}renderCu();renderTicker();renderSum();}
+
+/* ---------- Медь LME ---------- */
+function manualCopper(value){const d=value||{};return {prem:d.prem??240,rows:d.rows||[],lmci:d.lmci??null,lmciDate:d.lmciDate??null};}
+function cuData(){return {...manualCopper(store.get('kts_cu')),auto:state.copperAuto?.rows||[],autoAt:state.copperAuto?.at||null};}
+function workingDaysSince(date){let n=0;const end=iso(new Date());for(let d=new Date(date+'T12:00:00Z');iso(d)<end;){d.setUTCDate(d.getUTCDate()+1);if(d.getUTCDay()!==0&&d.getUTCDay()!==6)n++;}return n;}
+/* ряд Cash Settlement: авто + ручные записи (ручная запись на ту же дату имеет приоритет) */
+function cuSeries(){const d=cuData();const m={};(d.auto||[]).forEach(r=>m[r.date]={date:r.date,price:r.cash,m3:r.m3});(d.rows||[]).forEach(r=>m[r.date]={...(m[r.date]||{}),date:r.date,price:r.price});return Object.values(m).sort((a,b)=>a.date<b.date?-1:1);}
+function renderCu(){
+  const d=cuData(),all=cuSeries(),rows=all.slice(-5);
+  const T=state.today,usd=T?.Valute.USD?T.Valute.USD.Value:null;
+  const st=document.getElementById("cuStatus"),big=document.getElementById("cuBig"),tb=document.getElementById("cuTable"),f=document.getElementById("cuForm");
+  if(!dirtyForms.has('cuForm')&&!f.contains(document.activeElement)){f.prem.value=d.prem;f.date.value=iso(new Date());}
+  const rub=v=>usd?nf(v*usd,0)+" ₽/т · "+nf(v*usd/1000,2)+" ₽/кг":"";
+  let h="";
+  const last=rows[rows.length-1];
+  if(rows.length){const stale=workingDaysSince(last.date)>3||sourceStates.copper?.stale;
+    st.innerHTML=`<span class="state ${stale?"bad":"ok"}">${stale?"Данные устарели":"LME / ручная корректировка"}: ${escapeHtml(ruDate(last.date))}</span>`;
+    const avg=rows.reduce((a,r)=>a+r.price,0)/rows.length;
+    h+=`<div class="hl"><div class="l">Курс 1 · LME среднее Cash Settlement за ${rows.length} дн.</div><div class="v">${nf(avg,0)} $</div><div class="r">${rub(avg)}</div></div>`;
+  }else{st.innerHTML=`<span class="state bad">${state.errors.cu?"Westmetall недоступен":"Загружаю цены LME…"}</span>`;h+=`<div><div class="l">Курс 1 · LME среднее за 5 дн.</div><div class="v">—</div><div class="r">нет данных</div></div>`;}
+  // курс 2: ручная внутридневная fx678, если она свежее последней официальной; иначе LME 3-month
+  const bC=baseOf("COPPER"),manualFresh=!bC&&d.lmci&&d.lmciDate&&(!last||d.lmciDate>=last.date);
+  const base=bC?bC.price:(manualFresh?d.lmci:(last&&last.m3!=null?last.m3:null)),baseL=bC?`база 08:30 ${nf(bC.price,0)}`:(manualFresh?`fx678 LMCI ${nf(d.lmci,0)} (${ruDate(d.lmciDate).slice(0,5)})`:(base!=null?`LME 3-мес. ${nf(base,0)} (${ruDate(last.date).slice(0,5)})`:""));
+  if(base!=null){const t=base+d.prem;h+=`<div class="hl"><div class="l">Курс 2 · Jintian: ${baseL} + ${nf(d.prem,0)} $</div><div class="v">${nf(t,0)} $</div><div class="r">${rub(t)}</div></div>`;}
+  else h+=`<div><div class="l">Курс 2 · Jintian: LME + ${nf(d.prem,0)} $</div><div class="v">—</div><div class="r">нет данных</div></div>`;
+  big.innerHTML=h;
+  tb.innerHTML=rows.length?`<tr><th>Дата</th><th>Cash, $/т</th><th>Δ</th><th>3-мес.</th></tr>`+rows.map((r,i)=>{const p=rows[i-1],dd=p?r.price-p.price:0;return `<tr><td>${ruDate(r.date).slice(0,5)}</td><td class="n">${nf(r.price,0)}</td><td class="n ${p?cls(dd):""}">${p?sgn(dd)+nf(Math.abs(dd),0):"—"}</td><td class="n">${r.m3!=null?nf(r.m3,0):"—"}</td></tr>`;}).join(""):"";
+  document.getElementById("cuSrc").textContent=d.autoAt?`Westmetall через сервер, проверено ${formatSavedAt(d.autoAt)} МСК${sourceStates.copper?.stale?' · устаревшие данные':''}`:"";
+}
+function cuRate2(){const b=baseOf("COPPER");if(b)return b.price+cuData().prem;const d=cuData(),all=cuSeries(),last=all[all.length-1];const fresh=d.lmci&&d.lmciDate&&(!last||d.lmciDate>=last.date);const base=fresh?d.lmci:(last&&last.m3!=null?last.m3:null);return base==null?null:base+d.prem;}
+document.getElementById('cuForm').addEventListener('submit',async e=>{e.preventDefault();const f=e.target;
+  try{const d=manualCopper(store.get('kts_cu')),pr=parseNumber(f.price.value,{optional:true}),lm=parseNumber(f.lmci.value,{optional:true}),date=parseDate(f.date.value);
+    d.prem=parseNumber(f.prem.value,{zero:true});if(lm!==null){d.lmci=lm;d.lmciDate=date;}
+    if(pr!==null)d.rows=d.rows.filter(r=>r.date!==date).concat({date,price:pr}).sort((a,b)=>a.date.localeCompare(b.date));
+    await saveSharedPatch({kts_cu:d},'Ручные данные меди обновлены');f.price.value='';f.lmci.value='';f.closest('details').open=false;
+  }catch(error){showSaveError(error);}});
+
+/* ---------- Сводка за месяц ---------- */
+let selectedMonth=iso(new Date()).slice(0,7);
+const summaryMonth=document.getElementById('summaryMonth');summaryMonth.value=selectedMonth;summaryMonth.max=selectedMonth;
+summaryMonth.addEventListener('change',()=>{if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(summaryMonth.value)||summaryMonth.value<'2026-01'||summaryMonth.value>iso(new Date()).slice(0,7)){summaryMonth.value=selectedMonth;return;}selectedMonth=summaryMonth.value;renderSum();refreshMonthHistory();});
+function sumRows(){
+  const published=Object.keys(state.hist).sort(),mh=store.get('kts_moexHist')||{},cu=cuSeries(),cd=cuData();
+  const days=[...new Set([...published,...Object.keys(mh),...cu.map(r=>r.date),...Object.keys(state.baselines||{})])].filter(k=>k.startsWith(selectedMonth+'-')).sort();
+  return days.map(k=>{const row={date:k};CODES.forEach(code=>{const v=state.hist[k]?.[code],previous=published.filter(day=>day<k&&state.hist[day]?.[code]).at(-1),p=previous?state.hist[previous][code]:null;
+    const nominal=code==='KZT'?100:1;row[code]=v?v[0]/v[1]*nominal:null;row[code+'_d']=v&&p?row[code]-p[0]/p[1]*nominal:null;});
+    row.MX=mh[k]?.CNY??null;const c=cu.find(r=>r.date===k),base=state.baselines?.[k]?.COPPER;row.CU=c?c.price:null;
+    row.CU2=base?base.price+(base.premium??cd.prem):((cd.lmci&&cd.lmciDate===k)?cd.lmci+cd.prem:(c?.m3!=null?c.m3+cd.prem:null));
+    row.CUF=mh[k]?.CUF??null;row.BR=mh[k]?.BR??null;return row;});
+}
+const SUM_COLS=[["date","Дата"],["USD","USD, ₽"],["USD_d","Δ USD"],["EUR","EUR, ₽"],["EUR_d","Δ EUR"],["CNY","CNY, ₽"],["CNY_d","Δ CNY"],["KZT","KZT за 100, ₽"],["KZT_d","Δ KZT"],["MX","Биржа CNY, ₽"],["CU","Медь LME Cash, $/т"],["CU2","Медь Jintian: LME + премия, $/т"],["CUF","Медь онлайн, $/т"],["BR","Brent, $/барр."]];
+function renderSum(){
+  const rows=sumRows().reverse();const t=document.getElementById("sumTable");
+  t.innerHTML=`<tr>${SUM_COLS.map(([k,l])=>`<th>${l}</th>`).join("")}</tr>`+rows.map(r=>`<tr>${SUM_COLS.map(([k])=>{const v=r[k];
+    if(k==="date")return `<td>${ruDate(v)}</td>`;if(v==null)return `<td>—</td>`;
+    if(k.endsWith("_d"))return `<td class="${cls(v)}">${arr(v)} ${sgn(v)}${nf(Math.abs(v),4)}</td>`;
+    return `<td>${nf(v,k.startsWith("CU")?0:(k==="BR"?2:4))}</td>`;}).join("")}</tr>`).join("");
+  document.getElementById("sumCnt").textContent=`${selectedMonth} · ${rows.length} дат с данными. Jintian: премия зафиксированной базы; без базы — расчёт с текущей премией.${state.monthError?' · '+state.monthError:''}`;
+}
+function dl(name,blob){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
+document.getElementById("btnCsv").onclick=()=>{
+  const rows=sumRows().reverse();const lines=[SUM_COLS.map(c=>c[1]).join(";")].concat(rows.map(r=>SUM_COLS.map(([k])=>{const v=r[k];return k==="date"?ruDate(v):(v==null?"":String(v).replace(".",","));}).join(";")));
+  dl(`курсы_сводка_${selectedMonth}.csv`,new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}));};
+document.getElementById("btnXlsx").onclick=()=>{
+  const rows=sumRows().reverse();
+  const cells=[SUM_COLS.map(c=>({t:"s",v:c[1],s:1}))].concat(rows.map(r=>SUM_COLS.map(([k])=>{const v=r[k];
+    if(k==="date")return {t:"s",v:ruDate(v),s:2};if(v==null)return {t:"s",v:"",s:2};
+    if(k.endsWith("_d"))return {t:"n",v,s:v>0?5:(v<0?6:3)};return {t:"n",v,s:k.startsWith("CU")?4:3};})));
+  dl(`курсы_сводка_${selectedMonth}.xlsx`,makeXlsx("Сводка",cells,[12,12,11,12,11,12,11,14,11,14,16,18,14,12],`Курсы валют · сводка за ${selectedMonth} · ГК КТС · Носит информационный характер`));};
+
+/* минимальный генератор XLSX без библиотек (ZIP без сжатия) */
+function makeXlsx(sheet,cells,widths,note){
+  const esc=x=>String(x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  const col=i=>{let s="";i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26);}return s;};
+  let rowsXml="";const nR=cells.length+2;
+  cells.forEach((r,ri)=>{rowsXml+=`<row r="${ri+1}">`+r.map((c,ci)=>{const ref=col(ci)+(ri+1);
+    return c.t==="n"?`<c r="${ref}" s="${c.s}"><v>${c.v}</v></c>`:`<c r="${ref}" s="${c.s}" t="inlineStr"><is><t>${esc(c.v)}</t></is></c>`;}).join("")+`</row>`;});
+  rowsXml+=`<row r="${nR}"><c r="A${nR}" s="7" t="inlineStr"><is><t>${esc(note)}</t></is></c></row>`;
+  const colsXml=`<cols>${widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join("")}</cols>`;
+  const sheetXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>${colsXml}<sheetData>${rowsXml}</sheetData><autoFilter ref="A1:${col(cells[0].length-1)}${cells.length}"/><pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/><headerFooter><oddHeader>&amp;L&amp;"Arial Narrow"ГК КТС · Курсы валют&amp;R&amp;"Arial Narrow"&amp;D</oddHeader><oddFooter>&amp;L&amp;"Arial Narrow"Методика и разработка — ФАМ&amp;R&amp;"Arial Narrow"Стр. &amp;P из &amp;N</oddFooter></headerFooter></worksheet>`;
+  const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0.0000"/><numFmt numFmtId="165" formatCode="#,##0"/></numFmts><fonts count="5"><font><sz val="10"/><color rgb="FF0D185B"/><name val="Arial Narrow"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial Narrow"/></font><font><b/><sz val="10"/><color rgb="FF0D185B"/><name val="Arial Narrow"/></font><font><sz val="10"/><color rgb="FFC32133"/><name val="Arial Narrow"/></font><font><sz val="10"/><color rgb="FF1B7A4B"/><name val="Arial Narrow"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0D185B"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD7D9E6"/></left><right style="thin"><color rgb="FFD7D9E6"/></right><top style="thin"><color rgb="FFD7D9E6"/></top><bottom style="thin"><color rgb="FFD7D9E6"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="164" fontId="3" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/><xf numFmtId="164" fontId="4" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const files={
+   "[Content_Types].xml":`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`,
+   "_rels/.rels":`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`,
+   "docProps/core.xml":`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Курсы валют · сводка</dc:title><dc:creator>ФАМ — авторская методика и разработка</dc:creator></cp:coreProperties>`,
+   "xl/workbook.xml":`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${esc(sheet)}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+   "xl/_rels/workbook.xml.rels":`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+   "xl/styles.xml":styles,"xl/worksheets/sheet1.xml":sheetXml};
+  return zipStore(files);
+}
+function zipStore(files){
+  const enc=new TextEncoder();const crcT=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+  const crc32=b=>{let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=crcT[(c^b[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;};
+  const parts=[],central=[];let off=0;const d=new Date(),dt=((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))&0xFFFF,dd=(((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xFFFF;
+  const u16=n=>[n&255,(n>>8)&255],u32=n=>[n&255,(n>>8)&255,(n>>16)&255,(n>>>24)&255];
+  for(const [name,txt] of Object.entries(files)){const nm=enc.encode(name),data=enc.encode(txt),crc=crc32(data);
+    const lh=new Uint8Array([0x50,0x4b,3,4,...u16(20),...u16(0x800),...u16(0),...u16(dt),...u16(dd),...u32(crc),...u32(data.length),...u32(data.length),...u16(nm.length),...u16(0),...nm]);
+    parts.push(lh,data);
+    central.push(new Uint8Array([0x50,0x4b,1,2,...u16(20),...u16(20),...u16(0x800),...u16(0),...u16(dt),...u16(dd),...u32(crc),...u32(data.length),...u32(data.length),...u16(nm.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off),...nm]));
+    off+=lh.length+data.length;}
+  const cdLen=central.reduce((a,c)=>a+c.length,0);
+  const end=new Uint8Array([0x50,0x4b,5,6,...u16(0),...u16(0),...u16(central.length),...u16(central.length),...u32(cdLen),...u32(off),...u16(0)]);
+  return new Blob([...parts,...central,end],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+
+/* ---------- Неделя онлайн: почасовые свечи Мосбиржи ---------- */
+const WEEK_ITEMS=[["COPPER","Медь LME онлайн (фьючерс COPPER), $/т",0],["BR","Нефть Brent (фьючерс BR), $/баррель",2],["CNY","Юань CNY/RUB (Мосбиржа), ₽",4]];
+async function fetchCandles(secid,from,till){
+  const j=await getJSON('moex-candles',{secid,from,till}),c=j.candles.columns,ci=n=>c.indexOf(n);
+  return j.candles.data.map(r=>({t:r[ci('begin')],end:r[ci('end')],o:r[ci('open')],h:r[ci('high')],l:r[ci('low')],c:r[ci('close')]})).filter(r=>r.c>0);
+}
+async function loadCandles(){
+  const from=iso(Date.now()-8*864e5),till=iso(new Date()),out={...(state.candles||{})},secids={...(state.candleSecids||{})};
+  for(const [k] of WEEK_ITEMS){const secid=k==='CNY'?'CNYRUB_TOM':state.fut?.[k]?.secid;if(!secid)continue;
+    try{out[k]=await fetchCandles(secid,from,till);secids[k]=secid;}catch(error){/* Keep both observations and their actual contract identity on failure. */}
+  }
+  state.candles=out;state.candleSecids=secids;
+}
+let monthRequest=0;
+async function refreshMonthHistory(){
+  const request=++monthRequest,month=selectedMonth,from=month+'-01';
+  const [year,mon]=month.split('-').map(Number),last=iso(new Date(Date.UTC(year,mon,0,12))),till=last<iso(new Date())?last:iso(new Date());
+  const history=store.get('kts_moexHist')||{},items=[{asset:'CNY',secid:'CNYRUB_TOM'}];
+  for(const asset of ['COPPER','BR']){
+    const ids=new Set(Object.entries(state.baselines||{}).filter(([date])=>date.startsWith(month+'-')).map(([,day])=>day[asset]?.secid).filter(Boolean));
+    if(month===iso(new Date()).slice(0,7)&&state.fut?.[asset])ids.add(state.fut[asset].secid);
+    for(const secid of ids)items.push({asset,secid});
+  }
+  let failed=false;
+  for(const {asset,secid} of items){
+    try{const rows=await fetchCandles(secid,from,till);
+      for(const r of rows){const date=r.t.slice(0,10);if(!date.startsWith(month+'-'))continue;
+        const pinned=state.baselines?.[date]?.[asset]?.secid;if(pinned&&pinned!==secid)continue;
+        history[date]=history[date]||{};history[date][asset==='COPPER'?'CUF':asset]=r.c;}
+    }catch(error){failed=true;}
+  }
+  // Merge with newer live observations instead of replacing data from concurrent refreshes.
+  const live=store.get('kts_moexHist')||{};
+  Object.keys(live).forEach(date=>{if(date===iso(new Date()))history[date]={...history[date],...live[date]};});
+  store.set('kts_moexHist',history);
+  if(request===monthRequest){state.monthError=failed?'часть котировок недоступна; сохранены последние полученные значения':'';renderSum();}
+}
+function weekDays(rows,asset){
+  // база дня = последняя цена до 08:30 МСК этого дня
+  const days={};rows.forEach(r=>{const d=r.t.slice(0,10);(days[d]=days[d]||[]).push(r);});
+  const keys=Object.keys(days).sort();const out=[];let lastClose=null;
+  keys.forEach(d=>{const rs=days[d];const before=rs.filter(r=>r.end&&r.end.slice(11,16)<='08:30');const after=rs.filter(r=>r.t.slice(11,16)>="08:30"),baseline=state.baselines?.[d]?.[asset];
+    const base=asset==='CNY'?(before.length?before[before.length-1].c:lastClose):(baseline?.secid===state.candleSecids?.[asset]?baseline?.price??null:null);
+    const use=after.length?after:rs;
+    const row={date:d,base,open:use[0].o,high:Math.max(...use.map(r=>r.h)),low:Math.min(...use.map(r=>r.l)),close:use[use.length-1].c,t:use[use.length-1].t.slice(11,16)};
+    row.d=base!=null?row.close-base:null;row.pct=base!=null?row.d/base*100:null;out.push(row);lastClose=rs[rs.length-1].c;});
+  return out.slice(-7);
+}
+function drawWeek(el,rows,days,dec){
+  const box=el.querySelector(".chart-box");box.querySelector("svg")?.remove();if(rows.length<2)return;
+  const W=box.clientWidth||800,H=box.clientHeight||200,fs=parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const m={l:fs*4.4,r:fs*.8,t:fs*.6,b:fs*1.8};const N=rows.length;
+  const vals=rows.flatMap(r=>[r.h,r.l]).concat(days.map(d=>d.base).filter(x=>x!=null));
+  let lo=Math.min(...vals),hi=Math.max(...vals);const pad=(hi-lo)*.08||1;lo-=pad;hi+=pad;
+  const X=i=>m.l+i/(N-1)*(W-m.l-m.r),Y=v=>m.t+(hi-v)/(hi-lo)*(H-m.t-m.b);
+  const brand=CSS("--brand"),muted=CSS("--muted"),line2=CSS("--line2"),red=CSS("--brand-red"),good=CSS("--good");
+  let g="";
+  for(let k=0;k<=4;k++){const v=lo+(hi-lo)*k/4,y=Y(v);g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y}" y2="${y}" stroke="${line2}"/><text x="${m.l-fs*.4}" y="${y+fs*.35}" text-anchor="end" font-family="ui-monospace,Consolas,monospace" font-size="${fs*.8}" fill="${muted}">${nf(v,dec)}</text>`;}
+  // разделители дней и базы
+  const idxByDay={};rows.forEach((r,i)=>{const d=r.t.slice(0,10);if(idxByDay[d]==null)idxByDay[d]=i;});
+  const dks=Object.keys(idxByDay);
+  dks.forEach((d,j)=>{const i0=idxByDay[d],i1=(j+1<dks.length?idxByDay[dks[j+1]]:N)-1;
+    g+=`<line x1="${X(i0)}" x2="${X(i0)}" y1="${m.t}" y2="${H-m.b}" stroke="${muted}" stroke-dasharray="2 4" opacity=".6"/><text x="${X(i0)+3}" y="${H-fs*.4}" font-family="${CSS("--cond")}" font-size="${fs*.85}" fill="${muted}">${ruDate(d).slice(0,5)}</text>`;
+    const day=days.find(x=>x.date===d);if(day&&day.base!=null){const y=Y(day.base);g+=`<line x1="${X(i0)}" x2="${X(i1)}" y1="${y}" y2="${y}" stroke="${day.d>0?red:good}" stroke-width="1.5" stroke-dasharray="${fs*.4} ${fs*.3}"/>`;}});
+  g+=`<polyline fill="none" stroke="${brand}" stroke-width="${fs*.16}" stroke-linejoin="round" points="${rows.map((r,i)=>`${X(i)},${Y(r.c)}`).join(" ")}"/>`;
+  g+=`<circle cx="${X(N-1)}" cy="${Y(rows[N-1].c)}" r="${fs*.3}" fill="${brand}"/>`;
+  box.insertAdjacentHTML("afterbegin",`<svg viewBox="0 0 ${W} ${H}" role="img">${g}</svg>`);
+}
+function renderWeek(){
+  const wrap=document.getElementById("week");if(!wrap.offsetParent)return;wrap.innerHTML="";let total=0;
+  WEEK_ITEMS.forEach(([k,title,dec])=>{const rows=state.candles?.[k]||[];const days=weekDays(rows,k);total+=rows.length;
+    const el=document.createElement("div");el.className="wk";
+    el.innerHTML=`<div><h2>${title}</h2><div class="chart-box"></div></div>
+      <div><table><tr><th>Дата</th><th>База 08:30</th><th>Мин</th><th>Макс</th><th>Закрытие</th><th>Δ к базе</th></tr>${days.length?days.slice().reverse().map(d=>`<tr><td>${ruDate(d.date).slice(0,5)}</td><td class="n">${nf(d.base,dec)}</td><td class="n">${nf(d.low,dec)}</td><td class="n">${nf(d.high,dec)}</td><td class="n">${nf(d.close,dec)} <span class="hint" style="margin:0">${d.t}</span></td><td class="n ${d.d!=null?cls(d.d):""}">${d.d!=null?`${arr(d.d)} ${sgn(d.d)}${nf(Math.abs(d.d),dec)} (${sgn(d.pct)}${nf(Math.abs(d.pct),2)}%)`:"—"}</td></tr>`).join(""):`<tr><td colspan="6" class="empty">${state.fut?"Нет данных с Мосбиржи":"Загрузка…"}</td></tr>`}</table></div>`;
+    wrap.appendChild(el);drawWeek(el,rows,days,dec);});
+  document.getElementById("weekCnt").textContent=total?`${total} часовых котировок · Мосбиржа, задержка до 15 минут. База CNY: последняя завершённая часовая свеча до 08:30 (не точная котировка в 08:30).`:"";
+}
+function weekTable(){const out=[];WEEK_ITEMS.forEach(([k,title,dec])=>{weekDays(state.candles?.[k]||[],k).forEach(d=>out.push({item:title.split(" (")[0],...d}));});return out;}
+const WEEK_COLS=[["item","Инструмент"],["date","Дата"],["base","База 08:30"],["low","Мин"],["high","Макс"],["close","Закрытие"],["d","Δ к базе"],["pct","Δ, %"]];
+document.getElementById("btnWeekCsv").onclick=()=>{const rows=weekTable();const lines=[WEEK_COLS.map(c=>c[1]).join(";")].concat(rows.map(r=>WEEK_COLS.map(([k])=>{const v=r[k];return k==="date"?ruDate(v):(k==="item"?v:(v==null?"":String(Math.round(v*10000)/10000).replace(".",",")));}).join(";")));dl(`неделя_онлайн_${iso(new Date())}.csv`,new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}));};
+document.getElementById("btnWeekXlsx").onclick=()=>{const rows=weekTable();const cells=[WEEK_COLS.map(c=>({t:"s",v:c[1],s:1}))].concat(rows.map(r=>WEEK_COLS.map(([k])=>{const v=r[k];if(k==="item")return {t:"s",v,s:2};if(k==="date")return {t:"s",v:ruDate(v),s:2};if(v==null)return {t:"s",v:"",s:2};if(k==="d"||k==="pct")return {t:"n",v:Math.round(v*10000)/10000,s:v>0?5:(v<0?6:3)};return {t:"n",v:Math.round(v*10000)/10000,s:3};})));
+  dl(`неделя_онлайн_${iso(new Date())}.xlsx`,makeXlsx("Неделя",cells,[34,12,13,12,12,12,13,10],`Курсы валют · неделя онлайн (Мосбиржа) · ГК КТС · ${ruDate(iso(new Date()))} · Носит информационный характер`));};
+async function refreshCandles(){try{await loadCandles();}catch(e){}renderWeek();}
+
+/* ---------- Общие данные: серверное подтверждение, CAS и откат ---------- */
+let sharedEnvelope={revision:0,current:null,previous:null},sharedLoaded=false,savingShared=false;
+const dirtyForms=new Set();
+['cpsForm','anForm','cuForm'].forEach(id=>document.getElementById(id).addEventListener('input',()=>dirtyForms.add(id)));
+function formatSavedAt(at){return new Date(at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+function manualSnapshotData(source){const data={};MANUAL_KEYS.forEach(k=>{if(source[k]!=null)data[k]=k==='kts_cu'?manualCopper(source[k]):source[k];});return data;}
+function makeSnapshot(){const data={};MANUAL_KEYS.forEach(k=>{const v=store.get(k);if(v!=null)data[k]=v;});return {at:new Date().toISOString(),version:'V21',data:manualSnapshotData(data)};}
+function updateHistoryStatus(){
+  const current=sharedEnvelope.current,previous=sharedEnvelope.previous;
+  document.getElementById('previousStatus').textContent=previous?'Предыдущая версия: '+formatSavedAt(previous.savedAt)+' МСК · '+previous.actor:'Предыдущей сохранённой версии пока нет.';
+  document.getElementById('rollbackShared').disabled=savingShared||!previous;
+  document.getElementById('saveStatus').textContent=current?'Общие данные сохранены '+formatSavedAt(current.savedAt)+' МСК · '+current.actor+' · ревизия '+sharedEnvelope.revision:'Общие данные ещё не сохранены. Показаны исходные авторские значения с указанными датами; они не являются новыми данными сервера.';
+}
+function installEnvelope(envelope,preserveDrafts=[]){
+  if(!envelope||!Number.isSafeInteger(envelope.revision)||envelope.revision<0)throw new Error('Сервер вернул некорректную версию данных.');
+  sharedEnvelope=envelope;sharedLoaded=true;dirtyForms.clear();preserveDrafts.forEach(id=>dirtyForms.add(id));
+  const data=manualSnapshotData(envelope.current?.data||{});
+  MANUAL_KEYS.forEach(k=>{if(data[k]!==undefined)store.set(k,data[k]);else memoryStore.delete(k);});
+  state.cps=store.get('kts_cpsRates')||CPS_DEFAULT;
+  renderAn();renderAll();renderLog();updateHistoryStatus();
+  document.getElementById('snapHint').classList.remove('show');
+}
+function showSaveError(error){
+  const conflict=error?.code==='CURRENCY_CONFLICT'||error?.status===409;
+  const message=conflict?'Другой администратор уже изменил общие данные. Ваш ввод не сохранён и не потерян. Нажмите «Загрузить актуальные общие данные», проверьте изменения и повторите сохранение.':('Не удалось сохранить: '+(error?.message||String(error)));
+  document.getElementById('saveStatus').textContent=message;
+  const hint=document.getElementById('snapHint');hint.textContent=message;hint.classList.add('show');
+}
+function setSharedBusy(busy){
+  savingShared=busy;
+  document.querySelectorAll('#cpsForm button[type="submit"],#anForm button[type="submit"],#cuForm button[type="submit"],#reloadShared,#tOpen,#tSnap').forEach(b=>b.disabled=busy);
+  document.getElementById('rollbackShared').disabled=busy||!sharedEnvelope.previous;
+}
+async function loadShared(force=false){
+  if(savingShared)return;
+  const next=await rpc('snapshot:get');
+  if(savingShared||next.revision<sharedEnvelope.revision)return;
+  if(sharedLoaded&&next.revision===sharedEnvelope.revision&&!force)return;
+  if(!force&&dirtyForms.size){const hint=document.getElementById('snapHint');hint.textContent='На сервере есть новая версия. Незавершённый ввод сохранён на экране. Для загрузки новой версии нажмите «Загрузить актуальные общие данные».';hint.classList.add('show');return;}
+  installEnvelope(next);
+}
+async function saveSharedPatch(patch,message,replace=false){
+  if(!sharedLoaded)throw new Error('Сначала загрузите актуальные общие данные с сервера.');
+  if(savingShared)throw new Error('Дождитесь завершения текущего сохранения.');
+  const snapshot=makeSnapshot();snapshot.data=manualSnapshotData(replace?patch:{...snapshot.data,...patch});
+  snapshot.data.kts_log=[{t:new Date().toISOString(),msg:message,risk:false},...(snapshot.data.kts_log||[])].slice(0,200);
+  setSharedBusy(true);
+  try{const next=await rpc('snapshot:save',{snapshot,expectedRevision:sharedEnvelope.revision});
+    const forms={kts_cpsRates:'cpsForm',kts_an:'anForm',kts_cu:'cuForm'},savedForms=Object.keys(patch).map(k=>forms[k]);
+    installEnvelope(next,replace?[]:[...dirtyForms].filter(id=>!savedForms.includes(id)));}
+  finally{setSharedBusy(false);}
+}
+document.getElementById('reloadShared').onclick=async()=>{
+  if(dirtyForms.size&&!confirm('Загрузить актуальную версию? Несохранённый ввод в формах будет сброшен.'))return;
+  try{await loadShared(true);}catch(error){showSaveError(error);}
+};
+document.getElementById('rollbackShared').onclick=async()=>{
+  if(!sharedEnvelope.previous||!confirm('Вернуть общие данные от '+formatSavedAt(sharedEnvelope.previous.savedAt)+' МСК для всех администраторов?'))return;
+  setSharedBusy(true);try{const next=await rpc('snapshot:rollback',{expectedRevision:sharedEnvelope.revision});installEnvelope(next);}
+  catch(error){showSaveError(error);}finally{setSharedBusy(false);}
+};
+document.getElementById('tSnap').onclick=()=>{
+  if(!sharedLoaded||!sharedEnvelope.current){showSaveError(new Error('Сохранённого общего снимка пока нет.'));return;}
+  const current=sharedEnvelope.current;
+  dl('kts_currency_snapshot.json',new Blob([JSON.stringify({at:current.at,version:'V21',data:current.data},null,2)],{type:'application/json'}));
+};
+document.getElementById('tOpen').onclick=()=>document.getElementById('snapFile').click();
+document.getElementById('snapFile').onchange=async e=>{
+  const file=e.target.files[0];if(!file)return;
+  try{
+    if(file.size>2*1024*1024)throw new Error('Снимок ручных данных должен быть не больше 2 МБ.');
+    const txt=await file.text(),start=txt.indexOf('{'),end=txt.lastIndexOf('}');
+    const snapshot=JSON.parse(txt.slice(start,end+1));
+    if(!snapshot?.data||typeof snapshot.data!=='object'||Array.isArray(snapshot.data))throw new Error('В файле нет данных снимка.');
+    const data=manualSnapshotData(snapshot.data);if(!Object.keys(data).length)throw new Error('В файле нет поддерживаемых ручных данных.');
+    if(!confirm('Импортировать «'+file.name+'» и заменить общие ручные данные для всех администраторов?'))return;
+    await saveSharedPatch(data,'Импортирован общий снимок ручных данных',true);
+  }catch(error){showSaveError(error);}finally{e.target.value='';}
+};
+
+/* ---------- Вкладки ---------- */
+const tabs=[...document.querySelectorAll(".tab")];
+function showTab(id){tabs.forEach(t=>t.setAttribute("aria-selected",t.dataset.page===id));document.querySelectorAll(".page").forEach(p=>p.classList.toggle("on",p.id===id));if(id==="pgSum")renderSum();else if(id==="pgWeek")renderWeek();else renderChart();}
+tabs.forEach(t=>t.onclick=()=>{showTab(t.dataset.page);});
+let autoT=null;const tAuto=document.getElementById("tAuto");
+function setAuto(on){prefs.auto=on;store.set("kts_prefs",prefs);tAuto.setAttribute("aria-pressed",on);clearInterval(autoT);
+  if(on)autoT=setInterval(()=>{const cur=tabs.find(t=>t.getAttribute("aria-selected")==="true");const i=(tabs.indexOf(cur)+1)%tabs.length;showTab(tabs[i].dataset.page);},45000);}
+tAuto.onclick=()=>setAuto(!prefs.auto);
+
+/* ---------- Статус и обновление ---------- */
+function setStatus(){
+  const issues=[];
+  const lines=Object.entries(sourceStates).map(([kind,s])=>{
+    const failed=s.stale||s.error;if(failed)issues.push((sourceNames[kind]||kind)+': '+(s.error||'устаревшие данные'));
+    return '<div class="'+(failed?'up':'')+'">'+escapeHtml(sourceNames[kind]||kind)+': '+escapeHtml(s.at?'последняя успешная проверка '+formatSavedAt(s.at)+' МСК':'успешных проверок пока нет')+(s.delay?' · задержка котировок '+s.delay+' минут':'')+(failed?' · '+escapeHtml(s.error||'устаревшие данные'):'')+'</div>';
+  });
+  if(state.baselineError)issues.push('База дня: '+state.baselineError);
+  if(mskNow().min>=510&&(!state.base?.COPPER||!state.base?.BR))lines.push('<div class="up">База 08:30 не зафиксирована для одного или нескольких инструментов (проверьте серверное расписание).</div>');
+  document.getElementById('sourceStatus').innerHTML=lines.join('')||'Получаем данные…';
+  const box=document.getElementById('errBox');box.style.display=issues.length?'block':'none';
+  box.textContent=issues.length?'Не все данные актуальны. '+issues.join(' · '):'';
+}
+async function refreshCbr(){try{await loadToday();state.errors.cbr=false;checkCbrChange();}catch(e){state.errors.cbr=true;sourceFailed('cbr-daily',e);}renderAll();}
+async function refreshMoex(){try{await loadMoex();state.errors.moex=false;checkMoexChange();snapMoex();}catch(e){state.errors.moex=true;sourceFailed('moex-currency',e);}renderMoex();renderImplied();renderTileMoex();renderTicker();setStatus();}
+async function refreshWorld(){try{await loadWorld();state.errors.world=false;}catch(e){state.errors.world=true;sourceFailed('world',e);}renderWorld();renderImplied();renderTicker();setStatus();}
+function renderAll(){renderTiles();renderTileMoex();renderChart();renderCps();renderCu();renderFutures();renderTicker();setStatus();if(document.getElementById("pgSum").classList.contains("on"))renderSum();}
+
+document.querySelectorAll(".how").forEach(b=>b.onclick=()=>{const p=document.getElementById(b.dataset.for),o=!p.classList.contains("open");p.classList.toggle("open",o);b.setAttribute("aria-expanded",o);b.textContent=o?"свернуть":"как считается";if(b.dataset.for==="ex-chart")renderChart();});
+const MSK={timeZone:"Europe/Moscow",hour:"2-digit",minute:"2-digit"};
+const tick=()=>document.getElementById("clock").textContent=new Date().toLocaleTimeString("ru-RU",MSK)+" МСК";tick();setInterval(tick,1000);
+
+const runningJobs=new Set();
+async function runJob(fn){if(runningJobs.has(fn))return;runningJobs.add(fn);try{await fn();}catch(error){setStatus();}finally{runningJobs.delete(fn);}}
+(async function init(){
+  state.cps=CPS_DEFAULT;renderCps();renderAn();renderLog();applyMini();sndHint();renderCu();setAuto(!!prefs.auto);
+  try{await loadShared();}catch(error){showSaveError(error);}
+  await refreshBaselines();
+  await refreshCbr();
+  await Promise.all([loadHistory().catch(()=>{}),refreshMoex(),refreshWorld(),refreshCopper(),refreshFutures()]);
+  renderAll();refreshCandles();refreshMonthHistory();
+  const reloadShared=async()=>{try{await loadShared();}catch(error){showSaveError(error);}};
+  const history=async()=>{await loadHistory();renderAll();await refreshMonthHistory();};
+  [[refreshCbr,600],[refreshCopper,3600],[refreshFutures,60],[refreshCandles,600],[refreshMoex,60],[refreshWorld,3600],[refreshBaselines,60],[reloadShared,60],[history,3600]].forEach(([fn,every])=>setInterval(()=>runJob(fn),every*1000));
+  // Browser background throttling is expected; server cron keeps the shared 08:30 base.
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){runJob(refreshBaselines);runJob(refreshFutures);runJob(reloadShared);}});
+  setTimeout(()=>{if(!savingShared&&!dirtyForms.size)location.reload();},24*60*60*1000);
+})();
+</script>
+</body>
+</html>

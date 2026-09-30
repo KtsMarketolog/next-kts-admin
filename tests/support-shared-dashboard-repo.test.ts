@@ -94,6 +94,7 @@ test('shared migration only creates new report tables and does not migrate or co
   const statements: string[] = [];
   const migrations = compile<typeof import('../src/shared/lib/db/migrations')>('../src/shared/lib/db/migrations.ts', {
     '../topDashboardLimits': limits, './client': {},
+    './currencyDashboardMigration': { applyCurrencyDashboardMigration: async () => { throw new Error('Unrelated migration must not run'); } },
   });
   await migrations.applySupportSharedDashboardMigration({ query: async (sql: string) => { statements.push(sql); } } as never);
   assert.equal(statements.length, 1);

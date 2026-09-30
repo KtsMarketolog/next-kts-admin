@@ -6,6 +6,7 @@ import {
   TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
 } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
+import { applyCurrencyDashboardMigration } from './currencyDashboardMigration';
 
 type SchemaMigration = {
   id: string;
@@ -828,6 +829,11 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
         );
       `);
     },
+  },
+  {
+    id: '202609300001_currency_dashboard',
+    description: 'Private currency dashboard snapshots and independent market history',
+    apply: applyCurrencyDashboardMigration,
   },
 ];
 
