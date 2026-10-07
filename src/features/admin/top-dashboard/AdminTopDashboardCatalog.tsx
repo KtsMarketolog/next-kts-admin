@@ -7,6 +7,9 @@ import type { FormEvent } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
 import type { DashboardAccessOption } from '@/shared/lib/dashboardAccess';
+import { DashboardDataDates } from './DashboardDataDates';
+import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
+import type { DashboardReportDates } from '@/shared/lib/db/dashboardReportDatesRepo';
 
 type TopDashboardBlock = {
   id: number;
@@ -16,25 +19,19 @@ type TopDashboardBlock = {
   versionCount?: number;
   updatedAt: string | null;
   createdAt?: string;
+  dataUploadedAt?: string | null;
+  dataAsOf?: string | null;
+  htmlPublishedAt?: string | null;
 };
 
 type AdminTopDashboardCatalogProps = {
   canManage: boolean;
   canReadTopBlocks?: boolean;
+  canReviewUsage?: boolean;
   reportEntries?: DashboardAccessOption[];
   showStatus: (message: string) => void;
 };
 const EMPTY_REPORT_ENTRIES: NonNullable<AdminTopDashboardCatalogProps['reportEntries']> = [];
-
-function formatDate(value: string | null) {
-  if (!value) return 'Ещё не обновлялась';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Ещё не обновлялась';
-  return new Intl.DateTimeFormat('ru-RU', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
-}
 
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
@@ -56,9 +53,11 @@ function blockDescription(block: TopDashboardBlock) {
   return 'HTML ещё не загружен';
 }
 
-export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, reportEntries = EMPTY_REPORT_ENTRIES, showStatus }: AdminTopDashboardCatalogProps) {
+export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, canReviewUsage = false, reportEntries = EMPTY_REPORT_ENTRIES, showStatus }: AdminTopDashboardCatalogProps) {
   const router = useRouter();
   const [blocks, setBlocks] = useState<TopDashboardBlock[]>([]);
+  const [reportDates, setReportDates] = useState<DashboardReportDates[]>([]);
+  const [datesError, setDatesError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -109,6 +108,17 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, r
   useEffect(() => {
     void loadBlocks();
   }, [loadBlocks]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/admin/dashboard-metadata', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Metadata unavailable');
+        const data = await response.json();
+        if (!controller.signal.aborted) { setReportDates(Array.isArray(data.reports) ? data.reports : []); setDatesError(false); }
+      }).catch(() => { if (!controller.signal.aborted) setDatesError(true); });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (creating) titleInputRef.current?.focus();
@@ -179,6 +189,8 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, r
           ? 'Личные дашборды МР и МС, компоновщик рейсов и самостоятельные HTML-отчёты. У каждого отчёта собственные данные и история версий.'
           : 'Откройте нужный отчёт — актуальные данные уже сохранены и загрузятся автоматически.'}
       </p>
+      <p><Link href="/admin/top/paired">Два отчёта на одном экране</Link></p>
+      {canReviewUsage ? <p><Link href="/admin/dashboard-usage">История использования дашбордов</Link></p> : null}
 
       <div className={styles.topDashboardCatalogGrid} aria-busy={loading}>
         {reportEntries.filter((entry) => entry.href).map((entry) => (
@@ -186,6 +198,16 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, r
             <span className={styles.topDashboardCatalogEyebrow}>Раздел отчётов</span>
             <strong>{entry.title}</strong>
             <span className={styles.topDashboardCatalogDescription}>{entry.description}</span>
+            <span className={styles.topDashboardCatalogMeta}>
+              {datesError ? 'Даты обновления временно недоступны' : reportDates.some((item) => item.key === entry.key)
+                ? (() => {
+                  const dates = reportDates.find((item) => item.key === entry.key)!;
+                  return entry.key === 'currency-rates'
+                    ? <span>Последнее успешное обновление источника: {formatDashboardTimestamp(dates.automaticCheckedAt)}</span>
+                    : <DashboardDataDates uploadedAt={dates.dataUploadedAt} dataAsOf={dates.dataAsOf} />;
+                })()
+                : 'Проверяем даты обновления…'}
+            </span>
             <span className={styles.topDashboardCatalogOpen}>Открыть <span aria-hidden>→</span></span>
           </Link>
         ))}
@@ -204,10 +226,12 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, r
               {canManage ? blockDescription(block) : 'Опубликован и готов к просмотру'}
             </span>
             <span className={styles.topDashboardCatalogMeta}>
-              {canManage
-                ? `${block.versionCount ?? 0} ${pluralize(block.versionCount ?? 0, 'версия', 'версии', 'версий')} · ${formatDate(block.updatedAt ?? block.createdAt ?? null)}`
-                : `Обновлён: ${formatDate(block.updatedAt)}`}
+              <DashboardDataDates uploadedAt={block.dataUploadedAt} dataAsOf={block.dataAsOf} />
             </span>
+            {canManage ? <span className={styles.topDashboardCatalogMeta}>
+              HTML: {block.versionCount ?? 0} {pluralize(block.versionCount ?? 0, 'версия', 'версии', 'версий')}
+              {block.htmlPublishedAt ? ` · опубликован ${formatDashboardTimestamp(block.htmlPublishedAt)}` : ''}
+            </span> : null}
             <span className={styles.topDashboardCatalogOpen}>Открыть <span aria-hidden>→</span></span>
           </Link>
         ))}

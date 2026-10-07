@@ -48,10 +48,6 @@ function attachSavedPasswords(users: AccessUser[]) {
   }));
 }
 
-function isAdminAccessUser(user: AccessUser) {
-  return user.source === 'admin';
-}
-
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -90,7 +86,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       }
       const data = await response.json();
       const accessUsers = Array.isArray(data.users) ? data.users : [];
-      setUsers(attachSavedPasswords(accessUsers.filter(isAdminAccessUser)));
+      setUsers(attachSavedPasswords(accessUsers));
       const options = readDashboardOptions(data.dashboardOptions);
       setDashboardOptions(options);
       setDashboardOptionsError(options ? null : 'Сервер не передал корректный список дашбордов.');
@@ -196,8 +192,8 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
 
   const createUser = async () => {
     const role = activeRoleOptions.some((option) => option.value === draft.role) ? draft.role : defaultRoleForTab(activeTab);
-    if (role === 'purchaser' && (dashboardOptionsLoading || dashboardOptions === null)) {
-      showStatusRef.current('Дождитесь загрузки списка дашбордов перед сохранением закупщика');
+    if (dashboardOptionsLoading || dashboardOptions === null) {
+      showStatusRef.current('Дождитесь загрузки списка дашбордов перед сохранением сотрудника');
       return;
     }
     const payload = {
@@ -209,7 +205,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       role,
       supportManagerId: null,
       canManageTopDashboard: role === 'top' && draft.canManageTopDashboard,
-      dashboardAccess: role === 'purchaser' ? draft.dashboardAccess : [],
+      dashboardAccess: draft.dashboardAccess,
     };
 
     if (!payload.name || !payload.login || !payload.password) {
@@ -245,8 +241,8 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   };
 
   const saveUser = async (user: AccessUser) => {
-    if (user.role === 'purchaser' && (dashboardOptionsLoading || dashboardOptions === null)) {
-      showStatusRef.current('Дождитесь загрузки списка дашбордов перед сохранением закупщика');
+    if (dashboardOptionsLoading || dashboardOptions === null) {
+      showStatusRef.current('Дождитесь загрузки списка дашбордов перед сохранением сотрудника');
       return;
     }
     const passwordIsEdited = Boolean(passwordEditIds[user.id]);
@@ -261,7 +257,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     const response = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...user, supportManagerId: null, password: nextPassword }),
+      body: JSON.stringify({ ...user, password: nextPassword }),
     });
     setBusyId(null);
 

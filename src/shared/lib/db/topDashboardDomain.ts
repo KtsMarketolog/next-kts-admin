@@ -25,6 +25,7 @@ export type TopDashboardBlockDataVersion = {
   status: TopDashboardBlockDataVersionStatus;
   uploadedByName: string;
   createdAt: string;
+  dataAsOf: string | null;
 };
 
 export type TopDashboardBlockDataOverview = {
@@ -55,6 +56,7 @@ export type CreateAndActivateTopDashboardBlockDataVersionInput = {
   expectedHtmlSnapshotFormat: TopDashboardSnapshotFormat;
   expectedHtmlProfile: TopDashboardProfile;
   originalName: string;
+  dataAsOf?: string | null;
   content: Buffer | null;
   storagePath: string | null;
   fileSize: number;

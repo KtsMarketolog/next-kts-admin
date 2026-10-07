@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const versionId = parsePersonalDashboardId(query?.get('version') ?? null);
     if (!query || !versionId) return personalJson({error: 'Некорректная версия HTML'}, 400);
     const preview = query.get('preview') === '1';
-    if ((preview && access.mode !== 'manage') || (!preview && access.mode !== 'view')) return personalJson({error: 'Нет доступа'}, 403);
+    if (preview && access.mode !== 'manage') return personalJson({error: 'Нет доступа'}, 403);
     let referer: URL;
     try { referer = new URL(request.headers.get('referer') || ''); }
     catch { return personalJson({error: 'HTML доступен только в защищённом просмотре'}, 403); }
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       || (referer.searchParams.get('preview') === '1') !== preview) {
       return personalJson({error: 'HTML доступен только в защищённом просмотре'}, 403);
     }
-    const version = await getSupportSharedDashboardHtml(versionId, preview, access.viewer);
+    const version = await getSupportSharedDashboardHtml(versionId, preview, preview ? undefined : access.viewer);
     if (!version) return personalJson({error: 'Версия HTML недоступна'}, 404);
     const routePlanner = version.format === 'route-planner-v1';
     const html = routePlanner ? injectSupportSharedRoutePlannerAdapter(version.htmlContent)

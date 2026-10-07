@@ -1,4 +1,6 @@
 import type { DashboardAccessOption } from '@/shared/lib/dashboardAccess';
+import { canViewDashboardKey, hasDashboardManagementRight } from '@/shared/lib/dashboardPermissions';
+import type { AccessUserRole } from './AdminUsersTypes';
 
 import { toggleDashboardAccess } from './AdminUsersDashboardAccess';
 import styles from './AdminUsersDashboardAccess.module.scss';
@@ -11,23 +13,27 @@ type Props = {
   error: string | null;
   onChange: (value: string[]) => void;
   onRetry: () => void;
+  role: AccessUserRole;
+  canManageTopDashboard?: boolean;
 };
 
-export function AdminUsersDashboardAccessFields({ value, options, loading, disabled, error, onChange, onRetry }: Props) {
+export function AdminUsersDashboardAccessFields({ value, options, loading, disabled, error, onChange, onRetry, role, canManageTopDashboard }: Props) {
   const unavailableCount = options ? value.filter((key) => !options.some((option) => option.key === key)).length : 0;
+  const session = { role, sessionId: 'settings-preview', adminUserId: 1, managerId: 1, canManageTopDashboard, dashboardAccess: value };
 
   return (
     <fieldset className={styles.accessFieldset} disabled={disabled}>
       <legend>Доступные дашборды — только просмотр</legend>
       <p className={styles.help}>
-        Закупщик видит только отмеченные дашборды и не может менять их HTML, данные или настройки.
-        Без галочек доступа нет. Новые дашборды не добавляются автоматически.
+        Галочки разрешают только просмотр. Права загрузки, публикации и управления доступами не меняются.
+        Личные отчёты доступны только своему менеджеру. Доступ по существующим правам управления отмечен отдельно.
+        Новые дашборды не добавляются автоматически.
       </p>
       {loading ? (
         <p className={styles.help} role="status">Загрузка списка дашбордов…</p>
       ) : error || options === null ? (
         <div className={styles.error}>
-          <p role="alert">{error || 'Список дашбордов недоступен.'} Сохранение закупщика временно недоступно; текущие права не изменены.</p>
+          <p role="alert">{error || 'Список дашбордов недоступен.'} Сохранение временно недоступно; текущие права не изменены.</p>
           <button type="button" onClick={onRetry}>Повторить загрузку дашбордов</button>
         </div>
       ) : (
@@ -37,12 +43,14 @@ export function AdminUsersDashboardAccessFields({ value, options, loading, disab
               <label className={styles.option} key={option.key}>
                 <input
                   type="checkbox"
-                  checked={value.includes(option.key)}
+                  checked={canViewDashboardKey(session, option.key)}
+                  disabled={hasDashboardManagementRight(session, option.key) || (option.key.startsWith('manager:') && option.key !== `manager:${role === 'manager' ? 'development' : role === 'support_manager' ? 'support' : ''}`)}
                   onChange={(event) => onChange(toggleDashboardAccess(value, option.key, event.target.checked))}
                 />
                 <span>
                   <strong>{option.title}</strong>
                   {option.description && <small>{option.description}</small>}
+                  {hasDashboardManagementRight(session, option.key) && <small>Доступ по правам управления — эти галочки его не отменяют.</small>}
                 </span>
               </label>
             ))}

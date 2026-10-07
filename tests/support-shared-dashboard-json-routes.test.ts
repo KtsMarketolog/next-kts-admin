@@ -28,7 +28,8 @@ function api(role: Role = 'admin', options: {
   const observe = (name: string, fn: (...args: unknown[]) => unknown = () => undefined) => async (...args: unknown[]) => {
     calls.push({name, args}); return fn(...args);
   };
-  const session = role ? {role, sessionId: options.sessionId === undefined ? 'synthetic' : options.sessionId, adminUserId: 7, managerId: 20, dashboardAccess: options.grants ?? []} : null;
+  const session = role ? {role, sessionId: options.sessionId === undefined ? 'synthetic' : options.sessionId, adminUserId: 7, managerId: 20,
+    dashboardAccess: options.grants ?? (role === 'support_manager' ? ['route-planner'] : [])} : null;
   const base = compile<typeof import('../src/app/api/admin/manager-dashboard/_shared')>('../src/app/api/admin/manager-dashboard/_shared.ts', {
     '@/shared/lib/adminAuth': {getAdminSession: async () => session},
     '@/shared/lib/adminSecurity': {enforceAdminActionRateLimit: async () => options.limited ? new Response(null, {status: 429}) : null},
@@ -150,8 +151,8 @@ test('invalid streamed JSON releases the cross-worker slot before returning the 
   assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'release']);
 });
 
-test('normal JSON GET permits support or assigned purchaser only and rejects personal manager selectors', async () => {
-  for (const role of ['admin', 'admintop', 'manager', 'top', 'purchaser', null] as const) {
+test('normal JSON GET permits management or explicitly assigned viewers and rejects personal manager selectors', async () => {
+  for (const role of ['manager', 'top', 'purchaser', null] as const) {
     const harness = api(role);
     assert.ok([401, 403].includes((await harness.route.GET(new Request(`${URL_ROOT}?version=8`))).status));
     assert.deepEqual(harness.calls, []);
@@ -176,12 +177,17 @@ test('normal JSON GET permits support or assigned purchaser only and rejects per
   const purchaser = api('purchaser', {grants: ['route-planner']});
   const buyerResponse = await purchaser.route.GET(new Request(`${URL_ROOT}?version=8&snapshot=9`));
   assert.equal(buyerResponse.status, 200);
-  assert.deepEqual(purchaser.calls, [{name: 'read', args: [{purchaserId: 7}, 8, 9]}]);
+  assert.deepEqual(purchaser.calls, [{name: 'read', args: [{adminUserId: 7}, 8, 9]}]);
   const buyerPreview = api('purchaser', {grants: ['route-planner']});
   assert.equal((await buyerPreview.route.GET(new Request(`${URL_ROOT}?version=8&preview=1`))).status, 403);
   assert.deepEqual(buyerPreview.calls, []);
   assert.equal((await buyerPreview.route.POST(upload())).status, 403);
   assert.deepEqual(buyerPreview.calls, []);
+  for (const role of ['admin', 'admintop'] as const) {
+    const admin = api(role);
+    assert.equal((await admin.route.GET(new Request(`${URL_ROOT}?version=8&snapshot=9`))).status, 200);
+    assert.deepEqual(admin.calls, [{name: 'read', args: [{adminUserId: 7}, 8, 9]}]);
+  }
 });
 
 test('JSON preview requires a persisted administrator session and never uses manager reads', async () => {

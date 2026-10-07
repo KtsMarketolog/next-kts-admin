@@ -16,7 +16,8 @@ export async function GET(request: Request) {
   const nonce = new URL(request.url).searchParams.get('nonce') ?? '';
   if (!/^[a-f0-9-]{36}$/.test(nonce)) return new Response('Некорректный запрос', { status: 400, headers: CURRENCY_PRIVATE_HEADERS });
   const parentOrigin = new URL(request.headers.get('referer') ?? request.url).origin;
-  const html = renderCurrencyDashboardHtml(nonce, parentOrigin, canManageCurrencyDashboard(session));
+  const readOnly = new URL(request.url).searchParams.get('readOnly') === '1';
+  const html = renderCurrencyDashboardHtml(nonce, parentOrigin, !readOnly && canManageCurrencyDashboard(session));
   return new Response(html, {
     headers: { ...CURRENCY_PRIVATE_HEADERS, 'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': buildCurrencyDashboardContentSecurityPolicy(html) },

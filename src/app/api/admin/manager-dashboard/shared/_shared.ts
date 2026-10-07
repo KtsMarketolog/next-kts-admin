@@ -1,6 +1,6 @@
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { canAccessRoutePlanner } from '@/shared/lib/dashboardAccess';
+import { canAccessRoutePlanner, getSharedDashboardViewer } from '@/shared/lib/dashboardAccess';
 import type { SharedDashboardViewer } from '@/shared/lib/db/supportSharedDashboardRepo';
 import { getWholesaleManagerById } from '@/shared/lib/db/wholesaleAdminRepo/managerRepo';
 import { personalDashboardMode } from '@/shared/lib/managerDashboardSecurity';
@@ -14,9 +14,9 @@ export async function requireSharedAccess(request?: Request, manageOnly = false)
   if (!session || !canAccessRoutePlanner(session) || (manageOnly && mode !== 'manage')) {
     return {denied: personalJson({error: 'Нет доступа к компоновщику рейсов'}, session ? 403 : 401)} as const;
   }
-  if (session.role === 'support_manager') {
+  if (session.role === 'support_manager' || session.role === 'manager') {
     const manager = await getWholesaleManagerById(session.managerId!);
-    if (!manager?.isActive || manager.role !== 'support_manager') {
+    if (!manager?.isActive || manager.role !== session.role) {
       return {denied: personalJson({error: 'Учётная запись менеджера недоступна'}, 403)} as const;
     }
   }
@@ -26,8 +26,9 @@ export async function requireSharedAccess(request?: Request, manageOnly = false)
     const limited = await enforceAdminActionRateLimit(session, 'personal_dashboard_write', 30, 10 * 60 * 1000);
     if (limited) return {denied: limited} as const;
   }
-  const viewer: SharedDashboardViewer | undefined = mode === 'manage' ? undefined
-    : session.role === 'purchaser' ? {purchaserId: session.adminUserId!} : session.managerId!;
+  // Management and published reading are separate operations. Even administrators
+  // use a persisted principal when opening the published report and its data.
+  const viewer: SharedDashboardViewer = getSharedDashboardViewer(session);
   return {session, mode, viewer, actorId: `${session.role}:${session.adminUserId ?? session.sessionId}`, denied: null} as const;
 }
 

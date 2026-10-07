@@ -11,14 +11,14 @@ import { getReportEntries, parseDashboardAccess, PURCHASER_DASHBOARD_REPORT_OPTI
 import * as rpc from '../src/shared/lib/currencyDashboardRpc';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 
-test('currency report is available to persisted admins, TOP and both manager roles, without granting other roles access', () => {
+test('currency report view grants work for all persisted employees without granting management', () => {
   for (const role of ['admin', 'admintop', 'top', 'manager', 'support_manager', 'purchaser', 'wholesale_admin'] as const) {
     const session: AdminSession = { role, adminUserId: 5, managerId: 9, sessionId: 'synthetic',
       canAccessTopDashboard: true, canManageTopDashboard: true, dashboardAccess: ['currency-rates'] };
     const expected = ['admin', 'admintop', 'top', 'manager', 'support_manager'].includes(role);
-    assert.equal(access.canAccessCurrencyDashboard(session), expected, role);
+    assert.equal(access.canAccessCurrencyDashboard(session), true, role);
     assert.equal(access.canManageCurrencyDashboard(session), expected, role);
-    assert.equal(getReportEntries(session).some(({ key }) => key === 'currency-rates'), expected);
+    assert.equal(getReportEntries(session).some(({ key }) => key === 'currency-rates'), true);
     assert.equal(access.canAccessCurrencyDashboard({ ...session, sessionId: undefined }), false);
   }
   assert.equal(access.canAccessCurrencyDashboard(null), false);
@@ -42,7 +42,7 @@ test('currency report is available to persisted admins, TOP and both manager rol
     for (const canManageTopDashboard of [undefined, false, true]) {
       const session: AdminSession = { role, sessionId: 'x',
         ...(role === 'top' ? { adminUserId: 6 } : { managerId: 9 }),
-        canAccessTopDashboard: false, canManageTopDashboard };
+        canAccessTopDashboard: false, canManageTopDashboard, dashboardAccess:['currency-rates'] };
       assert.equal(access.canAccessCurrencyDashboard(session), true);
       assert.equal(getReportEntries(session).some(({ key }) => key === 'currency-rates'), true);
       assert.equal(access.canManageCurrencyDashboard(session), canManageTopDashboard === true);
@@ -52,7 +52,7 @@ test('currency report is available to persisted admins, TOP and both manager rol
     assert.equal(access.canManageCurrencyDashboard({ role, sessionId: 'x', adminUserId: 6,
       canAccessTopDashboard: false, canManageTopDashboard: false }), true);
   }
-  assert.equal(parseDashboardAccess(['currency-rates']), null);
+  assert.deepEqual(parseDashboardAccess(['currency-rates']), ['currency-rates']);
   assert.equal(PURCHASER_DASHBOARD_REPORT_OPTIONS.some(({ key }) => key === 'currency-rates'), false);
 });
 
@@ -127,7 +127,7 @@ function harness(relative: string, session: AdminSession | null) {
 
 test('actual API and HTML route reject unauthorized roles before data reads or source requests', async () => {
   for (const session of [null, { role: 'admin' }, { role: 'top', sessionId: 'x' },
-    { role: 'purchaser', adminUserId: 1, sessionId: 'x', dashboardAccess: ['currency-rates'] },
+    { role: 'purchaser', adminUserId: 1, sessionId: 'x', dashboardAccess: [] },
     { role: 'manager', adminUserId: 1, sessionId: 'x', canManageTopDashboard: true },
     { role: 'support_manager', managerId: 0, adminUserId: 1, sessionId: 'x', canManageTopDashboard: true },
     { role: 'manager', managerId: 1, canManageTopDashboard: true },
@@ -152,7 +152,7 @@ test('TOP and both manager roles can read all report data but saving and rollbac
     for (const canManageTopDashboard of [undefined, false, true]) {
       const session: AdminSession = { role, sessionId: 'x',
         ...(role === 'top' ? { adminUserId: 6 } : { managerId: 9 }),
-        canAccessTopDashboard: false, canManageTopDashboard };
+        canAccessTopDashboard: false, canManageTopDashboard, dashboardAccess:['currency-rates'] };
       for (const [method, expectedCall] of [
         ['snapshot:get', 'readCurrencySnapshot'], ['baselines:get', 'getCurrencyBaselines'], ['source', 'source:cbr-daily'],
       ]) {
@@ -202,7 +202,7 @@ test('manager writes and audit events use the manager identity, not an administr
 test('currency write permission is checked again when TOP or manager management is revoked after opening', async () => {
   for (const role of ['top', 'manager', 'support_manager'] as const) {
     const session: AdminSession = { role, sessionId: 'x',
-      ...(role === 'top' ? { adminUserId: 6 } : { managerId: 9 }), canManageTopDashboard: true };
+      ...(role === 'top' ? { adminUserId: 6 } : { managerId: 9 }), canManageTopDashboard: true, dashboardAccess:['currency-rates'] };
     const h = harness('route.ts', session);
     const request = () => new Request('https://example.test/api/admin/currency-dashboard', {
       method: 'POST', headers: { Origin: 'https://example.test', 'Content-Type': 'application/json' },

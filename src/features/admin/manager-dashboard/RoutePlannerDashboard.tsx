@@ -18,7 +18,7 @@ function reportIdentity(overview: RoutePlannerOverview) {
   return JSON.stringify([shared?.activeHtmlVersionId, shared?.snapshot?.id, shared?.jsonSnapshot?.id]);
 }
 
-export function RoutePlannerDashboard({ mode }: { mode: 'manage' | 'view' }) {
+export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode: 'manage' | 'view'; canAssignAccess?: boolean }) {
   const router = useRouter();
   const [overview, setOverview] = useState<RoutePlannerOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -121,7 +121,7 @@ export function RoutePlannerDashboard({ mode }: { mode: 'manage' | 'view' }) {
     {message ? <p className={styles.notice} role="status">{message}</p> : null}
     {updateAvailable ? <div className={styles.notice} role="status"><p>Опубликовано обновление компоновщика или его данных.</p><button className={styles.secondary} disabled={loading || busy} type="button" onClick={() => void refresh()}>Открыть обновление</button></div> : null}
     {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем компоновщик…</p></section> : null}
-    {overview?.mode === 'manage' ? <ManagerDashboardManagement section="shared" overview={overview} busy={busy || loading} mutate={mutate} /> : null}
+    {overview?.mode === 'manage' ? <ManagerDashboardManagement section="shared" overview={overview} canAssignAccess={canAssignAccess} busy={busy || loading} mutate={mutate} onReload={refresh} /> : null}
     {overview?.mode === 'view' ? <RoutePlannerViewer shared={overview.supportShared} loading={loading} onReload={refresh} /> : null}
   </main>;
 }

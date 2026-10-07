@@ -946,7 +946,7 @@ document.getElementById('cuForm').addEventListener('submit',async e=>{e.preventD
 /* ---------- Сводка за месяц ---------- */
 let selectedMonth=iso(new Date()).slice(0,7);
 const summaryMonth=document.getElementById('summaryMonth');summaryMonth.value=selectedMonth;summaryMonth.max=selectedMonth;
-summaryMonth.addEventListener('change',()=>{if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(summaryMonth.value)||summaryMonth.value<'2026-01'||summaryMonth.value>iso(new Date()).slice(0,7)){summaryMonth.value=selectedMonth;return;}selectedMonth=summaryMonth.value;renderSum();refreshMonthHistory();});
+summaryMonth.addEventListener('change',event=>{if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(summaryMonth.value)||summaryMonth.value<'2026-01'||summaryMonth.value>iso(new Date()).slice(0,7)){summaryMonth.value=selectedMonth;return;}selectedMonth=summaryMonth.value;renderSum();if(event.isTrusted)window.__ktsDashboardUsage?.record('calculation_completed');refreshMonthHistory();});
 function sumRows(){
   const published=Object.keys(state.hist).sort(),mh=store.get('kts_moexHist')||{},cu=cuSeries(),cd=cuData();
   const days=[...new Set([...published,...Object.keys(mh),...cu.map(r=>r.date),...Object.keys(state.baselines||{})])].filter(k=>k.startsWith(selectedMonth+'-')).sort();
@@ -965,7 +965,7 @@ function renderSum(){
     return `<td>${nf(v,k.startsWith("CU")?0:(k==="BR"?2:4))}</td>`;}).join("")}</tr>`).join("");
   document.getElementById("sumCnt").textContent=`${selectedMonth} · ${rows.length} дат с данными. Jintian: премия зафиксированной базы; без базы — расчёт с текущей премией.${state.monthError?' · '+state.monthError:''}`;
 }
-function dl(name,blob){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
+function dl(name,blob){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();window.__ktsDashboardUsage?.record('export_started');setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
 document.getElementById("btnCsv").onclick=()=>{
   const rows=sumRows().reverse();const lines=[SUM_COLS.map(c=>c[1]).join(";")].concat(rows.map(r=>SUM_COLS.map(([k])=>{const v=r[k];return k==="date"?ruDate(v):(v==null?"":String(v).replace(".",","));}).join(";")));
   dl(`курсы_сводка_${selectedMonth}.csv`,new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}));};
@@ -1110,12 +1110,14 @@ function updateHistoryStatus(){
 }
 function installEnvelope(envelope,preserveDrafts=[]){
   if(!envelope||!Number.isSafeInteger(envelope.revision)||envelope.revision<0)throw new Error('Сервер вернул некорректную версию данных.');
+  const usageDataChanged=!sharedLoaded||envelope.revision!==sharedEnvelope.revision;
   sharedEnvelope=envelope;sharedLoaded=true;dirtyForms.clear();preserveDrafts.forEach(id=>dirtyForms.add(id));
   const data=manualSnapshotData(envelope.current?.data||{});
   MANUAL_KEYS.forEach(k=>{if(data[k]!==undefined)store.set(k,data[k]);else memoryStore.delete(k);});
   state.cps=store.get('kts_cpsRates')||CPS_DEFAULT;
   renderAn();renderAll();renderLog();updateHistoryStatus();
   document.getElementById('snapHint').classList.remove('show');
+  if(usageDataChanged&&envelope.current)globalThis.__ktsDashboardUsage?.record('data_loaded');
 }
 function showSaveError(error){
   const conflict=error?.code==='CURRENCY_CONFLICT'||error?.status===409;

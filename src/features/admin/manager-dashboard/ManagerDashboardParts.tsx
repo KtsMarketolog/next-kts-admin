@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { useTopDashboardDownloadBridge } from '@/features/admin/top-dashboard/useTopDashboardDownloadBridge';
+import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
 import type { PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
 import type { ManagerDashboardImport, ManagerDashboardSnapshot, ManagerDashboardSnapshotStatus } from './types';
@@ -92,6 +93,7 @@ export function DashboardFrame({
 }) {
   const [downloadStatus, setDownloadStatus] = useState('');
   const frameRef = useTopDashboardDownloadBridge(setDownloadStatus);
+  useDashboardUsage({ dashboardKey: `manager:${audience}`, iframeRef: frameRef, preview, versionId });
   const params = new URLSearchParams({ version: String(versionId), revision: String(revision), audience });
   if (snapshotId) params.set('snapshot', String(snapshotId));
   if (preview) params.set('preview', '1');
@@ -123,6 +125,7 @@ export function SharedDashboardFrame({
 }) {
   const [downloadStatus, setDownloadStatus] = useState('');
   const frameRef = useTopDashboardDownloadBridge(setDownloadStatus);
+  useDashboardUsage({ dashboardKey: 'route-planner', iframeRef: frameRef, preview, versionId });
   const params = new URLSearchParams({ version: String(versionId), revision: String(revision) });
   if (snapshotId && !preview) params.set('snapshot', String(snapshotId));
   if (preview) params.set('preview', '1');

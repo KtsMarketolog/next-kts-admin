@@ -22,8 +22,7 @@ test('dashboard grants accept only canonical, exact report keys without wildcard
   assert.deepEqual(access.parseDashboardAccess(['top:7', 'route-planner', 'top:7']), ['route-planner', 'top:7']);
   assert.deepEqual(access.parseDashboardAccess([]), []);
   for (const value of [null, undefined, '*', {}, [7], ['*'], ['top:*'], ['top:0'], ['top:-1'], ['top:01'],
-    ['top:1.5'], ['top:1e2'], ['top:9007199254740992'], ['top:7 '], ['route-planner/'], ['manager:all'],
-    ['manager:development'], ['manager:support'], ['top:7', 'manager:support']]) {
+    ['top:1.5'], ['top:1e2'], ['top:9007199254740992'], ['top:7 '], ['route-planner/'], ['manager:all']]) {
     assert.equal(access.parseDashboardAccess(value), null, JSON.stringify(value));
   }
 });
@@ -41,8 +40,8 @@ test('purchaser helpers require a persisted identity and exact grants, never man
     assert.deepEqual(access.getReportEntries(purchaser([key])), []);
   }
   assert.deepEqual(access.PURCHASER_DASHBOARD_REPORT_OPTIONS.map(({ key }) => key), ['route-planner']);
-  assert.deepEqual(access.getReportEntries({ role: 'manager', managerId: 1, sessionId: 'manager' }).map(({ key }) => key), ['manager:development', 'currency-rates']);
-  assert.deepEqual(access.getReportEntries({ role: 'support_manager', managerId: 1, sessionId: 'support' }).map(({ key }) => key), ['manager:support', 'route-planner', 'currency-rates']);
+  assert.deepEqual(access.getReportEntries({ role: 'manager', managerId: 1, sessionId: 'manager',dashboardAccess:['manager:development','currency-rates'] }).map(({ key }) => key), ['manager:development', 'currency-rates']);
+  assert.deepEqual(access.getReportEntries({ role: 'support_manager', managerId: 1, sessionId: 'support',dashboardAccess:['manager:support','route-planner','currency-rates'] }).map(({ key }) => key), ['manager:support', 'route-planner', 'currency-rates']);
   assert.deepEqual(access.getReportEntries(purchaser()), []);
   assert.equal(isTopDashboardManagementSession({ ...session, canManageTopDashboard: true }), false);
   for (const invalid of [{ ...session, sessionId: undefined }, { ...session, adminUserId: undefined },
@@ -55,7 +54,8 @@ test('purchaser helpers require a persisted identity and exact grants, never man
   }
   assert.equal(access.canAccessRoutePlanner({ role: 'top', adminUserId: 1, sessionId: 'top' }), false);
   assert.equal(access.canAccessRoutePlanner({ role: 'manager', managerId: 1, sessionId: 'manager' }), false);
-  assert.equal(access.canAccessRoutePlanner({ role: 'support_manager', managerId: 1, sessionId: 'support' }), true);
+  assert.equal(access.canAccessRoutePlanner({ role: 'support_manager', managerId: 1, sessionId: 'support',dashboardAccess:['route-planner'] }), true);
+  assert.equal(access.canAccessRoutePlanner({ role: 'support_manager', managerId: 1, sessionId: 'support',dashboardAccess:[] }), false);
 });
 
 /** Executes the actual route exports with inert DB/storage; auth predicates and frame checks are real. */

@@ -104,23 +104,38 @@ function mapSnapshot(row: SnapshotRow, state: StateRow): SupportSharedDashboardS
     expired: row.expires < personalDashboardToday() };
 }
 
-export type SharedDashboardViewer = number | { purchaserId: number };
+export type SharedDashboardViewer = number | { purchaserId: number } | { adminUserId: number } | { adminSessionId: string };
 
-/** The principal comes only from a persisted session. Grants are rechecked in the read transaction. */
+/** The principal comes only from a persisted session. Viewing authority is rechecked in the read transaction. */
 async function authorizeSupportViewer(client: PoolClient, viewer: SharedDashboardViewer) {
   if (typeof viewer === 'object' && viewer !== null) {
-    positiveId(viewer.purchaserId);
-    const grant = await client.query(`select au.id from admin_users au
-      join admin_user_dashboard_access a on a.user_id=au.id and a.key='route-planner'
-      where au.id=$1 and au.role='purchaser' and au.is_active=true for share of au,a`, [viewer.purchaserId]);
+    // The environment administrator has no admin_users row. Its persisted,
+    // unrevoked session is the authority, not a caller-provided management flag.
+    if ('adminSessionId' in viewer) {
+      if (!viewer.adminSessionId || viewer.adminSessionId.length > 128) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');
+      const session = await client.query(`select s.id from admin_sessions s where s.id::text=$1
+        and s.role='admin' and s.admin_user_id is null and s.manager_id is null
+        and s.revoked_at is null and s.expires_at>now() for share of s`, [viewer.adminSessionId]);
+      if (!session.rows.length) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');
+      return;
+    }
+    const userId = 'adminUserId' in viewer ? viewer.adminUserId : viewer.purchaserId;
+    positiveId(userId);
+    const account = await client.query<{role: string; is_active: boolean}>(
+      `select au.role,au.is_active from admin_users au where au.id=$1 for share of au`, [userId]);
+    if (!account.rows[0]?.is_active) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');
+    if (['admin', 'admintop'].includes(account.rows[0].role)) return;
+    const grant = await client.query(`select a.key from dashboard_view_grants a
+      where a.admin_user_id=$1 and a.key='route-planner' for share of a`, [userId]);
     if (!grant.rows.length) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');
     return;
   }
   const managerId = viewer;
   positiveId(managerId);
   const result = await client.query<{ role: string | null; is_active: boolean }>(
-    `select role,is_active from wholesale_managers where id=$1 for share`, [managerId]);
-  if (!result.rows[0]?.is_active || result.rows[0].role !== 'support_manager') {
+    `select coalesce(nullif(m.role,''),'manager') as role,m.is_active from wholesale_managers m join dashboard_view_grants a on a.manager_id=m.id and a.key='route-planner'
+     where m.id=$1 for share of m,a`, [managerId]);
+  if (!result.rows[0]?.is_active || !['manager','support_manager'].includes(result.rows[0].role ?? '')) {
     throw new PersonalDashboardError('NOT_FOUND', 'Общий дашборд сопровождения недоступен');
   }
 }
@@ -158,7 +173,7 @@ export async function getSupportSharedDashboardOverview(viewer?: SharedDashboard
   });
 }
 
-/** preview=true is administrator-only. Published reads always recheck the support account inside this transaction. */
+/** preview=true is administrator-only. Published reads always recheck the persisted viewer inside this transaction. */
 export async function getSupportSharedDashboardHtml(id: number | undefined, preview: boolean, viewer?: SharedDashboardViewer) {
   if (id !== undefined) positiveId(id);
   if (!preview && viewer === undefined) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');

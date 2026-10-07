@@ -8,6 +8,8 @@ import ts from 'typescript';
 import * as access from '../src/shared/lib/dashboardAccess';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import * as security from '../src/shared/lib/managerDashboardSecurity';
+import * as dates from '../src/shared/lib/dashboardDates';
+import { DashboardDataDates } from '../src/features/admin/top-dashboard/DashboardDataDates';
 
 function compile<T>(file: string, modules: Record<string, unknown>, globals: Record<string, unknown> = {}) {
   const code = ts.transpileModule(readFileSync(new URL(file, import.meta.url), 'utf8'), {
@@ -45,16 +47,19 @@ test('reports catalog renders authorized static sections and does not fetch TOP 
         },
         'next/link': {default: Link}, 'next/navigation': {useRouter: () => ({})},
         '@/app/admin/admin.module.scss': {default: {}},
+        './DashboardDataDates': {DashboardDataDates}, '@/shared/lib/dashboardDates': dates,
       }, {fetch: async (url: string) => {requests.push(url); return Response.json({blocks: []}); }},
     );
-    const entries = access.getReportEntries({role: 'support_manager', managerId: 4, sessionId: 'synthetic'});
+    const entries = access.getReportEntries({role: 'support_manager', managerId: 4, sessionId: 'synthetic',
+      dashboardAccess: ['manager:support', 'route-planner', 'currency-rates']});
     const tree = elements(AdminTopDashboardCatalog({canManage: false, canReadTopBlocks, reportEntries: entries, showStatus() {}}));
     assert.deepEqual(tree.filter((node) => node.type === Link).map((node) => node.props.href), [
+      '/admin/top/paired',
       '/admin/manager-dashboard?audience=support', '/admin/top/route-planner', '/admin/top/currency-rates',
     ]);
     effects.forEach((effect) => effect());
     await Promise.resolve();
-    assert.deepEqual(requests, canReadTopBlocks ? ['/api/admin/top-dashboard/blocks'] : []);
+    assert.deepEqual(requests, [...(canReadTopBlocks ? ['/api/admin/top-dashboard/blocks'] : []), '/api/admin/dashboard-metadata']);
     assert.ok(!tree.some((node) => node.type === 'form'), 'read-only catalog has no creation forms');
   }
 });
@@ -63,7 +68,8 @@ test('route planner page grants only verified shared access and never fabricates
   for (const [session, expectedMode] of [
     [{role: 'admin', adminUserId: 1, sessionId: 'synthetic'}, 'manage'],
     [{role: 'admintop', adminUserId: 2, sessionId: 'synthetic'}, 'manage'],
-    [{role: 'support_manager', managerId: 3, sessionId: 'synthetic'}, 'view'],
+    [{role: 'support_manager', managerId: 3, sessionId: 'synthetic', dashboardAccess: ['route-planner']}, 'view'],
+    [{role: 'support_manager', managerId: 3, sessionId: 'synthetic', dashboardAccess: []}, null],
     [{role: 'purchaser', adminUserId: 4, sessionId: 'synthetic', dashboardAccess: ['route-planner']}, 'view'],
     [{role: 'purchaser', adminUserId: 4, sessionId: 'synthetic', dashboardAccess: []}, null],
     [{role: 'manager', managerId: 5, sessionId: 'synthetic'}, null],
@@ -81,7 +87,7 @@ test('route planner page grants only verified shared access and never fabricates
     );
     if (expectedMode) {
       const rendered = await Page();
-      assert.deepEqual(rendered.props, {section: 'shared', mode: expectedMode});
+      assert.deepEqual(rendered.props, {section: 'shared', mode: expectedMode, canAssignAccess: session?.role === 'admin'});
     } else await assert.rejects(Page(), /redirect:\/admin\/top/);
   }
 });

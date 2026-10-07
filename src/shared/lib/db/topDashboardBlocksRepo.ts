@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 
 import { detectTopDashboardDataContract } from '../topDashboardContentSecurity';
+import { normalizeDashboardDataDate } from '../dashboardDates';
 import { TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
 import { enqueueDashboardFilesForDeletion } from './dashboardFileCleanupRepo';
@@ -44,6 +45,9 @@ export type TopDashboardBlockSummary = TopDashboardBlock & {
   activeOriginalName: string | null;
   versionCount: number;
   updatedAt: string;
+  dataUploadedAt: string | null;
+  dataAsOf: string | null;
+  htmlPublishedAt: string | null;
 };
 
 export type TopDashboardPublishedBlockSummary = {
@@ -51,6 +55,9 @@ export type TopDashboardPublishedBlockSummary = {
   title: string;
   activeVersionId: number;
   updatedAt: string;
+  dataUploadedAt: string | null;
+  dataAsOf: string | null;
+  htmlPublishedAt: string | null;
 };
 
 export type TopDashboardPublishedBlockOverview = {
@@ -61,6 +68,9 @@ export type TopDashboardPublishedBlockOverview = {
   };
   activeVersionId: number;
   updatedAt: string;
+  dataUploadedAt: string | null;
+  dataAsOf: string | null;
+  htmlPublishedAt: string | null;
 };
 
 export type TopDashboardBlockOverview = TopDashboardOverview & {
@@ -151,6 +161,9 @@ type TopDashboardBlockSummaryRow = TopDashboardBlockRow & {
   active_original_name: string | null;
   version_count: string;
   updated_at: string;
+  data_uploaded_at: string | null;
+  data_as_of: string | null;
+  html_published_at: string | null;
 };
 
 type TopDashboardPublishedBlockRow = {
@@ -159,6 +172,9 @@ type TopDashboardPublishedBlockRow = {
   created_at: string;
   active_version_id: string;
   updated_at: string;
+  data_uploaded_at: string | null;
+  data_as_of: string | null;
+  html_published_at: string | null;
 };
 
 type TopDashboardStateRow = {
@@ -189,6 +205,7 @@ type TopDashboardBlockDataVersionRow = {
   bound_html_version_id: string | null;
   uploaded_by_name: string | null;
   created_at: string;
+  data_as_of: string | null;
 };
 
 function numericId(value: string | null | undefined) {
@@ -210,6 +227,9 @@ function mapBlockSummary(row: TopDashboardBlockSummaryRow): TopDashboardBlockSum
     activeOriginalName: row.active_original_name,
     versionCount: Number(row.version_count),
     updatedAt: row.updated_at,
+    dataUploadedAt: row.data_uploaded_at ?? null,
+    dataAsOf: row.data_as_of ?? null,
+    htmlPublishedAt: row.html_published_at ?? null,
   };
 }
 
@@ -245,6 +265,7 @@ function mapDataVersion(
     originalName: row.original_name,
     fileSize: Number(row.file_size),
     uncompressedSize: Number(row.uncompressed_size),
+    dataAsOf: row.data_as_of ?? null,
     sha256: row.sha256,
     snapshotFormat: row.snapshot_format,
     dashboardProfile: row.dashboard_profile,
@@ -708,12 +729,18 @@ export async function getTopDashboardBlocks(): Promise<TopDashboardBlockSummary[
         from top_dashboard_block_versions versions
         where versions.block_id = blocks.id
       ) as version_count,
-      greatest(blocks.updated_at, coalesce(native_state.updated_at, blocks.updated_at))::text as updated_at
+      greatest(native_state.updated_at, native_data_state.updated_at)::text as updated_at,
+      native_active_data.created_at::text as data_uploaded_at,
+      native_active_data.data_as_of,
+      native_active.first_published_at::text as html_published_at
     from top_dashboard_blocks blocks
     left join top_dashboard_block_state native_state
       on native_state.block_id = blocks.id
     left join top_dashboard_block_versions native_active
       on native_active.block_id = blocks.id and native_active.id = native_state.active_version_id
+    left join top_dashboard_block_data_state native_data_state on native_data_state.block_id = blocks.id
+    left join top_dashboard_block_data_versions native_active_data
+      on native_active_data.block_id = blocks.id and native_active_data.id = native_data_state.active_version_id
     order by blocks.created_at asc, blocks.id asc
   `);
 
@@ -729,7 +756,10 @@ export async function getPublishedTopDashboardBlocks(): Promise<TopDashboardPubl
       blocks.title,
       blocks.created_at::text,
       native_state.active_version_id::text as active_version_id,
-      greatest(blocks.updated_at, native_state.updated_at, native_data_state.updated_at)::text as updated_at
+      greatest(native_state.updated_at, native_data_state.updated_at)::text as updated_at,
+      native_active_data.created_at::text as data_uploaded_at,
+      native_active_data.data_as_of,
+      native_active.first_published_at::text as html_published_at
     from top_dashboard_blocks blocks
     join top_dashboard_block_state native_state
       on native_state.block_id = blocks.id
@@ -762,6 +792,9 @@ export async function getPublishedTopDashboardBlocks(): Promise<TopDashboardPubl
     title: row.title,
     activeVersionId: Number(row.active_version_id),
     updatedAt: row.updated_at,
+    dataUploadedAt: row.data_uploaded_at ?? null,
+    dataAsOf: row.data_as_of ?? null,
+    htmlPublishedAt: row.html_published_at ?? null,
   }));
 }
 
@@ -776,7 +809,10 @@ export async function getPublishedTopDashboardBlockOverview(
        blocks.title,
        blocks.created_at::text,
        native_state.active_version_id::text as active_version_id,
-       greatest(blocks.updated_at, native_state.updated_at, native_data_state.updated_at)::text as updated_at
+       greatest(native_state.updated_at, native_data_state.updated_at)::text as updated_at,
+       native_active_data.created_at::text as data_uploaded_at,
+       native_active_data.data_as_of,
+       native_active.first_published_at::text as html_published_at
      from top_dashboard_blocks blocks
      join top_dashboard_block_state native_state
        on native_state.block_id = blocks.id
@@ -816,6 +852,9 @@ export async function getPublishedTopDashboardBlockOverview(
     },
     activeVersionId: Number(row.active_version_id),
     updatedAt: row.updated_at,
+    dataUploadedAt: row.data_uploaded_at ?? null,
+    dataAsOf: row.data_as_of ?? null,
+    htmlPublishedAt: row.html_published_at ?? null,
   };
 }
 
@@ -859,6 +898,9 @@ export async function createTopDashboardBlock(input: {
       activeOriginalName: null,
       versionCount: 0,
       updatedAt: row.created_at,
+      dataUploadedAt: null,
+      dataAsOf: null,
+      htmlPublishedAt: null,
     };
   });
 }
@@ -1033,6 +1075,7 @@ export async function getTopDashboardBlockOverview(
          versions.original_name,
          versions.file_size::text,
          versions.uncompressed_size::text,
+         versions.data_as_of,
          versions.sha256,
          versions.snapshot_format,
          versions.dashboard_profile,
@@ -1112,6 +1155,7 @@ export async function createAndActivateTopDashboardBlockDataVersion(
 
     const duplicate = await client.query<TopDashboardBlockDataVersionRow & { storage_path: string | null }>(
       `select id::text, original_name, file_size::text, uncompressed_size::text, sha256,
+         data_as_of,
          snapshot_format, dashboard_profile, bound_html_version_id::text, storage_path,
          coalesce(
            (select name from admin_users where id = uploaded_by_admin_user_id),
@@ -1154,14 +1198,16 @@ export async function createAndActivateTopDashboardBlockDataVersion(
          bound_html_version_id,
          uploaded_by_admin_user_id,
          uploaded_by_manager_id,
-         storage_path
+         storage_path,
+         data_as_of
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        returning
          id::text,
          original_name,
          file_size::text,
          uncompressed_size::text,
+         data_as_of,
          sha256,
          snapshot_format,
          dashboard_profile,
@@ -1184,6 +1230,7 @@ export async function createAndActivateTopDashboardBlockDataVersion(
         input.uploadedByAdminUserId,
         input.uploadedByManagerId,
         input.storagePath,
+        normalizeDashboardDataDate(input.dataAsOf),
       ],
     );
     const versionRow = versionResult.rows[0];

@@ -95,7 +95,7 @@ export type ManagerDashboardOverview = {
   snapshot: ManagerDashboardSnapshot | null;
   snapshotStatus?: ManagerDashboardSnapshotStatus;
   history: ManagerDashboardSnapshot[];
-  htmlVersion: Pick<ManagerDashboardHtmlVersion, 'id' | 'originalName' | 'audience'> | null;
+  htmlVersion: Pick<ManagerDashboardHtmlVersion, 'id' | 'originalName' | 'audience' | 'firstPublishedAt'> | null;
   email: string;
   expectedIssuedAfter?: string | null;
   expectedBy?: string | null;

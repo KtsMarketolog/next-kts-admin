@@ -19,8 +19,8 @@ export async function GET(request: Request) {
     const snapshotId = parsePersonalDashboardId(query?.get('snapshot') ?? null);
     if (!query || !versionId || (query.has('snapshot') && !snapshotId)) return personalJson({error: 'Некорректная версия'}, 400);
     const preview = query.get('preview') === '1';
-    if ((preview && access.mode !== 'manage') || (!preview && access.mode !== 'view') || (preview && snapshotId)) return personalJson({error: 'Нет доступа'}, 403);
-    const version = await getSupportSharedDashboardHtml(versionId, preview, access.viewer);
+    if ((preview && access.mode !== 'manage') || (preview && snapshotId)) return personalJson({error: 'Нет доступа'}, 403);
+    const version = await getSupportSharedDashboardHtml(versionId, preview, preview ? undefined : access.viewer);
     if (!version) return personalJson({error: 'Версия HTML недоступна'}, 404);
     if (version.format === 'route-planner-v1') {
       let jsonSnapshotId: number | undefined;

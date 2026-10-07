@@ -47,7 +47,7 @@ function canRoleAccessTopDashboard(
     || role === 'admintop'
     || role === 'top'
     || role === 'purchaser'
-    || (isManagerRole(role) && explicitPermission === true);
+    || explicitPermission === true;
 }
 
 function canRoleManageTopDashboard(
@@ -77,7 +77,7 @@ export default function AdminPanel({
   const [sessionRole, setSessionRole] = useState<AdminSession['role'] | null>(initialSession?.role ?? null);
   const [reportSession, setReportSession] = useState<AdminSession | null>(initialSession);
   const [canAccessTopDashboard, setCanAccessTopDashboard] = useState(
-    canRoleAccessTopDashboard(initialSession?.role, initialSession?.canAccessTopDashboard),
+    canRoleAccessTopDashboard(initialSession?.role, initialSession?.dashboardAccess?.some((key)=>key.startsWith('top:')) || initialSession?.canManageTopDashboard),
   );
   const [canManageTopDashboard, setCanManageTopDashboard] = useState(
     canRoleManageTopDashboard(initialSession?.role, initialSession?.canManageTopDashboard),
@@ -202,7 +202,7 @@ export default function AdminPanel({
         setSessionRole(nextRole);
         setReportSession(nextRole ? {...session, role: nextRole} : null);
         setCanAccessTopDashboard(
-          canRoleAccessTopDashboard(nextRole, session.canAccessTopDashboard),
+          canRoleAccessTopDashboard(nextRole, session.dashboardAccess?.some((key)=>key.startsWith('top:')) || session.canManageTopDashboard),
         );
         setCanManageTopDashboard(
           canRoleManageTopDashboard(nextRole, session.canManageTopDashboard),
@@ -273,7 +273,7 @@ export default function AdminPanel({
           }
           const nextCanAccessTopDashboard = canRoleAccessTopDashboard(
             nextRole,
-            data.canAccessTopDashboard,
+            Array.isArray(data.dashboardAccess) && data.dashboardAccess.some((key:unknown)=>typeof key==='string' && key.startsWith('top:')) || data.canManageTopDashboard,
           );
           setSessionRole(nextRole);
           const nextReportSession = {...data, role: nextRole};
@@ -529,6 +529,7 @@ export default function AdminPanel({
             <AdminTopDashboardSection
               key={topDashboardBlockId}
               blockId={topDashboardBlockId}
+              canAssignAccess={sessionRole === 'admin'}
               showStatus={showStatus}
             />
           ) : (
@@ -542,6 +543,7 @@ export default function AdminPanel({
           <AdminTopDashboardCatalog
             key={JSON.stringify([reportSession?.role, reportSession?.adminUserId, reportSession?.managerId, reportSession?.dashboardAccess, canAccessTopDashboard])}
             canManage={canManageTopDashboard}
+            canReviewUsage={sessionRole === 'admin'}
             canReadTopBlocks={canAccessTopDashboard}
             reportEntries={getReportEntries(reportSession)}
             showStatus={showStatus}

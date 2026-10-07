@@ -1,0 +1,11 @@
+.root { max-width: 1600px; margin: 32px auto; padding: 24px; background: #fff; border: 1px solid #dce0ee; border-radius: 16px; color: #272934;
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+  h1 { margin: 0 0 8px; font-size: 28px; }
+  button, select, a { color: #302261; }
+  button, select { border: 1px solid #d1cee3; border-radius: 8px; padding: 10px 12px; background: #fff; font: inherit; }
+  button { cursor: pointer; &:hover:not(:disabled) { background: #f1edff; } &:disabled { opacity: .5; cursor: default; } }
+  small { display: block; margin-top: 5px; color: #70748a; }
+}
+.notice { color: #687082; line-height: 1.55; font-size: 14px; }
+.filters { display: flex; gap: 16px; align-items: end; flex-wrap: wrap; margin: 20px 0; label { display: grid; gap: 8px; } }
+.table { overflow-x: auto; margin: 20px 0; table { width: 100%; border-collapse: collapse; text-align: left; } th { background: #f5f4fa; } td, th { padding: 12px; border-bottom: 1px solid #e7e8ee; vertical-align: top; } }

@@ -30,11 +30,11 @@ async function readResponse(response: Response) {
   return data;
 }
 
-export function ManagerDashboard(props: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null; section?: 'personal' | 'shared' }) {
-  return props.section === 'shared' ? <RoutePlannerDashboard mode={props.mode} /> : <PersonalManagerDashboard {...props} />;
+export function ManagerDashboard(props: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null; section?: 'personal' | 'shared'; canAssignAccess?: boolean }) {
+  return props.section === 'shared' ? <RoutePlannerDashboard mode={props.mode} canAssignAccess={props.canAssignAccess} /> : <PersonalManagerDashboard {...props} />;
 }
 
-function PersonalManagerDashboard({ mode, audience = null }: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null }) {
+function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = false }: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null; canAssignAccess?: boolean }) {
   const router = useRouter();
   const [overview, setOverview] = useState<ManagerDashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -170,7 +170,7 @@ function PersonalManagerDashboard({ mode, audience = null }: { mode: 'manage' | 
       </div> : null}
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}
       {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем дашборд…</p></section> : null}
-      {overview?.mode === 'manage' ? <ManagerDashboardManagement key={audience ?? 'all'} audience={audience} overview={overview} busy={busy || loading} mutate={mutate} onAccessDenied={() => {
+      {overview?.mode === 'manage' ? <ManagerDashboardManagement key={audience ?? 'all'} audience={audience} overview={overview} canAssignAccess={canAssignAccess} busy={busy || loading} mutate={mutate} onAccessDenied={() => {
         requestRevision.current += 1;
         setOverview(null);
         router.replace('/admin');

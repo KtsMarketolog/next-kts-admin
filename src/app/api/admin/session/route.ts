@@ -16,7 +16,7 @@ export async function GET() {
       adminUserId: session.adminUserId,
       managerId: session.managerId,
       sessionId: session.sessionId,
-      dashboardAccess: [],
+      dashboardAccess: session.dashboardAccess ?? [],
       canAccessTopDashboard: isTopDashboardSession(session),
       canManageTopDashboard: isTopDashboardManagementSession(session),
       manager: manager
@@ -38,7 +38,7 @@ export async function GET() {
     sessionId: session?.sessionId,
     canAccessTopDashboard: isTopDashboardSession(session),
     canManageTopDashboard: isTopDashboardManagementSession(session),
-    dashboardAccess: session?.role === 'purchaser' ? session.dashboardAccess ?? [] : [],
+    dashboardAccess: session?.dashboardAccess ?? [],
     manager: null,
   }, { headers: { 'Cache-Control': 'private, no-store' } });
 }

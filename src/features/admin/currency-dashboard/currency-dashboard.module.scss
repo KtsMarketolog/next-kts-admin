@@ -22,6 +22,10 @@
 }
 .frame { display: block; width: 100%; height: calc(100vh - 200px); min-height: 740px; border: 1px solid #dde0eb; border-radius: 10px; background: white; }
 .error { background: #fff1ed; color: #9c291b; padding: 12px; border-radius: 8px; }
+.embedded { min-width: 0; .frame { min-height: 650px; height: calc(100vh - 270px); } }
+.sourceDates { background: #fff; border: 1px solid #dde0eb; padding: 12px; border-radius: 8px; margin: 0 0 16px;
+  summary { cursor: pointer; font-size: 14px; } p, li { font-size: 13px; color: #62677b; }
+}
 @media (max-width: 700px) {
   .root { padding: 120px 8px 16px; }
   .toolbar { flex-direction: column; align-items: flex-start; h1 { font-size: 22px; } }

@@ -22,5 +22,5 @@ export default async function ManagerDashboardPage({ searchParams }: {
     redirect(mode === 'view' && audience ? `/admin/manager-dashboard?audience=${audience}` : '/admin/manager-dashboard');
   }
 
-  return <ManagerDashboard mode={mode} audience={audience} />;
+  return <ManagerDashboard mode={mode} audience={audience} canAssignAccess={session?.role === 'admin'} />;
 }

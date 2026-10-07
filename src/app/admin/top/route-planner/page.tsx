@@ -10,5 +10,5 @@ export const dynamic = 'force-dynamic';
 export default async function RoutePlannerPage() {
   const session = await getAdminSession();
   if (!canAccessRoutePlanner(session)) redirect('/admin/top');
-  return <ManagerDashboard section="shared" mode={personalDashboardMode(session) === 'manage' ? 'manage' : 'view'} />;
+  return <ManagerDashboard section="shared" mode={personalDashboardMode(session) === 'manage' ? 'manage' : 'view'} canAssignAccess={session?.role === 'admin'} />;
 }

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { PersonalDashboardAudience } from './managerDashboardAudience';
+import { dashboardUsageRelayScript } from './dashboardUsageBridge';
 
 import { buildTopDashboardContentSecurityPolicy, buildTopDashboardFrameSecurityPolicy, getTopDashboardDataAdapterScript } from './topDashboardContentSecurity';
 import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_MAX_BYTES, TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH, TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE, TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE } from './topDashboardDownloadBridge';
@@ -133,7 +134,14 @@ export function getPersonalDashboardAdapterScript(scope: DashboardScope = 'perso
   // No plaintext/password is posted to the outer frame or persisted anywhere.
   window.parent.postMessage({marker, type:'ready'}, '*');
   const originalOpen = tryOpen;
-  tryOpen = async function() { try { await originalOpen(); } finally { if (unlocked) { const input = document.getElementById('pass'); if (input) input.value = ''; } } };
+  tryOpen = async function() {
+    unlocked = false;
+    const previousData = typeof D === 'undefined' ? null : D;
+    try {
+      await originalOpen();
+      if (unlocked && typeof D !== 'undefined' && D && D !== previousData && window.__ktsDashboardUsage) window.__ktsDashboardUsage.record('data_loaded');
+    } finally { if (unlocked) { const input = document.getElementById('pass'); if (input) input.value = ''; } }
+  };
   const go = document.getElementById('go');
   if (go) go.disabled = true;
 })();`;
@@ -181,6 +189,7 @@ function buildDashboardFrame(input: DashboardFrameInput, scope: DashboardScope) 
   const script = `(() => {
     'use strict';
     const frame = document.getElementById('personal');
+    ${dashboardUsageRelayScript('frame')}
     const status = document.getElementById('status');
     const preview = ${input.preview};
     const emptyState = ${JSON.stringify(input.emptyState ?? null)};

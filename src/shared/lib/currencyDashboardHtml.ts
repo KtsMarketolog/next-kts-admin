@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { dashboardUsageAdapterScript } from './dashboardUsageBridge';
 
 /** Reviewed application asset, never administrator-supplied executable HTML. */
 export function renderCurrencyDashboardHtml(nonce: string, parentOrigin: string, canManage = false): string {
@@ -13,7 +14,7 @@ export function renderCurrencyDashboardHtml(nonce: string, parentOrigin: string,
   const marker = '__KTS_CURRENCY_BOOTSTRAP__';
   if (html.split(marker).length !== 2) throw new Error('Invalid currency dashboard asset');
   const configuration = JSON.stringify({ nonce, parentOrigin, canManage }).replace(/</g, '\\u003c');
-  return html.replace(marker, () => configuration);
+  return html.replace(marker, () => configuration).replace(/<\/script\s*>/i, (tag) => `\n${dashboardUsageAdapterScript()}\n${tag}`);
 }
 
 export function buildCurrencyDashboardContentSecurityPolicy(html: string): string {

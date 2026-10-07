@@ -6,6 +6,9 @@ import { useRouter } from 'next/navigation';
 import styles from '@/app/admin/admin.module.scss';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
+import { DashboardDataDates } from './DashboardDataDates';
+import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
+import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
 
 type TopDashboardPublishedOverview = {
   block: {
@@ -15,6 +18,9 @@ type TopDashboardPublishedOverview = {
   };
   activeVersionId: number;
   updatedAt: string;
+  dataUploadedAt?: string | null;
+  dataAsOf?: string | null;
+  htmlPublishedAt?: string | null;
 };
 
 type TopDashboardViewerProps = {
@@ -66,16 +72,6 @@ async function exitDocumentFullscreen() {
   throw new Error('Fullscreen API is unavailable');
 }
 
-function formatDate(value: string | null) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return new Intl.DateTimeFormat('ru-RU', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
-}
-
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   return typeof data.error === 'string' ? data.error : fallback;
@@ -93,6 +89,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
   const showStatusRef = useRef(showStatus);
   const requestIdRef = useRef(0);
   const apiBasePath = `/api/admin/top-dashboard/blocks/${blockId}`;
+  useDashboardUsage({ dashboardKey: `top:${blockId}`, iframeRef: previewFrameRef, versionId: overview?.activeVersionId ?? null });
 
   useEffect(() => {
     showStatusRef.current = showStatus;
@@ -211,8 +208,10 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
             <h2>{overview?.block.title ?? 'Загружаем отчёт…'}</h2>
             {overview ? (
               <div className={styles.topDashboardMeta}>
-                <span>Данные загружаются автоматически</span>
-                <span>Обновлён: {formatDate(overview.updatedAt)}</span>
+                <DashboardDataDates uploadedAt={overview.dataUploadedAt} dataAsOf={overview.dataAsOf} />
+                <details><summary>Техническая информация</summary>
+                  <span>HTML опубликован: {formatDashboardTimestamp(overview.htmlPublishedAt)}</span>
+                </details>
               </div>
             ) : null}
           </div>

@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { DashboardDataDates } from '@/features/admin/top-dashboard/DashboardDataDates';
+import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
 
 import { DashboardFrame, SharedDashboardFrame, formatDashboardDate, isSnapshotExpired, SnapshotStatus } from './ManagerDashboardParts';
 import type { ManagerDashboardOverview, ManagerDashboardSupportShared } from './types';
@@ -26,12 +28,12 @@ export function ManagerDashboardViewer({ overview, loading, onReload }: ViewerPr
   );
 }
 
-export function RoutePlannerViewer({ shared, loading, onReload }: Omit<SharedViewerProps, 'selection'>) {
+export function RoutePlannerViewer({ shared, loading, onReload, showHistory = true }: Omit<SharedViewerProps, 'selection'> & { showHistory?: boolean }) {
   const version = shared?.htmlVersions.find((item) => item.id === shared.activeHtmlVersionId);
   const selection = useReportSelection(JSON.stringify(['route-planner', shared?.activeHtmlVersionId, version?.format]));
   return <div className={styles.stack}>
     <SharedDashboardViewer key={selection.identity} shared={shared} loading={loading} onReload={onReload} selection={selection} />
-    <SharedDataHistory shared={shared} selection={selection} />
+    {showHistory ? <SharedDataHistory shared={shared} selection={selection} /> : null}
   </div>;
 }
 
@@ -83,7 +85,8 @@ function PersonalDashboardViewer({ overview, loading, onReload, selection }: Vie
           <>
             <dl className={styles.metadata}>
               <div><dt>Файл</dt><dd>{selected.originalName}</dd></div>
-              <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(selected.issued)}</dd></div>
+              <div><dt>Данные на</dt><dd>{formatDashboardDate(selected.issued)}</dd></div>
+              <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(selected.receivedAt)}</dd></div>
               <div><dt>Доступ до, МСК</dt><dd>{formatDashboardDate(selected.expires)}</dd></div>
             </dl>
             {!expired ? <p className={styles.notice}>Для открытия зашифрованного отчёта введите пароль от файла внутри дашборда. Это пароль снимка, который вы получили вместе с ним.</p> : null}
@@ -97,7 +100,9 @@ function PersonalDashboardViewer({ overview, loading, onReload, selection }: Vie
       ) : (
         <section className={styles.panel}>
           <div className={styles.sectionHeading}>
-            <h2>Личный дашборд</h2>
+            <div><h2>Личный дашборд</h2>
+              <details><summary>Техническая информация HTML</summary><p>HTML опубликован: {formatDashboardTimestamp(overview.htmlVersion.firstPublishedAt)}</p></details>
+            </div>
             <button className={styles.secondary} type="button" disabled={loading} onClick={async () => {
               if (await onReload('personal')) selection.reload();
             }}>{loading ? 'Обновляем…' : 'Перезагрузить отчёт'}</button>
@@ -139,11 +144,11 @@ function SharedJsonDashboardViewer({ shared, loading, onReload, versionId, selec
         }}>{loading ? 'Обновляем…' : 'Перезагрузить общий отчёт'}</button>
       </div>
       <span className={styles.badge} data-status={selected ? 'current' : 'missing'}>{selected ? 'Данные получены' : 'Данные ещё не поступили'}</span>
+      <div className={styles.metadata}><DashboardDataDates uploadedAt={selected?.receivedAt} dataAsOf={selected?.savedAt} /></div>
+      <details><summary>Техническая информация HTML</summary><p>HTML опубликован: {formatDashboardTimestamp(shared?.htmlVersions.find((version) => version.id === versionId)?.firstPublishedAt)}</p></details>
       {selected ? <>
         <dl className={styles.metadata}>
           <div><dt>Общий файл</dt><dd>{selected.originalName}</dd></div>
-          <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(selected.savedAt)}</dd></div>
-          <div><dt>Загружен, МСК</dt><dd>{formatDashboardDate(selected.receivedAt)}</dd></div>
         </dl>
         <p className={styles.notice}>Изменения и расчёты внутри компоновщика не меняют опубликованный файл для других менеджеров.</p>
         {isHistorical ? <p className={styles.warning}>Открыт архивный общий файл. Он не заменяет текущие данные.</p> : null}
@@ -168,6 +173,8 @@ function SharedKtspDashboardViewer({ shared, loading, onReload, selection }: Sha
         }}>{loading ? 'Обновляем…' : 'Перезагрузить общий отчёт'}</button>
       </div>
       <SnapshotStatus snapshot={selected ?? null} />
+      <div className={styles.metadata}><DashboardDataDates uploadedAt={selected?.receivedAt} dataAsOf={selected?.issued} /></div>
+      <details><summary>Техническая информация HTML</summary><p>HTML опубликован: {formatDashboardTimestamp(version?.firstPublishedAt)}</p></details>
       {selected ? <>
         <dl className={styles.metadata}>
           <div><dt>Общий файл</dt><dd>{selected.originalName}</dd></div>

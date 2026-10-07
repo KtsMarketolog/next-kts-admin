@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     const id = parsePersonalDashboardId(query?.get('snapshot') ?? null);
     if (!query || !version || (query.has('snapshot') && !id)) return personalJson({error: 'Некорректные параметры JSON'}, 400);
     const preview = query.get('preview') === '1';
-    if ((preview && access.mode !== 'manage') || (!preview && access.mode !== 'view')) return personalJson({error: 'Нет доступа к JSON'}, 403);
+    if (preview && access.mode !== 'manage') return personalJson({error: 'Нет доступа к JSON'}, 403);
     const snapshot = preview
       ? await getSupportSharedDashboardJsonPreviewSnapshot(version, id ?? undefined)
       : await getSupportSharedDashboardJsonSnapshot(access.viewer!, version, id ?? undefined);

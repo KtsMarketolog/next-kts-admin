@@ -10,7 +10,6 @@ export async function GET(request: Request) {
   try {
     const access = await requireSharedAccess();
     if (access.denied) return access.denied;
-    if (access.mode !== 'view') return personalJson({error: 'Данные общего отчёта доступны в кабинете сопровождения'}, 403);
     const query = sharedQuery(request, ['snapshot']);
     const id = parsePersonalDashboardId(query?.get('snapshot') ?? null);
     if (!query || (query.has('snapshot') && !id)) return personalJson({error: 'Некорректные параметры снимка'}, 400);

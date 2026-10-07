@@ -60,6 +60,9 @@ export async function PUT(request: Request, context: Context) {
   const role = normalizeRole(body.role);
   const dashboardAccess = body.dashboardAccess === undefined ? undefined : parseDashboardAccess(body.dashboardAccess);
   if (dashboardAccess === null) return badRequest('Некорректный список доступных дашбордов');
+  if (dashboardAccess !== undefined && (typeof body.dashboardAccessVersion !== 'string' || !/^[a-f0-9]{64}$/.test(body.dashboardAccessVersion))) {
+    return badRequest('Обновите список сотрудников перед изменением доступов',409);
+  }
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
   if (body.canManageTopDashboard !== undefined && typeof body.canManageTopDashboard !== 'boolean') {
     return badRequest('Некорректное значение доступа «Админ TOP»');
@@ -87,6 +90,7 @@ export async function PUT(request: Request, context: Context) {
         isActive,
         canManageTopDashboard: role === 'top' && body.canManageTopDashboard === true,
         dashboardAccess,
+        dashboardAccessVersion: body.dashboardAccessVersion,
         supportManagerId,
         passwordHash: password ? hashPassword(password) : undefined,
       },

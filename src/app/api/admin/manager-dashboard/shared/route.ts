@@ -9,7 +9,7 @@ export async function GET() {
   try {
     const access = await requireSharedAccess();
     if (access.denied) return access.denied;
-    const supportShared = await getSupportSharedDashboardOverview(access.viewer);
+    const supportShared = await getSupportSharedDashboardOverview(access.mode === 'manage' ? undefined : access.viewer);
     return personalJson({mode: access.mode, supportShared});
   } catch (error) { return personalApiError(error); }
 }

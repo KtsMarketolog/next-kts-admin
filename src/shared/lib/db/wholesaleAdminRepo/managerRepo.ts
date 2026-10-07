@@ -177,9 +177,17 @@ export async function createWholesaleManager(input: {
   const canManageTopDashboard = input.canManageTopDashboard === true;
   const canAccessTopDashboard = input.canAccessTopDashboard === true || canManageTopDashboard;
   const result = await query<{ id: string }>(
-    `insert into wholesale_managers (name, login, email, phone, role, can_access_top_dashboard, can_manage_top_dashboard, support_manager_id, password_hash, display_password, is_active, password_changed_at)
+    `with created as (insert into wholesale_managers (name, login, email, phone, role, can_access_top_dashboard, can_manage_top_dashboard, support_manager_id, password_hash, display_password, is_active, password_changed_at)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10::text, ''), $11, now())
-     returning id`,
+     returning id), grants as (
+       insert into dashboard_view_grants(manager_id,key)
+       select c.id,k.key from created c cross join (
+         select 'currency-rates' key union all
+         select case when $5='support_manager' then 'manager:support' else 'manager:development' end union all
+         select 'route-planner' where $5='support_manager' union all
+         select 'top:' || b.id from top_dashboard_blocks b where $6::boolean
+       ) k returning manager_id
+     ) select id from created`,
     [
       input.name,
       normalizeLogin(input.login),

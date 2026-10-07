@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { parseDashboardAccess } from '../dashboardAccess';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
+import { dashboardAccessVersion, getDashboardGrants, saveDashboardGrants, DASHBOARD_ACCESS_LOCK } from './dashboardAccessRepo';
 
 export type AdminUserRole = 'admin' | 'wholesale_admin' | 'top' | 'admintop' | 'purchaser';
 export type ManagerAccessRole = 'manager' | 'support_manager';
@@ -32,6 +33,7 @@ export type AccessUser = {
   isActive: boolean;
   canManageTopDashboard: boolean;
   dashboardAccess: string[];
+  dashboardAccessVersion?: string;
   accesses: string[];
   priceListCount: number;
   supportManagerId: number | null;
@@ -49,6 +51,7 @@ type AccessUserInput = {
   isActive: boolean;
   canManageTopDashboard: boolean;
   dashboardAccess?: string[];
+  dashboardAccessVersion?: string;
   passwordHash?: string;
   supportManagerId?: number | null;
 };
@@ -103,7 +106,7 @@ function isManagerAccessRole(role: AccessUserRole): role is ManagerAccessRole {
 }
 
 function normalizeTopManagementAccess(role: AccessUserRole, value: unknown) {
-  return role === 'top' && value === true;
+  return (role === 'top' || role === 'manager' || role === 'support_manager') && value === true;
 }
 
 function accessLabels(role: AccessUserRole, canManageTopDashboard: boolean) {
@@ -154,14 +157,6 @@ function parseAccessUserId(id: string): ParsedAccessUserId | null {
   return { source, numericId };
 }
 
-async function getDashboardAccess(client: Pick<PoolClient, 'query'>, userId: number) {
-  const result = await client.query<{ key: string }>(
-    'select key from admin_user_dashboard_access where user_id = $1 order by key',
-    [userId],
-  );
-  return parseDashboardAccess(result.rows.map((row) => row.key)) ?? [];
-}
-
 /** User changes and access changes share a transaction; no partial profile can be saved. */
 async function saveDashboardAccess(
   client: Pick<PoolClient, 'query'>,
@@ -170,27 +165,7 @@ async function saveDashboardAccess(
   value: string[] | undefined,
   previous?: AccessUser,
 ) {
-  const parsed = value === undefined ? undefined : parseDashboardAccess(value);
-  if (parsed === null) throw new Error('Некорректный список доступных дашбордов');
-  const next = role === 'purchaser'
-    ? parsed ?? (previous?.role === 'purchaser' ? previous.dashboardAccess : [])
-    : [];
-  const topIds = next.filter((key) => key.startsWith('top:')).map((key) => Number(key.slice(4)));
-  if (topIds.length) {
-    const blocks = await client.query<{ id: string }>(
-      'select id::text from top_dashboard_blocks where id = any($1::bigint[]) for key share',
-      [topIds],
-    );
-    if (blocks.rows.length !== topIds.length) throw new Error('Один из выбранных дашбордов не существует');
-  }
-  await client.query('delete from admin_user_dashboard_access where user_id = $1', [userId]);
-  if (next.length) {
-    await client.query(
-      'insert into admin_user_dashboard_access (user_id, key) select $1, unnest($2::text[])',
-      [userId, next],
-    );
-  }
-  return next;
+  return saveDashboardGrants(client,{source:isManagerAccessRole(role)?'manager':'admin',numericId:userId,role},value ?? previous?.dashboardAccess);
 }
 
 async function assertLoginAvailable(
@@ -333,7 +308,7 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
         wm.email,
         coalesce(nullif(wm.role, ''), 'manager') as role,
         wm.is_active,
-        false as can_manage_top_dashboard,
+        wm.can_manage_top_dashboard,
         count(pl.id)::text as price_list_count,
         wm.support_manager_id::text as support_manager_id,
         coalesce(support.name, '') as support_manager_name,
@@ -352,17 +327,10 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
   `);
 
   const users = result.rows.map((row) => mapAccessUser(row, currentAdminUserId));
-  const purchasers = users.filter((user) => user.source === 'admin' && user.role === 'purchaser');
-  if (purchasers.length) {
-    const grants = await query<{ user_id: string; key: string }>(
-      'select user_id::text, key from admin_user_dashboard_access where user_id = any($1::bigint[]) order by key',
-      [purchasers.map((user) => user.numericId)],
-    );
-    for (const user of purchasers) {
-      user.dashboardAccess = parseDashboardAccess(
-        grants.rows.filter((grant) => Number(grant.user_id) === user.numericId).map((grant) => grant.key),
-      ) ?? [];
-    }
+  const grants=await query<{admin_user_id:string|null;manager_id:string|null;key:string}>('select admin_user_id::text,manager_id::text,key from dashboard_view_grants order by key');
+  for (const user of users) {
+    user.dashboardAccess=grants.rows.filter((grant)=>Number(user.source==='admin'?grant.admin_user_id:grant.manager_id)===user.numericId).map((grant)=>grant.key);
+    user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
   }
   return users;
 }
@@ -373,6 +341,7 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
   }
   await ensureSiteSchema();
   return withTransaction(async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))',[DASHBOARD_ACCESS_LOCK]);
     await assertLoginAvailable(input.login, undefined, client);
 
     if (isManagerAccessRole(input.role)) {
@@ -396,7 +365,10 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
            updated_at::text`,
         [input.name, normalizeLogin(input.login), input.email, input.role, supportManagerId, input.passwordHash, input.isActive],
       );
-      return mapAccessUser(result.rows[0]);
+      const user=mapAccessUser(result.rows[0]);
+      user.dashboardAccess=await saveDashboardAccess(client,user.numericId,user.role,input.dashboardAccess);
+      user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
+      return user;
     }
 
     const result = await client.query<AccessUserRow>(
@@ -430,6 +402,7 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
     );
     const user = mapAccessUser(result.rows[0]);
     user.dashboardAccess = await saveDashboardAccess(client, user.numericId, user.role, input.dashboardAccess);
+    user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
     return user;
   });
 }
@@ -453,6 +426,7 @@ export async function updateAccessUser(
   if (!parsed) throw new Error('Некорректный пользователь');
 
   return withTransaction(async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))',[DASHBOARD_ACCESS_LOCK]);
     await assertLoginAvailable(input.login, parsed, client);
 
     if (parsed.source === 'admin') {
@@ -479,9 +453,8 @@ export async function updateAccessUser(
       const existingRow = existingResult.rows[0];
       if (!existingRow) throw new Error('Пользователь не найден');
       const previous = mapAccessUser(existingRow, currentAdminUserId);
-      previous.dashboardAccess = previous.role === 'purchaser'
-        ? await getDashboardAccess(client, previous.numericId)
-        : [];
+      previous.dashboardAccess = await getDashboardGrants(client,'admin',previous.numericId);
+      if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new Error('Доступы уже изменены в другом окне. Обновите список сотрудников.');
       const isSelf = previous.isCurrent;
       const nextRole = input.role;
       const nextCanManageTopDashboard = normalizeTopManagementAccess(
@@ -512,7 +485,7 @@ export async function updateAccessUser(
              email,
              role,
              is_active,
-             false as can_manage_top_dashboard,
+             can_manage_top_dashboard,
              '0'::text as price_list_count,
              support_manager_id::text as support_manager_id,
              coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
@@ -530,9 +503,12 @@ export async function updateAccessUser(
           ],
         );
         await client.query(`delete from admin_users where id = $1`, [parsed.numericId]);
+        const user=mapAccessUser(insertResult.rows[0],currentAdminUserId);
+        user.dashboardAccess=await saveDashboardAccess(client,user.numericId,user.role,input.dashboardAccess,previous);
+        user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
         return {
           previous,
-          user: mapAccessUser(insertResult.rows[0], currentAdminUserId),
+          user,
           roleChanged: true,
           permissionsChanged: previous.canManageTopDashboard || previous.dashboardAccess.length > 0,
           passwordChanged: Boolean(input.passwordHash),
@@ -580,6 +556,7 @@ export async function updateAccessUser(
       user.dashboardAccess = await saveDashboardAccess(
         client, user.numericId, nextRole, input.dashboardAccess, previous,
       );
+      user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
       return {
         previous,
         user,
@@ -599,7 +576,7 @@ export async function updateAccessUser(
          wm.email,
          coalesce(nullif(wm.role, ''), 'manager') as role,
          wm.is_active,
-         false as can_manage_top_dashboard,
+         wm.can_manage_top_dashboard,
          count(pl.id)::text as price_list_count,
          wm.support_manager_id::text as support_manager_id,
          coalesce(support.name, '') as support_manager_name,
@@ -616,6 +593,8 @@ export async function updateAccessUser(
     const existingRow = existingResult.rows[0];
     if (!existingRow) throw new Error('Пользователь не найден');
     const previous = mapAccessUser(existingRow, currentAdminUserId);
+    previous.dashboardAccess=await getDashboardGrants(client,'manager',previous.numericId);
+    if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new Error('Доступы уже изменены в другом окне. Обновите список сотрудников.');
 
     if (!isManagerAccessRole(input.role)) {
       if (previous.priceListCount > 0) {
@@ -660,7 +639,8 @@ export async function updateAccessUser(
       );
       await client.query(`delete from wholesale_managers where id = $1`, [parsed.numericId]);
       const user = mapAccessUser(insertResult.rows[0], currentAdminUserId);
-      user.dashboardAccess = await saveDashboardAccess(client, user.numericId, user.role, input.dashboardAccess);
+      user.dashboardAccess = await saveDashboardAccess(client, user.numericId, user.role, input.dashboardAccess,previous);
+      user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
       return {
         previous,
         user,
@@ -694,7 +674,7 @@ export async function updateAccessUser(
          email,
          role,
          is_active,
-         false as can_manage_top_dashboard,
+         can_manage_top_dashboard,
          (select count(*)::text from wholesale_price_lists where manager_id = wholesale_managers.id) as price_list_count,
          support_manager_id::text as support_manager_id,
          coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
@@ -712,12 +692,15 @@ export async function updateAccessUser(
       ],
     );
 
+    const user=mapAccessUser(updateResult.rows[0],currentAdminUserId);
+    user.dashboardAccess=await saveDashboardAccess(client,user.numericId,user.role,input.dashboardAccess,previous);
+    user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
     return {
       previous,
-      user: mapAccessUser(updateResult.rows[0], currentAdminUserId),
+      user,
       roleChanged:
         previous.role !== input.role || previous.isActive !== input.isActive || previous.supportManagerId !== supportManagerId,
-      permissionsChanged: false,
+      permissionsChanged: dashboardAccessVersion(previous.dashboardAccess)!==user.dashboardAccessVersion,
       passwordChanged: Boolean(input.passwordHash),
     };
   });

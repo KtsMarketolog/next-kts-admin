@@ -4,6 +4,9 @@ import { PERSONAL_DASHBOARD_AUDIENCE_LABELS, type PersonalDashboardAudience } fr
 
 import { DashboardFrame, SharedDashboardFrame, formatDashboardDate, ImportResults, SnapshotStatus } from './ManagerDashboardParts';
 import { ManagerDashboardImportJournal } from './ManagerDashboardImportJournal';
+import { RoutePlannerViewer } from './ManagerDashboardViewer';
+import { formatDashboardTimestamp, formatDashboardDataDate } from '@/shared/lib/dashboardDates';
+import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
 import { prepareSharedJsonUpload } from './sharedJsonUpload';
 import type { ManagerDashboardGroup, ManagerDashboardHtmlVersion, ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview, RoutePlannerOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
@@ -17,15 +20,17 @@ const AUDIENCES: PersonalDashboardAudience[] = ['development', 'support'];
 const NO_PERSONAL_GROUPS: ManagerDashboardGroup[] = [];
 
 type ManagementProps = {
+  canAssignAccess?: boolean;
   overview: Extract<ManagerDashboardOverview, { mode: 'manage' }> | RoutePlannerOverview;
   section?: 'personal' | 'shared';
   audience?: PersonalDashboardAudience | null;
   busy: boolean;
   mutate: (path: string, init: RequestInit, successMessage: string) => Promise<ManagerDashboardMutationResult | null>;
   onAccessDenied?: () => void;
+  onReload?: () => Promise<boolean>;
 };
 
-export function ManagerDashboardManagement({ overview, section = 'personal', audience = null, busy: externalBusy, mutate: performMutation, onAccessDenied }: ManagementProps) {
+export function ManagerDashboardManagement({ overview, section = 'personal', audience = null, busy: externalBusy, mutate: performMutation, onAccessDenied, onReload, canAssignAccess = false }: ManagementProps) {
   const personalOverview = section === 'personal' && 'groups' in overview ? overview : null;
   const groups = personalOverview?.groups ?? NO_PERSONAL_GROUPS;
   const [pending, setPending] = useState(false);
@@ -357,6 +362,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
 
   return (
     <div className={styles.stack}>
+      {section === 'shared' ? <RoutePlannerViewer shared={shared} loading={busy} onReload={onReload ?? (async () => true)} showHistory={false} /> : null}
       {personalOverview ? <div ref={audienceGrid} className={`${styles.audienceGrid}${audience ? ` ${styles.audienceGridSingle}` : ''}`}>
         {(audience ? [audience] : AUDIENCES).map((audience) => {
           const group = groups.find((item) => item.audience === audience);
@@ -380,6 +386,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
                     </div>
                     {fileErrors[audience] ? <p id={`manager-dashboard-html-error-${audience}`} className={styles.warning} role="alert">{fileErrors[audience]}</p> : null}
                   </form>
+                  {canAssignAccess ? <DashboardAudienceEditor dashboardKey={`manager:${audience}`} /> : null}
                   <p className={styles.muted}>Хранятся действующий и один предыдущий рабочий HTML. История и откат — внизу страницы. Черновики хранятся отдельно.</p>
                   {drafts.length ? <div className={styles.draftSummary}>
                     <h3>Последний черновик HTML</h3><p>{drafts[0].originalName} · #{drafts[0].id}</p>
@@ -402,7 +409,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
                             ? <p className={styles.warning}>Email совпадает у нескольких менеджеров. Исправьте его в карточках, чтобы назначать файлы автоматически.</p>
                             : manager.isActive !== false && (manager.bindingStatus === 'unknown' || !manager.email)
                               ? <p className={styles.warning}>Для назначения файла нужен уникальный email в карточке менеджера.</p> : null}</td>
-                          <td><SnapshotStatus snapshot={manager.snapshot} status={manager.snapshotStatus} expectedIssuedAfter={personalOverview.expectedIssuedAfter} />{manager.snapshot ? <><small>{manager.snapshot.originalName}</small><small>Подготовлен: {formatDashboardDate(manager.snapshot.issued)} · до {formatDashboardDate(manager.snapshot.expires)} (МСК)</small></> : null}</td>
+                          <td><SnapshotStatus snapshot={manager.snapshot} status={manager.snapshotStatus} expectedIssuedAfter={personalOverview.expectedIssuedAfter} />{manager.snapshot ? <><small>{manager.snapshot.originalName}</small><small>Данные загружены: {formatDashboardTimestamp(manager.snapshot.receivedAt)}</small><small>Данные на: {formatDashboardDataDate(manager.snapshot.issued)} · доступ до {formatDashboardDate(manager.snapshot.expires)} (МСК)</small></> : null}</td>
                         </tr>
                       ))}</tbody>
                     </table>
@@ -428,6 +435,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
           </div>
           <p className={styles.muted}>Поддерживаются HTML компоновщика рейсов с JSON-снимком и прежний формат с .ktsp. Сначала опубликуйте HTML, затем загрузите соответствующий файл данных ниже.</p>
         </form>
+        {canAssignAccess ? <DashboardAudienceEditor dashboardKey="route-planner" /> : null}
         <p className={styles.muted}>Хранятся действующий и один предыдущий рабочий HTML. История и откат — внизу страницы. Черновики хранятся отдельно.</p>
         {sharedDrafts.length
           ? <div className={styles.draftSummary}><h3>Последний черновик общего HTML</h3><p>{sharedDrafts[0].originalName} · #{sharedDrafts[0].id}</p><div className={styles.actions}>
@@ -439,8 +447,8 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
           <div className={styles.sectionHeading}><div><h3>Общий файл данных JSON</h3><p>Один снимок компоновщика автоматически открывается у всех сотрудников с доступом. Email и пароль не нужны. Личные .ktsp не изменяются.</p></div><span className={styles.badge} data-status={shared?.jsonSnapshot ? 'current' : 'missing'}>{shared?.jsonSnapshot ? 'Данные получены' : 'Данные ещё не поступили'}</span></div>
           {shared?.jsonSnapshot ? <dl className={styles.metadata}>
             <div><dt>Текущий общий файл</dt><dd>{shared.jsonSnapshot.originalName}</dd></div>
-            <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(shared.jsonSnapshot.savedAt)}</dd></div>
-            <div><dt>Загружен, МСК</dt><dd>{formatDashboardDate(shared.jsonSnapshot.receivedAt)}</dd></div>
+            <div><dt>Данные на</dt><dd>{formatDashboardDataDate(shared.jsonSnapshot.savedAt)}</dd></div>
+            <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(shared.jsonSnapshot.receivedAt)}</dd></div>
           </dl> : null}
           <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedJson(event)}>
             <label htmlFor="manager-dashboard-shared-json">JSON-снимок компоновщика · до 100 МБ</label>
@@ -455,7 +463,8 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
           <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех сотрудников с доступом. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>
           {shared?.snapshot ? <dl className={styles.metadata}>
             <div><dt>Текущий общий файл</dt><dd>{shared.snapshot.originalName}</dd></div>
-            <div><dt>Подготовлен, МСК</dt><dd>{formatDashboardDate(shared.snapshot.issued)}</dd></div>
+            <div><dt>Данные на</dt><dd>{formatDashboardDataDate(shared.snapshot.issued)}</dd></div>
+            <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(shared.snapshot.receivedAt)}</dd></div>
             <div><dt>Доступ до, МСК</dt><dd>{formatDashboardDate(shared.snapshot.expires)}</dd></div>
           </dl> : null}
           <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedSnapshot(event)}>
@@ -473,7 +482,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
       </section> : null}
 
       {preview && (previewGroup || sharedPreview) ? <section id="manager-dashboard-html-preview" ref={previewPanel} className={`${styles.panel} ${styles.fullWidthPreview}`} aria-labelledby="manager-dashboard-preview-heading" tabIndex={-1}>
-        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр: {sharedPreview ? 'Компоновщик рейсов' : PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup!.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. {sharedJsonPreview ? 'Общий JSON, привязанный к этой версии HTML, загружается автоматически, если он опубликован. Личные данные менеджеров не загружаются.' : sharedPreview ? 'Общие и личные данные не загружаются.' : 'Личные данные менеджеров не загружаются.'}</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
+        <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-preview-heading">Предпросмотр{!preview.firstPublishedAt ? ' черновика' : ' версии'}: {sharedPreview ? 'Компоновщик рейсов' : PERSONAL_DASHBOARD_AUDIENCE_LABELS[previewGroup!.audience]}</h2><p>{preview.originalName} · версия #{preview.id}. Предпросмотр не заменяет действующий отчёт. {sharedJsonPreview ? 'Общий JSON, привязанный к этой версии HTML, загружается автоматически, если он опубликован. Личные данные менеджеров не загружаются.' : sharedPreview ? 'Общие и личные данные не загружаются.' : 'Личные данные менеджеров не загружаются.'}</p></div><button className={styles.secondary} type="button" disabled={busy} onClick={() => {
           if (busy || mutationRef.current) return;
           setPreviewSelection(null);
           (sharedPreview ? sharedHtmlInput : htmlInputs[previewGroup!.audience]).current?.focus();

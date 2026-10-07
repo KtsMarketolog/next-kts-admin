@@ -3,6 +3,7 @@ import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 
 import { getAdminSessionSecret } from './authSecret';
 import { createStoredAdminSession, getStoredAdminSession, revokeStoredAdminSession } from './db/adminSessionsRepo';
+import { hasDashboardIdentity } from './dashboardPermissions';
 
 const COOKIE_NAME = 'kts_admin_session';
 const PASSWORD_KEYLEN = 64;
@@ -76,25 +77,11 @@ export function isTopDashboardManagementSession(
 
 export function isTopDashboardSession(
   session: AdminSession | null | undefined,
-): session is
-  | (AdminSession & { role: 'admin' })
-  | (AdminSession & { role: 'admintop'; adminUserId: number })
-  | (AdminSession & { role: 'top'; adminUserId: number })
-  | (AdminSession & { role: 'purchaser'; adminUserId: number })
-  | (AdminSession & {
-      role: AdminManagerSessionRole;
-      managerId: number;
-      canAccessTopDashboard: true;
-    }) {
-  if (session?.role === 'admin') return true;
-  if (session?.role === 'purchaser') return hasPersistedAdminUserId(session) && Boolean(session.sessionId);
-  if (session?.role === 'top' || session?.role === 'admintop') {
-    return hasPersistedAdminUserId(session);
-  }
-  return isManagerSessionRole(session?.role)
-    && (session.canAccessTopDashboard === true || session.canManageTopDashboard === true)
-    && Number.isInteger(session.managerId)
-    && Number(session.managerId) > 0;
+): session is AdminSession {
+  if (isTopDashboardManagementSession(session)) return true;
+  return hasDashboardIdentity(session)
+    && (session.role === 'purchaser' || session.role === 'top'
+      || Boolean(session.dashboardAccess?.some((key) => /^top:[1-9]\d*$/.test(key))));
 }
 
 export function getTopDashboardActor(session: TopDashboardManagementSession) {

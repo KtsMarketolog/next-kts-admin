@@ -31,6 +31,7 @@ const makeVersion = (id, audience, suffix) => ({id, audience, originalName: audi
 const requestedAudience = new URLSearchParams(location.search).get('audience');
 const managementAudience = ['development', 'support'].includes(requestedAudience) ? requestedAudience : null;
 const sharedOnly = new URLSearchParams(location.search).get('section') === 'shared';
+const canAssignAccess = new URLSearchParams(location.search).has('access');
 const supportMany = new URLSearchParams(location.search).get('support') === 'many';
 const sharedSnapshot = {id: 301, originalName: 'общий_файл.ktsp', email: 'shared.synthetic@example.test', issued: '2026-09-15', expires: '2999-10-30', receivedAt: date};
 const sharedInitial = {
@@ -147,7 +148,7 @@ function Fixture() {
       <a id="fixture-back-link" href="#fixture" className={dashboardStyles.secondary}>В панель управления</a>
       <button className={dashboardStyles.primary}>Обновить</button>
     </div></div>
-    <ManagerDashboardManagement section={sharedOnly ? 'shared' : 'personal'} audience={managementAudience} overview={sharedOnly ? {mode: 'manage', supportShared: overview.supportShared} : overview} busy={false} mutate={mutate}/>
+    <ManagerDashboardManagement section={sharedOnly ? 'shared' : 'personal'} audience={managementAudience} overview={sharedOnly ? {mode: 'manage', supportShared: overview.supportShared} : overview} busy={false} mutate={mutate} canAssignAccess={canAssignAccess}/>
   </main><aside className={adminStyles.page} id="fixture-unrelated"><button>Другая страница администратора</button></aside></>;
 }
 createRoot(document.getElementById('root')).render(viewerAudience ? <ManagerDashboard section={viewerAudience === 'shared' ? 'shared' : 'personal'} mode="view" audience={managementAudience}/> : <Fixture/>);
@@ -207,6 +208,13 @@ async function main() {
     else if (url.pathname === '/fixture.js') response.writeHead(200, {...headers, 'Content-Type': 'text/javascript'}).end(bundle.outputFiles[0].contents);
     else if (url.pathname === '/fixture.css') response.writeHead(200, {...headers, 'Content-Type': 'text/css'}).end(css);
     else if (fonts.has(url.pathname)) response.writeHead(200, {...headers, 'Content-Type': 'font/woff2'}).end(fonts.get(url.pathname));
+    else if (url.pathname === '/api/admin/dashboard-access' && request.method === 'GET') {
+      const users = Array.from({length: 7}, (_, index) => ({
+        id: `manager:${index + 1}`, name: `Синтетический сотрудник ${index + 1}`, login: `employee${index + 1}@example.test`,
+        role: index === 0 ? 'manager' : 'support_manager', isActive: true, eligible: true, checked: false, locked: false,
+      }));
+      response.writeHead(200, {...headers, 'Content-Type': 'application/json'}).end(JSON.stringify({users, key: url.searchParams.get('key'), version: 'synthetic-v1'}));
+    }
     else if (url.pathname === '/api/admin/manager-dashboard/imports') {
       const before = Number(url.searchParams.get('before'));
       if (request.method !== 'GET' || !Number.isSafeInteger(before) || before <= 0) {
@@ -803,6 +811,39 @@ async function main() {
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'JSON view stays in mobile width');
             assert.deepEqual(errors, [], 'JSON gzip upload and viewer have no browser errors');
             assert.deepEqual(external, [], 'JSON UI uses no external services');
+
+            await page.goto(origin + '/?access=1');
+            await page.getByRole('button', {name: 'Сохранить доступы', exact: true}).first().waitFor({state: 'visible'});
+            await page.waitForFunction(() => document.querySelectorAll('input[type=checkbox]').length === 14);
+            assert.equal(await page.getByRole('heading', {name: 'Кому доступен отчёт', exact: true}).count(), 2);
+            for (const audience of ['development', 'support']) {
+              assert.equal(await page.locator(`#manager-dashboard-html-panel-${audience}`).evaluate((panel: HTMLElement) => {
+                const form = panel.querySelector('form')!;
+                const editor = [...panel.querySelectorAll('section')].find(section => section.querySelector('h2')?.textContent === 'Кому доступен отчёт');
+                return editor?.previousElementSibling === form && !editor.closest('form');
+              }), true, `${audience}: live audience editor immediately follows HTML form and is outside it`);
+            }
+            await assertPanelAlignment('live access editors loaded');
+            await page.locator('#manager-dashboard-html-panel-development').getByRole('combobox', {name: 'Роль сотрудников'}).selectOption('manager');
+            await page.locator('#manager-dashboard-html-panel-support').getByRole('textbox', {name: 'Поиск сотрудников'}).fill('Нет такого');
+            await assertPanelAlignment('different editor heights after role and search filtering');
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'live audience controls fit the page');
+            await page.screenshot({path: path.join(output, `${engineName}-${width}-audience-editors.png`), fullPage: true});
+
+            await page.goto(origin + '/?section=shared&json=1&access=1');
+            await page.getByRole('button', {name: 'Сохранить доступы', exact: true}).waitFor({state: 'visible'});
+            await page.waitForFunction(() => document.querySelectorAll('input[type=checkbox]').length === 7);
+            assert.equal(await page.getByRole('heading', {name: 'Кому доступен отчёт', exact: true}).count(), 1);
+            assert.equal(await page.locator('#manager-dashboard-shared-support').evaluate((panel: HTMLElement) => {
+              const form = panel.querySelector('#manager-dashboard-shared-html')?.closest('form');
+              const editor = [...panel.querySelectorAll('section')].find(section => section.querySelector('h2')?.textContent === 'Кому доступен отчёт');
+              const report = document.querySelector('iframe[title="Общий дашборд сопровождения"]');
+              return Boolean(editor && editor.previousElementSibling === form && !editor.closest('form')
+                && report && (report.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING));
+            }), true, 'route planner stays first and audience editor immediately follows HTML form');
+            await page.screenshot({path: path.join(output, `${engineName}-${width}-shared-audience-editor.png`), fullPage: true});
+            assert.deepEqual(errors, [], 'live audience editor placement has no browser errors');
+            assert.deepEqual(external, [], 'live audience editor placement uses only synthetic local APIs');
             console.log(`PASS ${engineName}/${width}: personal aligned panels and scoped MR/MS, separate route planner management/view/history, common personal batch/journal, real admin cascade, safe delete/publication, bounded gzip JSON with CAS, JSON preview refresh, personal binding reset, explicit report refresh, journal 5+5+3, no overflow.`);
           } finally {await context.close();}
         }

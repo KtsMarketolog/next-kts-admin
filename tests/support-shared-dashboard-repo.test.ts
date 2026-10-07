@@ -85,16 +85,21 @@ function repository(steps: Step[] = [], options: {openFile?: () => Readable | Pr
   return { repo, queries, fileReads, deletedFiles, queuedFiles, get schemaCalls() { return schemaCalls; }, get transactions() { return transactions; },
     done() { assert.deepEqual(steps, []); } };
 }
-const support = { sql: /^select role,is_active from wholesale_managers where id=\$1 for share$/, rows: [{ role: 'support_manager', is_active: true }], params: [20] };
+const support = { sql: /^select coalesce\(nullif\(m.role,''\),'manager'\) as role,m.is_active from wholesale_managers m join dashboard_view_grants a on a.manager_id=m.id and a.key='route-planner' where m.id=\$1 for share of m,a$/, rows: [{ role: 'support_manager', is_active: true }], params: [20] };
 const readState = { sql: /^select .* from support_shared_dashboard_state where id=1 for share$/, rows: [state] };
 const lock = { sql: /^select pg_advisory_xact_lock\(hashtext\(\$1\)\)$/, params: ['kts-support-shared-dashboard'], rows: [] };
 const writeState = { sql: /^select .* from support_shared_dashboard_state where id=1 for update$/, rows: [state] };
+const adminAccount = {sql: /^select au.role,au.is_active from admin_users au where au.id=\$1 for share of au$/, rows: [{role: 'admin', is_active: true}], params: [2]};
+const adminGrant = {sql: /^select a.key from dashboard_view_grants a where a.admin_user_id=\$1 and a.key='route-planner' for share of a$/, rows: [{key: 'route-planner'}], params: [2]};
 
 test('shared migration only creates new report tables and does not migrate or copy personal data', async () => {
   const statements: string[] = [];
   const migrations = compile<typeof import('../src/shared/lib/db/migrations')>('../src/shared/lib/db/migrations.ts', {
     '../topDashboardLimits': limits, './client': {},
     './currencyDashboardMigration': { applyCurrencyDashboardMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './dashboardAccessMigration': { applyDashboardAccessMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './dashboardUsageMigration': { applyDashboardUsageMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './dashboardDatesMigration': { applyDashboardDatesMigration: async () => { throw new Error('Unrelated migration must not run'); } },
   });
   await migrations.applySupportSharedDashboardMigration({ query: async (sql: string) => { statements.push(sql); } } as never);
   assert.equal(statements.length, 1);
@@ -105,8 +110,8 @@ test('shared migration only creates new report tables and does not migrate or co
   assert.doesNotMatch(statements[0], /password|secret|decrypted/i);
 });
 
-test('all viewer reads recheck exact active support role under a manager-row share lock', async () => {
-  for (const account of [{ role: 'manager', is_active: true }, { role: null, is_active: true },
+test('all viewer reads recheck active manager role and explicit route-planner grant under shared locks', async () => {
+  for (const account of [{ role: 'top', is_active: true }, { role: null, is_active: true },
     { role: ' support_manager ', is_active: true }, { role: 'support_manager', is_active: false }, null]) {
     for (const kind of ['overview', 'html', 'snapshot', 'json'] as const) {
       const db = repository([{ ...support, rows: account ? [account] : [] }]);
@@ -119,6 +124,69 @@ test('all viewer reads recheck exact active support role under a manager-row sha
       db.done();
     }
   }
+});
+
+test('both manager groups can view the shared report only with a row joined to an explicit grant', async () => {
+  for (const role of ['manager', 'support_manager']) {
+    const db = repository([{ ...support, rows: [{ role, is_active: true }] }, readState,
+      { sql: /from support_shared_dashboard_html_versions where id=\$1 and first_published_at is not null/, rows: [] },
+      { sql: /from support_shared_dashboard_snapshots/, rows: [] }]);
+    await db.repo.getSupportSharedDashboardOverview(20);
+    db.done();
+  }
+});
+
+test('legacy empty or null manager roles are normalized by SQL exactly like persisted sessions', async () => {
+  const db = repository([{ ...support, rows: [{ role: 'manager', is_active: true }] }, readState]);
+  assert.equal(await db.repo.getSupportSharedDashboardHtml(7, false, 20), null);
+  assert.match(db.queries[0], /coalesce\(nullif\(m\.role,''\),'manager'\) as role/);
+  assert.match(db.queries[0], /join dashboard_view_grants a on a\.manager_id=m\.id and a\.key='route-planner'/);
+  db.done();
+});
+
+test('published admin reads recheck the active database role; ordinary users still require an explicit grant', async () => {
+  for (const role of ['admin', 'admintop', 'top', 'purchaser']) {
+    const db = repository([{...adminAccount, rows: [{role, is_active: true}]},
+      ...(['top', 'purchaser'].includes(role) ? [adminGrant] : []), readState,
+      {sql: /from support_shared_dashboard_html_versions where id=\$1 and first_published_at is not null/, rows: []},
+      {sql: /from support_shared_dashboard_snapshots/, rows: []}]);
+    await db.repo.getSupportSharedDashboardOverview({adminUserId: 2});
+    db.done();
+  }
+  for (const kind of ['overview', 'html', 'snapshot', 'json'] as const) {
+    for (const account of [null, {role: 'admin', is_active: false}, {role: 'top', is_active: true}]) {
+      const db = repository([{...adminAccount, rows: account ? [account] : []},
+        ...(account?.is_active ? [{...adminGrant, rows: []}] : [])]);
+      await assert.rejects(() => kind === 'overview' ? db.repo.getSupportSharedDashboardOverview({adminUserId: 2})
+        : kind === 'html' ? db.repo.getSupportSharedDashboardHtml(8, false, {adminUserId: 2})
+          : kind === 'snapshot' ? db.repo.getSupportSharedDashboardSnapshot({adminUserId: 2})
+            : db.repo.getSupportSharedDashboardJsonSnapshot({adminUserId: 2}, 8), {code: 'NOT_FOUND'});
+      db.done();
+    }
+  }
+});
+
+test('administrator published reads cannot select a draft HTML or JSON bound to an inactive HTML', async () => {
+  const html = repository([adminAccount, readState]);
+  assert.equal(await html.repo.getSupportSharedDashboardHtml(7, false, {adminUserId: 2}), null);
+  html.done();
+  const json = repository([adminAccount, readState]);
+  await assert.rejects(() => json.repo.getSupportSharedDashboardJsonSnapshot({adminUserId: 2}, 7), {code: 'STATE_CONFLICT'});
+  assert.deepEqual(json.fileReads, []);
+  json.done();
+  const ktsp = repository([adminAccount, readState, {sql: /from support_shared_dashboard_snapshots where id=\$1$/, rows: [snapshotRow()], params: [4]}]);
+  assert.equal((await ktsp.repo.getSupportSharedDashboardSnapshot({adminUserId: 2}))?.id, 4);
+  ktsp.done();
+});
+
+test('environment administrator published access requires an active persisted breakglass session', async () => {
+  const sessionStep = {sql: /^select s.id from admin_sessions s where s.id::text=\$1 and s.role='admin' and s.admin_user_id is null and s.manager_id is null and s.revoked_at is null and s.expires_at>now\(\) for share of s$/, rows: [{id: 'synthetic-admin-session'}], params: ['synthetic-admin-session']};
+  const allowed = repository([sessionStep, readState]);
+  assert.equal(await allowed.repo.getSupportSharedDashboardHtml(7, false, {adminSessionId: 'synthetic-admin-session'}), null);
+  allowed.done();
+  const denied = repository([{...sessionStep, rows: []}]);
+  await assert.rejects(() => denied.repo.getSupportSharedDashboardSnapshot({adminSessionId: 'synthetic-admin-session'}), {code: 'NOT_FOUND'});
+  denied.done();
 });
 
 const previewJsonSelect = /from support_shared_dashboard_html_versions h join support_shared_dashboard_json_state st on st.html_version_id=h.id join support_shared_dashboard_json_snapshots s on s.html_version_id=st.html_version_id and s.id=st.active_snapshot_id where h.id=\$1 and h.format='route-planner-v1' and \(\$2::bigint is null or s.id=\$2::bigint\) for share of h,st,s$/;

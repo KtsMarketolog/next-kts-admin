@@ -26,9 +26,11 @@ const sharedSnapshot = {id: 31, email: 'shared@example.test', originalName: 'sha
 type Role = 'admin' | 'admintop' | 'manager' | 'support_manager' | 'top' | 'purchaser' | null;
 type Route = {GET(request: Request): Promise<Response>; POST(request: Request): Promise<Response>; DELETE(request: Request): Promise<Response>};
 
-function routes(role: Role = 'support_manager', options: {grants?: string[]; inactive?: boolean; currentRole?: string; limit?: boolean; noSnapshot?: boolean; expired?: boolean; routePlanner?: boolean; foreignPreviewSnapshot?: boolean} = {}) {
+function routes(role: Role = 'support_manager', options: {grants?: readonly string[]; inactive?: boolean; currentRole?: string; limit?: boolean; noSnapshot?: boolean; expired?: boolean; routePlanner?: boolean; foreignPreviewSnapshot?: boolean} = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
-  const session = role ? {role, sessionId: 'synthetic-session', adminUserId: 2, managerId: 71, dashboardAccess: options.grants ?? []} : null;
+  const migratedGrants = role === 'support_manager' ? ['manager:support', 'route-planner', 'currency-rates']
+    : role === 'manager' ? ['manager:development', 'currency-rates'] : [];
+  const session = role ? {role, sessionId: 'synthetic-session', adminUserId: 2, managerId: 71, dashboardAccess: options.grants ?? migratedGrants} : null;
   const manager = {id: 71, role: options.currentRole ?? role, email: '', isActive: !options.inactive};
   const base = compile<typeof import('../src/app/api/admin/manager-dashboard/_shared')>(
     '../src/app/api/admin/manager-dashboard/_shared.ts', {
@@ -153,6 +155,7 @@ test('route-planner content retains opaque sandbox and hashed scripts with limit
 test('shared report denies unauthorized, development and stale roles before repository reads', async () => {
   for (const [role, options, expected] of [
     [null, {}, 401], ['top', {}, 403], ['manager', {}, 403],
+    ['support_manager', {grants: []}, 403],
     ['support_manager', {inactive: true}, 403], ['support_manager', {currentRole: 'manager'}, 403],
   ] as const) {
     const api = routes(role, options);
@@ -200,7 +203,7 @@ test('frame pins a shared snapshot, leaves HTML visible without data, rejects fo
   }
 });
 
-test('administrator KTSP previews remain without snapshot reads and cannot use viewer data endpoints', async () => {
+test('administrator KTSP draft previews remain without snapshot reads', async () => {
   for (const role of ['admin', 'admintop'] as const) {
     const api = routes(role);
     const frame = await api.frame.GET(request('frame?version=23&preview=1'));
@@ -208,7 +211,29 @@ test('administrator KTSP previews remain without snapshot reads and cannot use v
     assert.match(await frame.text(), /const preview = true/);
     assert.deepEqual(api.calls, [{name: 'html', args: [23, true, undefined]}]);
     assert.equal((await api.frame.GET(request('frame?version=23&preview=1&snapshot=31'))).status, 403);
-    assert.equal((await api.snapshots.GET(request('snapshots'))).status, 403);
+    assert.equal(api.calls.some((call) => call.name === 'snapshot'), false);
+  }
+});
+
+test('administrators open the published report with its data while drafts require preview mode', async () => {
+  for (const role of ['admin', 'admintop'] as const) {
+    for (const routePlanner of [false, true]) {
+      const api = routes(role, {routePlanner});
+      const response = await api.frame.GET(request('frame?version=22'));
+      assert.equal(response.status, 200);
+      const document = await response.text();
+      assert.match(document, routePlanner ? /shared\/json\?version=22&snapshot=81/ : /shared\/snapshots\?snapshot=31/);
+      assert.deepEqual(api.calls.slice(0, 2), [{name: 'html', args: [22, false, {adminUserId: 2}]},
+        {name: 'overview', args: [{adminUserId: 2}]}]);
+      assert.equal((await api.frame.GET(request('frame?version=23'))).status, 404);
+      assert.equal((await api.content.GET(request('content?version=23', {headers: {referer: ROOT + 'frame?version=23'}}))).status, 404);
+      assert.equal((await api.content.GET(request('content?version=22', {headers: {referer: ROOT + 'frame?version=22'}}))).status, 200);
+      assert.equal((await api.snapshots.GET(request('snapshots?snapshot=31'))).status, 200);
+      assert.deepEqual(api.calls.at(-1), {name: 'snapshot', args: [{adminUserId: 2}, 31]});
+    }
+    const admin = routes(role);
+    assert.equal((await admin.sharedOverview.GET(request(''))).status, 200);
+    assert.deepEqual(admin.calls, [{name: 'overview', args: [undefined]}], 'The management listing still includes draft metadata');
   }
 });
 
@@ -296,7 +321,7 @@ test('purchaser route-planner grant permits published viewing only, without a ma
   assert.equal((await allowed.frame.GET(request('frame?version=23&preview=1'))).status, 403);
   assert.equal((await allowed.publish.POST(request('publish', json({versionId: 23})))).status, 403);
   assert.equal((await allowed.html.DELETE(request('html?version=23', {method: 'DELETE'}))).status, 403);
-  assert.ok(allowed.calls.filter((c) => c.name === 'overview').every((c) => JSON.stringify(c.args) === '[{"purchaserId":2}]'));
+  assert.ok(allowed.calls.filter((c) => c.name === 'overview').every((c) => JSON.stringify(c.args) === '[{"adminUserId":2}]'));
   assert.equal((await allowed.overview.GET(request(''))).status, 403);
 
   for (const grants of [[], ['manager:support'], ['top:22']]) {

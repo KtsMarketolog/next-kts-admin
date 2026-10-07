@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import sanitizeHtml from 'sanitize-html';
+import { dashboardUsageAdapterScript, dashboardUsageRelayScript } from './dashboardUsageBridge';
 
 import type {
   TopDashboardProfile,
@@ -433,7 +434,8 @@ export function getTopDashboardDataAdapterScript(
   const expectedProfileJson = JSON.stringify(expectedProfile);
   const readOnlyJson = JSON.stringify(readOnly);
   const legacyReadyFunctionJson = JSON.stringify(legacyReadyFunction);
-  return String.raw`(() => {
+  return String.raw`${dashboardUsageAdapterScript()}
+(() => {
   'use strict';
   const MARKER = '${TOP_DASHBOARD_DATA_MESSAGE_MARKER}';
   const MULTI_FILE_MARKER = '${TOP_DASHBOARD_MULTI_FILE_MESSAGE_MARKER}';
@@ -470,6 +472,7 @@ export function getTopDashboardDataAdapterScript(
     window.dispatchEvent(new CustomEvent(RESTORE_READY_EVENT, {
       detail: { restoreId },
     }));
+    if (window.__ktsDashboardUsage) window.__ktsDashboardUsage.record('data_loaded');
   }
 
   function installLegacyReadyHook(restoreId) {
@@ -608,6 +611,7 @@ export function getTopDashboardDataAdapterScript(
         { marker: DOWNLOAD_MARKER, type: 'download-request', name, blob },
         '*',
       );
+      if (window.__ktsDashboardUsage && navigator.userActivation && navigator.userActivation.isActive) window.__ktsDashboardUsage.record('export_started');
       downloadableObjectUrls.delete(this.href);
       nativeRevokeObjectURL(this.href);
     };
@@ -842,6 +846,7 @@ export function getTopDashboardDataAdapterScript(
         if (completed) return;
         completed = true;
         cleanup();
+        if (confirmation === 'event' && window.__ktsDashboardUsage) window.__ktsDashboardUsage.record('data_loaded');
         resolve(confirmation);
       };
       const confirmAfterPaint = () => {
@@ -1212,6 +1217,7 @@ export function createTopDashboardFrameBridgeScript(
   const DOWNLOAD_INVALID_NAME = new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE)}, 'i');
   const SNAPSHOT_NAME = /\.json(?:\.gz)?$/i;
   const iframe = document.querySelector('#dashboard-frame');
+  ${dashboardUsageRelayScript('iframe')}
   const notice = document.querySelector('#data-notice');
   let initialLoadStarted = false;
   let noticeTimer = 0;

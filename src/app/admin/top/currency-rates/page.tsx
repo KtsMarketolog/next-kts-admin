@@ -10,5 +10,5 @@ export const dynamic = 'force-dynamic';
 export default async function CurrencyDashboardPage() {
   const session = await getAdminSession();
   if (!canAccessCurrencyDashboard(session)) redirect('/admin');
-  return <CurrencyDashboard nonce={randomUUID()} canManage={canManageCurrencyDashboard(session)} />;
+  return <CurrencyDashboard nonce={randomUUID()} canManage={canManageCurrencyDashboard(session)} canAssignAccess={session?.role === 'admin'} />;
 }

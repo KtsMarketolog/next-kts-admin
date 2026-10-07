@@ -79,7 +79,7 @@ export function AdminUsersView({
         ))}
       </div>
 
-      <div className={`${styles.userCreateCard} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''} ${activeTab === 'purchaser' ? accessStyles.purchaserCreate : ''}`}>
+      <div className={`${styles.userCreateCard} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''} ${accessStyles.purchaserCreate}`}>
         <div className={styles.autofillGuard} aria-hidden="true">
           <input tabIndex={-1} autoComplete="username" />
           <input tabIndex={-1} type="password" autoComplete="current-password" />
@@ -162,8 +162,10 @@ export function AdminUsersView({
             Активен
           </label>
         </div>
-        {draft.role === 'purchaser' && (
+        {(
           <AdminUsersDashboardAccessFields
+            role={draft.role}
+            canManageTopDashboard={draft.canManageTopDashboard}
             value={draft.dashboardAccess}
             options={dashboardOptions}
             loading={dashboardOptionsLoading}
@@ -175,7 +177,7 @@ export function AdminUsersView({
         )}
         <button
           className={savedId === 'new' ? styles.savedButton : undefined}
-          disabled={busyId === 'new' || (draft.role === 'purchaser' && purchaserSaveBlocked)}
+          disabled={busyId === 'new' || purchaserSaveBlocked}
           onClick={createUser}
         >
           {savedId === 'new' ? 'Сохранено' : addButtonLabel(activeTab)}
@@ -260,8 +262,10 @@ export function AdminUsersView({
                   </label>
                 </div>
 
-                {user.role === 'purchaser' && (
+                {(
                   <AdminUsersDashboardAccessFields
+                    role={user.role}
+                    canManageTopDashboard={user.canManageTopDashboard}
                     value={user.dashboardAccess}
                     options={dashboardOptions}
                     loading={dashboardOptionsLoading}
@@ -322,7 +326,7 @@ export function AdminUsersView({
                     </button>
                     <button
                       className={savedId === user.id ? styles.savedButton : undefined}
-                      disabled={busyId === user.id || (user.role === 'purchaser' && purchaserSaveBlocked)}
+                      disabled={busyId === user.id || purchaserSaveBlocked}
                       onClick={() => saveUser(user)}
                     >
                       {savedId === user.id ? 'Сохранено' : 'Сохранить'}

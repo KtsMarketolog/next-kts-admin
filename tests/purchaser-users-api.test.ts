@@ -23,6 +23,7 @@ function routes(authorized = true) {
       : {denied: new Response(null, {status: 403})}, hashPassword: () => 'synthetic-hash'},
     '@/shared/lib/adminSecurity': {enforceAdminActionRateLimit: async () => null},
     '@/shared/lib/dashboardAccess': access,
+    '@/shared/lib/db/dashboardAccessRepo':{getDashboardGrantOptions:async()=>{reads++;return [...access.DASHBOARD_REPORT_OPTIONS,{key:'top:7',title:'Аналитика продаж'},{key:'top:12',title:'Новый отчёт'}];}},
     '@/shared/lib/db': {
       getAccessUsers: async () => {reads++; return [user];},
       getTopDashboardBlocks: async () => {reads++; return [{id: 7, title: 'Аналитика продаж'}, {id: 12, title: 'Новый отчёт'}];},
@@ -59,24 +60,24 @@ function request(method: string, dashboardAccess: unknown) {
   return new Request('https://example.test/api/admin/users', {method,
     headers: {origin: 'https://example.test', 'content-type': 'application/json'},
     body: JSON.stringify({name: 'Synthetic', login: 'buyer', role: 'purchaser', password: 'Synthetic12345',
-      isActive: true, canManageTopDashboard: true, dashboardAccess})});
+      isActive: true, canManageTopDashboard: true, dashboardAccess,dashboardAccessVersion:'a'.repeat(64)})});
 }
 
-test('admin options are individual current catalog blocks, never personal MR/MS groups', async () => {
+test('admin options contain all current dashboards, private scopes are enforced separately', async () => {
   const api = routes();
   const response = await api.collection.GET();
   assert.equal(response.status, 200);
   assert.match(response.headers.get('cache-control')!, /private.*no-store/);
   const {dashboardOptions} = await response.json();
-  assert.deepEqual(dashboardOptions.map((option: {key: string}) => option.key), ['route-planner', 'top:7', 'top:12']);
+  assert.deepEqual(dashboardOptions.map((option: {key: string}) => option.key), ['manager:development','manager:support','route-planner','currency-rates','top:7', 'top:12']);
   assert.equal(dashboardOptions.find((option: {key: string}) => option.key === 'top:12').title, 'Новый отчёт');
   const denied = routes(false);
   assert.equal((await denied.collection.GET()).status, 403);
   assert.equal(denied.readCount(), 0);
 });
 
-test('both create and update reject personal group permissions before any write', async () => {
-  for (const grant of ['manager:development', 'manager:support', 'manager:*', 'top:*']) {
+test('both create and update reject wildcard permissions before any write', async () => {
+  for (const grant of ['manager:*', 'top:*']) {
     const api = routes();
     assert.equal((await api.collection.POST(request('POST', [grant]))).status, 400);
     assert.equal((await api.item.PUT(request('PUT', [grant]), context)).status, 400);

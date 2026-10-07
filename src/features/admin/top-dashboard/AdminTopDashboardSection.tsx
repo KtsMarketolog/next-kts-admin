@@ -13,6 +13,10 @@ import {
 import { encodeTopDashboardMultiFileBlobSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
+import { DashboardDataDates } from './DashboardDataDates';
+import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
+import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
+import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
 import { selectWorkingVersionPair } from './topDashboardHistory';
 import {
   normalizeTopDashboardUploadTargets,
@@ -48,6 +52,7 @@ type TopDashboardDataVersion = {
   status: TopDashboardDataVersionStatus;
   uploadedByName: string;
   createdAt: string;
+  dataAsOf?: string | null;
 };
 
 type TopDashboardDataOverview = {
@@ -85,6 +90,7 @@ type TopDashboardOverview = {
 };
 
 type AdminTopDashboardSectionProps = {
+  canAssignAccess?: boolean;
   blockId: number;
   showStatus: (message: string) => void;
 };
@@ -142,13 +148,7 @@ function formatFileSize(bytes: number) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return new Intl.DateTimeFormat('ru-RU', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
+  return formatDashboardTimestamp(value);
 }
 
 function statusLabel(status: TopDashboardVersionStatus | 'previous') {
@@ -273,7 +273,7 @@ function UploadFeedbackMessage({ feedback, id }: { feedback: UploadFeedback | nu
   >{feedback.message}</p>;
 }
 
-export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashboardSectionProps) {
+export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess = false }: AdminTopDashboardSectionProps) {
   const router = useRouter();
   const previewFrameRef = useTopDashboardDownloadBridge(showStatus);
   const [overview, setOverview] = useState<TopDashboardOverview | null>(null);
@@ -433,6 +433,8 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
     () => overview?.versions.find((version) => version.id === selectedVersionId) ?? null,
     [overview, selectedVersionId],
   );
+  useDashboardUsage({ dashboardKey: `top:${blockId}`, iframeRef: previewFrameRef,
+    preview: selectedVersion?.status !== 'active', versionId: selectedVersion?.id ?? null });
   const latestDraft = overview?.versions.find((version) => version.status === 'draft');
   const workingHtmlVersions = overview
     ? selectWorkingVersionPair(overview.versions, overview.activeVersionId, overview.previousVersionId)
@@ -1063,14 +1065,17 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
       >
         <div className={styles.topDashboardPreviewHeader}>
           <div>
-            <span className={styles.topDashboardEyebrow}>Предпросмотр в изолированном режиме</span>
+            <span className={styles.topDashboardEyebrow}>{selectedVersion?.status === 'active' ? 'Опубликованный отчёт' : 'Предпросмотр неопубликованной версии'}</span>
             <h2>{selectedVersion?.originalName ?? 'HTML ещё не загружен'}</h2>
             {selectedVersion ? (
               <div className={styles.topDashboardMeta}>
-                <span>Версия #{selectedVersion.id}</span>
-                <span>{formatFileSize(selectedVersion.fileSize)}</span>
-                <span>{formatDate(selectedVersion.createdAt)}</span>
-                <span>SHA-256: {selectedVersion.sha256.slice(0, 12)}…</span>
+                {selectedVersion.status === 'active' ? <DashboardDataDates uploadedAt={activeDataVersion?.createdAt} dataAsOf={activeDataVersion?.dataAsOf} /> : <span>Предпросмотр не заменяет действующий отчёт</span>}
+                <details><summary>Техническая информация HTML</summary>
+                  <span>Версия #{selectedVersion.id} · {formatFileSize(selectedVersion.fileSize)}</span>{' · '}
+                  <span>HTML загружен: {formatDate(selectedVersion.createdAt)}</span>{' · '}
+                  <span>HTML опубликован: {formatDate(selectedVersion.firstPublishedAt)}</span>{' · '}
+                  <span>SHA-256: {selectedVersion.sha256.slice(0, 12)}…</span>
+                </details>
               </div>
             ) : null}
           </div>
@@ -1247,6 +1252,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
           </div>
           <UploadFeedbackMessage feedback={htmlUploadFeedback} id="top-dashboard-html-upload-feedback" />
         </div>
+        {canAssignAccess ? <DashboardAudienceEditor dashboardKey={`top:${blockId}`} /> : null}
         <p className={styles.mutedText}>{activeVersion ? `Сейчас опубликован: ${activeVersion.originalName}, версия #${activeVersion.id}.` : 'HTML ещё не опубликован.'}</p>
         {latestDraft ? <article className={styles.topDashboardVersionRow}>
           <div><h3>Последний черновик</h3><div className={styles.topDashboardVersionTitle}><strong>{latestDraft.originalName}</strong></div><p className={styles.mutedText}>Версия #{latestDraft.id} · {formatDate(latestDraft.createdAt)}</p></div>
@@ -1441,7 +1447,7 @@ export function AdminTopDashboardSection({ blockId, showStatus }: AdminTopDashbo
                 <span>Файл: {formatFileSize(activeDataVersion.fileSize)}</span>
                 <span>{storedSizeLabel(activeDataVersion)}</span>
                 <span>Загрузил: {activeDataVersion.uploadedByName || 'Администратор'}</span>
-                <span>{formatDate(activeDataVersion.createdAt)}</span>
+                <DashboardDataDates uploadedAt={activeDataVersion.createdAt} dataAsOf={activeDataVersion.dataAsOf} />
                 <span>SHA-256: {activeDataVersion.sha256.slice(0, 12)}…</span>
               </div>
             </div>

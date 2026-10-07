@@ -82,7 +82,7 @@ test('TOP keeps its primary role and receives dashboard management only through 
   assert.equal(isAdminManagementSession({ role: 'top', adminUserId: 1 }), false);
   assert.equal(isTopDashboardSession({ role: 'top' }), false);
   assert.equal(isTopDashboardSession({ role: 'top', adminUserId: -1 }), false);
-  assert.equal(isTopDashboardSession({ role: 'top', adminUserId: 1 }), true);
+  assert.equal(isTopDashboardSession({ role: 'top', adminUserId: 1,sessionId:'persisted' }), true);
   assert.equal(isTopDashboardManagementSession({ role: 'top', adminUserId: 1 }), false);
   assert.equal(isTopDashboardManagementSession({
     role: 'top',
@@ -118,7 +118,7 @@ test('Admin TOP requires a persisted user id and receives TOP management only', 
   assert.equal(isTopDashboardManagementSession({ role: 'admintop', adminUserId: 1 }), true);
 });
 
-test('manager roles keep their primary permissions and receive TOP only through the additive flag', () => {
+test('manager roles keep operational permissions while dashboard viewing uses explicit grants', () => {
   for (const role of ['manager', 'support_manager'] as const) {
     assert.equal(isOperationalEmployeeSessionRole(role), true);
     assert.equal(isAdminManagementSession({ role, managerId: 17 }), false);
@@ -137,8 +137,9 @@ test('manager roles keep their primary permissions and receive TOP only through 
     );
     assert.equal(
       isTopDashboardSession({ role, managerId: 17, canAccessTopDashboard: true }),
-      true,
+      false,
     );
+    assert.equal(isTopDashboardSession({role,managerId:17,sessionId:'persisted',dashboardAccess:['top:7']}),true);
     assert.equal(
       isTopDashboardSession({ role, managerId: 17, canManageTopDashboard: true }),
       true,
@@ -284,7 +285,7 @@ test('active TOP dashboard versions have a dedicated deletion conflict', () => {
 });
 
 test('admin users screen exposes separate single-role TOP and Admin TOP tabs', () => {
-  assert.deepEqual(USER_TABS.map((tab) => tab.value), ['admin', 'top', 'admintop', 'purchaser']);
+  assert.deepEqual(USER_TABS.map((tab) => tab.value), ['admin', 'top', 'admintop', 'purchaser','manager','support_manager']);
   assert.equal(tabForRole('purchaser'), 'purchaser');
   assert.equal(defaultRoleForTab('purchaser'), 'purchaser');
   assert.deepEqual(roleOptionsForTab('purchaser'), [{ value: 'purchaser', label: 'Закупщик — просмотр' }]);
@@ -323,7 +324,7 @@ test('TOP users expose a separate Admin TOP capability without changing their pr
 
   assert.match(viewSource, /canManageTopDashboard/);
   assert.match(viewSource, /Админ TOP/);
-  assert.match(repositorySource, /role === 'top' && value === true/);
+  assert.match(repositorySource, /role === 'top' \|\| role === 'manager' \|\| role === 'support_manager'/);
   assert.match(sessionRepositorySource, /au\.can_manage_top_dashboard/);
   assert.match(panelSource, /data\.canManageTopDashboard/);
   assert.match(updateRouteSource, /result\.permissionsChanged/);
@@ -781,7 +782,7 @@ test('dashboard adapter turns a legacy writable noopener popup into one Blob nav
     parent: { postMessage: () => undefined },
     addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
   } as unknown as Window;
-  const fakeDocument = { readyState: 'complete' } as unknown as Document;
+  const fakeDocument = { readyState: 'complete', addEventListener() {} } as unknown as Document;
   const fakeUrl = {
     createObjectURL: (blob: Blob) => {
       createdBlobs.push(blob);
@@ -861,7 +862,7 @@ test('dashboard adapter relays detached Blob-anchor downloads instead of navigat
     parent: { postMessage: (message: unknown) => postedMessages.push(message) },
     addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
   } as unknown as Window;
-  const fakeDocument = { readyState: 'complete' } as unknown as Document;
+  const fakeDocument = { readyState: 'complete', addEventListener() {} } as unknown as Document;
   let urlSequence = 0;
   const fakeUrl = {
     createObjectURL: (blob: Blob) => {

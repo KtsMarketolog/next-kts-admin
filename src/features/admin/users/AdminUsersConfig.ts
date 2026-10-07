@@ -43,10 +43,12 @@ export const USER_TABS: Array<{ value: UserTab; label: string }> = [
   { value: 'top', label: 'TOP' },
   { value: 'admintop', label: 'Админ TOP' },
   { value: 'purchaser', label: 'Закупщик' },
+  { value: 'manager', label: 'МР' },
+  { value: 'support_manager', label: 'МС' },
 ];
 
 export function isUserTab(value: string | null): value is UserTab {
-  return value === 'admin' || value === 'top' || value === 'admintop' || value === 'purchaser';
+  return value === 'admin' || value === 'top' || value === 'admintop' || value === 'purchaser' || value === 'manager' || value === 'support_manager';
 }
 
 export function tabForRole(role: AccessUserRole): UserTab {

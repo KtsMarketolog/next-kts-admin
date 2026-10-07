@@ -1,6 +1,10 @@
 /** Run only through scripts/test-top-dashboard-postgres.sh (private local Unix socket). */
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { Readable } from 'node:stream';
 import test from 'node:test';
 
 import { query, withTransaction } from '../src/shared/lib/db/client';
@@ -16,10 +20,23 @@ import {
   deleteTopDashboardBlockVersion,
   getActiveTopDashboardBlockDataContent,
   getTopDashboardBlockOverview,
+  getTopDashboardBlocks,
+  getPublishedTopDashboardBlockOverview,
   pruneTopDashboardBlockHistory,
   TopDashboardDraftLimitError,
   TopDashboardDataStorageLimitError,
 } from '../src/shared/lib/db/topDashboardBlocksRepo';
+import { getDashboardReportDates } from '../src/shared/lib/db/dashboardReportDatesRepo';
+import { getDashboardPairConfig, saveDashboardPairConfig } from '../src/shared/lib/db/dashboardPairRepo';
+import { createAccessUser } from '../src/shared/lib/db/adminUsersRepo';
+import { createStoredAdminSession, getStoredAdminSession, revokeStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
+import {
+  activateSupportSharedDashboardHtml, createSupportSharedDashboardHtml, getSupportSharedDashboardHtml,
+  getSupportSharedDashboardJsonSnapshot, getSupportSharedDashboardOverview, getSupportSharedDashboardSnapshot,
+  importSupportSharedDashboardJson, importSupportSharedDashboardSnapshot,
+} from '../src/shared/lib/db/supportSharedDashboardRepo';
+import { getManagerEmailHash, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
+import { writeTopDashboardRequestToPendingFile } from '../src/shared/lib/topDashboardDataStorage';
 import { TOP_DASHBOARD_DATA_STORED_MAX_BYTES } from '../src/shared/lib/topDashboardLimits';
 import {
   TopDashboardBlockDataStateConflictError,
@@ -117,6 +134,117 @@ test('TOP retention isolated PostgreSQL acceptance', async (t) => {
     assert.equal((await query(`select to_regclass('public.top_dashboard_blocks')::text as present`)).rows[0].present, null);
     await ensureSiteSchema();
     assert.equal((await query(`select count(*)::int as count from top_dashboard_block_data_context_state`)).rows[0].count, 0);
+
+    await t.test('fixed dashboard pair persists its selection and rejects stale administrator revisions', async () => {
+      assert.equal(await getDashboardPairConfig(), null);
+      const input = {keys: ['currency-rates', 'route-planner'] as [string, string], layout: 'columns' as const, revision: 0};
+      const first = await saveDashboardPairConfig(input);
+      assert.deepEqual(first, {...input, revision: 1});
+      assert.deepEqual(await getDashboardPairConfig(), first);
+      assert.equal(await saveDashboardPairConfig({...input, layout: 'rows'}), null);
+      const second = await saveDashboardPairConfig({...input, layout: 'rows', revision: 1});
+      assert.deepEqual(second, {...input, layout: 'rows', revision: 2});
+      assert.deepEqual(await getDashboardPairConfig(), second);
+    });
+
+    await t.test('dashboard dates preserve explicit snapshot metadata and ignore block renames', async () => {
+      const item = await block();
+      const version = await html(item.id, 'date-metadata', 'native');
+      await publish(item.id, version, null, 'native');
+      const uploaded = await createAndActivateTopDashboardBlockDataVersion({
+        ...dataInput(item.id, version, null, 'date-metadata-data', 'native'), dataAsOf: '2026-09-30',
+      });
+      assert.equal(uploaded.version.dataAsOf, '2026-09-30');
+      const before = await getPublishedTopDashboardBlockOverview(item.id);
+      assert.ok(before?.dataUploadedAt);
+      assert.equal(before.dataAsOf, '2026-09-30');
+      assert.ok(before.htmlPublishedAt);
+      await query(`update top_dashboard_blocks set title='Renamed date fixture', updated_at=now()+interval '1 day' where id=$1`, [item.id]);
+      const after = await getPublishedTopDashboardBlockOverview(item.id);
+      assert.equal(after?.dataUploadedAt, before.dataUploadedAt);
+      assert.equal(after?.updatedAt, before.updatedAt);
+      assert.equal((await getTopDashboardBlocks()).find((row) => row.id === item.id)?.dataAsOf, '2026-09-30');
+      assert.equal((await getTopDashboardBlockOverview(item.id)).data.versions[0].dataAsOf, '2026-09-30');
+      const special = await getDashboardReportDates({ role: 'admin', sessionId: 'synthetic-metadata-session' });
+      assert.equal(special.length, 4);
+      assert.ok(special.every((row) => row.dataUploadedAt === null && row.dataAsOf === null));
+      assert.deepEqual(await getDashboardReportDates({ role: 'purchaser', adminUserId: 999, sessionId: 'synthetic-no-grants', dashboardAccess: [] }), []);
+      await deleteTopDashboardBlock(item.id);
+    });
+
+    await t.test('published route-planner admin reads bind current JSON, reject drafts, and recheck role or session revocation', async () => {
+      const directory = await mkdtemp(path.join(tmpdir(), 'kts-shared-admin-read-'));
+      const previousDirectory = process.env.TOP_DASHBOARD_DATA_DIR;
+      process.env.TOP_DASHBOARD_DATA_DIR = directory;
+      try {
+        const htmlContent = '<html><body><input id="snapIn"><script>function loadSnapshot(j){S.orders=revive(j.orders)} function handleFiles(list){} window.UI={};const example={app:"компоновщик"};</script></body></html>';
+        const createHtml = (originalName: string) => createSupportSharedDashboardHtml({originalName, htmlContent,
+          fileSize: Buffer.byteLength(htmlContent), sha256: hash(htmlContent), actorId: 'admin:integration-test'});
+        const published = await createHtml('published.html');
+        const draft = await createHtml('draft.html');
+        await activateSupportSharedDashboardHtml({versionId: published.id, expectedActiveVersionId: null, actorId: 'admin:integration-test'});
+        const content = JSON.stringify({snapshot: true, app: 'компоновщик', orders: [], savedAt: '2026-10-07T05:30:00Z'});
+        const pending = await writeTopDashboardRequestToPendingFile(new Request('https://example.test/synthetic', {method: 'POST', body: content}), 1024);
+        const imported = await importSupportSharedDashboardJson({htmlVersionId: published.id, expectedActiveSnapshotId: null,
+          originalName: 'synthetic.json', savedAt: '2026-10-07T05:30:00Z', fileSize: pending.fileSize,
+          sha256: pending.sha256, storagePath: await pending.commit(), actorId: 'admin:integration-test'});
+        pending.preserve();
+        const email = 'shared@example.test';
+        const bytes = Buffer.from(JSON.stringify({fmt: 'kts-personal', v: 1, gz: true,
+          kdf: {name: 'PBKDF2', hash: 'SHA-256', iter: 200000, salt: Buffer.alloc(16).toString('base64')},
+          iv: Buffer.alloc(12).toString('base64'), ct: Buffer.alloc(16, 1).toString('base64'), emailHash: getManagerEmailHash(email),
+          name: 'Synthetic shared report', role: 'Support', issued: personalDashboardToday(), expires: '2099-12-31'}));
+        await importSupportSharedDashboardSnapshot({filename: 'synthetic.ktsp', bytes, email,
+          actorId: 'admin:integration-test', expectedActiveSnapshotId: null});
+        for (const role of ['admin', 'admintop'] as const) {
+          const user = await createAccessUser({name: `Synthetic ${role}`, login: `shared-${randomUUID()}`, email: '', role,
+            passwordHash: 'synthetic-test-hash-not-a-credential', isActive: true, canManageTopDashboard: false});
+          const viewer = {adminUserId: user.numericId};
+          const session = await createStoredAdminSession({role, adminUserId: user.numericId});
+          assert.ok(await getStoredAdminSession(session.token));
+          assert.equal((await getSupportSharedDashboardHtml(published.id, false, viewer))?.id, published.id);
+          assert.equal(await getSupportSharedDashboardHtml(draft.id, false, viewer), null);
+          const overview = await getSupportSharedDashboardOverview(viewer);
+          assert.deepEqual(overview.htmlVersions.map(({id}) => id), [published.id]);
+          assert.equal(overview.jsonSnapshot?.id, imported.snapshot.id);
+          const json = await getSupportSharedDashboardJsonSnapshot(viewer, published.id, imported.snapshot.id);
+          assert.ok(json);
+          assert.equal(await new Response(Readable.toWeb(json.stream) as ReadableStream<Uint8Array>).text(), content);
+          assert.deepEqual((await getSupportSharedDashboardSnapshot(viewer))?.bytes, bytes);
+          await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(viewer, draft.id), {code: 'STATE_CONFLICT'});
+          await query('update admin_users set is_active=false where id=$1', [user.numericId]);
+          await assert.rejects(() => getSupportSharedDashboardOverview(viewer), {code: 'NOT_FOUND'});
+          assert.equal(await getStoredAdminSession(session.token), null);
+          await query("update admin_users set is_active=true,role='top' where id=$1", [user.numericId]);
+          await assert.rejects(() => getSupportSharedDashboardJsonSnapshot(viewer, published.id), {code: 'NOT_FOUND'});
+          assert.equal(await getStoredAdminSession(session.token), null);
+        }
+        const breakglass = await createStoredAdminSession({role: 'admin'});
+        const breakglassViewer = {adminSessionId: breakglass.sessionId};
+        assert.equal((await getSupportSharedDashboardHtml(published.id, false, breakglassViewer))?.id, published.id);
+        await revokeStoredAdminSession(breakglass.token);
+        assert.equal(await getStoredAdminSession(breakglass.token), null);
+        await assert.rejects(() => getSupportSharedDashboardSnapshot(breakglassViewer), {code: 'NOT_FOUND'});
+        const legacyManager = await createAccessUser({name: 'Synthetic legacy manager', login: `legacy-shared-${randomUUID()}`,
+          email: '', role: 'manager', passwordHash: 'synthetic-test-hash-not-a-credential', isActive: true,
+          canManageTopDashboard: false, dashboardAccess: ['route-planner']});
+        await query("update wholesale_managers set role='' where id=$1", [legacyManager.numericId]);
+        const legacySession = await createStoredAdminSession({role: 'manager', managerId: legacyManager.numericId});
+        assert.equal((await getStoredAdminSession(legacySession.token))?.role, 'manager');
+        assert.equal((await getSupportSharedDashboardHtml(published.id, false, legacyManager.numericId))?.id, published.id);
+        assert.equal((await getSupportSharedDashboardOverview(legacyManager.numericId)).jsonSnapshot?.id, imported.snapshot.id);
+        const legacyJson = await getSupportSharedDashboardJsonSnapshot(legacyManager.numericId, published.id);
+        assert.ok(legacyJson);
+        assert.equal(await new Response(Readable.toWeb(legacyJson.stream) as ReadableStream<Uint8Array>).text(), content);
+        assert.deepEqual((await getSupportSharedDashboardSnapshot(legacyManager.numericId))?.bytes, bytes);
+        await query("delete from dashboard_view_grants where manager_id=$1 and key='route-planner'", [legacyManager.numericId]);
+        await assert.rejects(() => getSupportSharedDashboardOverview(legacyManager.numericId), {code: 'NOT_FOUND'});
+      } finally {
+        if (previousDirectory === undefined) delete process.env.TOP_DASHBOARD_DATA_DIR;
+        else process.env.TOP_DASHBOARD_DATA_DIR = previousDirectory;
+        await rm(directory, {recursive: true, force: true});
+      }
+    });
 
     await t.test('context migration is additive and preserves legacy history and unrelated prices', async () => {
       await withTransaction(async (client) => {

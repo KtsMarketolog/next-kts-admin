@@ -25,6 +25,8 @@ export type SecurityEventType =
   | 'top_dashboard_block_deleted'
   | 'top_dashboard_data_uploaded'
   | 'top_dashboard_data_rolled_back'
+  | 'dashboard_pair_configured'
+  | 'dashboard_access_updated'
   | 'currency_dashboard_saved'
   | 'currency_dashboard_rolled_back'
   | 'manager_created'

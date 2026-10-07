@@ -1,7 +1,8 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireAdminSession } from '@/shared/lib/adminAuth';
-import { createAccessUser, getAccessUsers, getTopDashboardBlocks, type AccessUserRole } from '@/shared/lib/db';
-import { PURCHASER_DASHBOARD_REPORT_OPTIONS, parseDashboardAccess } from '@/shared/lib/dashboardAccess';
+import { createAccessUser, getAccessUsers, type AccessUserRole } from '@/shared/lib/db';
+import { parseDashboardAccess } from '@/shared/lib/dashboardAccess';
+import { getDashboardGrantOptions } from '@/shared/lib/db/dashboardAccessRepo';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
@@ -28,14 +29,10 @@ export async function GET() {
   const { denied, session } = await requireAdminSession();
   if (denied) return denied;
 
-  const [users, blocks] = await Promise.all([
+  const [users, dashboardOptions] = await Promise.all([
     getAccessUsers(session.adminUserId ?? null),
-    getTopDashboardBlocks(),
+    getDashboardGrantOptions(),
   ]);
-  const dashboardOptions = [
-    ...PURCHASER_DASHBOARD_REPORT_OPTIONS,
-    ...blocks.map((block) => ({ key: `top:${block.id}`, title: block.title })),
-  ];
   return Response.json({ users, dashboardOptions }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 

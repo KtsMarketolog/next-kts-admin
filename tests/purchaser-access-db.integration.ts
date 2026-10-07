@@ -5,6 +5,10 @@ import test from 'node:test';
 
 import { isOperationalEmployeeSessionRole, isTopDashboardManagementSession, isTopDashboardSession } from '../src/shared/lib/adminAuth';
 import { query } from '../src/shared/lib/db/client';
+import { withTransaction } from '../src/shared/lib/db/client';
+import { applyDashboardAccessMigration } from '../src/shared/lib/db/dashboardAccessMigration';
+import { getDashboardAudience,setDashboardAudience } from '../src/shared/lib/db/dashboardAccessRepo';
+import { canViewDashboard } from '../src/shared/lib/dashboardAccess';
 import { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
 import { createStoredAdminSession, getStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
 import { createTopDashboardBlock } from '../src/shared/lib/db/topDashboardBlocksRepo';
@@ -78,14 +82,15 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
       await assert.rejects(createAccessUser({ ...input(), dashboardAccess: ['*'] }), /Некорректный/);
     });
 
-    await t.test('personal MR/MS grants are rejected by user writes and the database constraint', async () => {
+    await t.test('personal MR/MS keys never authorize a purchaser, even if explicitly supplied', async () => {
       const values = input();
       const user = await createAccessUser({ ...values, dashboardAccess: ['route-planner'] });
       for (const key of ['manager:development', 'manager:support']) {
         const createValues = input();
-        await assert.rejects(createAccessUser({ ...createValues, dashboardAccess: [key] }), /Некорректный/);
-        assert.equal(await getAdminUserByLogin(createValues.login), null);
-        await assert.rejects(updateAccessUser(user.id, { ...values, name: 'Must not commit', dashboardAccess: [key] }), /Некорректный/);
+        const created=await createAccessUser({ ...createValues,dashboardAccess:[key] });
+        assert.deepEqual(created.dashboardAccess,[]);
+        const updated=await updateAccessUser(user.id,{...values,dashboardAccess:['route-planner',key]});
+        assert.deepEqual(updated.user.dashboardAccess,['route-planner']);
         await assert.rejects(query('insert into admin_user_dashboard_access(user_id,key) values($1,$2)', [user.numericId, key]), { code: '23514' });
       }
       const unchanged = (await getAccessUsers()).find((item) => item.id === user.id)!;
@@ -93,7 +98,7 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
       assert.deepEqual(unchanged.dashboardAccess, ['route-planner']);
     });
 
-    await t.test('leaving purchaser clears grants and returning without explicit grants starts empty', async () => {
+    await t.test('changing business role preserves independent explicit view grants', async () => {
       const values = input();
       const user = await createAccessUser({ ...values, dashboardAccess: ['route-planner'] });
       const stored = await createStoredAdminSession({ role: 'purchaser', adminUserId: user.numericId });
@@ -101,7 +106,7 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
       assert.equal(await getStoredAdminSession(stored.token), null);
       assert.equal((await query('select count(*)::int as count from admin_user_dashboard_access where user_id=$1', [user.numericId])).rows[0].count, 0);
       const returned = await updateAccessUser(user.id, { ...values, passwordHash: undefined });
-      assert.deepEqual(returned.user.dashboardAccess, []);
+      assert.deepEqual(returned.user.dashboardAccess, ['route-planner']);
       assert.equal(returned.user.canManageTopDashboard, false);
     });
 
@@ -164,9 +169,59 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
       await deniedReads();
       await updateAccessUser(user.id, { ...values, passwordHash: undefined, dashboardAccess: ['route-planner'], isActive: false });
       await deniedReads();
-      // A stale grant must not authorize a different role even if it remains in storage.
+      // Grants are independent of operational roles; the old login session was revoked separately.
       await query("update admin_users set role='top',is_active=true where id=$1", [user.numericId]);
-      await deniedReads();
+      assert.equal((await getSupportSharedDashboardOverview(viewer)).activeHtmlVersionId,published.id);
+    });
+
+    await t.test('both editors share grants, detect stale writes, and do not grant future users or reports',async()=>{
+      const report=await block();const key=`top:${report.id}`;
+      const values={...input(),role:'manager' as const,canManageTopDashboard:false};
+      const manager=await createAccessUser({...values,dashboardAccess:['manager:development','currency-rates']});
+      const stored=await createStoredAdminSession({role:'manager',managerId:manager.numericId});
+      const oldUser=(await getAccessUsers()).find((user)=>user.id===manager.id)!;
+      assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),key),false);
+      const audience=await getDashboardAudience(key);
+      const updated=await setDashboardAudience(key,[manager.id],audience.version);
+      assert.equal(updated.users.find((user)=>user.id===manager.id)?.checked,true);
+      const latest=(await getAccessUsers()).find((user)=>user.id===manager.id)!;
+      assert.ok(latest.dashboardAccess.includes(key));
+      assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),key),true);
+      assert.equal(isTopDashboardManagementSession(await getStoredAdminSession(stored.token)),false);
+      await assert.rejects(updateAccessUser(manager.id,{...values,passwordHash:undefined,dashboardAccess:[],dashboardAccessVersion:oldUser.dashboardAccessVersion}),/другом окне/);
+      const removed=await updateAccessUser(manager.id,{...values,passwordHash:undefined,dashboardAccess:['manager:development'],dashboardAccessVersion:latest.dashboardAccessVersion});
+      assert.equal(removed.user.role,'manager');assert.equal(removed.user.numericId,manager.numericId);
+      assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),key),false);
+      assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),'manager:development'),true);
+      assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),'manager:support'),false);
+      assert.equal((await getDashboardAudience(key)).users.find((user)=>user.id===manager.id)?.checked,false);
+      await assert.rejects(setDashboardAudience(key,[manager.id],updated.version),/изменены/);
+      const future=await createAccessUser({...input(),role:'top',canManageTopDashboard:false});
+      assert.equal((await getDashboardAudience(key)).users.find((user)=>user.id===future.id)?.checked,false);
+      const newer=await block();assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),`top:${newer.id}`),false);
+    });
+
+    await t.test('migration preserves every legacy effective view without changing operational records',async()=>{
+      await withTransaction(async(client)=>{
+        await client.query('create schema synthetic_acl_backfill');
+        await client.query('set local search_path=synthetic_acl_backfill');
+        await client.query(`create table admin_users(id bigint primary key,role text);create table wholesale_managers(id bigint primary key,role text,can_access_top_dashboard boolean,can_manage_top_dashboard boolean);
+          create table top_dashboard_blocks(id bigint primary key);create table admin_user_dashboard_access(user_id bigint,key text);
+          insert into admin_users values(1,'admin'),(2,'admintop'),(3,'top'),(4,'purchaser'),(5,'wholesale_admin');
+          insert into wholesale_managers values(11,'manager',false,false),(12,'support_manager',true,false),(13,'manager',false,true);
+          insert into top_dashboard_blocks values(7),(8);insert into admin_user_dashboard_access values(4,'top:7'),(4,'route-planner');`);
+        await applyDashboardAccessMigration(client);
+        const grants=(await client.query('select admin_user_id,manager_id,key from dashboard_view_grants')).rows;
+        const keys=(source:'admin_user_id'|'manager_id',id:number)=>grants.filter((row)=>Number(row[source])===id).map((row)=>row.key).sort();
+        assert.deepEqual(keys('admin_user_id',3),['currency-rates','top:7','top:8']);
+        assert.deepEqual(keys('admin_user_id',4),['route-planner','top:7']);
+        assert.deepEqual(keys('admin_user_id',5),[]);
+        assert.deepEqual(keys('manager_id',11),['currency-rates','manager:development']);
+        assert.deepEqual(keys('manager_id',12),['currency-rates','manager:support','route-planner','top:7','top:8']);
+        assert.deepEqual(keys('manager_id',13),['currency-rates','manager:development','top:7','top:8']);
+        assert.deepEqual((await client.query('select role,can_access_top_dashboard,can_manage_top_dashboard from wholesale_managers where id=12')).rows[0],{role:'support_manager',can_access_top_dashboard:true,can_manage_top_dashboard:false});
+        await client.query('set local search_path=public');await client.query('drop schema synthetic_acl_backfill cascade');
+      });
     });
   } finally {
     await globalThis.__ktsPgPool?.end();

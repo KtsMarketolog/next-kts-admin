@@ -42,7 +42,7 @@ test('administrator cards select MR/MS while the legacy URL retains the combined
     const render = page({ role, adminUserId: 3, sessionId: 'synthetic-admin-session' });
     for (const audience of ['development', 'support', undefined] as const) {
       const result = await render({ searchParams: Promise.resolve({ audience }) });
-      assert.deepEqual(result.props, { mode: 'manage', audience: audience ?? null });
+      assert.deepEqual(result.props, { mode: 'manage', audience: audience ?? null,canAssignAccess:role==='admin' });
     }
     for (const audience of ['', 'invalid', ['support', 'development']]) {
       await assert.rejects(render({ searchParams: Promise.resolve({ audience }) }),
@@ -56,10 +56,10 @@ test('a manager sees only the role-derived audience, including direct and mislea
     ['manager', 'development', 'support'],
     ['support_manager', 'support', 'development'],
   ] as const) {
-    const render = page({ role, managerId: 17, sessionId: 'synthetic-manager-session' });
+    const render = page({ role, managerId: 17, sessionId: 'synthetic-manager-session',dashboardAccess:[`manager:${audience}`] });
     for (const requested of [undefined, audience]) {
       const result = await render({ searchParams: Promise.resolve({ audience: requested }) });
-      assert.deepEqual(result.props, { mode: 'view', audience });
+      assert.deepEqual(result.props, { mode: 'view', audience,canAssignAccess:false });
     }
     for (const requested of [other, 'invalid', '', [audience, other]]) {
       await assert.rejects(render({ searchParams: Promise.resolve({ audience: requested }) }),
@@ -74,6 +74,7 @@ test('query parameters never grant dashboard access to missing or unauthorized s
     { role: 'admin' },
     { role: 'admintop', sessionId: 'synthetic' },
     { role: 'manager', sessionId: 'synthetic' },
+    { role: 'manager', managerId:17, sessionId: 'synthetic', dashboardAccess:[] },
     { role: 'support_manager', managerId: 0, sessionId: 'synthetic' },
     { role: 'wholesale_admin', adminUserId: 3, sessionId: 'synthetic' },
     { role: 'top', adminUserId: 3, sessionId: 'synthetic' },

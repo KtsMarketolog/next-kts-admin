@@ -46,14 +46,6 @@ type ManagerTopPermissions = {
   canManageTopDashboard: boolean;
 };
 
-function updateTopViewing<T extends ManagerTopPermissions>(value: T, enabled: boolean): T {
-  return {
-    ...value,
-    canAccessTopDashboard: enabled,
-    canManageTopDashboard: enabled ? value.canManageTopDashboard : false,
-  };
-}
-
 function updateTopManagement<T extends ManagerTopPermissions>(value: T, enabled: boolean): T {
   return {
     ...value,
@@ -143,14 +135,7 @@ export function WholesaleManagerManagement({
               <input type="checkbox" checked={managerDraft.isActive} onChange={(event) => setManagerDraft({ ...managerDraft, isActive: event.target.checked })} />
               Активен
             </label>
-            <label className={styles.userActiveToggle}>
-              <input
-                type="checkbox"
-                checked={managerDraft.canAccessTopDashboard}
-                onChange={(event) => setManagerDraft((current) => updateTopViewing(current, event.target.checked))}
-              />
-              Просмотр TOP
-            </label>
+            <span className={styles.passwordPolicyHint}>Просмотр отчётов администратор назначает галочками в разделе «Пользователи и доступы».</span>
             <label className={styles.userActiveToggle}>
               <input
                 type="checkbox"
@@ -249,14 +234,7 @@ export function WholesaleManagerManagement({
                     <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
                     <span>Активен</span>
                   </label>
-                  <label className={styles.managerActive}>
-                    <input
-                      type="checkbox"
-                      checked={manager.canAccessTopDashboard}
-                      onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? updateTopViewing(item, event.target.checked) : item))}
-                    />
-                    <span>Просмотр TOP</span>
-                  </label>
+                  <span className={styles.passwordPolicyHint}>Просмотр отчётов: галочки в разделе «Пользователи и доступы».</span>
                   <label className={styles.managerActive}>
                     <input
                       type="checkbox"
@@ -386,14 +364,7 @@ export function WholesaleManagerManagement({
                         <input type="checkbox" checked={manager.isActive} onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? { ...item, isActive: event.target.checked } : item))} />
                         Активен
                       </label>
-                      <label className={styles.userActiveToggle}>
-                        <input
-                          type="checkbox"
-                          checked={manager.canAccessTopDashboard}
-                          onChange={(event) => setManagers((current) => current.map((item) => item.id === manager.id ? updateTopViewing(item, event.target.checked) : item))}
-                        />
-                        Просмотр TOP
-                      </label>
+                      <span className={styles.passwordPolicyHint}>Просмотр отчётов: галочки в разделе «Пользователи и доступы».</span>
                       <label className={styles.userActiveToggle}>
                         <input
                           type="checkbox"

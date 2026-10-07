@@ -13,6 +13,8 @@ import * as audiences from '../src/shared/lib/managerDashboardAudience';
 import { isManagerRole } from '../src/app/admin/adminPanelConfig';
 import { getReportEntries } from '../src/shared/lib/dashboardAccess';
 import * as sharedJsonUpload from '../src/features/admin/manager-dashboard/sharedJsonUpload';
+import * as dashboardDates from '../src/shared/lib/dashboardDates';
+import { DashboardDataDates } from '../src/features/admin/top-dashboard/DashboardDataDates';
 
 import type { ManagerDashboardOverview, ManagerDashboardSnapshot } from '../src/features/admin/manager-dashboard/types';
 
@@ -44,6 +46,25 @@ function render(overview: View) {
 function renderShared(shared: Manage['supportShared']) {
   return renderToStaticMarkup(createElement(RoutePlannerViewer, { shared, loading: false, onReload: async () => true }));
 }
+
+test('route-planner management opens its published report with current JSON before uploads and history', () => {
+  const shared = sharedJsonOverview();
+  const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, {
+    section: 'shared', overview: { mode: 'manage', supportShared: shared }, busy: false,
+    mutate: async () => null,
+  }));
+  const frame = html.match(/<iframe[^>]+src="([^"]+)"/);
+  assert.ok(frame);
+  const url = new URL(frame[1].replaceAll('&amp;', '&'), 'https://example.test');
+  assert.equal(url.searchParams.get('version'), String(shared.activeHtmlVersionId));
+  assert.equal(url.searchParams.get('snapshot'), String(shared.jsonSnapshot?.id));
+  assert.equal(url.searchParams.has('preview'), false, 'working report is not a draft preview');
+  assert.ok(html.indexOf('<iframe') < html.indexOf('id="manager-dashboard-shared-html"'));
+  assert.ok(html.indexOf('id="manager-dashboard-shared-html"') < html.indexOf('id="manager-dashboard-html-history"'));
+  assert.match(html, /Данные загружены:/);
+  assert.match(html, /Данные на:/);
+  assert.match(html, /Техническая информация HTML/);
+});
 
 function frameUrl(html: string) {
   const match = html.match(/<iframe[^>]+src="([^"]+)"/);
@@ -160,6 +181,7 @@ function text(node: unknown): string {
 // refs. No browser, server, application auth, real payload or mutation is used.
 function management(options: {
   overview?: Manage; busy?: boolean;
+  canAssignAccess?: boolean;
   section?: 'personal' | 'shared';
   audience?: audiences.PersonalDashboardAudience;
   confirm?: () => boolean;
@@ -188,6 +210,9 @@ function management(options: {
     './ManagerDashboardParts': parts, '@/shared/lib/managerDashboardAudience': audiences,
     './ManagerDashboardImportJournal': { ManagerDashboardImportJournal },
     './sharedJsonUpload': sharedJsonUpload,
+    './ManagerDashboardViewer': { RoutePlannerViewer },
+    '@/shared/lib/dashboardDates': dashboardDates,
+    '@/features/admin/dashboard-access/DashboardAudienceEditor': { DashboardAudienceEditor() {} },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -200,7 +225,7 @@ function management(options: {
   let focusedInput = '';
   const render = () => {
     cursor = 0;
-    const tree = testModule.exports.ManagerDashboardManagement({ overview, section: options.section, audience: options.audience, busy: options.busy ?? false, mutate: async (path: string, init: RequestInit) => {
+    const tree = testModule.exports.ManagerDashboardManagement({ overview, section: options.section, audience: options.audience, canAssignAccess: options.canAssignAccess, busy: options.busy ?? false, mutate: async (path: string, init: RequestInit) => {
       requests.push({ path, init });
       return options.mutate ? options.mutate(path, init) : { results: overview.imports };
     } });
@@ -252,6 +277,35 @@ function management(options: {
 function sharedManagement(options: Parameters<typeof management>[0] = {}) {
   return management({ overview: { ...managementOverview(), supportShared: sharedOverview() }, ...options, section: 'shared' });
 }
+
+test('personal audience editors appear once per group next to HTML upload only for access administrators', () => {
+  for (const canAssignAccess of [false, true]) {
+    const view = management({canAssignAccess});
+    const all = elements(view.render());
+    assert.equal(all.filter((node) => typeof node.props.dashboardKey === 'string').length, canAssignAccess ? 2 : 0);
+    for (const audience of ['development', 'support'] as const) {
+      const panel = view.find('section', (props) => props.id === `manager-dashboard-html-panel-${audience}`);
+      const content = elements(panel).find((node) => node.props['data-dashboard-equal-row'] === 'html');
+      assert.ok(content);
+      assert.equal(elements(content).filter((node) => node.props.dashboardKey === `manager:${audience}`).length, canAssignAccess ? 1 : 0);
+      assert.equal(elements(panel).filter((node) => node.type === 'form').some((form) => elements(form).some((node) => node.props.dashboardKey)), false);
+    }
+  }
+  const single = management({canAssignAccess: true, audience: 'support'});
+  assert.deepEqual(elements(single.render()).filter((node) => node.props.dashboardKey).map((node) => node.props.dashboardKey), ['manager:support']);
+});
+
+test('shared audience editor is adjacent to HTML management while the published report stays first', () => {
+  const allowed = sharedManagement({canAssignAccess: true});
+  const tree = elements(allowed.render());
+  assert.equal(tree.filter((node) => node.props.dashboardKey === 'route-planner').length, 1);
+  const index = tree.findIndex((node) => node.props.dashboardKey === 'route-planner');
+  assert.ok(index > tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-html'));
+  assert.ok(index < tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-snapshot'));
+  assert.ok(tree.findIndex((node) => node.type === RoutePlannerViewer) < index);
+  assert.equal(tree.filter((node) => node.type === 'form').some((form) => elements(form).some((node) => node.props.dashboardKey)), false);
+  assert.equal(elements(sharedManagement().render()).some((node) => node.props.dashboardKey), false);
+});
 
 test('management shows both independently labelled groups together without tabs and keeps common controls below them', () => {
   const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview: managementOverview(), busy: false, mutate: async () => null }));
@@ -556,9 +610,10 @@ test('report navigation keeps personal audience guards and exposes the route pla
   assert.equal(isManagerRole('manager'), true);
   assert.equal(isManagerRole('support_manager'), true);
   assert.equal(isManagerRole('wholesale_admin'), false);
-  const identity = { managerId: 2, sessionId: 'synthetic-session' };
-  assert.deepEqual(getReportEntries({ ...identity, role: 'manager' }).map((entry) => entry.key), ['manager:development', 'currency-rates']);
-  assert.deepEqual(getReportEntries({ ...identity, role: 'support_manager' }).map((entry) => entry.key), ['manager:support', 'route-planner', 'currency-rates']);
+  const identity = { managerId: 2, sessionId: 'synthetic-session',dashboardAccess:['manager:development','manager:support','route-planner','currency-rates'] };
+  assert.deepEqual(getReportEntries({ ...identity, role: 'manager', dashboardAccess: ['manager:development', 'currency-rates'] }).map((entry) => entry.key), ['manager:development', 'currency-rates']);
+  assert.deepEqual(getReportEntries({ ...identity, role: 'support_manager', dashboardAccess: ['manager:support', 'route-planner', 'currency-rates'] }).map((entry) => entry.key), ['manager:support', 'route-planner', 'currency-rates']);
+  assert.deepEqual(getReportEntries({ ...identity, role: 'support_manager', dashboardAccess: [] }), [], 'a revoked grant removes the report despite an unchanged operational role');
   assert.deepEqual(getReportEntries({ ...identity, role: 'wholesale_admin' }), []);
   assert.deepEqual(getReportEntries({ role: 'support_manager', sessionId: 'synthetic-session' }), []);
   assert.deepEqual(getReportEntries({ role: 'support_manager', managerId: 2 }), []);
@@ -865,6 +920,8 @@ test('separate personal and shared viewers preserve independent history, reload 
   } };
   const modules: Record<string, unknown> = {
     react: hooks, 'react/jsx-runtime': jsx, './ManagerDashboard.module.scss': { default: {} }, './ManagerDashboardParts': parts,
+    '@/shared/lib/dashboardDates': dashboardDates,
+    '@/features/admin/top-dashboard/DashboardDataDates': { DashboardDataDates },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardViewer.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },

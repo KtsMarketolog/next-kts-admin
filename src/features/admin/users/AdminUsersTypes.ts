@@ -12,6 +12,7 @@ export type AccessUser = {
   isActive: boolean;
   canManageTopDashboard: boolean;
   dashboardAccess: string[];
+  dashboardAccessVersion?: string;
   accesses: string[];
   priceListCount: number;
   supportManagerId: number | null;

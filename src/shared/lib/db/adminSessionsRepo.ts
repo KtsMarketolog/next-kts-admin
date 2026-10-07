@@ -112,8 +112,10 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
        au.is_active as admin_is_active,
        au.role as admin_role,
        au.can_manage_top_dashboard as admin_can_manage_top_dashboard,
-       array(select access.key from admin_user_dashboard_access access
-             where access.user_id = au.id order by access.key) as dashboard_access,
+       array(select access.key from dashboard_view_grants access
+             where (s.role in ('manager','support_manager') and access.manager_id = wm.id)
+                or (s.role not in ('manager','support_manager') and access.admin_user_id = au.id)
+             order by access.key) as dashboard_access,
        wm.is_active as manager_is_active,
        coalesce(nullif(wm.role, ''), 'manager') as manager_role,
        wm.can_access_top_dashboard as manager_can_access_top_dashboard,
@@ -174,7 +176,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     role,
     adminUserId: row.admin_user_id ? Number(row.admin_user_id) : undefined,
     managerId: row.manager_id ? Number(row.manager_id) : undefined,
-    dashboardAccess: role === 'purchaser' ? parseDashboardAccess(row.dashboard_access) ?? [] : undefined,
+    dashboardAccess: parseDashboardAccess(row.dashboard_access) ?? [],
     canAccessTopDashboard: isStoredManagerRole(role)
       ? row.manager_can_access_top_dashboard === true || row.manager_can_manage_top_dashboard === true
       : undefined,

@@ -7,6 +7,9 @@ import {
 } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
 import { applyCurrencyDashboardMigration } from './currencyDashboardMigration';
+import { applyDashboardAccessMigration } from './dashboardAccessMigration';
+import { applyDashboardUsageMigration } from './dashboardUsageMigration';
+import { applyDashboardDatesMigration } from './dashboardDatesMigration';
 
 type SchemaMigration = {
   id: string;
@@ -835,6 +838,9 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
     description: 'Private currency dashboard snapshots and independent market history',
     apply: applyCurrencyDashboardMigration,
   },
+  {id: '202610080001_dashboard_access', description: 'Independent dashboard view grants preserving operational roles and existing access', apply: applyDashboardAccessMigration},
+  {id: '202610080002_dashboard_usage', description: 'Bounded dashboard usage events', apply: applyDashboardUsageMigration},
+  {id: '202610080003_dashboard_dates', description: 'Explicit dashboard data dates', apply: applyDashboardDatesMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

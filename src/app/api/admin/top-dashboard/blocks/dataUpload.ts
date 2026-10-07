@@ -18,6 +18,7 @@ import {
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
 } from '@/shared/lib/topDashboardLimits';
 import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
+import { createDashboardSnapshotDateInspector } from '@/shared/lib/dashboardSnapshotDate';
 
 import { parsePositiveId } from './routeUtils';
 import {
@@ -51,6 +52,7 @@ export type TopDashboardDataUpload = {
   sha256: string;
   snapshotFormat: TopDashboardSnapshotFormat;
   dashboardProfile: TopDashboardDataProfile | null;
+  dataAsOf: string | null;
 };
 
 type ParsedTopDashboardDataUpload = {
@@ -98,6 +100,7 @@ function parseExpectedActiveVersionId(
 type JsonInspection = {
   size: number;
   signature: SnapshotSignature;
+  dataAsOf: string | null;
 };
 
 type SnapshotField =
@@ -132,6 +135,7 @@ type JsonStreamInspector = {
   parser: JSONParser;
   decoder: TextDecoder;
   signature: SnapshotSignatureTracker;
+  dates: ReturnType<typeof createDashboardSnapshotDateInspector>;
 };
 
 const SNAPSHOT_SIGNATURE_KEYS = new Set([
@@ -319,17 +323,19 @@ function inspectSnapshotSignatureToken(
 
 function createJsonStreamInspector(): JsonStreamInspector {
   const signature = createSnapshotSignatureTracker();
+  const dates = createDashboardSnapshotDateInspector();
   const parser = new JSONParser({
     paths: [],
     keepStack: false,
     stringBufferSize: 64 * 1024,
     numberBufferSize: 64,
   });
-  parser.onToken = (token) => inspectSnapshotSignatureToken(signature, token);
+  parser.onToken = (token) => { inspectSnapshotSignatureToken(signature, token); dates.visit(token); };
 
   return {
     size: 0,
     parser,
+    dates,
     decoder: new TextDecoder('utf-8', { fatal: true }),
     signature,
   };
@@ -359,6 +365,7 @@ function finishJsonInspection(inspector: JsonStreamInspector): JsonInspection {
   if (!inspector.parser.isEnded) inspector.parser.end();
   return {
     size: inspector.size,
+    dataAsOf: inspector.dates.result(),
     signature: {
       rootObject: inspector.signature.rootObject,
       fields: inspector.signature.fields,
@@ -606,6 +613,7 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
         uncompressedSize: inspection.size,
         sha256: createHash('sha256').update(bytes).digest('hex'),
         snapshotFormat,
+        dataAsOf: inspection.dataAsOf,
         dashboardProfile,
       },
     },
@@ -686,6 +694,7 @@ export async function readTopDashboardDataStreamUpload(request: Request): Promis
         uncompressedSize: inspection.size,
         sha256: pending.sha256,
         snapshotFormat,
+        dataAsOf: inspection.dataAsOf,
         dashboardProfile,
       },
     },

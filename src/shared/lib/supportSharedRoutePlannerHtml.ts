@@ -1,4 +1,5 @@
 import { isPersonalDashboardHtml } from './managerDashboardHtml';
+import { dashboardUsageRelayScript } from './dashboardUsageBridge';
 import { buildTopDashboardContentSecurityPolicy, buildTopDashboardFrameSecurityPolicy, getTopDashboardDataAdapterScript } from './topDashboardContentSecurity';
 import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_MAX_BYTES, TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE, TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE } from './topDashboardDownloadBridge';
 
@@ -92,6 +93,7 @@ function routePlannerAdapterScript() {
         const json = JSON.parse(text); text = '';
         if (json.snapshot !== true || json.app !== 'компоновщик' || !Array.isArray(json.orders) || typeof load !== 'function') throw new Error('invalid');
         load(json);
+        if (window.__ktsDashboardUsage) window.__ktsDashboardUsage.record('data_loaded');
         send('installed');
       } catch { send('error'); }
     });
@@ -119,6 +121,7 @@ export function buildSupportSharedRoutePlannerFrame(input: {versionId: number; s
   const script = `(() => {
     'use strict';
     const frame = document.getElementById('report'), status = document.getElementById('status');
+    ${dashboardUsageRelayScript('frame')}
     const marker = '${MARKER}', hasSnapshot = ${!!input.snapshotId};
     let ready = false, sent = false, snapshot = null, printing = false;
     const controller = new AbortController();

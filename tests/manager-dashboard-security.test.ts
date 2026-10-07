@@ -31,8 +31,10 @@ test('personal dashboard requires a persisted session and explicit allowed emplo
   }
   assert.equal(personalDashboardMode({ role: 'admin', sessionId }), 'manage');
   assert.equal(personalDashboardMode({ role: 'admintop', sessionId, adminUserId: 1 }), 'manage');
-  assert.equal(personalDashboardMode({ role: 'manager', sessionId, managerId: 2 }), 'view');
-  assert.equal(personalDashboardMode({ role: 'support_manager', sessionId, managerId: 3 }), 'view');
+  assert.equal(personalDashboardMode({ role: 'manager', sessionId, managerId: 2,dashboardAccess:['manager:development'] }), 'view');
+  assert.equal(personalDashboardMode({ role: 'support_manager', sessionId, managerId: 3,dashboardAccess:['manager:support'] }), 'view');
+  assert.equal(personalDashboardMode({ role: 'manager', sessionId, managerId: 2,dashboardAccess:[] }), null);
+  assert.equal(personalDashboardMode({ role: 'support_manager', sessionId, managerId: 3,dashboardAccess:['manager:development'] }), null);
   for (const role of ['top', 'wholesale_admin'] as const) {
     assert.equal(personalDashboardMode({ role, sessionId, adminUserId: 1, managerId: 2, canAccessTopDashboard: true, canManageTopDashboard: true }), null);
   }
@@ -419,7 +421,7 @@ test('outer frame delivers once regardless of snapshot/iframe readiness order an
     let resolveFetch: (response: Response) => void = () => {};
     const responsePromise = new Promise<Response>((resolve) => { resolveFetch = resolve; });
     const context = createContext({
-      document: { getElementById: (id: string) => id === 'personal' ? { contentWindow } : status },
+      document: { getElementById: (id: string) => id === 'personal' ? { contentWindow, addEventListener() {} } : status },
       window: {
         location: { origin: 'https://example.test' },
         parent: { postMessage() {} },
@@ -456,7 +458,7 @@ test('HTML-only frames never request or deliver personal bytes, even with a snap
       const contentWindow = { postMessage: (value: Record<string, unknown>) => delivered.push(value) };
       const status = { hidden: false, textContent: '' };
       new Script(source).runInContext(createContext({
-        document: { getElementById: (id: string) => id === 'personal' ? { contentWindow } : status },
+        document: { getElementById: (id: string) => id === 'personal' ? { contentWindow, addEventListener() {} } : status },
         window: {
           location: { origin: 'https://example.test' }, parent: { postMessage() {} },
           addEventListener: (_type: string, callback: (event: Message) => void) => listeners.push(callback),
