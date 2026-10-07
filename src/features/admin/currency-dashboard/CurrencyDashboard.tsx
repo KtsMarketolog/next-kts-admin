@@ -78,7 +78,7 @@ export function CurrencyDashboard({ nonce, canManage }: { nonce: string; canMana
   return (
     <main className={styles.root} ref={container}>
       <div className={styles.toolbar}>
-        <div><h1>Курсы валют и медь</h1><p>Общие данные для Админа, Админ TOP и TOP · авторский дашборд V21{!canManage && ' · только просмотр'}</p></div>
+        <div><h1>Курсы валют и медь</h1><p>Общие данные для Админа, Админ TOP, TOP и менеджеров МР и МС · авторский дашборд V21{!canManage && ' · только просмотр'}</p></div>
         <nav aria-label="Навигация отчёта">
           <Link href="/admin/top">К списку отчётов</Link>
           <button type="button" onClick={fullScreen}>На весь экран</button>

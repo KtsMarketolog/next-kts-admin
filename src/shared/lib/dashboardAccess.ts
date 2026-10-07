@@ -12,7 +12,7 @@ export const DASHBOARD_REPORT_OPTIONS: DashboardAccessOption[] = [
   { key: 'manager:development', title: 'Дашборды МР', href: '/admin/manager-dashboard?audience=development', description: 'Личные отчёты менеджеров по развитию.' },
   { key: 'manager:support', title: 'Дашборды МС', href: '/admin/manager-dashboard?audience=support', description: 'Личные отчёты менеджеров по сопровождению.' },
   { key: 'route-planner', title: 'Компоновщик рейсов', href: '/admin/top/route-planner', description: 'Общий отчёт с опубликованным файлом данных.' },
-  { key: 'currency-rates', title: 'Курсы валют и медь', href: '/admin/top/currency-rates', description: 'Курсы ЦБ, биржевые котировки, прогнозы и сводка по месяцам. Для Админа, Админ TOP и TOP.' },
+  { key: 'currency-rates', title: 'Курсы валют и медь', href: '/admin/top/currency-rates', description: 'Курсы ЦБ, биржевые котировки, прогнозы и сводка по месяцам. Для Админа, Админ TOP, TOP и менеджеров МР и МС.' },
 ];
 
 // Personal MR/MS dashboards remain available to their existing roles only.

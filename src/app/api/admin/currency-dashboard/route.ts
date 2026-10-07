@@ -39,14 +39,17 @@ export async function POST(request: Request) {
     }
     const writesLimited = await enforceAdminActionRateLimit(session, 'currency-dashboard-save', 60);
     if (writesLimited) return writesLimited;
-    const actor = `${session.role}:${session.adminUserId ?? 'primary'}`;
+    const isManager = session.role === 'manager' || session.role === 'support_manager';
+    const actor = `${session.role}:${isManager ? session.managerId : session.adminUserId ?? 'primary'}`;
     const expectedRevision = params.expectedRevision as number;
     const state = method === 'snapshot:save'
       ? await writeCurrencySnapshot(params.snapshot, expectedRevision, actor)
       : await rollbackCurrencySnapshot(expectedRevision, actor);
     await recordSecurityEvent({
       eventType: method === 'snapshot:save' ? 'currency_dashboard_saved' : 'currency_dashboard_rolled_back',
-      actorType: session.role, adminUserId: session.adminUserId, sessionId: session.sessionId,
+      actorType: session.role === 'support_manager' ? 'manager' : session.role,
+      adminUserId: isManager ? undefined : session.adminUserId,
+      managerId: isManager ? session.managerId : undefined, sessionId: session.sessionId,
       entityType: 'currency_dashboard', entityId: state.revision,
       metadata: { revision: state.revision, previousRevision: expectedRevision },
     });

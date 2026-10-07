@@ -3,17 +3,20 @@ import type { AdminSession } from './adminAuth';
 /** This report is not an ordinary TOP block and cannot be granted to purchasers. */
 export function canAccessCurrencyDashboard(
   session: AdminSession | null | undefined,
-): session is AdminSession & { role: 'admin' | 'admintop' | 'top'; sessionId: string } {
+): session is AdminSession & { role: 'admin' | 'admintop' | 'top' | 'manager' | 'support_manager'; sessionId: string } {
   if (!session?.sessionId) return false;
   if (session.role === 'admin') return true;
+  if (session.role === 'manager' || session.role === 'support_manager') {
+    return Number.isSafeInteger(session.managerId) && Number(session.managerId) > 0;
+  }
   return (session.role === 'admintop' || session.role === 'top')
     && Number.isSafeInteger(session.adminUserId) && Number(session.adminUserId) > 0;
 }
 
-/** TOP keeps its existing report-management grant; viewing alone never grants writes. */
+/** TOP and managers keep their existing management grant; viewing alone never grants writes. */
 export function canManageCurrencyDashboard(session: AdminSession | null | undefined): boolean {
   return canAccessCurrencyDashboard(session)
-    && (session.role !== 'top' || session.canManageTopDashboard === true);
+    && (session.role === 'admin' || session.role === 'admintop' || session.canManageTopDashboard === true);
 }
 
 export const CURRENCY_PRIVATE_HEADERS = {

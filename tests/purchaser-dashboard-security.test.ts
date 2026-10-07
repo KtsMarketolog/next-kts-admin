@@ -41,8 +41,8 @@ test('purchaser helpers require a persisted identity and exact grants, never man
     assert.deepEqual(access.getReportEntries(purchaser([key])), []);
   }
   assert.deepEqual(access.PURCHASER_DASHBOARD_REPORT_OPTIONS.map(({ key }) => key), ['route-planner']);
-  assert.deepEqual(access.getReportEntries({ role: 'manager', managerId: 1, sessionId: 'manager' }).map(({ key }) => key), ['manager:development']);
-  assert.deepEqual(access.getReportEntries({ role: 'support_manager', managerId: 1, sessionId: 'support' }).map(({ key }) => key), ['manager:support', 'route-planner']);
+  assert.deepEqual(access.getReportEntries({ role: 'manager', managerId: 1, sessionId: 'manager' }).map(({ key }) => key), ['manager:development', 'currency-rates']);
+  assert.deepEqual(access.getReportEntries({ role: 'support_manager', managerId: 1, sessionId: 'support' }).map(({ key }) => key), ['manager:support', 'route-planner', 'currency-rates']);
   assert.deepEqual(access.getReportEntries(purchaser()), []);
   assert.equal(isTopDashboardManagementSession({ ...session, canManageTopDashboard: true }), false);
   for (const invalid of [{ ...session, sessionId: undefined }, { ...session, adminUserId: undefined },

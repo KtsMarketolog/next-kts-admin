@@ -557,8 +557,8 @@ test('report navigation keeps personal audience guards and exposes the route pla
   assert.equal(isManagerRole('support_manager'), true);
   assert.equal(isManagerRole('wholesale_admin'), false);
   const identity = { managerId: 2, sessionId: 'synthetic-session' };
-  assert.deepEqual(getReportEntries({ ...identity, role: 'manager' }).map((entry) => entry.key), ['manager:development']);
-  assert.deepEqual(getReportEntries({ ...identity, role: 'support_manager' }).map((entry) => entry.key), ['manager:support', 'route-planner']);
+  assert.deepEqual(getReportEntries({ ...identity, role: 'manager' }).map((entry) => entry.key), ['manager:development', 'currency-rates']);
+  assert.deepEqual(getReportEntries({ ...identity, role: 'support_manager' }).map((entry) => entry.key), ['manager:support', 'route-planner', 'currency-rates']);
   assert.deepEqual(getReportEntries({ ...identity, role: 'wholesale_admin' }), []);
   assert.deepEqual(getReportEntries({ role: 'support_manager', sessionId: 'synthetic-session' }), []);
   assert.deepEqual(getReportEntries({ role: 'support_manager', managerId: 2 }), []);

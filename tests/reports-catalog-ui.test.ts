@@ -50,7 +50,7 @@ test('reports catalog renders authorized static sections and does not fetch TOP 
     const entries = access.getReportEntries({role: 'support_manager', managerId: 4, sessionId: 'synthetic'});
     const tree = elements(AdminTopDashboardCatalog({canManage: false, canReadTopBlocks, reportEntries: entries, showStatus() {}}));
     assert.deepEqual(tree.filter((node) => node.type === Link).map((node) => node.props.href), [
-      '/admin/manager-dashboard?audience=support', '/admin/top/route-planner',
+      '/admin/manager-dashboard?audience=support', '/admin/top/route-planner', '/admin/top/currency-rates',
     ]);
     effects.forEach((effect) => effect());
     await Promise.resolve();
