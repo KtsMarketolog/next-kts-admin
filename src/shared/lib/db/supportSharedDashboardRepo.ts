@@ -17,6 +17,7 @@ import { deleteTopDashboardDataFiles } from '../topDashboardDataStorage';
 import { withTransaction } from './client';
 import { enqueueDashboardFilesForDeletion } from './dashboardFileCleanupRepo';
 import { ensureSiteSchema } from './schema';
+import { DASHBOARD_ACCESS_LOCK } from './dashboardAccessRepo';
 
 export type SupportSharedDashboardSnapshot = PersonalSnapshotMetadata & {
   id: number;
@@ -108,6 +109,8 @@ export type SharedDashboardViewer = number | { purchaserId: number } | { adminUs
 
 /** The principal comes only from a persisted session. Viewing authority is rechecked in the read transaction. */
 async function authorizeSupportViewer(client: PoolClient, viewer: SharedDashboardViewer) {
+  // Audience-policy writers hold the exclusive counterpart while changing grants.
+  await client.query('select pg_advisory_xact_lock_shared(hashtext($1))', [DASHBOARD_ACCESS_LOCK]);
   if (typeof viewer === 'object' && viewer !== null) {
     // The environment administrator has no admin_users row. Its persisted,
     // unrevoked session is the authority, not a caller-provided management flag.
@@ -125,16 +128,16 @@ async function authorizeSupportViewer(client: PoolClient, viewer: SharedDashboar
       `select au.role,au.is_active from admin_users au where au.id=$1 for share of au`, [userId]);
     if (!account.rows[0]?.is_active) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');
     if (['admin', 'admintop'].includes(account.rows[0].role)) return;
-    const grant = await client.query(`select a.key from dashboard_view_grants a
-      where a.admin_user_id=$1 and a.key='route-planner' for share of a`, [userId]);
+    const grant = await client.query(`select a.key from dashboard_effective_view_grants a
+      where a.admin_user_id=$1 and a.key='route-planner'`, [userId]);
     if (!grant.rows.length) throw new PersonalDashboardError('NOT_FOUND', 'Общий отчёт недоступен');
     return;
   }
   const managerId = viewer;
   positiveId(managerId);
   const result = await client.query<{ role: string | null; is_active: boolean }>(
-    `select coalesce(nullif(m.role,''),'manager') as role,m.is_active from wholesale_managers m join dashboard_view_grants a on a.manager_id=m.id and a.key='route-planner'
-     where m.id=$1 for share of m,a`, [managerId]);
+    `select coalesce(nullif(m.role,''),'manager') as role,m.is_active from wholesale_managers m join dashboard_effective_view_grants a on a.manager_id=m.id and a.key='route-planner'
+     where m.id=$1 for share of m`, [managerId]);
   if (!result.rows[0]?.is_active || !['manager','support_manager'].includes(result.rows[0].role ?? '')) {
     throw new PersonalDashboardError('NOT_FOUND', 'Общий дашборд сопровождения недоступен');
   }

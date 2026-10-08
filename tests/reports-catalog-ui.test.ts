@@ -87,7 +87,7 @@ test('route planner page grants only verified shared access and never fabricates
     );
     if (expectedMode) {
       const rendered = await Page();
-      assert.deepEqual(rendered.props, {section: 'shared', mode: expectedMode, canAssignAccess: session?.role === 'admin'});
+      assert.deepEqual(rendered.props, {section: 'shared', mode: expectedMode, canAssignAccess: session?.role === 'admin' || session?.role === 'admintop'});
     } else await assert.rejects(Page(), /redirect:\/admin\/top/);
   }
 });

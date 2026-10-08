@@ -8,6 +8,7 @@ import ts from 'typescript';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import * as audiences from '../src/shared/lib/managerDashboardAudience';
 import * as security from '../src/shared/lib/managerDashboardSecurity';
+import * as permissions from '../src/shared/lib/dashboardPermissions';
 
 type Query = { [key: string]: string | string[] | undefined };
 type Page = (props: { searchParams: Promise<Query> }) => Promise<{ props: { mode: string; audience: audiences.PersonalDashboardAudience | null } }>;
@@ -24,6 +25,7 @@ function page(session: AdminSession | null): Page {
     '@/shared/lib/adminAuth': { getAdminSession: async () => session },
     '@/shared/lib/managerDashboardAudience': audiences,
     '@/shared/lib/managerDashboardSecurity': security,
+    '@/shared/lib/dashboardPermissions': permissions,
     '@/features/admin/manager-dashboard/ManagerDashboard': { ManagerDashboard: () => null },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/app/admin/manager-dashboard/page.tsx', import.meta.url), 'utf8'), {
@@ -42,7 +44,7 @@ test('administrator cards select MR/MS while the legacy URL retains the combined
     const render = page({ role, adminUserId: 3, sessionId: 'synthetic-admin-session' });
     for (const audience of ['development', 'support', undefined] as const) {
       const result = await render({ searchParams: Promise.resolve({ audience }) });
-      assert.deepEqual(result.props, { mode: 'manage', audience: audience ?? null,canAssignAccess:role==='admin' });
+      assert.deepEqual(result.props, { mode: 'manage', audience: audience ?? null,canAssignAccess:true });
     }
     for (const audience of ['', 'invalid', ['support', 'development']]) {
       await assert.rejects(render({ searchParams: Promise.resolve({ audience }) }),

@@ -2,8 +2,12 @@ import { isTopDashboardManagementSession, type AdminSession } from '../adminAuth
 import { canViewDashboard } from '../dashboardAccess';
 import { canManageCurrencyDashboard } from '../currencyDashboardAccess';
 import type { DashboardUsageAction, DashboardUsageBatch } from '../dashboardUsage';
-import { query } from './client';
+import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
+
+export const DASHBOARD_USAGE_RETENTION_CUTOFF_SQL = "((now() at time zone 'Europe/Moscow') - interval '1 month') at time zone 'Europe/Moscow'";
+export const DASHBOARD_USAGE_PURGE_BATCH_SIZE = 1000;
+export const DASHBOARD_USAGE_PURGE_MAX_BATCHES = 10;
 
 export function dashboardUsageActorKey(session: AdminSession) {
   if (session.role === 'manager' || session.role === 'support_manager') {
@@ -52,7 +56,8 @@ export async function listDashboardUsage(input: { before?: string; dashboardKey?
     left join admin_users u on event.actor_key = 'admin:' || u.id::text
     left join wholesale_managers m on event.actor_key = 'manager:' || m.id::text
     left join top_dashboard_blocks block on event.dashboard_key = 'top:' || block.id::text
-    where ($1::bigint is null or event.id < $1::bigint)
+    where event.created_at >= (${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL})
+      and ($1::bigint is null or event.id < $1::bigint)
       and ($2::text is null or event.dashboard_key = $2)
       and ($3::text is null or event.actor_key = $3)
       and ($4::text is null or event.action = $4)
@@ -64,4 +69,31 @@ export async function listDashboardUsage(input: { before?: string; dashboardKey?
     createdAt: new Date(row.created_at).toISOString(),
   }));
   return { events: rows, nextCursor: result.rows.length > 50 ? rows.at(-1)!.id : null };
+}
+
+/** Scheduled physical deletion; never prunes HTML, snapshots, users or security audit. */
+export async function pruneExpiredDashboardUsage() {
+  await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    await client.query("set local lock_timeout='1s'");
+    await client.query("set local statement_timeout='5s'");
+    const lock = await client.query<{ acquired: boolean }>(
+      'select pg_try_advisory_xact_lock(hashtext($1)) as acquired', ['kts:dashboard-usage-retention']);
+    if (!lock.rows[0].acquired) return { ok: true, skipped: 'running' as const, deleted: 0, remaining: null, cutoff: null };
+    const time = await client.query<{ cutoff: Date }>(`select (${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL}) as cutoff`);
+    const cutoff = new Date(time.rows[0].cutoff).toISOString();
+    let deleted = 0;
+    for (let batch = 0; batch < DASHBOARD_USAGE_PURGE_MAX_BATCHES; batch++) {
+      const removed = await client.query(`with expired as (
+        select id from dashboard_usage_events where created_at < $1::timestamptz
+        order by created_at,id limit $2 for update skip locked
+      ) delete from dashboard_usage_events event using expired where event.id=expired.id`,
+      [cutoff, DASHBOARD_USAGE_PURGE_BATCH_SIZE]);
+      deleted += removed.rowCount ?? 0;
+      if ((removed.rowCount ?? 0) < DASHBOARD_USAGE_PURGE_BATCH_SIZE) break;
+    }
+    const remainder = await client.query<{ remaining: boolean }>(
+      'select exists(select 1 from dashboard_usage_events where created_at < $1::timestamptz) as remaining', [cutoff]);
+    return { ok: true, skipped: null, deleted, remaining: remainder.rows[0].remaining, cutoff };
+  });
 }

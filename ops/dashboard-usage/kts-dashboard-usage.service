@@ -1,0 +1,13 @@
+[Unit]
+Description=KTS usage audit one-month retention
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/kts-dashboard-usage.env
+ExecStart=/usr/bin/node %h/.local/lib/kts-dashboard-usage/prune.mjs
+TimeoutStartSec=80
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

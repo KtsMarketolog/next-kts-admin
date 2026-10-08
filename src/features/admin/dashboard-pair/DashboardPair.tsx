@@ -7,7 +7,7 @@ import { SharedDashboardFrame } from '@/features/admin/manager-dashboard/Manager
 import { useTopDashboardDownloadBridge } from '@/features/admin/top-dashboard/useTopDashboardDownloadBridge';
 import { DashboardDataDates } from '@/features/admin/top-dashboard/DashboardDataDates';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
-import type { DashboardPairConfig, DashboardPairOverview, DashboardPairPanel } from '@/shared/lib/dashboardPair';
+import type { DashboardPairConfig, DashboardPairOverview, DashboardPairPanel, DashboardPairView } from '@/shared/lib/dashboardPair';
 import styles from './DashboardPair.module.scss';
 
 export function DashboardPair() {
@@ -80,7 +80,7 @@ export function DashboardPair() {
         {panel.available ? <PairReport panel={panel} /> : <p>{panel.message}</p>}
       </section>)}
     </div> : overview ? <section className={styles.panel}>
-      <h2>Пара отчётов ещё не назначена</h2><p>После согласования администратор выберет два отчёта для этого экрана. Сейчас ни один отчёт не выбран автоматически.</p>
+      <h2>Пара отчётов ещё не назначена</h2><p>Согласованная пара: «Курсы валют и медь» и «Аналитика продаж — Экран для офиса». Опубликуйте аналитику продаж с данными или выберите её в настройках ниже.</p>
     </section> : null}
     {overview?.canConfigure ? <PairSettings key={overview.revision} overview={overview} busy={busy} save={save} /> : null}
   </main>;
@@ -90,16 +90,24 @@ function PairSettings({overview, busy, save}: {overview:DashboardPairOverview; b
   const [first, setFirst] = useState(overview.settings?.keys[0] ?? '');
   const [second, setSecond] = useState(overview.settings?.keys[1] ?? '');
   const [layout, setLayout] = useState<DashboardPairConfig['layout']>(overview.layout);
+  const [views, setViews] = useState<[DashboardPairView, DashboardPairView]>(overview.settings?.views ?? ['default', 'default']);
   return <details className={styles.settings} open={!overview.configured}>
     <summary>Настройка пары — только для администратора</summary>
     <p>Выберите согласованную пару общих отчётов. Настройка не выдаёт сотрудникам новых прав.</p>
-    <form onSubmit={(event) => {event.preventDefault(); void save({keys:[first,second], layout, revision:overview.revision});}}>
-      {([['Первый отчёт', first, setFirst], ['Второй отчёт', second, setSecond]] as const).map(([label, value, change]) => <label key={label}>
-        {label}<select aria-label={label} required value={value} onChange={(event) => change(event.target.value)} disabled={busy}>
+    <form onSubmit={(event) => {event.preventDefault(); void save({keys:[first,second], views, layout, revision:overview.revision});}}>
+      {([['Первый отчёт', first, setFirst], ['Второй отчёт', second, setSecond]] as const).map(([label, value, change], index) => <div key={label}>
+        <label>{label}<select aria-label={label} required value={value} onChange={(event) => {
+          change(event.target.value);
+          setViews((previous) => previous.map((view, at) => at === index ? 'default' : view) as [DashboardPairView, DashboardPairView]);
+        }} disabled={busy}>
           <option value="">Не выбран</option>
           {overview.options?.map((item) => <option key={item.key} value={item.key}>{item.title}</option>)}
-        </select>
-      </label>)}
+        </select></label>
+        {value.startsWith('top:') ? <label>Режим: {label.toLocaleLowerCase('ru-RU')}<select aria-label={`Режим: ${label.toLocaleLowerCase('ru-RU')}`} value={views[index]} disabled={busy}
+          onChange={(event) => setViews((previous) => previous.map((view, at) => at === index ? event.target.value as DashboardPairView : view) as [DashboardPairView, DashboardPairView])}>
+          <option value="default">Весь отчёт</option><option value="sales-office">Экран для офиса (аналитика продаж)</option>
+        </select></label> : null}
+      </div>)}
       <label>Начальное расположение<select value={layout} disabled={busy} onChange={(event) => setLayout(event.target.value as DashboardPairConfig['layout'])}>
         <option value="columns">Рядом</option><option value="rows">Друг под другом</option>
       </select></label>
@@ -124,8 +132,8 @@ function PairTopReport({panel}: {panel:DashboardPairPanel}) {
     <p className={styles.dates}><DashboardDataDates uploadedAt={panel.dataUploadedAt} dataAsOf={panel.dataAsOf} /></p>
     {status ? <p role="status">{status}</p> : null}
     <iframe ref={frame} title={panel.title} className={styles.frame}
-      key={`${panel.key}:${panel.versionId}:${panel.reportRevision ?? ''}`}
-      src={`/api/admin/top-dashboard/blocks/${panel.key.slice(4)}/versions/${panel.versionId}/frame`}
+      key={`${panel.key}:${panel.versionId}:${panel.reportRevision ?? ''}:${panel.view ?? 'default'}`}
+      src={`/api/admin/top-dashboard/blocks/${panel.key.slice(4)}/versions/${panel.versionId}/frame${panel.view === 'sales-office' ? '?view=sales-office' : ''}`}
       sandbox="allow-scripts allow-same-origin allow-popups" referrerPolicy="no-referrer"
       allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *" allowFullScreen />
   </>;

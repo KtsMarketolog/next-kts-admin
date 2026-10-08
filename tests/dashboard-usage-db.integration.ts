@@ -5,8 +5,8 @@ import test from 'node:test';
 import { enforceAdminActionRateLimit } from '../src/shared/lib/adminSecurity';
 import { createAccessUser, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
 import { createStoredAdminSession, getStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
-import { query } from '../src/shared/lib/db/client';
-import { dashboardUsageActorKey, listDashboardUsage, recordDashboardUsage } from '../src/shared/lib/db/dashboardUsageRepo';
+import { query, withTransaction } from '../src/shared/lib/db/client';
+import { DASHBOARD_USAGE_RETENTION_CUTOFF_SQL, dashboardUsageActorKey, listDashboardUsage, recordDashboardUsage, pruneExpiredDashboardUsage } from '../src/shared/lib/db/dashboardUsageRepo';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import { createTopDashboardBlock } from '../src/shared/lib/db/topDashboardBlocksRepo';
 
@@ -102,6 +102,36 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
       assert.equal(result.events[0].actorName, actorKey);
       assert.equal(result.events[0].dashboardKey, key);
       assert.equal(result.events[0].dashboardTitle, key);
+    });
+
+    await t.test('retention uses a Moscow calendar month, hides expiry immediately and physically prunes in bounded batches', async () => {
+      const actor = 'admin:999999';
+      await query(`insert into dashboard_usage_events(actor_key,actor_role,dashboard_key,event_id,action,created_at)
+        select $1,'admin','currency-rates','expired-event-'||lpad(i::text,8,'0'),'report_open',
+          (${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL})-interval '1 minute' from generate_series(1,10005) as i`, [actor]);
+      await query(`insert into dashboard_usage_events(actor_key,actor_role,dashboard_key,event_id,action,created_at)
+        values ($1,'admin','currency-rates','current-event-retained','report_open',now()),
+          ($1,'admin','currency-rates','boundary-event-retained','report_open',(${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL})+interval '1 minute')`, [actor]);
+      assert.equal((await listDashboardUsage({ actorKey: actor })).events.length, 2, 'Expired rows are hidden even before the scheduler runs');
+      const unrelatedBefore = (await query('select count(*)::int as total from dashboard_usage_events where actor_key<>$1', [actor])).rows[0].total;
+      await withTransaction(async (client) => {
+        await client.query('select pg_advisory_xact_lock(hashtext($1))', ['kts:dashboard-usage-retention']);
+        const blocked = await pruneExpiredDashboardUsage();
+        assert.equal(blocked.skipped, 'running');
+        assert.equal(blocked.deleted, 0);
+      });
+      const first = await pruneExpiredDashboardUsage();
+      assert.equal(first.deleted, 10000);
+      assert.equal(first.remaining, true);
+      assert.equal(first.skipped, null);
+      const second = await pruneExpiredDashboardUsage();
+      assert.equal(second.deleted, 5);
+      assert.equal(second.remaining, false);
+      assert.equal((await pruneExpiredDashboardUsage()).deleted, 0);
+      assert.equal((await query('select count(*)::int as total from dashboard_usage_events where actor_key=$1', [actor])).rows[0].total, 2);
+      assert.equal((await query('select count(*)::int as total from dashboard_usage_events where actor_key<>$1', [actor])).rows[0].total, unrelatedBefore);
+      const calendar = await query(`select ((timestamptz '2026-03-31T20:00:00Z' at time zone 'Europe/Moscow')-interval '1 month') at time zone 'Europe/Moscow' as cutoff`);
+      assert.equal(new Date(calendar.rows[0].cutoff).toISOString(), '2026-02-28T20:00:00.000Z');
     });
   } finally {
     await globalThis.__ktsPgPool?.end();

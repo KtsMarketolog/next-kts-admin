@@ -10,7 +10,7 @@ import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 const origin = 'https://reports.test';
 const config: pair.DashboardPairConfig = { keys: ['top:7', 'route-planner'], layout: 'columns', revision: 1 };
 
-function harness(session: AdminSession | null, conflict = false) {
+function harness(session: AdminSession | null, conflict = false, stored: pair.DashboardPairConfig | null = config, reports = [{id:7,title:'Продажи'}]) {
   const calls: Array<{ type: string; value?: unknown }> = [];
   const modules: Record<string, unknown> = {
     '@/shared/lib/adminAuth': {
@@ -23,17 +23,17 @@ function harness(session: AdminSession | null, conflict = false) {
     '@/shared/lib/dashboardAccess': access,
     '@/shared/lib/dashboardPair': pair,
     '@/shared/lib/db/dashboardPairRepo': {
-      getDashboardPairConfig: async () => config,
+      getDashboardPairConfig: async () => stored,
       saveDashboardPairConfig: async (value: pair.DashboardPairConfig) => {
         calls.push({ type: 'save', value });
         return conflict ? null : { ...value, revision: value.revision + 1 };
       },
     },
     '@/shared/lib/db/topDashboardBlocksRepo': {
-      getPublishedTopDashboardBlocks: async () => [{ id: 7, title: 'Продажи' }],
+      getPublishedTopDashboardBlocks: async () => reports,
       getPublishedTopDashboardBlockOverview: async (id: number) => {
         calls.push({ type: 'top', value: id });
-        return { block: { id, title: 'Продажи' }, activeVersionId: 9,
+        return { block: { id, title: reports.find((item)=>item.id===id)?.title ?? 'Продажи' }, activeVersionId: 9,
           updatedAt: '2026-10-07T10:00:00Z', dataUploadedAt: '2026-10-07T10:00:00Z', dataAsOf: '2026-10-06' };
       },
     },
@@ -81,6 +81,23 @@ test('pair checks each report and does not disclose a denied report key, title, 
   assert.deepEqual(api.calls, [{ type: 'top', value: 7 }]);
   assert.equal((await api.PUT(put(config))).status, 403);
   assert.equal((await harness(null).GET()).status, 401);
+});
+
+test('unconfigured pair selects currency and sales office view but does not grant either report', async () => {
+  const reports=[{id:4,title:'Аналитика продаж'}];
+  const admin=await (await harness({role:'admin',sessionId:'s',adminUserId:1},false,null,reports).GET()).json() as pair.DashboardPairOverview;
+  assert.equal(admin.configured,true);
+  assert.equal(admin.revision,0);
+  assert.deepEqual(admin.settings?.keys,['currency-rates','top:4']);
+  assert.deepEqual(admin.settings?.views,['default','sales-office']);
+  assert.equal(admin.panels[1].title,'Аналитика продаж — Экран для офиса');
+  assert.equal(admin.panels[1].view,'sales-office');
+  const viewer=harness({role:'purchaser',sessionId:'s',adminUserId:2,dashboardAccess:['currency-rates']},false,null,reports);
+  const result=await (await viewer.GET()).json() as pair.DashboardPairOverview;
+  assert.equal(result.panels[0].available,true);
+  assert.equal(result.panels[1].available,false);
+  assert.equal(result.panels[1].view,undefined);
+  assert.deepEqual(viewer.calls,[]);
 });
 
 test('shared pair uses a verified viewer identity, while full admins use management overview', async () => {

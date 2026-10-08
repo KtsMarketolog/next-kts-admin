@@ -1,8 +1,9 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { hashPassword, requireAdminSession } from '@/shared/lib/adminAuth';
+import { hashPassword, requireDashboardAccessManagementSession } from '@/shared/lib/adminAuth';
+import { AccessUserManagementError, assertAccessUserManagementAllowed, DashboardOptionsConflictError } from '@/shared/lib/accessUserManagement';
 import { createAccessUser, getAccessUsers, type AccessUserRole } from '@/shared/lib/db';
 import { parseDashboardAccess } from '@/shared/lib/dashboardAccess';
-import { getDashboardGrantOptions } from '@/shared/lib/db/dashboardAccessRepo';
+import { dashboardGrantOptionsVersion, getDashboardGrantOptions } from '@/shared/lib/db/dashboardAccessRepo';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
@@ -26,18 +27,18 @@ function normalizeSupportManagerId(role: AccessUserRole, value: unknown) {
 }
 
 export async function GET() {
-  const { denied, session } = await requireAdminSession();
+  const { denied, session } = await requireDashboardAccessManagementSession();
   if (denied) return denied;
 
   const [users, dashboardOptions] = await Promise.all([
-    getAccessUsers(session.adminUserId ?? null),
+    getAccessUsers(session.adminUserId ?? null, session.role),
     getDashboardGrantOptions(),
   ]);
-  return Response.json({ users, dashboardOptions }, { headers: { 'Cache-Control': 'private, no-store' } });
+  return Response.json({ users, dashboardOptions, dashboardOptionsVersion: dashboardGrantOptionsVersion(dashboardOptions), canManageSiteAdmins: session.role === 'admin' }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
 export async function POST(request: Request) {
-  const { denied, session } = await requireAdminSession();
+  const { denied, session } = await requireDashboardAccessManagementSession();
   if (denied) return denied;
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
@@ -51,8 +52,12 @@ export async function POST(request: Request) {
   const email = normalizeTextField(body.email, 160);
   const password = typeof body.password === 'string' ? body.password : '';
   const role = normalizeRole(body.role);
+  if (role === 'admin' && session.role !== 'admin') return badRequest('Создание администратора сайта недоступно', 403);
   const dashboardAccess = body.dashboardAccess === undefined ? undefined : parseDashboardAccess(body.dashboardAccess);
   if (dashboardAccess === null) return badRequest('Некорректный список доступных дашбордов');
+  const dashboardOptionsVersion = typeof body.dashboardOptionsVersion === 'string' && /^[a-f0-9]{64}$/.test(body.dashboardOptionsVersion)
+    ? body.dashboardOptionsVersion : undefined;
+  if (dashboardAccess !== undefined && !dashboardOptionsVersion) return badRequest(new DashboardOptionsConflictError().message, 409);
   const isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
   if (body.canManageTopDashboard !== undefined && typeof body.canManageTopDashboard !== 'boolean') {
     return badRequest('Некорректное значение доступа «Админ TOP»');
@@ -72,6 +77,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    assertAccessUserManagementAllowed(session.role, role);
     const user = await createAccessUser({
       name,
       login,
@@ -80,13 +86,14 @@ export async function POST(request: Request) {
       isActive,
       canManageTopDashboard,
       dashboardAccess,
+      dashboardOptionsVersion,
       supportManagerId,
       passwordHash: hashPassword(password),
-    });
+    }, session.role);
 
     await recordSecurityEvent({
       eventType: 'admin_user_created',
-      actorType: 'admin',
+      actorType: session.role,
       adminUserId: session.adminUserId,
       sessionId: session.sessionId,
       entityType: 'access_user',
@@ -106,6 +113,8 @@ export async function POST(request: Request) {
 
     return Response.json({ user });
   } catch (error) {
+    if (error instanceof AccessUserManagementError) return badRequest(error.message, 403);
+    if (error instanceof DashboardOptionsConflictError) return badRequest(error.message, 409);
     return badRequest(error instanceof Error ? error.message : 'Не удалось добавить пользователя');
   }
 }

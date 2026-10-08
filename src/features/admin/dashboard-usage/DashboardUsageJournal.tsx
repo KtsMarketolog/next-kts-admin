@@ -28,7 +28,7 @@ export function DashboardUsageJournal() {
   useEffect(() => { void load(); }, [load]);
   const reset = () => setFilter({ dashboard: '', actor: '', action: '' });
   return <main className={styles.root}>
-    <header><div><h1>История использования дашбордов</h1><p>Журнал доступен только администратору.</p></div><Link href="/admin/top">К отчётам</Link></header>
+    <header><div><h1>История использования дашбордов</h1><p>Журнал доступен ролям Администратор, Админ TOP и TOP. Показан последний месяц.</p></div><Link href="/admin/top">К отчётам</Link></header>
     <p className={styles.notice}>Записываются открытия и поддерживаемые действия, без значений фильтров, паролей и содержимого файлов. Фоновые обновления не считаются действиями сотрудника. События внутри HTML передаются его адаптером и не подтверждают производительность сотрудника. Экспорт означает подготовку файла, а не подтверждение сохранения на устройстве. История начинается с подключения журнала.</p>
     <div className={styles.filters}>
       <label>Действие<select value={filter.action} disabled={busy} onChange={(event) => setFilter({ ...filter, action: event.target.value })}><option value="">Все действия</option>{DASHBOARD_USAGE_ACTIONS.map((action) => <option key={action} value={action}>{DASHBOARD_USAGE_LABELS[action]}</option>)}</select></label>
@@ -48,6 +48,6 @@ export function DashboardUsageJournal() {
     {!rows.length && !busy && !error && <p>Событий пока нет.</p>}
     {busy && <p role="status">Загружаем журнал…</p>}
     {cursor && <button type="button" disabled={busy} onClick={() => void load(cursor)}>Показать ещё 50</button>}
-    <p className={styles.notice}>Записи не удаляются вместе со старыми снимками. Срок хранения и расширение доступа к журналу будут настроены после согласования.</p>
+    <p className={styles.notice}>Срок хранения — один календарный месяц назад от текущего времени МСК. Просроченные записи скрыты и удаляются отдельным серверным заданием; история снимков и права на отчёты от этого не меняются.</p>
   </main>;
 }

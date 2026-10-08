@@ -9,6 +9,7 @@ const interactiveCardClassName = `${styles.dashboardCard} ${styles.dashboardCard
 
 type AdminDashboardProps = {
   canAccessSite: boolean;
+  canManageUsers?: boolean;
   topDashboardMode: 'manage' | 'view' | null;
   managerDashboardMode: 'manage' | 'view' | null;
   managerDashboardAudience?: PersonalDashboardAudience | null;
@@ -19,6 +20,7 @@ type AdminDashboardProps = {
 
 export function AdminDashboard({
   canAccessSite,
+  canManageUsers = false,
   topDashboardMode,
   managerDashboardMode,
   canAccessReportsCatalog,
@@ -40,6 +42,10 @@ export function AdminDashboard({
           </div>
           <span className={styles.dashboardCardLink}>Открыть</span>
         </Link>
+        {canManageUsers && <Link className={interactiveCardClassName} href="/admin/site/users" replace scroll={false}>
+          <div><h2>Пользователи и доступы</h2><p>Создание сотрудников и назначение доступных отчётов.</p></div>
+          <span className={styles.dashboardCardLink}>Открыть</span>
+        </Link>}
       </section>
     );
   }

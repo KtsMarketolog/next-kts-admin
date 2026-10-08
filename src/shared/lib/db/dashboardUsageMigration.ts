@@ -20,3 +20,7 @@ export async function applyDashboardUsageMigration(client: PoolClient) {
     create index dashboard_usage_events_dashboard_idx on dashboard_usage_events(dashboard_key, id desc);
   `);
 }
+
+export async function applyDashboardUsageRetentionMigration(client: PoolClient) {
+  await client.query('create index dashboard_usage_events_retention_idx on dashboard_usage_events(created_at,id)');
+}

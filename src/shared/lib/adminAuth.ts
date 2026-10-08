@@ -3,7 +3,7 @@ import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 
 import { getAdminSessionSecret } from './authSecret';
 import { createStoredAdminSession, getStoredAdminSession, revokeStoredAdminSession } from './db/adminSessionsRepo';
-import { hasDashboardIdentity } from './dashboardPermissions';
+import { canAssignDashboardAccess, hasDashboardIdentity } from './dashboardPermissions';
 
 const COOKIE_NAME = 'kts_admin_session';
 const PASSWORD_KEYLEN = 64;
@@ -237,6 +237,14 @@ export async function requireAdminSession() {
   const session = await getAdminSession();
   if (!isAdminManagementSession(session)) {
     return { denied: Response.json({ error: 'Unauthorized' }, { status: 401 }), session: null };
+  }
+  return { denied: null, session };
+}
+
+export async function requireDashboardAccessManagementSession() {
+  const session = await getAdminSession();
+  if (!canAssignDashboardAccess(session)) {
+    return { denied: Response.json({ error: session ? 'Недостаточно прав для управления сотрудниками и доступами' : 'Unauthorized' }, { status: session ? 403 : 401 }), session: null };
   }
   return { denied: null, session };
 }

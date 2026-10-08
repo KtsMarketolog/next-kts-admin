@@ -5,6 +5,7 @@ import ts from 'typescript';
 
 import * as access from '../src/shared/lib/dashboardAccess';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
+import * as userManagement from '../src/shared/lib/accessUserManagement';
 
 type Route = {
   GET(): Promise<Response>;
@@ -18,12 +19,13 @@ function routes(authorized = true) {
   let reads = 0;
   const user = {id: 'admin:42', numericId: 42, source: 'admin', role: 'purchaser', isActive: true, dashboardAccess: []};
   const modules: Record<string, unknown> = {
-    '@/shared/lib/adminAuth': {requireAdminSession: async () => authorized
+    '@/shared/lib/adminAuth': {requireDashboardAccessManagementSession: async () => authorized
       ? {session: {role: 'admin', adminUserId: 1, sessionId: 'synthetic-admin'}, denied: null}
       : {denied: new Response(null, {status: 403})}, hashPassword: () => 'synthetic-hash'},
     '@/shared/lib/adminSecurity': {enforceAdminActionRateLimit: async () => null},
     '@/shared/lib/dashboardAccess': access,
-    '@/shared/lib/db/dashboardAccessRepo':{getDashboardGrantOptions:async()=>{reads++;return [...access.DASHBOARD_REPORT_OPTIONS,{key:'top:7',title:'Аналитика продаж'},{key:'top:12',title:'Новый отчёт'}];}},
+    '@/shared/lib/accessUserManagement': userManagement,
+    '@/shared/lib/db/dashboardAccessRepo':{dashboardGrantOptionsVersion:()=> 'a'.repeat(64),getDashboardGrantOptions:async()=>{reads++;return [...access.DASHBOARD_REPORT_OPTIONS,{key:'top:7',title:'Аналитика продаж'},{key:'top:12',title:'Новый отчёт'}];}},
     '@/shared/lib/db': {
       getAccessUsers: async () => {reads++; return [user];},
       getTopDashboardBlocks: async () => {reads++; return [{id: 7, title: 'Аналитика продаж'}, {id: 12, title: 'Новый отчёт'}];},
@@ -60,7 +62,7 @@ function request(method: string, dashboardAccess: unknown) {
   return new Request('https://example.test/api/admin/users', {method,
     headers: {origin: 'https://example.test', 'content-type': 'application/json'},
     body: JSON.stringify({name: 'Synthetic', login: 'buyer', role: 'purchaser', password: 'Synthetic12345',
-      isActive: true, canManageTopDashboard: true, dashboardAccess,dashboardAccessVersion:'a'.repeat(64)})});
+      isActive: true, canManageTopDashboard: true, dashboardAccess,dashboardAccessVersion:'a'.repeat(64),dashboardOptionsVersion:'a'.repeat(64)})});
 }
 
 test('admin options contain all current dashboards, private scopes are enforced separately', async () => {

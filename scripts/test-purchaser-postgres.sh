@@ -25,3 +25,5 @@ export KTS_PURCHASER_TEST=1
 export NODE_ENV=test
 export ADMIN_SESSION_SECRET='synthetic-isolated-purchaser-test-only'
 node --import tsx --test tests/purchaser-access-db.integration.ts
+node --import tsx --test tests/dashboard-audience-db.integration.ts
+node --import tsx --test tests/admin-top-users-db.integration.ts

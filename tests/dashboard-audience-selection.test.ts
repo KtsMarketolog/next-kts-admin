@@ -6,6 +6,7 @@ import {
   dashboardAudienceRoleLabel,
   filterDashboardAudience,
   selectDashboardAudienceEmployees,
+  selectAllDashboardAudience,
   type DashboardAudienceEmployee,
 } from '../src/features/admin/dashboard-access/DashboardAudienceSelection';
 
@@ -54,4 +55,11 @@ test('even manually supplied checkbox IDs cannot clear management or grant anoth
   const users = [employee('locked', 'admin', { locked: true, checked: true }), employee('private', 'manager', { eligible: false })];
   assert.deepEqual(selectDashboardAudienceEmployees(users, ['locked', 'private'], false), users);
   assert.deepEqual(selectDashboardAudienceEmployees(users, ['locked', 'private'], true), users);
+});
+
+test('all-employee selection includes inactive accounts for later activation but preserves own-group eligibility and management locks', () => {
+  const users = [employee('active', 'manager'), employee('inactive', 'manager', {isActive: false}), employee('other', 'support_manager', {eligible: false}), employee('admin', 'admin', {locked: true, checked: true})];
+  const selected = selectAllDashboardAudience(users);
+  assert.deepEqual(selected.map((user) => user.checked), [true, true, false, true]);
+  assert.deepEqual(users.map((user) => user.checked), [false, false, false, true]);
 });

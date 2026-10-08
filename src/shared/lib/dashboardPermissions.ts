@@ -1,5 +1,10 @@
 import type { AdminSession } from './adminAuth';
 
+/** Delegated access administration is deliberately narrower than site administration. */
+export function canAssignDashboardAccess(session: AdminSession | null | undefined): session is AdminSession & { role: 'admin' | 'admintop' } {
+  return session?.role === 'admin' || (session?.role === 'admintop' && hasDashboardIdentity(session));
+}
+
 export function validDashboardKey(key: unknown): key is string {
   return typeof key === 'string' && (['manager:development', 'manager:support', 'route-planner', 'currency-rates'].includes(key)
     || (/^top:[1-9]\d{0,15}$/.test(key) && Number.isSafeInteger(Number(key.slice(4)))));

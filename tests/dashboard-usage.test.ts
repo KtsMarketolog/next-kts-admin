@@ -5,6 +5,8 @@ import test from 'node:test';
 import { DASHBOARD_USAGE_MARKER, parseDashboardUsageBatch, readDashboardUsageMessage } from '../src/shared/lib/dashboardUsage';
 import { dashboardUsageAdapterScript, dashboardUsageRelayScript } from '../src/shared/lib/dashboardUsageBridge';
 import { applyDashboardUsageMigration } from '../src/shared/lib/db/dashboardUsageMigration';
+import { canReviewDashboardUsage } from '../src/shared/lib/dashboardUsageAccess';
+import type { AdminSession } from '../src/shared/lib/adminAuth';
 
 const nonce = '12345678901234567890123456789012';
 const batch = { dashboardKey: 'top:4', preview: false, versionId: 7, events: [{ id: nonce, action: 'filter_changed' }] };
@@ -76,10 +78,23 @@ test('usage migration preserves audit independently and deduplicates bounded ret
   assert.doesNotMatch(sql, /delete|drop|references|password|jsonb/i);
 });
 
-test('API and journal enforce admin-only reads, same-origin bounded write and persisted actor', () => {
+test('journal is restricted to persisted admin, TOP and Admin TOP identities, never inferred from report grants', () => {
+  for (const role of ['admin', 'admintop', 'top', 'wholesale_admin', 'manager', 'support_manager', 'purchaser'] as const) {
+    const session: AdminSession = { role, sessionId: 'stored-session', adminUserId: 8, managerId: 9,
+      dashboardAccess: ['currency-rates', 'top:4'], canManageTopDashboard: true };
+    assert.equal(canReviewDashboardUsage(session), ['admin', 'admintop', 'top'].includes(role));
+    assert.equal(canReviewDashboardUsage({ ...session, sessionId: undefined }), false);
+  }
+  assert.equal(canReviewDashboardUsage({role: 'top', sessionId: 'stored', adminUserId: undefined}), false);
+  assert.equal(canReviewDashboardUsage(null), false);
+});
+
+test('API and journal share role gate, same-origin bounded writes and server identity', () => {
   const api = readFileSync('src/app/api/admin/dashboard-usage/route.ts', 'utf8');
   const repo = readFileSync('src/shared/lib/db/dashboardUsageRepo.ts', 'utf8');
-  assert.match(api, /session\.role !== 'admin'/);
+  const page = readFileSync('src/app/admin/dashboard-usage/page.tsx', 'utf8');
+  assert.match(api, /canReviewDashboardUsage\(session\)/);
+  assert.match(page, /canReviewDashboardUsage\(session\)/);
   assert.match(api, /enforceSameOriginRequest\(request\)/);
   assert.match(api, /canViewDashboard\(session, batch\.dashboardKey\)/);
   assert.match(api, /size > DASHBOARD_USAGE_MAX_BODY/);
@@ -87,4 +102,6 @@ test('API and journal enforce admin-only reads, same-origin bounded write and pe
   assert.match(repo, /dashboardUsageActorKey\(session\)/);
   assert.match(repo, /event\.id < \$1::bigint/);
   assert.match(repo, /limit 51/);
+  assert.match(repo, /event\.created_at >= \(\$\{DASHBOARD_USAGE_RETENTION_CUTOFF_SQL\}\)/);
+  assert.match(repo, /interval '1 month'/);
 });

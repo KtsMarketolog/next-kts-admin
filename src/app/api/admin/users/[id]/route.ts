@@ -1,5 +1,6 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { hashPassword, requireAdminSession } from '@/shared/lib/adminAuth';
+import { hashPassword, requireDashboardAccessManagementSession } from '@/shared/lib/adminAuth';
+import { AccessUserManagementError, AccessUserProfileForbiddenError } from '@/shared/lib/accessUserManagement';
 import { parseDashboardAccess } from '@/shared/lib/dashboardAccess';
 import {
   deleteAccessUser,
@@ -43,7 +44,7 @@ async function revokePreviousSessions(source: 'admin' | 'manager', numericId: nu
 }
 
 export async function PUT(request: Request, context: Context) {
-  const { denied, session } = await requireAdminSession();
+  const { denied, session } = await requireDashboardAccessManagementSession();
   if (denied) return denied;
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
@@ -57,7 +58,9 @@ export async function PUT(request: Request, context: Context) {
   const login = normalizeTextField(body.login, 80).toLowerCase();
   const email = normalizeTextField(body.email, 160);
   const password = typeof body.password === 'string' ? body.password : '';
+  if (session.role !== 'admin' && password) return badRequest(new AccessUserProfileForbiddenError().message, 403);
   const role = normalizeRole(body.role);
+  if (role === 'admin' && session.role !== 'admin') return badRequest('Назначение администратора сайта недоступно', 403);
   const dashboardAccess = body.dashboardAccess === undefined ? undefined : parseDashboardAccess(body.dashboardAccess);
   if (dashboardAccess === null) return badRequest('Некорректный список доступных дашбордов');
   if (dashboardAccess !== undefined && (typeof body.dashboardAccessVersion !== 'string' || !/^[a-f0-9]{64}$/.test(body.dashboardAccessVersion))) {
@@ -88,13 +91,14 @@ export async function PUT(request: Request, context: Context) {
         email,
         role,
         isActive,
-        canManageTopDashboard: role === 'top' && body.canManageTopDashboard === true,
+        canManageTopDashboard: (role === 'top' || role === 'manager' || role === 'support_manager') && body.canManageTopDashboard === true,
         dashboardAccess,
         dashboardAccessVersion: body.dashboardAccessVersion,
         supportManagerId,
         passwordHash: password ? hashPassword(password) : undefined,
       },
       session.adminUserId ?? null,
+      session.role,
     );
 
     if (
@@ -108,7 +112,7 @@ export async function PUT(request: Request, context: Context) {
 
     await recordSecurityEvent({
       eventType: 'admin_user_updated',
-      actorType: 'admin',
+      actorType: session.role,
       adminUserId: session.adminUserId,
       sessionId: session.sessionId,
       entityType: 'access_user',
@@ -138,7 +142,7 @@ export async function PUT(request: Request, context: Context) {
     if (result.passwordChanged) {
       await recordSecurityEvent({
         eventType: 'password_changed',
-        actorType: 'admin',
+        actorType: session.role,
         adminUserId: session.adminUserId,
         sessionId: session.sessionId,
         entityType: 'access_user',
@@ -152,13 +156,15 @@ export async function PUT(request: Request, context: Context) {
 
     return Response.json({ user: result.user });
   } catch (error) {
+    if (error instanceof AccessUserManagementError || error instanceof AccessUserProfileForbiddenError) return badRequest(error.message, 403);
     return badRequest(error instanceof Error ? error.message : 'Не удалось сохранить пользователя');
   }
 }
 
 export async function DELETE(request: Request, context: Context) {
-  const { denied, session } = await requireAdminSession();
+  const { denied, session } = await requireDashboardAccessManagementSession();
   if (denied) return denied;
+  if (session.role !== 'admin') return badRequest(new AccessUserProfileForbiddenError().message, 403);
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
 
@@ -168,12 +174,12 @@ export async function DELETE(request: Request, context: Context) {
   const { id } = await context.params;
 
   try {
-    const user = await deleteAccessUser(id, session.adminUserId ?? null);
+    const user = await deleteAccessUser(id, session.adminUserId ?? null, session.role);
     await revokePreviousSessions(user.source, user.numericId);
 
     await recordSecurityEvent({
       eventType: 'admin_user_deleted',
-      actorType: 'admin',
+      actorType: session.role,
       adminUserId: session.adminUserId,
       sessionId: session.sessionId,
       entityType: 'access_user',
@@ -186,6 +192,7 @@ export async function DELETE(request: Request, context: Context) {
 
     return Response.json({ ok: true });
   } catch (error) {
+    if (error instanceof AccessUserManagementError) return badRequest(error.message, 403);
     return badRequest(error instanceof Error ? error.message : 'Не удалось удалить пользователя');
   }
 }

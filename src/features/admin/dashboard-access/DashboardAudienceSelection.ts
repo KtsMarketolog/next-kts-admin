@@ -9,6 +9,13 @@ export type DashboardAudienceEmployee = {
   eligible: boolean;
 };
 
+export type DashboardAudienceMode = 'individual' | 'all';
+
+/** Select all includes inactive accounts: the site still denies them until activation. */
+export function selectAllDashboardAudience(users: DashboardAudienceEmployee[]) {
+  return selectDashboardAudienceEmployees(users, users.map((user) => user.id), true);
+}
+
 export const DASHBOARD_AUDIENCE_ROLES = [
   { value: 'manager', label: 'МР — менеджеры по развитию' },
   { value: 'support_manager', label: 'МС — менеджеры по сопровождению' },

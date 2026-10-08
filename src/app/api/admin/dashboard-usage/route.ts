@@ -5,6 +5,7 @@ import { canManageCurrencyDashboard } from '@/shared/lib/currencyDashboardAccess
 import { DASHBOARD_USAGE_MAX_BODY, isDashboardUsageAction, isDashboardUsageKey, parseDashboardUsageBatch } from '@/shared/lib/dashboardUsage';
 import { listDashboardUsage, recordDashboardUsage } from '@/shared/lib/db/dashboardUsageRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
+import { canReviewDashboardUsage } from '@/shared/lib/dashboardUsageAccess';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   const session = await getAdminSession();
-  if (!session?.sessionId || session.role !== 'admin') return json({ error: 'Нет доступа' }, session ? 403 : 401);
+  if (!session || !canReviewDashboardUsage(session)) return json({ error: 'Нет доступа' }, session ? 403 : 401);
   const params = new URL(request.url).searchParams;
   const before = params.get('before') || undefined, dashboardKey = params.get('dashboard') || undefined;
   const actorKey = params.get('actor') || undefined, action = params.get('action') || undefined;

@@ -1,9 +1,11 @@
 import type { PoolClient } from 'pg';
 
 import { parseDashboardAccess } from '../dashboardAccess';
+import { AccessUserProfileForbiddenError, assertAccessUserManagementAllowed, assertDelegatedAccessOnly, DashboardOptionsConflictError } from '../accessUserManagement';
+import type { AdminSessionRole } from '../adminAuth';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
-import { dashboardAccessVersion, getDashboardGrants, saveDashboardGrants, DASHBOARD_ACCESS_LOCK } from './dashboardAccessRepo';
+import { dashboardAccessVersion, dashboardGrantOptionsVersion, getDashboardGrantOptions, getDashboardGrants, saveDashboardGrants, DASHBOARD_ACCESS_LOCK } from './dashboardAccessRepo';
 
 export type AdminUserRole = 'admin' | 'wholesale_admin' | 'top' | 'admintop' | 'purchaser';
 export type ManagerAccessRole = 'manager' | 'support_manager';
@@ -53,6 +55,7 @@ type AccessUserInput = {
   dashboardAccess?: string[];
   dashboardAccessVersion?: string;
   passwordHash?: string;
+  dashboardOptionsVersion?: string;
   supportManagerId?: number | null;
 };
 
@@ -279,7 +282,8 @@ export async function getAdminUserByLogin(login: string): Promise<AdminUserAuth 
   };
 }
 
-export async function getAccessUsers(currentAdminUserId?: number | null): Promise<AccessUser[]> {
+export async function getAccessUsers(currentAdminUserId?: number | null, actorRole: AdminSessionRole = 'admin'): Promise<AccessUser[]> {
+  assertAccessUserManagementAllowed(actorRole, 'top');
   await ensureSiteSchema();
   const result = await query<AccessUserRow>(`
     select *
@@ -299,6 +303,7 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
         au.created_at::text,
         au.updated_at::text
       from admin_users au
+      where ($1::boolean or au.role <> 'admin')
       union all
       select
         'manager'::text as source,
@@ -324,10 +329,10 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
       is_active desc,
       name asc,
       login asc
-  `);
+  `, [actorRole === 'admin']);
 
   const users = result.rows.map((row) => mapAccessUser(row, currentAdminUserId));
-  const grants=await query<{admin_user_id:string|null;manager_id:string|null;key:string}>('select admin_user_id::text,manager_id::text,key from dashboard_view_grants order by key');
+  const grants=await query<{admin_user_id:string|null;manager_id:string|null;key:string}>('select admin_user_id::text,manager_id::text,key from dashboard_effective_view_grants order by key');
   for (const user of users) {
     user.dashboardAccess=grants.rows.filter((grant)=>Number(user.source==='admin'?grant.admin_user_id:grant.manager_id)===user.numericId).map((grant)=>grant.key);
     user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
@@ -335,13 +340,18 @@ export async function getAccessUsers(currentAdminUserId?: number | null): Promis
   return users;
 }
 
-export async function createAccessUser(input: AccessUserInput & { passwordHash: string }): Promise<AccessUser> {
+export async function createAccessUser(input: AccessUserInput & { passwordHash: string }, actorRole: AdminSessionRole = 'admin'): Promise<AccessUser> {
+  assertAccessUserManagementAllowed(actorRole, input.role);
   if (input.dashboardAccess !== undefined && parseDashboardAccess(input.dashboardAccess) === null) {
     throw new Error('Некорректный список доступных дашбордов');
   }
   await ensureSiteSchema();
   return withTransaction(async (client) => {
     await client.query('select pg_advisory_xact_lock(hashtext($1))',[DASHBOARD_ACCESS_LOCK]);
+    if (input.dashboardAccess !== undefined && input.dashboardOptionsVersion !== undefined) {
+      const currentOptions = await getDashboardGrantOptions(client);
+      if (input.dashboardOptionsVersion !== dashboardGrantOptionsVersion(currentOptions)) throw new DashboardOptionsConflictError();
+    }
     await assertLoginAvailable(input.login, undefined, client);
 
     if (isManagerAccessRole(input.role)) {
@@ -411,6 +421,7 @@ export async function updateAccessUser(
   id: string,
   input: AccessUserInput,
   currentAdminUserId?: number | null,
+  actorRole: AdminSessionRole = 'admin',
 ): Promise<{
   user: AccessUser;
   previous: AccessUser;
@@ -418,6 +429,7 @@ export async function updateAccessUser(
   permissionsChanged: boolean;
   passwordChanged: boolean;
 }> {
+  assertAccessUserManagementAllowed(actorRole, input.role);
   if (input.dashboardAccess !== undefined && parseDashboardAccess(input.dashboardAccess) === null) {
     throw new Error('Некорректный список доступных дашбордов');
   }
@@ -427,7 +439,6 @@ export async function updateAccessUser(
 
   return withTransaction(async (client) => {
     await client.query('select pg_advisory_xact_lock(hashtext($1))',[DASHBOARD_ACCESS_LOCK]);
-    await assertLoginAvailable(input.login, parsed, client);
 
     if (parsed.source === 'admin') {
       const existingResult = await client.query<AccessUserRow>(
@@ -452,9 +463,17 @@ export async function updateAccessUser(
       );
       const existingRow = existingResult.rows[0];
       if (!existingRow) throw new Error('Пользователь не найден');
+      assertAccessUserManagementAllowed(actorRole, existingRow.role, input.role);
+      if (actorRole === 'admin') await assertLoginAvailable(input.login, parsed, client);
       const previous = mapAccessUser(existingRow, currentAdminUserId);
       previous.dashboardAccess = await getDashboardGrants(client,'admin',previous.numericId);
       if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new Error('Доступы уже изменены в другом окне. Обновите список сотрудников.');
+      if (actorRole === 'admintop') {
+        assertDelegatedAccessOnly(previous, input);
+        const dashboardAccess = await saveDashboardAccess(client, previous.numericId, previous.role, input.dashboardAccess, previous);
+        const user = { ...previous, dashboardAccess, dashboardAccessVersion: dashboardAccessVersion(dashboardAccess) };
+        return { previous, user, roleChanged: false, passwordChanged: false, permissionsChanged: dashboardAccessVersion(previous.dashboardAccess) !== user.dashboardAccessVersion };
+      }
       const isSelf = previous.isCurrent;
       const nextRole = input.role;
       const nextCanManageTopDashboard = normalizeTopManagementAccess(
@@ -463,7 +482,7 @@ export async function updateAccessUser(
       );
       const activeAdminCount = await countActiveSiteAdmins(client);
 
-      if (isSelf && (nextRole !== 'admin' || !input.isActive)) {
+      if (isSelf && (nextRole !== previous.role || !input.isActive)) {
         throw new Error('Нельзя снять с себя права администратора');
       }
       if (previous.role === 'admin' && (nextRole !== 'admin' || !input.isActive) && activeAdminCount <= 1) {
@@ -567,6 +586,8 @@ export async function updateAccessUser(
       };
     }
 
+    // Lock the principal separately: PostgreSQL cannot FOR UPDATE an aggregate projection.
+    await client.query('select id from wholesale_managers where id=$1 for update', [parsed.numericId]);
     const existingResult = await client.query<AccessUserRow>(
       `select
          'manager'::text as source,
@@ -592,9 +613,17 @@ export async function updateAccessUser(
     );
     const existingRow = existingResult.rows[0];
     if (!existingRow) throw new Error('Пользователь не найден');
+    assertAccessUserManagementAllowed(actorRole, existingRow.role, input.role);
+    if (actorRole === 'admin') await assertLoginAvailable(input.login, parsed, client);
     const previous = mapAccessUser(existingRow, currentAdminUserId);
     previous.dashboardAccess=await getDashboardGrants(client,'manager',previous.numericId);
     if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new Error('Доступы уже изменены в другом окне. Обновите список сотрудников.');
+    if (actorRole === 'admintop') {
+      assertDelegatedAccessOnly(previous, input);
+      const dashboardAccess = await saveDashboardAccess(client, previous.numericId, previous.role, input.dashboardAccess, previous);
+      const user = { ...previous, dashboardAccess, dashboardAccessVersion: dashboardAccessVersion(dashboardAccess) };
+      return { previous, user, roleChanged: false, passwordChanged: false, permissionsChanged: dashboardAccessVersion(previous.dashboardAccess) !== user.dashboardAccessVersion };
+    }
 
     if (!isManagerAccessRole(input.role)) {
       if (previous.priceListCount > 0) {
@@ -706,12 +735,15 @@ export async function updateAccessUser(
   });
 }
 
-export async function deleteAccessUser(id: string, currentAdminUserId?: number | null): Promise<AccessUser> {
+export async function deleteAccessUser(id: string, currentAdminUserId?: number | null, actorRole: AdminSessionRole = 'admin'): Promise<AccessUser> {
+  assertAccessUserManagementAllowed(actorRole, 'top');
+  if (actorRole !== 'admin') throw new AccessUserProfileForbiddenError();
   await ensureSiteSchema();
   const parsed = parseAccessUserId(id);
   if (!parsed) throw new Error('Некорректный пользователь');
 
   return withTransaction(async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [DASHBOARD_ACCESS_LOCK]);
     if (parsed.source === 'admin') {
       const existingResult = await client.query<AccessUserRow>(
         `select
@@ -730,11 +762,12 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
            updated_at::text
          from admin_users
          where id = $1
-         limit 1`,
+         limit 1 for update`,
         [parsed.numericId],
       );
       const row = existingResult.rows[0];
       if (!row) throw new Error('Пользователь не найден');
+      assertAccessUserManagementAllowed(actorRole, row.role);
       const user = mapAccessUser(row, currentAdminUserId);
       if (user.isCurrent) throw new Error('Нельзя удалить самого себя');
       if (user.role === 'admin' && user.isActive && (await countActiveSiteAdmins(client)) <= 1) {

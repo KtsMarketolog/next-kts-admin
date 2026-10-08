@@ -49,29 +49,44 @@ test('existing management is separate, and forged management on purchaser does n
   assert.equal(canManageCurrencyDashboard({role:'purchaser',adminUserId:2,sessionId:'x',canManageTopDashboard:true,dashboardAccess:['currency-rates']}),false);
 });
 
-function audienceRoute(admin=true){
+function audienceRoute(admin=true, role='admin'){
   const calls:string[]=[];
+  const audits:Array<{actorType:string;adminUserId:number;sessionId:string}>=[];
+  class DashboardAudienceForbiddenError extends Error {}
   const modules:Record<string,unknown>={
-    '@/shared/lib/adminAuth':{requireAdminSession:async()=>admin?{session:{role:'admin',sessionId:'x',adminUserId:1},denied:null}:{denied:new Response(null,{status:403})}},
+    '@/shared/lib/adminAuth':{requireDashboardAccessManagementSession:async()=>admin?{session:{role,sessionId:'x',adminUserId:1},denied:null}:{denied:new Response(null,{status:403})}},
     '@/shared/lib/adminSecurity':{enforceAdminActionRateLimit:async()=>null},
     '@/shared/lib/dashboardPermissions':permissions,
-    '@/shared/lib/db/dashboardAccessRepo':{getDashboardAudience:async()=>{calls.push('read');return{users:[],version:'a'.repeat(64)};},setDashboardAudience:async(key:string,ids:string[],version:string)=>{calls.push('write');return{key,ids,version};}},
-    '@/shared/lib/db/securityAuditRepo':{recordSecurityEvent:async()=>calls.push('audit')},
+    '@/shared/lib/db/dashboardAccessRepo':{DashboardAudienceForbiddenError,getDashboardAudience:async(_key:string,actor:string)=>{calls.push(`read:${actor}`);return{users:[],mode:'individual',version:'a'.repeat(64)};},setDashboardAudience:async(key:string,ids:string[],version:string,mode:string,actor:string)=>{if(actor==='admintop' && ids.includes('admin:1'))throw new DashboardAudienceForbiddenError('Protected administrator');calls.push(`write:${actor}:${mode}`);return{key,ids,version,mode};}},
+    '@/shared/lib/db/securityAuditRepo':{recordSecurityEvent:async(event:{actorType:string;adminUserId:number;sessionId:string})=>{audits.push(event);calls.push('audit');}},
     '@/shared/lib/originProtection':{enforceSameOriginRequest},
     '@/shared/lib/managerDashboardSecurity':{readPersonalRequestBytes},
   };
   const code=ts.transpileModule(readFileSync('src/app/api/admin/dashboard-access/route.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   const loaded={exports:{} as {GET:(r:Request)=>Promise<Response>;PUT:(r:Request)=>Promise<Response>}};
   new Function('require','module','exports',code)((key:string)=>{assert.ok(key in modules,key);return modules[key];},loaded,loaded.exports);
-  return{...loaded.exports,calls};
+  return{...loaded.exports,calls,audits};
 }
-test('only current site admins can assign report audiences, with same-origin and bounded validated body',async()=>{
+test('assignment guard, explicit all policy, scoped Admin TOP, same-origin and bounded validated body',async()=>{
   const request=(overrides:Record<string,unknown>={},origin='https://example.test')=>new Request('https://example.test/api/admin/dashboard-access',{method:'PUT',headers:{origin,'content-type':'application/json'},body:JSON.stringify({key:'top:7',userIds:['manager:2'],version:'a'.repeat(64),...overrides})});
   const denied=audienceRoute(false);assert.equal((await denied.GET(new Request('https://example.test?key=top:7'))).status,403);
   assert.equal((await denied.PUT(request())).status,403);assert.deepEqual(denied.calls,[]);
   const api=audienceRoute();assert.equal((await api.PUT(request({},'https://evil.test'))).status,403);
-  for(const body of [{key:'top:*'},{version:undefined},{userIds:['*']},{userIds:['manager:0']}])assert.equal((await api.PUT(request(body))).status,400);
+  for(const body of [{key:'top:*'},{version:undefined},{userIds:['*']},{userIds:['manager:0']},{mode:'*'},{mode:'role:manager'}])assert.equal((await api.PUT(request(body))).status,400);
   const large=new Request('https://example.test/api/admin/dashboard-access',{method:'PUT',headers:{origin:'https://example.test'},body:' '.repeat(128*1024+1)});
   assert.equal((await api.PUT(large)).status,400);assert.deepEqual(api.calls,[]);
-  assert.equal((await api.PUT(request())).status,200);assert.deepEqual(api.calls,['write','audit']);
+  assert.equal((await api.PUT(request())).status,200);assert.deepEqual(api.calls,['write:admin:individual','audit']);
+  assert.equal(api.audits[0].actorType,'admin');
+  assert.equal((await api.PUT(request({mode:'all'}))).status,200);
+  assert.deepEqual(api.calls.slice(-2),['write:admin:all','audit']);
+  const scoped=audienceRoute(true,'admintop');
+  assert.equal((await scoped.GET(new Request('https://example.test?key=top:7'))).status,200);
+  assert.deepEqual(scoped.calls,['read:admintop']);
+  assert.equal((await scoped.PUT(request({mode:'all',userIds:['admin:1']}))).status,403);
+  assert.deepEqual(scoped.calls,['read:admintop']);
+  assert.equal((await scoped.PUT(request({mode:'all'}))).status,200);
+  assert.deepEqual(scoped.calls.slice(-2),['write:admintop:all','audit']);
+  assert.equal(scoped.audits[0].actorType,'admintop');
+  assert.equal(scoped.audits[0].adminUserId,1);
+  assert.equal(scoped.audits[0].sessionId,'x');
 });

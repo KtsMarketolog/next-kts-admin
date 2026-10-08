@@ -97,6 +97,10 @@ jobs:
           rsync -a --exclude='uploads/' public/ deploy-artifact/public/
           cp ecosystem.config.cjs deploy-artifact/ecosystem.config.cjs
           cp scripts/verify-production-seo.mjs deploy-artifact/scripts/verify-production-seo.mjs
+          cp scripts/dashboard-usage-prune.mjs deploy-artifact/scripts/dashboard-usage-prune.mjs
+          mkdir -p deploy-artifact/ops/dashboard-usage
+          cp ops/dashboard-usage/install.mjs ops/dashboard-usage/kts-dashboard-usage.service \
+            ops/dashboard-usage/kts-dashboard-usage.timer deploy-artifact/ops/dashboard-usage/
           printf '%s\n' "$RELEASE_ID" > deploy-artifact/.release-id
 
           tar -czf "kts-release-${RELEASE_ID}.tar.gz" -C deploy-artifact .
@@ -330,6 +334,16 @@ jobs:
             ln -sfn "$BASE/.env.local" "$RELEASE/.env.local"
           fi
 
+          # Retention must survive logout and release-directory cleanup. Only
+          # inspect prerequisites here; never silently change host login policy.
+          test -x /usr/bin/node
+          systemctl --user show-environment >/dev/null
+          if [ "$(loginctl show-user "$(id -un)" -p Linger --value)" != "yes" ]; then
+            echo 'Dashboard usage retention requires user systemd lingering; deployment stopped.'
+            exit 1
+          fi
+          node "$RELEASE/ops/dashboard-usage/install.mjs" --app-env "$BASE/.env.local" --dry-run
+
           mkdir -p "$RELEASE/public"
           if [ -d "$RELEASE/public/$FIRMWARE_PUBLIC_PATH" ]; then
             cp -an "$RELEASE/public/$FIRMWARE_PUBLIC_PATH/." "$SHARED/public/$FIRMWARE_PUBLIC_PATH/" 2>/dev/null || true
@@ -370,6 +384,9 @@ jobs:
             /usr/bin/node /home/kts/.local/lib/kts-backup/notify.cjs predeploy || true
             exit 1
           fi
+          # Configure the independent scheduler before the application reads env.
+          # The installer never enables a timer; first deletion is after readiness.
+          node "$RELEASE/ops/dashboard-usage/install.mjs" --app-env "$BASE/.env.local" --apply
           # Rolling code back never rolls a migrated database schema back.
           pm2 delete kts-next-admin-canary >/dev/null 2>&1 || true
           KTS_PM2_CANARY=1 KTS_PM2_PORT=3001 \
@@ -432,6 +449,16 @@ jobs:
 
           ACTIVATION_STARTED=0
           trap - EXIT
+
+          # Application activation is now complete. An ops failure must be visible
+          # but must not roll back/restart an otherwise healthy report application.
+          if ! (systemctl --user daemon-reload &&
+            systemctl --user start kts-dashboard-usage.service &&
+            systemctl --user enable --now kts-dashboard-usage.timer &&
+            systemctl --user is-active --quiet kts-dashboard-usage.timer); then
+            echo 'Release is active, but dashboard usage retention activation failed. Inspect the user service journal; do not treat this deployment as complete.'
+            exit 1
+          fi
 
           CURRENT_REAL="$(readlink -f "$CURRENT" || true)"
           PREVIOUS_REAL="$(readlink -f "$PREVIOUS" || true)"

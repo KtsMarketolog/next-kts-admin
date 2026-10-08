@@ -1,4 +1,5 @@
 import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
+import { injectSalesOfficeView } from '@/shared/lib/dashboardOfficeView';
 import {
   isTopDashboardManagementSession,
   requireTopDashboardSession,
@@ -47,9 +48,11 @@ export async function GET(request: Request, context: Context) {
       : await getPublishedTopDashboardBlockVersionContent(blockId, versionId);
     if (!version) return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
 
-    const htmlContent = injectTopDashboardDataAdapter(version.htmlContent, {
-      readOnly: !isTopDashboardManagementSession(session),
+    const officeView = new URL(request.url).searchParams.get('view') === 'sales-office';
+    const adapted = injectTopDashboardDataAdapter(version.htmlContent, {
+      readOnly: officeView || !isTopDashboardManagementSession(session),
     });
+    const htmlContent = officeView ? injectSalesOfficeView(adapted) : adapted;
     const bytes = Buffer.from(htmlContent, 'utf8');
     return new Response(new Uint8Array(bytes), {
       headers: {

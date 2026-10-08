@@ -17,7 +17,7 @@ type Context = {
   params: Promise<{ blockId: string; versionId: string }>;
 };
 
-export async function GET(_request: Request, context: Context) {
+export async function GET(request: Request, context: Context) {
   const { denied, session } = await requireTopDashboardSession();
   if (denied) return denied;
 
@@ -36,11 +36,12 @@ export async function GET(_request: Request, context: Context) {
     return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
   }
 
-  const contentPath = `/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/content`;
+  const officeView = new URL(request.url).searchParams.get('view') === 'sales-office';
+  const contentPath = `/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/content${officeView ? '?view=sales-office' : ''}`;
   const bridgeScript = createTopDashboardFrameBridgeScript(
     blockId,
     versionId,
-    isTopDashboardManagementSession(session),
+    isTopDashboardManagementSession(session) && !officeView,
   );
   const html = `<!doctype html>
 <html lang="ru">

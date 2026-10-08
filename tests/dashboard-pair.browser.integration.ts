@@ -35,7 +35,7 @@ async function main() {
         return Response.json({configured:!!pair,canConfigure:admin,layout:pair?.layout??'columns',revision:pair?.revision??0,
           ...(admin?{settings:pair,options}:{}),panels:pair?pair.keys.map((key,index)=>window.revoked&&index===1
             ?{key:'restricted:1',title:'Отчёт недоступен',available:false,message:'Для этого отчёта администратор должен предоставить доступ.'}
-            :{key,title:options[index].title,available:true,kind:'top',versionId:1}):[]});
+            :{key,title:options[index].title,available:true,kind:'top',versionId:1,view:pair.views?.[index]}):[]});
       };
       createRoot(document.getElementById('root')).render(<DashboardPair/>);
     `}, bundle:true, write:false, platform:'browser', format:'iife', jsx:'automatic',
@@ -78,8 +78,10 @@ async function main() {
         await page.getByLabel('Второй отчёт',{exact:true}).selectOption('top:1');
         assert.equal(await page.getByRole('button',{name:'Сохранить фиксированную пару'}).isDisabled(),true);
         await page.getByLabel('Второй отчёт',{exact:true}).selectOption('top:2');
+        await page.getByLabel('Режим: второй отчёт',{exact:true}).selectOption('sales-office');
         await page.getByRole('button',{name:'Сохранить фиксированную пару'}).click();
         await page.waitForFunction(()=>document.querySelectorAll('iframe').length===2);
+        assert.match(await page.locator('iframe').nth(1).getAttribute('src'),/\?view=sales-office$/);
         await page.getByRole('button',{name:'Друг под другом',exact:true}).click();
         assert.equal(await page.locator('[data-layout]').getAttribute('data-layout'),'rows');
         await page.getByRole('button',{name:'Рядом',exact:true}).click();

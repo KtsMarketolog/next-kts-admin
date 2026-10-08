@@ -16,9 +16,16 @@ export function readDashboardOptions(value: unknown): DashboardAccessOption[] | 
       title: item.title,
       ...(typeof item.description === 'string' ? { description: item.description } : {}),
       ...(typeof item.href === 'string' ? { href: item.href } : {}),
+      ...(typeof item.defaultGranted === 'boolean' ? { defaultGranted: item.defaultGranted } : {}),
     });
   }
   return options;
+}
+
+export function defaultDashboardAccess(options: DashboardAccessOption[], role: string) {
+  return options.filter((option) => option.defaultGranted && (!option.key.startsWith('manager:')
+    || (option.key === 'manager:development' && role === 'manager')
+    || (option.key === 'manager:support' && role === 'support_manager'))).map((option) => option.key);
 }
 
 export function toggleDashboardAccess(current: string[], key: string, checked: boolean): string[] {

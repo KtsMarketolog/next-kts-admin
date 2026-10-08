@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 
 import { ManagerDashboard } from '@/features/admin/manager-dashboard/ManagerDashboard';
 import { getAdminSession } from '@/shared/lib/adminAuth';
+import { canAssignDashboardAccess } from '@/shared/lib/dashboardPermissions';
 import { getPersonalDashboardAudience, parsePersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 import { personalDashboardMode } from '@/shared/lib/managerDashboardSecurity';
 
@@ -22,5 +23,5 @@ export default async function ManagerDashboardPage({ searchParams }: {
     redirect(mode === 'view' && audience ? `/admin/manager-dashboard?audience=${audience}` : '/admin/manager-dashboard');
   }
 
-  return <ManagerDashboard mode={mode} audience={audience} canAssignAccess={session?.role === 'admin'} />;
+  return <ManagerDashboard mode={mode} audience={audience} canAssignAccess={canAssignDashboardAccess(session)} />;
 }

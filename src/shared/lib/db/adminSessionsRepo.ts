@@ -112,7 +112,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
        au.is_active as admin_is_active,
        au.role as admin_role,
        au.can_manage_top_dashboard as admin_can_manage_top_dashboard,
-       array(select access.key from dashboard_view_grants access
+       array(select access.key from dashboard_effective_view_grants access
              where (s.role in ('manager','support_manager') and access.manager_id = wm.id)
                 or (s.role not in ('manager','support_manager') and access.admin_user_id = au.id)
              order by access.key) as dashboard_access,

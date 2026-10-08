@@ -7,11 +7,13 @@ import {
   dashboardAudienceRoleLabel,
   filterDashboardAudience,
   selectDashboardAudienceEmployees,
+  selectAllDashboardAudience,
+  type DashboardAudienceMode,
   type DashboardAudienceEmployee,
 } from './DashboardAudienceSelection';
 import styles from './DashboardAudienceEditor.module.scss';
 
-type Audience = { users: DashboardAudienceEmployee[]; version: string; key: string };
+type Audience = { users: DashboardAudienceEmployee[]; version: string; key: string; mode: DashboardAudienceMode };
 
 export function DashboardAudienceEditor({ dashboardKey }: { dashboardKey: string }) {
   const [data, setData] = useState<Audience | null>(null);
@@ -37,7 +39,7 @@ export function DashboardAudienceEditor({ dashboardKey }: { dashboardKey: string
       }
       if (!response.ok) throw new Error('Не удалось загрузить сотрудников.');
       const result = await response.json();
-      if (generation === requestGeneration.current) setData({ ...result, key: dashboardKey });
+      if (generation === requestGeneration.current) setData({ ...result, mode: result.mode ?? 'individual', key: dashboardKey });
     } catch (error) {
       if (generation === requestGeneration.current) setMessage(error instanceof Error ? error.message : 'Не удалось загрузить сотрудников.');
     } finally {
@@ -73,13 +75,14 @@ export function DashboardAudienceEditor({ dashboardKey }: { dashboardKey: string
         body: JSON.stringify({
           key: dashboardKey,
           version: currentData.version,
+          mode: currentData.mode,
           userIds: currentData.users.filter((user) => user.checked && user.eligible).map((user) => user.id),
         }),
       });
       const result = await response.json();
       if (generation !== requestGeneration.current) return;
       if (!response.ok) throw new Error(result.error || 'Не удалось сохранить доступы');
-      setData({ ...result, key: dashboardKey });
+      setData({ ...result, mode: result.mode ?? 'individual', key: dashboardKey });
       setMessage('Доступы сохранены.');
     } catch (error) {
       if (generation === requestGeneration.current) setMessage(error instanceof Error ? error.message : 'Не удалось сохранить доступы');
@@ -103,14 +106,17 @@ export function DashboardAudienceEditor({ dashboardKey }: { dashboardKey: string
       <button type="button" disabled={busy || !roleEmployeeIds.length} onClick={() => select(roleEmployeeIds, true)}>Выбрать сотрудников роли</button>
       <button type="button" disabled={busy || !roleEmployeeIds.length} onClick={() => select(roleEmployeeIds, false)}>Снять выбор роли</button>
     </div>
-    <p>Выбор по роли отмечает только текущих активных сотрудников этой роли, независимо от поиска. После этого можно изменить галочки по одному. Будущие сотрудники автоматически не добавляются.</p>
+    <p>Выбор по роли отмечает только текущих активных сотрудников этой роли, независимо от поиска. После этого можно изменить галочки по одному. Сам выбор роли не добавляет будущих сотрудников.</p>
     <div className={styles.toolbar}>
       <input aria-label="Поиск сотрудников" placeholder="Имя или логин сотрудника" value={search} onChange={(event) => setSearch(event.target.value)} />
-      <button type="button" disabled={busy || !currentData} onClick={() => select(currentData!.users.filter((user) => user.isActive).map((user) => user.id), true)}>Выбрать всех</button>
-      <button type="button" disabled={busy || !currentData} onClick={() => select(currentData!.users.map((user) => user.id), false)}>Снять выбор</button>
+      <button type="button" disabled={busy || !currentData} onClick={() => setData((current) => current?.key === dashboardKey ? {...current, mode: 'all', users: selectAllDashboardAudience(current.users)} : current)}>Выбрать всех</button>
+      <button type="button" disabled={busy || !currentData} onClick={() => setData((current) => current?.key === dashboardKey ? {...current, mode: 'individual', users: selectDashboardAudienceEmployees(current.users, current.users.map((user) => user.id), false)} : current)}>Снять выбор</button>
       <button type="button" disabled={busy} onClick={() => void load()}>Обновить список</button>
     </div>
-    <p>«Выбрать всех» отмечает существующих активных сотрудников всех ролей, независимо от фильтров. Изменения применяются после нажатия «Сохранить доступы».</p>
+    <p>«Выбрать всех» включает доступ всем нынешним и будущим сотрудникам, независимо от фильтров. Неактивные сотрудники получат доступ только после активации. Личные отчёты — только своей группы и со своим снимком.</p>
+    {currentData && <p>{currentData.mode === 'all' ? 'Режим: все сотрудники, включая будущих. Снятая галочка — персональное исключение.' : 'Режим: только выбранные сотрудники. Новым сотрудникам доступ автоматически не добавляется.'}</p>}
+    {currentData?.mode === 'all' && <button type="button" disabled={busy} onClick={() => setData((current) => current?.key === dashboardKey ? {...current, mode: 'individual'} : current)}>Оставить только текущий выбор</button>}
+    <p>Изменения применяются после нажатия «Сохранить доступы».</p>
     <div className={styles.employees}>{visible.map((user) => <label key={user.id}>
       <input type="checkbox" checked={user.checked} disabled={busy || user.locked || !user.eligible} onChange={(event) => select([user.id], event.target.checked)} />
       <span><strong>{user.name}</strong><small>{user.login} · {dashboardAudienceRoleLabel(user.role)}{!user.isActive ? ' · Неактивен' : ''}{user.locked ? ' · Доступ по правам управления' : !user.eligible ? ' · Нет собственного личного отчёта этой группы' : ''}</small></span>

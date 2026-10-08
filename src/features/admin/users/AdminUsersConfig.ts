@@ -60,13 +60,13 @@ export function tabForRole(role: AccessUserRole): UserTab {
   return 'admin';
 }
 
-export function roleOptionsForTab(tab: UserTab) {
+export function roleOptionsForTab(tab: UserTab, canManageSiteAdmins = true) {
   if (tab === 'purchaser') return PURCHASER_ROLE_OPTIONS;
   if (tab === 'admintop') return ADMINTOP_ROLE_OPTIONS;
   if (tab === 'top') return TOP_ROLE_OPTIONS;
   if (tab === 'manager') return MANAGER_ROLE_OPTIONS;
   if (tab === 'support_manager') return SUPPORT_MANAGER_ROLE_OPTIONS;
-  return ADMIN_ROLE_OPTIONS;
+  return canManageSiteAdmins ? ADMIN_ROLE_OPTIONS : ADMIN_ROLE_OPTIONS.filter((option) => option.value !== 'admin');
 }
 
 export function defaultRoleForTab(tab: UserTab): AccessUserRole {

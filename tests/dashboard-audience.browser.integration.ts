@@ -22,16 +22,17 @@ const employees=[
  {id:'manager:4',name:'Неактивный',login:'inactive',role:'manager',isActive:false,checked:false,locked:false,eligible:true},
  {id:'manager:5',name:'Чужая группа',login:'other',role:'support_manager',isActive:true,checked:false,locked:false,eligible:false}
 ];
-window.calls=[];window.conflict=false;window.deferOld=false;window.releaseOld=null;
+window.calls=[];window.conflict=false;window.deferOld=false;window.releaseOld=null;window.audienceMode='individual';
 window.fetch=async(url,init={})=>{
  if(init.method==='PUT'){
   const body=JSON.parse(init.body);window.calls.push(body);
   if(window.conflict)return new Response(JSON.stringify({error:'Сотрудники или доступы уже изменены. Обновите список и повторите выбор.'}),{status:409});
   employees.forEach(user=>{if(!user.locked)user.checked=body.userIds.includes(user.id)});
-  return new Response(JSON.stringify({users:employees,version:'version2'}));
+  window.audienceMode=body.mode;
+  return new Response(JSON.stringify({users:employees,mode:window.audienceMode,version:'version2'}));
  }
  const key=new URL(url,location.origin).searchParams.get('key');
- const result={users:key==='top:8'?[{...employees[1],name:'Новый отчёт'}]:employees,version:'version1'};
+ const result={users:key==='top:8'?[{...employees[1],name:'Новый отчёт'}]:employees,mode:window.audienceMode,version:'version1'};
  if(window.deferOld&&key==='top:7'){window.deferOld=false;await new Promise(resolve=>window.releaseOld=resolve)}
  return new Response(JSON.stringify(result));
 };
@@ -131,12 +132,18 @@ async function main() {
             await audience.getByRole('button', { name: 'Выбрать всех', exact: true }).click();
             await audience.getByRole('textbox').fill('');
             assert.equal(await audience.getByRole('checkbox', { name: /Борис/ }).isChecked(), true, 'select all includes active users hidden by search');
-            assert.equal(await audience.getByRole('checkbox', { name: /Неактивный/ }).isChecked(), false);
+            assert.equal(await audience.getByRole('checkbox', { name: /Неактивный/ }).isChecked(), true, 'all mode includes inactive accounts for later activation');
             await audience.getByRole('button', { name: 'Сохранить доступы', exact: true }).click();
             await audience.getByRole('status').filter({ hasText: 'Доступы сохранены' }).waitFor();
             const saved = (await page.evaluate('window.calls'))[0];
-            assert.deepEqual(saved.userIds, ['admin:1', 'admin:2', 'manager:3']);
-            assert.deepEqual(Object.keys(saved).sort(), ['key', 'userIds', 'version'], 'persist explicit identities only, never a role rule');
+            assert.deepEqual(saved.userIds, ['admin:1', 'admin:2', 'manager:3', 'manager:4']);
+            assert.equal(saved.mode, 'all', 'only explicit select-all enables future employees');
+            assert.deepEqual(Object.keys(saved).sort(), ['key', 'mode', 'userIds', 'version'], 'role bulk selection never persists a role rule');
+            await audience.getByRole('button', {name:'Оставить только текущий выбор',exact:true}).click();
+            assert.equal(await audience.getByRole('checkbox', {name:/Борис/}).isChecked(),true,'switching to individual preserves current checkboxes');
+            await audience.getByRole('button', {name:'Сохранить доступы',exact:true}).click();
+            await audience.getByRole('status').filter({hasText:'Доступы сохранены'}).waitFor();
+            assert.equal((await page.evaluate('window.calls')).at(-1).mode,'individual');
             await role.selectOption('manager');
             await clearRole.click();
             await role.selectOption('');

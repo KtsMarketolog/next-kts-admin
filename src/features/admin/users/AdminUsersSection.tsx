@@ -13,7 +13,6 @@ import type { DashboardAccessOption } from '@/shared/lib/dashboardAccess';
 
 import {
   ACTIVE_TAB_STORAGE_KEY,
-  defaultRoleForTab,
   emptyDraftForTab,
   isUserTab,
   roleOptionsForTab,
@@ -22,10 +21,11 @@ import {
 import type { AccessUser, AccessUserRole, Draft, UserTab } from './AdminUsersTypes';
 import { EMPTY_DRAFT } from './AdminUsersTypes';
 import { AdminUsersView } from './AdminUsersView';
-import { readDashboardOptions } from './AdminUsersDashboardAccess';
+import { defaultDashboardAccess, readDashboardOptions } from './AdminUsersDashboardAccess';
 
 type AdminUsersSectionProps = {
   showStatus: (message: string) => void;
+  canManageSiteAdmins?: boolean;
 };
 
 function readActiveTab(): UserTab {
@@ -53,9 +53,9 @@ async function readError(response: Response, fallback: string) {
   return typeof data.error === 'string' ? data.error : fallback;
 }
 
-export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
+export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: AdminUsersSectionProps) {
   const [users, setUsers] = useState<AccessUser[]>([]);
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<Draft>(() => ({ ...EMPTY_DRAFT, role: canManageSiteAdmins ? EMPTY_DRAFT.role : 'wholesale_admin' }));
   const [activeTab, setActiveTab] = useState<UserTab>(() => readActiveTab());
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
   const [passwordEditIds, setPasswordEditIds] = useState<Record<string, boolean>>({});
@@ -63,15 +63,17 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dashboardOptions, setDashboardOptions] = useState<DashboardAccessOption[] | null>(null);
+  const [dashboardOptionsVersion, setDashboardOptionsVersion] = useState<string | null>(null);
   const [dashboardOptionsLoading, setDashboardOptionsLoading] = useState(true);
   const [dashboardOptionsError, setDashboardOptionsError] = useState<string | null>(null);
   const showStatusRef = useRef(showStatus);
+  const draftAccessTouched = useRef(false);
 
   useEffect(() => {
     showStatusRef.current = showStatus;
   }, [showStatus]);
 
-  const activeRoleOptions = roleOptionsForTab(activeTab);
+  const activeRoleOptions = roleOptionsForTab(activeTab, canManageSiteAdmins);
   const filteredUsers = useMemo(() => users.filter((user) => tabForRole(user.role) === activeTab), [activeTab, users]);
 
   const loadUsers = useCallback(async () => {
@@ -85,10 +87,13 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
         return;
       }
       const data = await response.json();
-      const accessUsers = Array.isArray(data.users) ? data.users : [];
-      setUsers(attachSavedPasswords(accessUsers));
+      const accessUsers: AccessUser[] = Array.isArray(data.users) ? data.users : [];
+      const visibleUsers = canManageSiteAdmins ? accessUsers : accessUsers.filter((user) => user.role !== 'admin');
+      // Do not even attach locally cached admin passwords to a delegated administration screen.
+      setUsers(canManageSiteAdmins ? attachSavedPasswords(visibleUsers) : visibleUsers.map((user) => ({ ...user, displayPassword: '' })));
       const options = readDashboardOptions(data.dashboardOptions);
       setDashboardOptions(options);
+      setDashboardOptionsVersion(typeof data.dashboardOptionsVersion === 'string' ? data.dashboardOptionsVersion : null);
       setDashboardOptionsError(options ? null : 'Сервер не передал корректный список дашбордов.');
     } catch {
       showStatusRef.current('Не удалось загрузить пользователей');
@@ -97,7 +102,7 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       setLoading(false);
       setDashboardOptionsLoading(false);
     }
-  }, []);
+  }, [canManageSiteAdmins]);
 
   const reloadDashboardOptions = async () => {
     setDashboardOptionsLoading(true);
@@ -110,6 +115,8 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       if (!options) throw new Error('Сервер не передал корректный список дашбордов.');
       // Retry options only: preserve the administrator's unsaved user changes.
       setDashboardOptions(options);
+      setDashboardOptionsVersion(typeof data.dashboardOptionsVersion === 'string' ? data.dashboardOptionsVersion : null);
+      if (draftAccessTouched.current) showStatusRef.current('Список обновлён. Проверьте доступы нового сотрудника перед сохранением.');
     } catch (error) {
       setDashboardOptions(null);
       setDashboardOptionsError(error instanceof Error ? error.message : 'Не удалось загрузить список дашбордов.');
@@ -125,8 +132,9 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   useEffect(() => {
     saveActiveTab(activeTab);
     setDraft((current) => {
-      const roleIsAllowed = roleOptionsForTab(activeTab).some((option) => option.value === current.role);
-      const role = roleIsAllowed ? current.role : defaultRoleForTab(activeTab);
+      const options = roleOptionsForTab(activeTab, canManageSiteAdmins);
+      const roleIsAllowed = options.some((option) => option.value === current.role);
+      const role = roleIsAllowed ? current.role : options[0].value;
       return {
         ...current,
         role,
@@ -134,7 +142,13 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
         canManageTopDashboard: role === 'top' ? current.canManageTopDashboard : false,
       };
     });
-  }, [activeTab]);
+  }, [activeTab, canManageSiteAdmins]);
+
+  useEffect(() => {
+    if (!dashboardOptions || draftAccessTouched.current) return;
+    const selected = defaultDashboardAccess(dashboardOptions, draft.role);
+    setDraft((current) => JSON.stringify(current.dashboardAccess) === JSON.stringify(selected) ? current : { ...current, dashboardAccess: selected });
+  }, [dashboardOptions, draft.role]);
 
   const updateUser = (id: string, patch: Partial<AccessUser>) => {
     setUsers((current) => current.map((user) => (user.id === id ? { ...user, ...patch } : user)));
@@ -191,8 +205,8 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   };
 
   const createUser = async () => {
-    const role = activeRoleOptions.some((option) => option.value === draft.role) ? draft.role : defaultRoleForTab(activeTab);
-    if (dashboardOptionsLoading || dashboardOptions === null) {
+    const role = activeRoleOptions.some((option) => option.value === draft.role) ? draft.role : activeRoleOptions[0].value;
+    if (dashboardOptionsLoading || dashboardOptions === null || (draftAccessTouched.current && !dashboardOptionsVersion)) {
       showStatusRef.current('Дождитесь загрузки списка дашбордов перед сохранением сотрудника');
       return;
     }
@@ -205,7 +219,9 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
       role,
       supportManagerId: null,
       canManageTopDashboard: role === 'top' && draft.canManageTopDashboard,
-      dashboardAccess: draft.dashboardAccess,
+      // Untouched forms inherit the current all-employees policy inside the creation transaction.
+      dashboardAccess: draftAccessTouched.current ? draft.dashboardAccess : undefined,
+      dashboardOptionsVersion: draftAccessTouched.current ? dashboardOptionsVersion : undefined,
     };
 
     if (!payload.name || !payload.login || !payload.password) {
@@ -224,17 +240,23 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
 
     if (!response.ok) {
       showStatusRef.current(await readError(response, 'Не удалось добавить пользователя'));
+      if (response.status === 409) {
+        setDashboardOptions(null);
+        setDashboardOptionsVersion(null);
+        setDashboardOptionsError('Общие доступы изменились. Обновите список и проверьте выбор; введённые данные сотрудника сохранены.');
+      }
       return;
     }
 
     const data = await response.json();
     if (data.user) {
-      const createdUser = { ...data.user, displayPassword: payload.password };
-      saveUserPassword(createdUser.id, payload.password);
+      const createdUser = { ...data.user, displayPassword: canManageSiteAdmins ? payload.password : '' };
+      if (canManageSiteAdmins) saveUserPassword(createdUser.id, payload.password);
       setUsers((current) => [...current, createdUser]);
       const nextTab = tabForRole(data.user.role);
       setActiveTab(nextTab);
-      setDraft(emptyDraftForTab(nextTab));
+      draftAccessTouched.current = false;
+      setDraft({ ...emptyDraftForTab(nextTab), role, dashboardAccess: defaultDashboardAccess(dashboardOptions, role) });
       markSaved('new');
       showStatusRef.current('Пользователь добавлен');
     }
@@ -253,11 +275,17 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
     }
     if (nextPassword && !validatePasswordBeforeSave(nextPassword)) return;
 
+    const payload = canManageSiteAdmins ? { ...user, password: nextPassword } : {
+      name: user.name, login: user.login, email: user.email, role: user.role,
+      isActive: user.isActive, canManageTopDashboard: user.canManageTopDashboard,
+      supportManagerId: user.supportManagerId, dashboardAccess: user.dashboardAccess,
+      dashboardAccessVersion: user.dashboardAccessVersion,
+    };
     setBusyId(user.id);
     const response = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...user, password: nextPassword }),
+      body: JSON.stringify(payload),
     });
     setBusyId(null);
 
@@ -309,11 +337,16 @@ export function AdminUsersSection({ showStatus }: AdminUsersSectionProps) {
   return (
     <AdminUsersView
       users={users}
+      canManageSiteAdmins={canManageSiteAdmins}
       filteredUsers={filteredUsers}
       activeTab={activeTab}
       setActiveTab={setActiveTab}
       draft={draft}
       setDraft={setDraft}
+      onDraftDashboardAccessChange={(dashboardAccess) => {
+        draftAccessTouched.current = true;
+        setDraft((current) => ({ ...current, dashboardAccess }));
+      }}
       busyId={busyId}
       savedId={savedId}
       loading={loading}

@@ -19,7 +19,8 @@ import { TopDashboardViewer } from '@/features/admin/top-dashboard/TopDashboardV
 import { AdminWholesaleGateway } from '@/features/admin/wholesale/AdminWholesaleGateway';
 import type { AdminSection, SettingKey } from '@/features/admin/types';
 import type { AdminSession } from '@/shared/lib/adminAuth';
-import { canAccessReportsCatalog, getReportEntries } from '@/shared/lib/dashboardAccess';
+import { canAccessReportsCatalog, canAssignDashboardAccess, getReportEntries } from '@/shared/lib/dashboardAccess';
+import { canReviewDashboardUsage } from '@/shared/lib/dashboardUsageAccess';
 
 import { AdminSiteContent } from './AdminSiteContent';
 import { AdminSiteSidebar } from './AdminSiteSidebar';
@@ -512,6 +513,7 @@ export default function AdminPanel({
       {activeArea === 'home' && (
         <AdminDashboard
           canAccessSite={sessionRole === 'admin'}
+          canManageUsers={canAssignDashboardAccess(reportSession)}
           canAccessReportsCatalog={canAccessCatalog}
           topDashboardMode={topDashboardMode}
           managerDashboardMode={sessionRole === 'admin' || sessionRole === 'admintop' ? 'manage' : isManagerRole(sessionRole) ? 'view' : null}
@@ -529,7 +531,7 @@ export default function AdminPanel({
             <AdminTopDashboardSection
               key={topDashboardBlockId}
               blockId={topDashboardBlockId}
-              canAssignAccess={sessionRole === 'admin'}
+              canAssignAccess={canAssignDashboardAccess(reportSession)}
               showStatus={showStatus}
             />
           ) : (
@@ -543,7 +545,7 @@ export default function AdminPanel({
           <AdminTopDashboardCatalog
             key={JSON.stringify([reportSession?.role, reportSession?.adminUserId, reportSession?.managerId, reportSession?.dashboardAccess, canAccessTopDashboard])}
             canManage={canManageTopDashboard}
-            canReviewUsage={sessionRole === 'admin'}
+            canReviewUsage={canReviewDashboardUsage(reportSession)}
             canReadTopBlocks={canAccessTopDashboard}
             reportEntries={getReportEntries(reportSession)}
             showStatus={showStatus}

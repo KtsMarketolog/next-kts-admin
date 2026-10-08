@@ -50,6 +50,11 @@ function repository(steps: Step[] = [], options: {openFile?: () => Readable | Pr
   const client = { query: async (sql: string, params: unknown[] = []) => {
     queries.push(sql);
     assert.doesNotMatch(sql, /\bpersonal_dashboard_/, 'The second report never reads or writes personal dashboard tables');
+    if (sql === 'select pg_advisory_xact_lock_shared(hashtext($1))') {
+      assert.deepEqual(params, ['kts:dashboard-view-grants']);
+      assert.equal(transactionActive, true, 'Effective-grant reads share the write-side transaction lock');
+      return { rows: [], rowCount: 1 };
+    }
     const expected = steps.shift();
     assert.ok(expected, `Unexpected SQL: ${sql}`);
     assert.match(sql.replace(/\s+/g, ' ').trim(), expected.sql);
@@ -81,16 +86,17 @@ function repository(steps: Step[] = [], options: {openFile?: () => Readable | Pr
       } finally { transactionActive = false; }
     } },
     './schema': { ensureSiteSchema: async () => { schemaCalls++; } },
+    './dashboardAccessRepo': { DASHBOARD_ACCESS_LOCK: 'kts:dashboard-view-grants' },
   });
   return { repo, queries, fileReads, deletedFiles, queuedFiles, get schemaCalls() { return schemaCalls; }, get transactions() { return transactions; },
     done() { assert.deepEqual(steps, []); } };
 }
-const support = { sql: /^select coalesce\(nullif\(m.role,''\),'manager'\) as role,m.is_active from wholesale_managers m join dashboard_view_grants a on a.manager_id=m.id and a.key='route-planner' where m.id=\$1 for share of m,a$/, rows: [{ role: 'support_manager', is_active: true }], params: [20] };
+const support = { sql: /^select coalesce\(nullif\(m.role,''\),'manager'\) as role,m.is_active from wholesale_managers m join dashboard_effective_view_grants a on a.manager_id=m.id and a.key='route-planner' where m.id=\$1 for share of m$/, rows: [{ role: 'support_manager', is_active: true }], params: [20] };
 const readState = { sql: /^select .* from support_shared_dashboard_state where id=1 for share$/, rows: [state] };
 const lock = { sql: /^select pg_advisory_xact_lock\(hashtext\(\$1\)\)$/, params: ['kts-support-shared-dashboard'], rows: [] };
 const writeState = { sql: /^select .* from support_shared_dashboard_state where id=1 for update$/, rows: [state] };
 const adminAccount = {sql: /^select au.role,au.is_active from admin_users au where au.id=\$1 for share of au$/, rows: [{role: 'admin', is_active: true}], params: [2]};
-const adminGrant = {sql: /^select a.key from dashboard_view_grants a where a.admin_user_id=\$1 and a.key='route-planner' for share of a$/, rows: [{key: 'route-planner'}], params: [2]};
+const adminGrant = {sql: /^select a.key from dashboard_effective_view_grants a where a.admin_user_id=\$1 and a.key='route-planner'$/, rows: [{key: 'route-planner'}], params: [2]};
 
 test('shared migration only creates new report tables and does not migrate or copy personal data', async () => {
   const statements: string[] = [];
@@ -100,6 +106,7 @@ test('shared migration only creates new report tables and does not migrate or co
     './dashboardAccessMigration': { applyDashboardAccessMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardUsageMigration': { applyDashboardUsageMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardDatesMigration': { applyDashboardDatesMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './dashboardAudiencePolicyMigration': { applyDashboardAudiencePolicyMigration: async () => { throw new Error('Unrelated migration must not run'); } },
   });
   await migrations.applySupportSharedDashboardMigration({ query: async (sql: string) => { statements.push(sql); } } as never);
   assert.equal(statements.length, 1);
@@ -120,7 +127,7 @@ test('all viewer reads recheck active manager role and explicit route-planner gr
           : kind === 'snapshot' ? db.repo.getSupportSharedDashboardSnapshot(20)
             : db.repo.getSupportSharedDashboardJsonSnapshot(20, 8), { code: 'NOT_FOUND' });
       assert.equal(db.transactions, 1);
-      assert.equal(db.queries.length, 1, 'Denied accounts receive no shared metadata or encrypted bytes');
+      assert.equal(db.queries.length, 2, 'Denied accounts only acquire the ACL lock and read account authority, never metadata or bytes');
       db.done();
     }
   }
@@ -139,8 +146,8 @@ test('both manager groups can view the shared report only with a row joined to a
 test('legacy empty or null manager roles are normalized by SQL exactly like persisted sessions', async () => {
   const db = repository([{ ...support, rows: [{ role: 'manager', is_active: true }] }, readState]);
   assert.equal(await db.repo.getSupportSharedDashboardHtml(7, false, 20), null);
-  assert.match(db.queries[0], /coalesce\(nullif\(m\.role,''\),'manager'\) as role/);
-  assert.match(db.queries[0], /join dashboard_view_grants a on a\.manager_id=m\.id and a\.key='route-planner'/);
+  assert.match(db.queries[1], /coalesce\(nullif\(m\.role,''\),'manager'\) as role/);
+  assert.match(db.queries[1], /join dashboard_effective_view_grants a on a\.manager_id=m\.id and a\.key='route-planner'/);
   db.done();
 });
 

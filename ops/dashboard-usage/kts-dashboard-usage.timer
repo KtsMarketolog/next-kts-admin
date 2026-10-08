@@ -1,0 +1,12 @@
+[Unit]
+Description=Prune expired KTS dashboard usage every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00 Europe/Moscow
+AccuracySec=30s
+RandomizedDelaySec=0
+Persistent=true
+Unit=kts-dashboard-usage.service
+
+[Install]
+WantedBy=timers.target

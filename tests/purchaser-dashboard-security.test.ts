@@ -9,6 +9,7 @@ import ts from 'typescript';
 import { type AdminSession, isTopDashboardManagementSession, isTopDashboardSession } from '../src/shared/lib/adminAuth';
 import * as access from '../src/shared/lib/dashboardAccess';
 import * as security from '../src/shared/lib/topDashboardContentSecurity';
+import * as officeView from '../src/shared/lib/dashboardOfficeView';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
 
 const purchaser = (keys: string[] = []): AdminSession => ({
@@ -79,6 +80,10 @@ function harness(relative: string, session: AdminSession | null, published = tru
       calls.push(`published-content:${id}:${version}`);
       return published && version === 19 ? { htmlContent: '<!doctype html><html><body>Synthetic report</body></html>' } : null;
     },
+    async getTopDashboardBlockVersionContent(id: number, version: number) {
+      calls.push(`management-content:${id}:${version}`);
+      return { htmlContent: '<!doctype html><html><body>Synthetic report</body></html>' };
+    },
     async getActiveTopDashboardBlockDataContent(id: number, version: number) {
       calls.push(`data:${id}:${version}`);
       return { id: 70, originalName: 'synthetic.json', storagePath: 'synthetic-only', fileSize: 2, sha256: 'a'.repeat(64), snapshotFormat: 'kts-bundle-v1' };
@@ -87,6 +92,7 @@ function harness(relative: string, session: AdminSession | null, published = tru
   const dependencies: Record<string, unknown> = {
     'node:stream': { Readable },
     '@/shared/lib/dashboardAccess': access,
+    '@/shared/lib/dashboardOfficeView': officeView,
     '@/shared/lib/adminAuth': {
       isTopDashboardManagementSession,
       async requireTopDashboardSession() {
@@ -129,14 +135,29 @@ function harness(relative: string, session: AdminSession | null, published = tru
     assert.ok(name in dependencies, `Unexpected import ${name}`);
     return dependencies[name];
   } });
-  return { calls, async request(method = 'GET', blockId = '7', versionId = '19', trusted = true) {
+  return { calls, async request(method = 'GET', blockId = '7', versionId = '19', trusted = true, search = '') {
     const data = relative === '[blockId]/data/route.ts';
     const headers: Record<string, string> = trusted ? { 'sec-fetch-dest': data ? 'empty' : 'iframe', 'sec-fetch-mode': data ? 'cors' : 'navigate',
       'sec-fetch-site': 'same-origin', referer: `https://kts-impex.ru/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/frame` } : {};
-    return exports[method]!(new Request('https://kts-impex.ru/api/admin/top-dashboard/blocks/7', { method, headers }),
+    return exports[method]!(new Request(`https://kts-impex.ru/api/admin/top-dashboard/blocks/7${search}`, { method, headers }),
       { params: Promise.resolve({ blockId, versionId }) });
   } };
 }
+
+test('office subview cannot bypass grants and is read-only even for report administrators', async () => {
+  for (const part of ['frame','content']) {
+    const relative=`[blockId]/versions/[versionId]/${part}/route.ts`;
+    const denied=harness(relative,purchaser());
+    assert.equal((await denied.request('GET','7','19',true,'?view=sales-office')).status,403);
+    assert.deepEqual(denied.calls,[]);
+    const admin=harness(relative,{role:'admin',sessionId:'s',adminUserId:1});
+    const response=await admin.request('GET','7','19',true,'?view=sales-office');
+    assert.equal(response.status,200);
+    assert.ok(admin.calls.includes(part==='frame'?'bridge-writable:false':'adapter-readonly:true'));
+    const html=await response.text();
+    assert.match(html,part==='frame'?/content\?view=sales-office/:/data-kts-office-view/);
+  }
+});
 
 test('TOP collection reveals only assigned published dashboards, including an empty selection', async () => {
   for (const [grants, expected] of [[[], []], [['top:7'], [7]], [['top:7', 'top:8'], [7, 8]]] as const) {

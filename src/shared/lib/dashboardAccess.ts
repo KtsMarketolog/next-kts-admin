@@ -1,7 +1,7 @@
 import type { AdminSession } from './adminAuth';
 import type { SharedDashboardViewer } from './db/supportSharedDashboardRepo';
 import { canViewDashboardKey, hasDashboardIdentity, validDashboardKey } from './dashboardPermissions';
-export { canViewDashboardKey as canViewDashboard } from './dashboardPermissions';
+export { canViewDashboardKey as canViewDashboard, canAssignDashboardAccess } from './dashboardPermissions';
 
 /** Only use after the report guard; the repository rechecks the persisted identity and viewing authority. */
 export function getSharedDashboardViewer(session: AdminSession): SharedDashboardViewer {
@@ -15,6 +15,8 @@ export type DashboardAccessOption = {
   title: string;
   description?: string;
   href?: string;
+  /** Default checkbox for a new employee; viewing still depends on their own eligible role. */
+  defaultGranted?: boolean;
 };
 
 export const DASHBOARD_REPORT_OPTIONS: DashboardAccessOption[] = [

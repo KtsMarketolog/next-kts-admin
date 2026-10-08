@@ -1,7 +1,7 @@
 import { getAdminSession, requireAdminSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { canAccessReportsCatalog, canViewDashboard, getSharedDashboardViewer } from '@/shared/lib/dashboardAccess';
-import { parseDashboardPairConfig, type DashboardPairOverview, type DashboardPairPanel } from '@/shared/lib/dashboardPair';
+import { defaultOfficeDashboardPair, parseDashboardPairConfig, type DashboardPairOverview, type DashboardPairPanel } from '@/shared/lib/dashboardPair';
 import { getDashboardPairConfig, saveDashboardPairConfig } from '@/shared/lib/db/dashboardPairRepo';
 import { getPublishedTopDashboardBlocks, getPublishedTopDashboardBlockOverview } from '@/shared/lib/db/topDashboardBlocksRepo';
 import { getSupportSharedDashboardOverview } from '@/shared/lib/db/supportSharedDashboardRepo';
@@ -26,7 +26,8 @@ export async function GET() {
   const session = await getAdminSession();
   if (!session || !canAccessReportsCatalog(session)) return json({error:'Нет доступа к отчётам'}, session ? 403 : 401);
   try {
-    const config = await getDashboardPairConfig();
+    const saved = await getDashboardPairConfig();
+    const config = saved ?? defaultOfficeDashboardPair(await getPublishedTopDashboardBlocks());
     const canConfigure = session.role === 'admin';
     const panels: DashboardPairPanel[] = await Promise.all((config?.keys ?? []).map(async (key, index) => {
       if (!canViewDashboard(session, key)) {
@@ -45,7 +46,8 @@ export async function GET() {
       }
       const blockId = Number(key.slice(4));
       const overview = await getPublishedTopDashboardBlockOverview(blockId);
-      return {key, title:overview?.block.title ?? 'Отчёт не опубликован', available:Boolean(overview), kind:'top', versionId:overview?.activeVersionId,
+      const view = config?.views?.[index] ?? 'default';
+      return {key, title:overview ? `${overview.block.title}${view === 'sales-office' ? ' — Экран для офиса' : ''}` : 'Отчёт не опубликован', available:Boolean(overview), kind:'top', versionId:overview?.activeVersionId, view,
         reportRevision:overview?.updatedAt, dataUploadedAt:overview?.dataUploadedAt, dataAsOf:overview?.dataAsOf,
         ...(!overview ? {message:'Опубликованная версия отчёта не найдена.'} : {})};
     }));

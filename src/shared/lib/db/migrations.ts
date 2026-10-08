@@ -8,7 +8,8 @@ import {
 import { query, withTransaction } from './client';
 import { applyCurrencyDashboardMigration } from './currencyDashboardMigration';
 import { applyDashboardAccessMigration } from './dashboardAccessMigration';
-import { applyDashboardUsageMigration } from './dashboardUsageMigration';
+import { applyDashboardAudiencePolicyMigration } from './dashboardAudiencePolicyMigration';
+import { applyDashboardUsageMigration, applyDashboardUsageRetentionMigration } from './dashboardUsageMigration';
 import { applyDashboardDatesMigration } from './dashboardDatesMigration';
 
 type SchemaMigration = {
@@ -841,6 +842,8 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610080001_dashboard_access', description: 'Independent dashboard view grants preserving operational roles and existing access', apply: applyDashboardAccessMigration},
   {id: '202610080002_dashboard_usage', description: 'Bounded dashboard usage events', apply: applyDashboardUsageMigration},
   {id: '202610080003_dashboard_dates', description: 'Explicit dashboard data dates', apply: applyDashboardDatesMigration},
+  {id: '202610080004_dashboard_audience_policy', description: 'Explicit all-employee dashboard audiences with individual exceptions', apply: applyDashboardAudiencePolicyMigration},
+  {id: '202610080005_dashboard_usage_retention', description: 'Index bounded monthly dashboard usage retention', apply: applyDashboardUsageRetentionMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

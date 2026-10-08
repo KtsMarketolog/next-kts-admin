@@ -10,11 +10,13 @@ import accessStyles from './AdminUsersDashboardAccess.module.scss';
 
 type AdminUsersViewProps = {
   users: AccessUser[];
+  canManageSiteAdmins: boolean;
   filteredUsers: AccessUser[];
   activeTab: UserTab;
   setActiveTab: (tab: UserTab) => void;
   draft: Draft;
   setDraft: Dispatch<SetStateAction<Draft>>;
+  onDraftDashboardAccessChange: (keys: string[]) => void;
   busyId: string | null;
   savedId: string | null;
   loading: boolean;
@@ -36,11 +38,13 @@ type AdminUsersViewProps = {
 
 export function AdminUsersView({
   users,
+  canManageSiteAdmins,
   filteredUsers,
   activeTab,
   setActiveTab,
   draft,
   setDraft,
+  onDraftDashboardAccessChange,
   busyId,
   savedId,
   loading,
@@ -59,7 +63,7 @@ export function AdminUsersView({
   saveUser,
   deleteUser,
 }: AdminUsersViewProps) {
-  const activeRoleOptions = roleOptionsForTab(activeTab);
+  const activeRoleOptions = roleOptionsForTab(activeTab, canManageSiteAdmins);
   const purchaserSaveBlocked = dashboardOptionsLoading || dashboardOptions === null;
   return (
     <section className={styles.section}>
@@ -71,10 +75,12 @@ export function AdminUsersView({
         <span className={styles.headingMeta}>{filteredUsers.length} из {users.length}</span>
       </div>
 
+      {!canManageSiteAdmins && <p className={styles.mutedText}>Можно создавать сотрудников и назначать доступ к отчётам. Изменение существующих профилей, паролей и удаление — только у администратора сайта. Его учётные записи здесь не отображаются.</p>}
+
       <div className={styles.userRoleTabs}>
         {USER_TABS.map((tab) => (
           <button key={tab.value} type="button" aria-pressed={activeTab === tab.value} onClick={() => setActiveTab(tab.value)}>
-            {tab.label}
+            {tab.value === 'admin' && !canManageSiteAdmins ? 'Админ прайсов' : tab.label}
           </button>
         ))}
       </div>
@@ -172,7 +178,7 @@ export function AdminUsersView({
             error={dashboardOptionsError}
             disabled={busyId === 'new'}
             onRetry={reloadDashboardOptions}
-            onChange={(dashboardAccess) => setDraft((current) => ({ ...current, dashboardAccess }))}
+            onChange={onDraftDashboardAccessChange}
           />
         )}
         <button
@@ -199,31 +205,31 @@ export function AdminUsersView({
                 <div className={`${styles.userAccessFields} ${activeTab === 'support_manager' ? styles.userSupportManagerLayout : ''} ${activeTab === 'purchaser' ? accessStyles.purchaserFields : ''}`}>
                   <label>
                     <span>Имя</span>
-                    <input value={user.name} onChange={(event) => updateUser(user.id, { name: event.target.value })} />
+                    <input readOnly={!canManageSiteAdmins} value={user.name} onChange={(event) => updateUser(user.id, { name: event.target.value })} />
                   </label>
                   <label>
                     <span>Логин</span>
-                    <input value={user.login} onChange={(event) => updateUser(user.id, { login: event.target.value })} />
+                    <input readOnly={!canManageSiteAdmins} value={user.login} onChange={(event) => updateUser(user.id, { login: event.target.value })} />
                   </label>
                   <label>
                     <span>Email</span>
-                    <input value={user.email} onChange={(event) => updateUser(user.id, { email: event.target.value })} />
+                    <input readOnly={!canManageSiteAdmins} value={user.email} onChange={(event) => updateUser(user.id, { email: event.target.value })} />
                   </label>
                   <label>
                     <span>Роль</span>
                     <select
                       value={user.role}
-                      disabled={user.isCurrent || roleOptionsForTab(activeTab).length === 1}
+                      disabled={!canManageSiteAdmins || user.isCurrent || activeRoleOptions.length === 1}
                       onChange={(event) => updateUserRole(user.id, event.target.value as AccessUserRole)}
                     >
-                      {roleOptionsForTab(activeTab).map((option) => (
+                      {activeRoleOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
                       ))}
                     </select>
                   </label>
-                  <label className={user.role === 'manager' ? undefined : styles.userPasswordWide}>
+                  {canManageSiteAdmins && <label className={user.role === 'manager' ? undefined : styles.userPasswordWide}>
                     <span>Пароль</span>
                     <div className={styles.userPasswordCopyField}>
                       <input
@@ -259,7 +265,7 @@ export function AdminUsersView({
                         <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
                       </>
                     )}
-                  </label>
+                  </label>}
                 </div>
 
                 {(
@@ -283,6 +289,7 @@ export function AdminUsersView({
                         <input
                           type="checkbox"
                           checked={user.canManageTopDashboard}
+                          disabled={!canManageSiteAdmins}
                           onChange={(event) => updateUser(user.id, {
                             canManageTopDashboard: event.target.checked,
                           })}
@@ -294,7 +301,7 @@ export function AdminUsersView({
                       <input
                         type="checkbox"
                         checked={user.isActive}
-                        disabled={user.isCurrent}
+                        disabled={!canManageSiteAdmins || user.isCurrent}
                         onChange={(event) => updateUser(user.id, { isActive: event.target.checked })}
                       />
                       Активен
@@ -309,7 +316,7 @@ export function AdminUsersView({
                     {(user.role === 'manager' || user.role === 'support_manager') && <span>Прайсов: {user.priceListCount}</span>}
                   </div>
                   <div className={styles.userAccessActions}>
-                    <button
+                    {canManageSiteAdmins && <button
                       className={styles.secondary}
                       type="button"
                       disabled={busyId === user.id}
@@ -323,7 +330,7 @@ export function AdminUsersView({
                       }}
                     >
                       {passwordIsEdited ? 'Отменить пароль' : 'Изменить пароль'}
-                    </button>
+                    </button>}
                     <button
                       className={savedId === user.id ? styles.savedButton : undefined}
                       disabled={busyId === user.id || purchaserSaveBlocked}
@@ -331,9 +338,9 @@ export function AdminUsersView({
                     >
                       {savedId === user.id ? 'Сохранено' : 'Сохранить'}
                     </button>
-                    <button className={styles.danger} disabled={busyId === user.id || user.isCurrent} onClick={() => deleteUser(user)}>
+                    {canManageSiteAdmins && <button className={styles.danger} disabled={busyId === user.id || user.isCurrent} onClick={() => deleteUser(user)}>
                       Удалить
-                    </button>
+                    </button>}
                   </div>
                 </div>
               </article>
