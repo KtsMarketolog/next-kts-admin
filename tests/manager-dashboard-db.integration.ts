@@ -32,6 +32,8 @@ import {
 import { prepareSupportSharedRoutePlannerUpload } from '../src/shared/lib/supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles } from '../src/shared/lib/topDashboardDataStorage';
 import { drainDashboardFileCleanup } from '../src/shared/lib/dashboardFileCleanup';
+import { getAccessUsers, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
+import { getDashboardAudience, setDashboardAudience } from '../src/shared/lib/db/dashboardAccessRepo';
 
 function guard() {
   assert.equal(process.env.KTS_PERSONAL_TEST, '1', 'Isolated integration tests require KTS_PERSONAL_TEST=1');
@@ -58,12 +60,22 @@ function bytes(email: string, offset = 0, token = 1, expires = day(45)) {
     ct: Buffer.alloc(32, token).toString('base64'),
   }));
 }
-async function manager(label: string, role = 'manager', active = true, emailOverride?: string) {
+async function manager(label: string, role = 'manager', active = true, emailOverride?: string, personalAccess = true) {
   const suffix = randomUUID();
   const email = emailOverride ?? `${label}-${suffix}@example.test`;
   const result = await query<{ id: string }>(`insert into wholesale_managers (login,email,name,role,is_active)
     values ($1,$2,$3,$4,$5) returning id::text`, [`test-${suffix}`, email, `Synthetic ${label}`, role, active]);
-  return { id: Number(result.rows[0].id), email };
+  const id = Number(result.rows[0].id);
+  if (personalAccess && (role === 'manager' || role === 'support_manager')) {
+    await query('insert into dashboard_view_grants(manager_id,key) values($1,$2)', [id, role === 'manager' ? 'manager:development' : 'manager:support']);
+  }
+  return { id, email };
+}
+
+async function employeeAccess(managerId: number, keys: string[]) {
+  const user = (await getAccessUsers()).find((item) => item.source === 'manager' && item.numericId === managerId);
+  assert.ok(user);
+  return updateAccessUser(user.id, { ...user, dashboardAccess: keys }, null, 'admintop');
 }
 const importFile = (data: Buffer, key = randomUUID()) => importPersonalDashboardSnapshot({
   filename: 'personal.ktsp', bytes: data, sourceKey: key, sender: 'synthetic@example.test', messageId: 'test-message',
@@ -118,6 +130,94 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         assert.equal((await client.query(`select payload from personal_dashboard_snapshots`)).rows[0].payload, 'encrypted sentinel unchanged');
         assert.equal((await client.query(`select payload from wholesale_price_lists`)).rows[0].payload, 'price sentinel unchanged');
       });
+    });
+
+    await t.test('recipient tables follow active own-group grants and employee edits without changing snapshots or prices', async () => {
+      const development = await manager('recipient-mr');
+      const support = await manager('recipient-ms', 'support_manager');
+      await query('update wholesale_managers set support_manager_id=$2 where id=$1', [development.id, support.id]);
+      const price = await query<{id: string}>('insert into wholesale_price_lists(title,token,manager_id,support_manager_id) values($1,$2,$3,$4) returning id::text',
+        ['Synthetic recipient price', randomUUID(), development.id, support.id]);
+      for (const [recipient, audience, wrongAudience] of [[development, 'development', 'support'], [support, 'support', 'development']] as const) {
+        const imported = await importFile(bytes(recipient.email));
+        assert.equal(imported.status, 'imported');
+        const savedSnapshot = (await query('select * from personal_dashboard_snapshots where manager_id=$1 order by id', [recipient.id])).rows;
+        const savedState = (await query('select * from personal_dashboard_snapshot_state where manager_id=$1', [recipient.id])).rows;
+        const savedManager = (await query('select * from wholesale_managers where id=$1', [recipient.id])).rows;
+        const savedPrice = (await query('select * from wholesale_price_lists where id=$1', [price.rows[0].id])).rows;
+        const recipients = async () => (await listPersonalDashboardAdmin()).groups.find((group) => group.audience === audience)!.managers;
+        assert.equal((await recipients()).find((item) => item.id === recipient.id)?.snapshot?.id, imported.snapshotId);
+        assert.equal((await listPersonalDashboardAdmin()).groups.find((group) => group.audience === wrongAudience)!.managers.some((item) => item.id === recipient.id), false);
+
+        await employeeAccess(recipient.id, []);
+        assert.equal((await recipients()).some((item) => item.id === recipient.id), false, 'unchecking the employee card removes the recipient row');
+        await query('insert into dashboard_view_grants(manager_id,key) values($1,$2)', [recipient.id, `manager:${wrongAudience}`]);
+        assert.equal((await recipients()).some((item) => item.id === recipient.id), false, 'a wrong-group grant cannot restore a row');
+        assert.equal((await listPersonalDashboardAdmin()).groups.find((group) => group.audience === wrongAudience)!.managers.some((item) => item.id === recipient.id), false);
+        await employeeAccess(recipient.id, [`manager:${audience}`]);
+        assert.equal((await recipients()).find((item) => item.id === recipient.id)?.snapshot?.id, imported.snapshotId, 'regrant restores the same saved snapshot');
+        assert.deepEqual((await query('select * from personal_dashboard_snapshots where manager_id=$1 order by id', [recipient.id])).rows, savedSnapshot);
+        assert.deepEqual((await query('select * from personal_dashboard_snapshot_state where manager_id=$1', [recipient.id])).rows, savedState);
+        assert.deepEqual((await query('select * from wholesale_managers where id=$1', [recipient.id])).rows, savedManager);
+        assert.deepEqual((await query('select * from wholesale_price_lists where id=$1', [price.rows[0].id])).rows, savedPrice);
+        await query('update wholesale_managers set is_active=false where id=$1', [recipient.id]);
+        assert.equal((await recipients()).some((item) => item.id === recipient.id), false, 'inactive employees stay hidden despite their grant');
+        await query('update wholesale_managers set is_active=true where id=$1', [recipient.id]);
+      }
+    });
+
+    await t.test('all-employees recipient lists include future eligible people and respect employee exclusions', async () => {
+      for (const [role, audience, otherRole] of [['manager', 'development', 'support_manager'], ['support_manager', 'support', 'manager']] as const) {
+        const key = `manager:${audience}`;
+        const previous = await getDashboardAudience(key);
+        const originalIds = previous.users.filter((user) => user.checked && user.eligible).map((user) => user.id);
+        await setDashboardAudience(key, originalIds, previous.version, 'all');
+        try {
+          const future = await manager(`future-${audience}`, role, true, undefined, false);
+          const inactive = await manager(`future-inactive-${audience}`, role, false, undefined, false);
+          const other = await manager(`future-other-${audience}`, otherRole, true, undefined, false);
+          const ids = async () => (await listPersonalDashboardAdmin()).groups.find((group) => group.audience === audience)!.managers.map((item) => item.id);
+          assert.ok((await ids()).includes(future.id));
+          assert.equal((await ids()).includes(inactive.id), false);
+          assert.equal((await ids()).includes(other.id), false);
+          await employeeAccess(future.id, []);
+          assert.equal((await ids()).includes(future.id), false, 'an employee-card exception hides inherited access');
+          const excluded = await getDashboardAudience(key);
+          assert.equal(excluded.users.find((user) => user.id === `manager:${future.id}`)?.checked, false);
+          await employeeAccess(future.id, [key]);
+          assert.ok((await ids()).includes(future.id));
+          await query('update wholesale_managers set is_active=true where id=$1', [inactive.id]);
+          assert.ok((await ids()).includes(inactive.id), 'activation reveals an inherited eligible recipient');
+        } finally {
+          const current = await getDashboardAudience(key);
+          await setDashboardAudience(key, originalIds, current.version, previous.mode);
+        }
+      }
+    });
+
+    await t.test('hidden recipients remain importable and hidden duplicate emails cannot misassign a snapshot', async () => {
+      for (const [role, audience, duplicateRole] of [['manager', 'development', 'support_manager'], ['support_manager', 'support', 'manager']] as const) {
+        const hidden = await manager(`hidden-import-${audience}`, role, true, undefined, false);
+        const imported = await importFile(bytes(hidden.email, -1));
+        assert.equal(imported.status, 'imported', 'view assignment does not gate manual imports');
+        assert.equal(imported.managerId, hidden.id);
+        assert.equal((await listPersonalDashboardAdmin()).groups.flatMap((group) => group.managers).some((item) => item.id === hidden.id), false);
+        await employeeAccess(hidden.id, [`manager:${audience}`]);
+        const before = (await query('select * from personal_dashboard_snapshot_state where manager_id=$1', [hidden.id])).rows;
+        const duplicate = await manager(`hidden-duplicate-${audience}`, duplicateRole, true, `  ${hidden.email.toUpperCase()}  `, false);
+        const overview = await listPersonalDashboardAdmin();
+        const visible = overview.groups.find((group) => group.audience === audience)!.managers.find((item) => item.id === hidden.id);
+        assert.equal(visible?.bindingStatus, 'ambiguous');
+        assert.equal(visible?.snapshot, null, 'UI never attaches saved data while a hidden employee collides by email');
+        assert.equal(overview.groups.flatMap((group) => group.managers).some((item) => item.id === duplicate.id), false);
+        assert.equal((await importFile(bytes(hidden.email, 0, 2))).status, 'ambiguous');
+        assert.deepEqual((await query('select * from personal_dashboard_snapshot_state where manager_id=$1', [hidden.id])).rows, before);
+        assert.equal((await query('select id from personal_dashboard_snapshots where manager_id=$1', [duplicate.id])).rowCount, 0);
+        await query('update wholesale_managers set is_active=false where id=$1', [duplicate.id]);
+        const restored = (await listPersonalDashboardAdmin()).groups.find((group) => group.audience === audience)!.managers.find((item) => item.id === hidden.id);
+        assert.equal(restored?.bindingStatus, 'matched');
+        assert.equal(restored?.snapshot?.id, imported.snapshotId);
+      }
     });
 
     await t.test('mixed-role attachments map independently; one broken file does not prevent ten good ones', async () => {
@@ -635,7 +735,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         assert.equal(latest.previousHtmlVersionId, before.groups.find((entry) => entry.audience === audience)!.previousHtmlVersionId);
       }
     });
-    await t.test('second shared support report is isolated, manually published, role protected and concurrency safe', async () => {
+    await t.test('second shared support report is isolated, manually published, grant protected and concurrency safe', async () => {
       const personalState = () => query(`select
         (select json_agg(v order by v.id) from personal_dashboard_html_versions v) as html,
         (select json_agg(st order by st.id) from personal_dashboard_html_state st) as html_state,
@@ -647,6 +747,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       const supportB = await manager('shared-b', 'support_manager');
       const development = await manager('shared-denied-development');
       const inactive = await manager('shared-denied-inactive', 'support_manager', false);
+      await query("insert into dashboard_view_grants(manager_id,key) select unnest($1::bigint[]),'route-planner'", [[supportA.id, supportB.id, inactive.id]]);
       const sharedEmail = 'shared-report@example.test';
       const upload = (data: Buffer, expectedActiveSnapshotId: number | null, email = sharedEmail) => importSupportSharedDashboardSnapshot({
         filename: 'shared.ktsp', bytes: data, email, actorId: 'admin:integration-test', expectedActiveSnapshotId,
@@ -693,7 +794,8 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         await assert.rejects(() => getSupportSharedDashboardSnapshot(denied.id), { code: 'NOT_FOUND' });
       }
       await query(`update wholesale_managers set role='manager' where id=$1`, [supportB.id]);
-      await assert.rejects(() => getSupportSharedDashboardOverview(supportB.id), { code: 'NOT_FOUND' });
+      assert.equal((await getSupportSharedDashboardOverview(supportB.id)).snapshot?.id, thirdId,
+        'An independent shared-report grant survives a business role change');
       await query(`update wholesale_managers set role='support_manager',is_active=false where id=$1`, [supportB.id]);
       await assert.rejects(() => getSupportSharedDashboardSnapshot(supportB.id), { code: 'NOT_FOUND' });
       await query(`update wholesale_managers set is_active=true where id=$1`, [supportB.id]);
@@ -781,6 +883,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(firstHtml.id), null, 'A draft without JSON has no preview data');
         assert.equal(await getSupportSharedDashboardJsonPreviewMetadata(legacyHtmlId), null, 'KTSP stays outside JSON preview');
         const support = await manager('json-support', 'support_manager', true, '');
+        await query("insert into dashboard_view_grants(manager_id,key) values($1,'route-planner')", [support.id]);
         const developer = await manager('json-development');
         await assert.rejects(() => assertSupportSharedJsonUploadTarget(firstHtml.id, null), {code: 'STATE_CONFLICT'});
         await activateSupportSharedDashboardHtml({versionId: firstHtml.id, expectedActiveVersionId: legacyHtmlId, actorId: 'admin:integration-test'});

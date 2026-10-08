@@ -29,23 +29,34 @@ function editors(file: string) {
   });
 }
 
-test('TOP has one admin-gated audience editor immediately after HTML upload, before data upload', () => {
+test('TOP follows report, data, HTML and publication, access, then histories in DOM order', () => {
   const matches = editors('../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx');
   assert.equal(matches.length, 1);
   assert.match(matches[0].key, /top:\$\{blockId\}/);
+  assert.match(matches[0].previous, /id="top-dashboard-html-upload"/);
   assert.match(matches[0].previous, /topDashboardUploadCard/);
   assert.match(matches[0].previous, /Выбрать HTML/);
-  assert.doesNotMatch(matches[0].container, /<h2>Данные дашборда<\/h2>/);
+  assert.match(matches[0].previous, /Опубликовать черновик/);
+  const source = matches[0].container;
+  const sequence = ['ref={previewCardRef}', 'id="top-dashboard-data-upload"', 'id="top-dashboard-html-upload"', '<DashboardAudienceEditor', 'id="top-dashboard-data-history"', 'id="top-dashboard-html-history"'];
+  const positions = sequence.map((marker) => source.indexOf(marker));
+  assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])));
 });
 
-test('personal and route-planner editors follow their own HTML forms without duplicate controls below data', () => {
+test('personal editors keep their placement and refresh recipients while route-planner follows data and HTML publication', () => {
   const matches = editors('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx');
   assert.equal(matches.length, 2);
   assert.match(matches[0].key, /manager:\$\{audience\}/);
   assert.match(matches[0].previous, /^<form/);
   assert.match(matches[0].previous, /uploadHtml\(event, audience\)/);
   assert.match(matches[0].container, /data-dashboard-equal-row="html"/);
+  assert.match(matches[0].key, /onSaved=\{onReload\}/);
   assert.match(matches[1].key, /route-planner/);
-  assert.match(matches[1].previous, /^<form/);
+  assert.match(matches[1].previous, /^<section/);
+  assert.match(matches[1].previous, /id="manager-dashboard-shared-html-upload"/);
   assert.match(matches[1].previous, /uploadSharedHtml\(event\)/);
+  assert.match(matches[1].previous, /Опубликовать общий HTML/);
+  const source = matches[1].container;
+  assert.ok(source.indexOf('id="manager-dashboard-shared-data-upload"') < source.indexOf('id="manager-dashboard-shared-html-upload"'));
+  assert.ok(source.indexOf('id="manager-dashboard-shared-html-upload"') < source.indexOf('<DashboardAudienceEditor'));
 });

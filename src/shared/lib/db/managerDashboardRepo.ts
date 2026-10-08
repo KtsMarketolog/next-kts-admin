@@ -438,11 +438,16 @@ export async function listPersonalDashboardAdmin() {
   return withTransaction(async (client) => {
     const state = await client.query<HtmlStateRow & { audience: PersonalDashboardAudience }>(`select audience,active_version_id::text,previous_version_id::text from personal_dashboard_html_state order by id`);
     const versions = await client.query<HtmlRow>(`select ${HTML_SELECT} from personal_dashboard_html_versions v order by v.id desc`);
-    const managers = await client.query<ManagerRow>(`select id::text,name,email,role,is_active from wholesale_managers
-      where coalesce(nullif(role,''),'manager') in ('manager','support_manager') order by is_active desc,name,id`);
+    const managers = await client.query<ManagerRow & { has_dashboard_access: boolean }>(`select m.id::text,m.name,m.email,m.role,m.is_active,
+      exists(select 1 from dashboard_effective_view_grants g where g.manager_id=m.id
+        and g.key=case when m.role='support_manager' then 'manager:support' else 'manager:development' end) as has_dashboard_access
+      from wholesale_managers m
+      where coalesce(nullif(m.role,''),'manager') in ('manager','support_manager') order by m.is_active desc,m.name,m.id`);
     const snapshots = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT} from personal_dashboard_snapshot_state st
       join personal_dashboard_snapshots s on s.manager_id=st.manager_id and s.id=st.active_snapshot_id`);
     const importPage = await readPersonalDashboardImportPage(client);
+    // Resolve email collisions against the whole group, including hidden accounts.
+    // View grants only filter the administrator table, never snapshot import/ownership.
     const managerBindings = bindings(managers.rows);
     return {
       groups: (['development', 'support'] as const).map((audience) => {
@@ -453,7 +458,8 @@ export async function listPersonalDashboardAdmin() {
           htmlVersions: versions.rows.filter((row) => row.audience === audience).map((row) => mapHtml(row, activeId)),
           activeHtmlVersionId: idOrNull(activeId),
           previousHtmlVersionId: idOrNull(groupState?.previous_version_id ?? null),
-          managers: managers.rows.filter((manager) => getPersonalDashboardAudience(manager.role) === audience).map((manager) => {
+          managers: managers.rows.filter((manager) => manager.is_active && manager.has_dashboard_access
+            && getPersonalDashboardAudience(manager.role) === audience).map((manager) => {
             const binding = manager.email.trim() ? resolvePersonalDashboardManager(managerBindings, getManagerEmailHash(manager.email)) : null;
             const snapshot = snapshots.rows.find((row) => row.manager_id === manager.id);
             const matches = snapshot && binding?.managerId === Number(manager.id) && snapshot.email_hash === getManagerEmailHash(manager.email);

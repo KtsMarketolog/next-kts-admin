@@ -170,7 +170,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
       </div> : null}
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}
       {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем дашборд…</p></section> : null}
-      {overview?.mode === 'manage' ? <ManagerDashboardManagement key={audience ?? 'all'} audience={audience} overview={overview} canAssignAccess={canAssignAccess} busy={busy || loading} mutate={mutate} onAccessDenied={() => {
+      {overview?.mode === 'manage' ? <ManagerDashboardManagement key={audience ?? 'all'} audience={audience} overview={overview} canAssignAccess={canAssignAccess} busy={busy || loading} mutate={mutate} onReload={refresh} onAccessDenied={() => {
         requestRevision.current += 1;
         setOverview(null);
         router.replace('/admin');

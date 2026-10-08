@@ -22,6 +22,7 @@ import {decodeTopDashboardMultiFileSnapshot} from './src/shared/lib/topDashboard
 import styles from './src/app/admin/admin.module.scss';
 const date='2026-09-17T06:00:00Z';
 const scenario=new URLSearchParams(location.search).get('case')||'multiple';
+const access=new URLSearchParams(location.search).get('access')||'hidden';
 const target=(id,index,multiple=false)=>({target:{id,name:null,index},multiple,directory:false,accept:'.json,.json.gz',label:id==='sales'?'Продажи':'Остатки'});
 const targets=scenario==='multiple'?[target('sales',0,true)]:[target('sales',0),target('inventory',1,true)];
 const version=(id,status)=>({id,status,originalName:'synthetic-'+id+'.html',fileSize:1000,sha256:'a'.repeat(64),uploadedByName:'Тест',firstPublishedByName:'Тест',firstPublishedAt:date,createdAt:date});
@@ -30,11 +31,17 @@ window.fixtureOverview={block:{id:7,title:'Синтетический обзор
 window.fixtureRuntimeTargets=scenario==='runtime'?targets:null;
 if(scenario==='legacy')window.fixtureOverview.activeDataContract={htmlVersionId:10,mode:'legacy',snapshotFormat:'kts-bundle-v1',profile:'sales-analytics',directUploadTarget:null,uploadTargets:[]};
 window.fixtureUploads=[];window.fixtureRuntimeUploads=[];window.fixtureStatuses=[];window.fixtureConfirms=[];window.fixtureConfirmAllowed=true;window.fixtureFail=false;window.fixtureConflict=false;window.fixtureFailureMode=null;window.fixtureOverviewLoads=0;
+window.fixtureAccessLoads=0;
 window.confirm=message=>{window.fixtureConfirms.push(message);return window.fixtureConfirmAllowed};
 window.fixtureCommit=()=>{const o=window.fixtureOverview;const id=o.data.activeVersionId+1;o.data={...o.data,previousVersionId:o.data.activeVersionId,activeVersionId:id,versions:[snapshot(id),...o.data.versions.map(v=>({...v,status:'previous'}))]};};
 window.fixtureChangeVersion=()=>{const o=window.fixtureOverview;o.activeVersionId=11;o.activeDataContract={...o.activeDataContract,htmlVersionId:11};o.versions=o.versions.map(v=>({...v,status:v.id===11?'active':'archived'}));};
 const originalFetch=window.fetch.bind(window);
 window.fetch=async(input,init)=>{
+ if(typeof input==='string'&&input.startsWith('/api/admin/dashboard-access?')){
+  window.fixtureAccessLoads++;
+  if(access==='denied')return Response.json({error:'Нет доступа'},{status:403});
+  return Response.json({key:'top:7',mode:'individual',version:'synthetic-audience',users:[{id:'manager:1',name:'Синтетический сотрудник',login:'test@example.test',role:'manager',isActive:true,checked:true,locked:false,eligible:true}]});
+ }
  if(input==='/api/admin/top-dashboard/blocks/7'&&(!init?.method||init.method==='GET')){window.fixtureOverviewLoads++;return Response.json(window.fixtureOverview);}
  if(input==='/api/admin/top-dashboard/blocks/7/versions'&&init?.method==='POST'){
   if(window.fixtureFailureMode==='network')throw new TypeError('Failed to fetch');
@@ -55,7 +62,7 @@ window.fetch=async(input,init)=>{
  }
  return originalFetch(input,init);
 };
-createRoot(document.getElementById('root')).render(<main className={styles.page}><AdminTopDashboardSection blockId={7} showStatus={message=>{window.fixtureStatuses.push(message)}}/></main>);
+createRoot(document.getElementById('root')).render(<main className={styles.page}><AdminTopDashboardSection blockId={7} canAssignAccess={access!=='hidden'} showStatus={message=>{window.fixtureStatuses.push(message)}}/></main>);
 `;
 
 const frameHtml = `<!doctype html><meta charset="utf-8"><p>Синтетический предпросмотр</p><script>
@@ -123,6 +130,50 @@ async function main() {
         const errors: string[] = [];
         page.on('pageerror', (error: Error) => errors.push(error.message));
         const json = (name: string, value: number) => ({ name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ value })) });
+        const assertManagementBelowReport = async (withAudience = false) => {
+          assert.deepEqual(await page.evaluate((withAudience: boolean) => {
+            const preview = document.querySelector('.topDashboardPreviewCard');
+            const htmlUpload = document.getElementById('top-dashboard-html-upload');
+            const dataUpload = document.getElementById('top-dashboard-data-upload');
+            const audience = [...document.querySelectorAll('.topDashboardLayout > section')]
+              .find((section) => section.querySelector('h2')?.textContent === 'Кому доступен отчёт');
+            const data = document.getElementById('top-dashboard-data-history');
+            const html = document.getElementById('top-dashboard-html-history');
+            const sections = [preview, dataUpload, htmlUpload, ...(withAudience ? [audience] : []), data, html];
+            return {
+              previewFirst: preview === document.querySelector('.topDashboardLayout > section'),
+              audienceMatches: Boolean(audience) === withAudience,
+              domOrder: sections.slice(1).every((section, index) => Boolean(section && sections[index]
+                && (sections[index]!.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING))),
+              visualOrder: sections.slice(1).every((section, index) => Boolean(section && sections[index]
+                && sections[index]!.getBoundingClientRect().bottom <= section.getBoundingClientRect().top)),
+              noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth,
+              oneFrame: document.querySelectorAll('.topDashboardLayout iframe').length === 1,
+            };
+          }, withAudience), { previewFirst: true, audienceMatches: true, domOrder: true, visualOrder: true, noHorizontalOverflow: true, oneFrame: true },
+          'report → data → HTML/publication → allowed audience → histories in DOM and visual order');
+        };
+        for (const access of ['allowed', 'hidden', 'denied']) {
+          await page.goto(`${origin}/?case=multiple&access=${access}`);
+          await page.waitForSelector('#top-dashboard-data-history .topDashboardVersionRow');
+          if (access === 'allowed') await page.getByRole('button', {name: 'Сохранить доступы', exact: true}).waitFor();
+          if (access === 'denied') await page.waitForFunction(() => (window as any).fixtureAccessLoads === 1
+            && ![...document.querySelectorAll('h2')].some((heading) => heading.textContent === 'Кому доступен отчёт'));
+          assert.equal(await page.evaluate(() => (window as any).fixtureAccessLoads), access === 'hidden' ? 0 : 1);
+          for (const width of [1440, 390]) {
+            await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+            await assertManagementBelowReport(access === 'allowed');
+            await page.evaluate(() => window.scrollTo(0, 0));
+            await page.screenshot({path: path.join(screenshots, `${engine}-${width}-${access}-ordered.png`), fullPage: true});
+          }
+          if (access === 'allowed') {
+            await page.evaluate(() => { (window as any).fixtureFrame = document.querySelector('.topDashboardLayout iframe'); });
+            await page.getByRole('textbox', {name: 'Поиск сотрудников'}).fill('Нет такого сотрудника');
+            await assertManagementBelowReport(true);
+            assert.equal(await page.evaluate(() => (window as any).fixtureFrame === document.querySelector('.topDashboardLayout iframe')), true, 'access filtering never remounts the report');
+          }
+        }
+        await page.setViewportSize({ width: 1440, height: 1000 });
         await page.goto(`${origin}/?case=multiple`);
         await page.waitForSelector('#top-dashboard-data-history .topDashboardVersionRow');
         assert.equal(await page.locator('#top-dashboard-data-history .topDashboardVersionRow').count(), 2);
@@ -133,24 +184,6 @@ async function main() {
         assert.equal(await page.locator('#top-dashboard-data-history').getByText('Версия данных #190', { exact: true }).count(), 0, 'previous HTML data stays stored but is not an archive in the current history');
         const sales = page.getByLabel('Выбрать данные: Продажи', { exact: true });
         await sales.setInputFiles([json('sales.json', 1), json('inventory.json', 2)]);
-        const assertManagementBelowReport = async () => {
-          assert.deepEqual(await page.evaluate(() => {
-            const preview = document.querySelector('.topDashboardPreviewCard');
-            const htmlUpload = document.querySelector('input[accept=".html,.htm,text/html"]')?.closest('section');
-            const dataUpload = document.querySelector('.topDashboardDataSection');
-            const data = document.getElementById('top-dashboard-data-history');
-            const html = document.getElementById('top-dashboard-html-history');
-            const sections = [preview, htmlUpload, dataUpload, data, html];
-            return {
-              previewFirst: preview === document.querySelector('.topDashboardLayout > section'),
-              domOrder: sections.slice(1).every((section, index) => Boolean(section && sections[index]
-                && (sections[index]!.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING))),
-              visualOrder: sections.slice(1).every((section, index) => Boolean(section && sections[index]
-                && sections[index]!.getBoundingClientRect().bottom <= section.getBoundingClientRect().top)),
-            };
-          }), { previewFirst: true, domOrder: true, visualOrder: true },
-          'report comes first, then HTML/data uploads and histories, in DOM and visual order');
-        };
         await assertManagementBelowReport();
         await page.evaluate(() => window.scrollTo(0, 0));
         await page.screenshot({ path: path.join(screenshots, `${engine}-desktop-report-first.png`) });

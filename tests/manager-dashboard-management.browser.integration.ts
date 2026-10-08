@@ -835,12 +835,14 @@ async function main() {
             await page.waitForFunction(() => document.querySelectorAll('input[type=checkbox]').length === 7);
             assert.equal(await page.getByRole('heading', {name: 'Кому доступен отчёт', exact: true}).count(), 1);
             assert.equal(await page.locator('#manager-dashboard-shared-support').evaluate((panel: HTMLElement) => {
-              const form = panel.querySelector('#manager-dashboard-shared-html')?.closest('form');
+              const data = panel.querySelector('#manager-dashboard-shared-data-upload');
+              const html = panel.querySelector('#manager-dashboard-shared-html-upload');
               const editor = [...panel.querySelectorAll('section')].find(section => section.querySelector('h2')?.textContent === 'Кому доступен отчёт');
               const report = document.querySelector('iframe[title="Общий дашборд сопровождения"]');
-              return Boolean(editor && editor.previousElementSibling === form && !editor.closest('form')
+              return Boolean(data && html && data.nextElementSibling === html
+                && editor && editor.previousElementSibling === html && !editor.closest('form')
                 && report && (report.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING));
-            }), true, 'route planner stays first and audience editor immediately follows HTML form');
+            }), true, 'route planner uses report → data → HTML/publication → access order with independent forms');
             await page.screenshot({path: path.join(output, `${engineName}-${width}-shared-audience-editor.png`), fullPage: true});
             assert.deepEqual(errors, [], 'live audience editor placement has no browser errors');
             assert.deepEqual(external, [], 'live audience editor placement uses only synthetic local APIs');

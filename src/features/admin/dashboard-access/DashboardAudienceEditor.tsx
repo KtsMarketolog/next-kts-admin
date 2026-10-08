@@ -15,7 +15,10 @@ import styles from './DashboardAudienceEditor.module.scss';
 
 type Audience = { users: DashboardAudienceEmployee[]; version: string; key: string; mode: DashboardAudienceMode };
 
-export function DashboardAudienceEditor({ dashboardKey }: { dashboardKey: string }) {
+export function DashboardAudienceEditor({ dashboardKey, onSaved }: {
+  dashboardKey: string;
+  onSaved?: () => boolean | void | Promise<boolean | void>;
+}) {
   const [data, setData] = useState<Audience | null>(null);
   const [hidden, setHidden] = useState(false);
   const [search, setSearch] = useState('');
@@ -64,7 +67,7 @@ export function DashboardAudienceEditor({ dashboardKey }: { dashboardKey: string
   };
 
   const save = async () => {
-    if (!currentData) return;
+    if (busy || !currentData) return;
     const generation = ++requestGeneration.current;
     setBusy(true);
     setMessage('');
@@ -83,7 +86,13 @@ export function DashboardAudienceEditor({ dashboardKey }: { dashboardKey: string
       if (generation !== requestGeneration.current) return;
       if (!response.ok) throw new Error(result.error || 'Не удалось сохранить доступы');
       setData({ ...result, mode: result.mode ?? 'individual', key: dashboardKey });
-      setMessage('Доступы сохранены.');
+      // A successful grant change must refresh dependent recipient tables. A
+      // failed refresh is not a failed save and must not encourage a blind retry.
+      let refreshed = true;
+      try { refreshed = (await onSaved?.()) !== false; }
+      catch { refreshed = false; }
+      if (generation === requestGeneration.current) setMessage(refreshed ? 'Доступы сохранены.'
+        : 'Доступы сохранены, но список личных файлов не удалось обновить. Нажмите «Обновить» вверху страницы.');
     } catch (error) {
       if (generation === requestGeneration.current) setMessage(error instanceof Error ? error.message : 'Не удалось сохранить доступы');
     } finally {

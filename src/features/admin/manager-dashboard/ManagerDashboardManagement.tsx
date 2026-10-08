@@ -386,7 +386,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
                     </div>
                     {fileErrors[audience] ? <p id={`manager-dashboard-html-error-${audience}`} className={styles.warning} role="alert">{fileErrors[audience]}</p> : null}
                   </form>
-                  {canAssignAccess ? <DashboardAudienceEditor dashboardKey={`manager:${audience}`} /> : null}
+                  {canAssignAccess ? <DashboardAudienceEditor dashboardKey={`manager:${audience}`} onSaved={onReload} /> : null}
                   <p className={styles.muted}>Хранятся действующий и один предыдущий рабочий HTML. История и откат — внизу страницы. Черновики хранятся отдельно.</p>
                   {drafts.length ? <div className={styles.draftSummary}>
                     <h3>Последний черновик HTML</h3><p>{drafts[0].originalName} · #{drafts[0].id}</p>
@@ -399,7 +399,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
                 </section>
 
                 <section id={`manager-dashboard-files-${audience}`} className={styles.panel} aria-label={`Личные файлы: ${label}`}>
-                  <div className={styles.sectionHeading}><div><h3>Личные файлы группы</h3><p>Загружайте снимки вручную ниже. Файлы назначаются менеджерам по email получателя.</p></div><span className={styles.badge}>Менеджеров: {group.managers.length}</span></div>
+                  <div className={styles.sectionHeading}><div><h3>Личные файлы группы</h3><p>Показаны активные сотрудники с доступом к этому дашборду. Загружайте снимки вручную ниже. Файлы назначаются менеджерам по email получателя.</p></div><span className={styles.badge}>Менеджеров: {group.managers.length}</span></div>
                   <div className={styles.tableScroll}>
                     <table className={`${styles.table} ${styles.groupTable}`}>
                       <thead><tr><th scope="col">Менеджер / email для сопоставления</th><th scope="col">Личный снимок</th></tr></thead>
@@ -413,7 +413,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
                         </tr>
                       ))}</tbody>
                     </table>
-                    {group.managers.length === 0 ? <p className={styles.empty}>В этой группе менеджеры ещё не добавлены.</p> : null}
+                    {group.managers.length === 0 ? <p className={styles.empty}>Нет активных сотрудников с доступом к этому дашборду.</p> : null}
                   </div>
                 </section>
               </>}
@@ -422,62 +422,66 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
         })}
       </div> : null}
 
-      {section === 'shared' ? <section id="manager-dashboard-shared-support" className={styles.panel} aria-labelledby="manager-dashboard-shared-management-heading">
-        <div className={styles.sectionHeading}>
-          <div><h2 id="manager-dashboard-shared-management-heading">HTML компоновщика рейсов</h2><p>Самостоятельный общий отчёт: отдельный HTML и один общий файл данных для сотрудников с доступом.</p></div>
-          <span className={styles.badge}>{shared?.activeHtmlVersionId ? `Опубликована версия #${shared.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
-        </div>
-        <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedHtml(event)}>
-          <label htmlFor="manager-dashboard-shared-html">Новая версия общего HTML · до 5 МБ</label>
-          <div className={styles.actions}>
-            <input ref={sharedHtmlInput} id="manager-dashboard-shared-html" type="file" accept=".html,.htm,text/html" required disabled={busy} />
-            <button className={styles.primary} type="submit" disabled={busy}>Загрузить общий HTML</button>
+      {section === 'shared' ? <section id="manager-dashboard-shared-support" className={styles.stack} aria-labelledby="manager-dashboard-shared-management-heading">
+        <section id="manager-dashboard-shared-data-upload" className={styles.panel} aria-label="Данные компоновщика рейсов">
+          {sharedUsesJson ? <div>
+            <div className={styles.sectionHeading}><div><h3>Общий файл данных JSON</h3><p>Один снимок компоновщика автоматически открывается у всех сотрудников с доступом. Email и пароль не нужны. Личные .ktsp не изменяются.</p></div><span className={styles.badge} data-status={shared?.jsonSnapshot ? 'current' : 'missing'}>{shared?.jsonSnapshot ? 'Данные получены' : 'Данные ещё не поступили'}</span></div>
+            {shared?.jsonSnapshot ? <dl className={styles.metadata}>
+              <div><dt>Текущий общий файл</dt><dd>{shared.jsonSnapshot.originalName}</dd></div>
+              <div><dt>Данные на</dt><dd>{formatDashboardDataDate(shared.jsonSnapshot.savedAt)}</dd></div>
+              <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(shared.jsonSnapshot.receivedAt)}</dd></div>
+            </dl> : null}
+            <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedJson(event)}>
+              <label htmlFor="manager-dashboard-shared-json">JSON-снимок компоновщика · до 100 МБ</label>
+              <div className={styles.actions}>
+                <input ref={sharedJsonInput} id="manager-dashboard-shared-json" type="file" accept=".json,application/json" required disabled={busy} aria-describedby="manager-dashboard-shared-json-help" />
+                <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий JSON</button>
+              </div>
+              <p id="manager-dashboard-shared-json-help" className={styles.muted}>Для HTML «{sharedActiveHtml.originalName}», версия #{sharedActiveHtml.id}. Файл сжимается перед отправкой: до 16 МБ после сжатия. Публикация происходит только после проверки; предыдущая версия данных сохраняется.</p>
+              {sharedJsonProgress ? <p className={styles.notice} role="status">{sharedJsonProgress}</p> : null}
+            </form>
+          </div> : <div>
+            <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех сотрудников с доступом. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>
+            {shared?.snapshot ? <dl className={styles.metadata}>
+              <div><dt>Текущий общий файл</dt><dd>{shared.snapshot.originalName}</dd></div>
+              <div><dt>Данные на</dt><dd>{formatDashboardDataDate(shared.snapshot.issued)}</dd></div>
+              <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(shared.snapshot.receivedAt)}</dd></div>
+              <div><dt>Доступ до, МСК</dt><dd>{formatDashboardDate(shared.snapshot.expires)}</dd></div>
+            </dl> : null}
+            <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedSnapshot(event)}>
+              <label htmlFor="manager-dashboard-shared-email">Email получателя общего файла</label>
+              <input ref={sharedEmailInput} id="manager-dashboard-shared-email" type="email" autoComplete="off" required disabled={busy} defaultValue={shared?.snapshot?.email ?? ''} aria-describedby="manager-dashboard-shared-email-help" />
+              <p id="manager-dashboard-shared-email-help" className={styles.muted}>Укажите email, использованный при создании этого .ktsp. Пароль от файла вводится только внутри дашборда при просмотре.</p>
+              <label htmlFor="manager-dashboard-shared-snapshot">Общий файл .ktsp · до 8 МБ</label>
+              <div className={styles.actions}>
+                <input ref={sharedSnapshotInput} id="manager-dashboard-shared-snapshot" type="file" accept=".ktsp" required disabled={busy} />
+                <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий файл</button>
+              </div>
+            </form>
+          </div>}
+        </section>
+        <section id="manager-dashboard-shared-html-upload" className={styles.panel}>
+          <div className={styles.sectionHeading}>
+            <div><h2 id="manager-dashboard-shared-management-heading">HTML компоновщика рейсов</h2><p>Самостоятельный общий отчёт: отдельный HTML и один общий файл данных для сотрудников с доступом.</p></div>
+            <span className={styles.badge}>{shared?.activeHtmlVersionId ? `Опубликована версия #${shared.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
           </div>
-          <p className={styles.muted}>Поддерживаются HTML компоновщика рейсов с JSON-снимком и прежний формат с .ktsp. Сначала опубликуйте HTML, затем загрузите соответствующий файл данных ниже.</p>
-        </form>
+          <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedHtml(event)}>
+            <label htmlFor="manager-dashboard-shared-html">Новая версия общего HTML · до 5 МБ</label>
+            <div className={styles.actions}>
+              <input ref={sharedHtmlInput} id="manager-dashboard-shared-html" type="file" accept=".html,.htm,text/html" required disabled={busy} />
+              <button className={styles.primary} type="submit" disabled={busy}>Загрузить общий HTML</button>
+            </div>
+            <p className={styles.muted}>Поддерживаются HTML компоновщика рейсов с JSON-снимком и прежний формат с .ktsp. Сначала опубликуйте HTML, затем загрузите соответствующий файл в блоке данных выше.</p>
+          </form>
+          <p className={styles.muted}>Хранятся действующий и один предыдущий рабочий HTML. История и откат — внизу страницы. Черновики хранятся отдельно.</p>
+          {sharedDrafts.length
+            ? <div className={styles.draftSummary}><h3>Последний черновик общего HTML</h3><p>{sharedDrafts[0].originalName} · #{sharedDrafts[0].id}</p><div className={styles.actions}>
+              <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={sharedPreview && previewSelection.versionId === sharedDrafts[0].id} onClick={() => showSharedPreview(sharedDrafts[0].id)}>Предпросмотр общего HTML</button>
+              <button className={styles.primary} type="button" disabled={busy} onClick={() => void publishShared(sharedDrafts[0].id)}>Опубликовать общий HTML</button>
+            </div></div>
+            : <p className={styles.empty}>{shared?.htmlVersions.length ? 'Неопубликованных черновиков нет.' : 'Общий HTML ещё не загружен. Загрузите файл и опубликуйте версию. Предпросмотр доступен по желанию.'}</p>}
+        </section>
         {canAssignAccess ? <DashboardAudienceEditor dashboardKey="route-planner" /> : null}
-        <p className={styles.muted}>Хранятся действующий и один предыдущий рабочий HTML. История и откат — внизу страницы. Черновики хранятся отдельно.</p>
-        {sharedDrafts.length
-          ? <div className={styles.draftSummary}><h3>Последний черновик общего HTML</h3><p>{sharedDrafts[0].originalName} · #{sharedDrafts[0].id}</p><div className={styles.actions}>
-            <button className={styles.secondary} type="button" disabled={busy} aria-controls="manager-dashboard-html-preview" aria-expanded={sharedPreview && previewSelection.versionId === sharedDrafts[0].id} onClick={() => showSharedPreview(sharedDrafts[0].id)}>Предпросмотр общего HTML</button>
-            <button className={styles.primary} type="button" disabled={busy} onClick={() => void publishShared(sharedDrafts[0].id)}>Опубликовать общий HTML</button>
-          </div></div>
-          : <p className={styles.empty}>{shared?.htmlVersions.length ? 'Неопубликованных черновиков нет.' : 'Общий HTML ещё не загружен. Загрузите файл и опубликуйте версию. Предпросмотр доступен по желанию.'}</p>}
-        {sharedUsesJson ? <div className={styles.preview}>
-          <div className={styles.sectionHeading}><div><h3>Общий файл данных JSON</h3><p>Один снимок компоновщика автоматически открывается у всех сотрудников с доступом. Email и пароль не нужны. Личные .ktsp не изменяются.</p></div><span className={styles.badge} data-status={shared?.jsonSnapshot ? 'current' : 'missing'}>{shared?.jsonSnapshot ? 'Данные получены' : 'Данные ещё не поступили'}</span></div>
-          {shared?.jsonSnapshot ? <dl className={styles.metadata}>
-            <div><dt>Текущий общий файл</dt><dd>{shared.jsonSnapshot.originalName}</dd></div>
-            <div><dt>Данные на</dt><dd>{formatDashboardDataDate(shared.jsonSnapshot.savedAt)}</dd></div>
-            <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(shared.jsonSnapshot.receivedAt)}</dd></div>
-          </dl> : null}
-          <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedJson(event)}>
-            <label htmlFor="manager-dashboard-shared-json">JSON-снимок компоновщика · до 100 МБ</label>
-            <div className={styles.actions}>
-              <input ref={sharedJsonInput} id="manager-dashboard-shared-json" type="file" accept=".json,application/json" required disabled={busy} aria-describedby="manager-dashboard-shared-json-help" />
-              <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий JSON</button>
-            </div>
-            <p id="manager-dashboard-shared-json-help" className={styles.muted}>Для HTML «{sharedActiveHtml.originalName}», версия #{sharedActiveHtml.id}. Файл сжимается перед отправкой: до 16 МБ после сжатия. Публикация происходит только после проверки; предыдущая версия данных сохраняется.</p>
-            {sharedJsonProgress ? <p className={styles.notice} role="status">{sharedJsonProgress}</p> : null}
-          </form>
-        </div> : <div className={styles.preview}>
-          <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех сотрудников с доступом. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>
-          {shared?.snapshot ? <dl className={styles.metadata}>
-            <div><dt>Текущий общий файл</dt><dd>{shared.snapshot.originalName}</dd></div>
-            <div><dt>Данные на</dt><dd>{formatDashboardDataDate(shared.snapshot.issued)}</dd></div>
-            <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(shared.snapshot.receivedAt)}</dd></div>
-            <div><dt>Доступ до, МСК</dt><dd>{formatDashboardDate(shared.snapshot.expires)}</dd></div>
-          </dl> : null}
-          <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedSnapshot(event)}>
-            <label htmlFor="manager-dashboard-shared-email">Email получателя общего файла</label>
-            <input ref={sharedEmailInput} id="manager-dashboard-shared-email" type="email" autoComplete="off" required disabled={busy} defaultValue={shared?.snapshot?.email ?? ''} aria-describedby="manager-dashboard-shared-email-help" />
-            <p id="manager-dashboard-shared-email-help" className={styles.muted}>Укажите email, использованный при создании этого .ktsp. Пароль от файла вводится только внутри дашборда при просмотре.</p>
-            <label htmlFor="manager-dashboard-shared-snapshot">Общий файл .ktsp · до 8 МБ</label>
-            <div className={styles.actions}>
-              <input ref={sharedSnapshotInput} id="manager-dashboard-shared-snapshot" type="file" accept=".ktsp" required disabled={busy} />
-              <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий файл</button>
-            </div>
-          </form>
-        </div>}
         {sharedError ? <p className={styles.warning} role="alert">{sharedError}</p> : null}
       </section> : null}
 

@@ -59,7 +59,9 @@ test('route-planner management opens its published report with current JSON befo
   assert.equal(url.searchParams.get('version'), String(shared.activeHtmlVersionId));
   assert.equal(url.searchParams.get('snapshot'), String(shared.jsonSnapshot?.id));
   assert.equal(url.searchParams.has('preview'), false, 'working report is not a draft preview');
-  assert.ok(html.indexOf('<iframe') < html.indexOf('id="manager-dashboard-shared-html"'));
+  assert.ok(html.indexOf('<iframe') < html.indexOf('id="manager-dashboard-shared-data-upload"'));
+  assert.ok(html.indexOf('id="manager-dashboard-shared-data-upload"') < html.indexOf('id="manager-dashboard-shared-json"'));
+  assert.ok(html.indexOf('id="manager-dashboard-shared-json"') < html.indexOf('id="manager-dashboard-shared-html-upload"'));
   assert.ok(html.indexOf('id="manager-dashboard-shared-html"') < html.indexOf('id="manager-dashboard-html-history"'));
   assert.match(html, /Данные загружены:/);
   assert.match(html, /Данные на:/);
@@ -295,13 +297,13 @@ test('personal audience editors appear once per group next to HTML upload only f
   assert.deepEqual(elements(single.render()).filter((node) => node.props.dashboardKey).map((node) => node.props.dashboardKey), ['manager:support']);
 });
 
-test('shared audience editor is adjacent to HTML management while the published report stays first', () => {
+test('shared audience editor follows data and HTML management while the published report stays first', () => {
   const allowed = sharedManagement({canAssignAccess: true});
   const tree = elements(allowed.render());
   assert.equal(tree.filter((node) => node.props.dashboardKey === 'route-planner').length, 1);
   const index = tree.findIndex((node) => node.props.dashboardKey === 'route-planner');
   assert.ok(index > tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-html'));
-  assert.ok(index < tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-snapshot'));
+  assert.ok(index > tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-snapshot'));
   assert.ok(tree.findIndex((node) => node.type === RoutePlannerViewer) < index);
   assert.equal(tree.filter((node) => node.type === 'form').some((form) => elements(form).some((node) => node.props.dashboardKey)), false);
   assert.equal(elements(sharedManagement().render()).some((node) => node.props.dashboardKey), false);
@@ -382,6 +384,10 @@ test('route-planner management keeps version history below upload and preview wi
     const view = sharedManagement({ overview: { ...managementOverview(), supportShared: shared } });
     (sharedVersionButton(view, 33, 'Предпросмотр общего HTML').props.onClick as () => void)();
     const tree = elements(view.render());
+    const data = tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-data-upload');
+    const html = tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-html-upload');
+    assert.ok(data > tree.findIndex((node) => node.type === RoutePlannerViewer));
+    assert.ok(html > data, 'JSON and legacy KTSP data controls precede HTML upload/publication');
     const history = tree.findIndex((node) => node.props.id === 'manager-dashboard-html-history');
     assert.ok(history > tree.findIndex((node) => node.props.id === 'manager-dashboard-shared-support'));
     assert.ok(history > tree.findIndex((node) => node.props.id === 'manager-dashboard-html-preview'));
@@ -393,6 +399,15 @@ test('route-planner management keeps version history below upload and preview wi
     assert.equal(new Set(ids).size, ids.length);
     assert.equal(ids.some((id) => /^manager-dashboard-(?:group-|snapshots$|html-development$|html-support$)/.test(id)), false);
   }
+});
+
+test('an empty personal recipient list explains the access filter without implying account deletion', () => {
+  const overview = managementOverview();
+  for (const group of overview.groups) group.managers = [];
+  const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview, busy: false, mutate: async () => null }));
+  assert.equal((html.match(/Нет активных сотрудников с доступом к этому дашборду\./g) ?? []).length, 2);
+  assert.doesNotMatch(html, /В этой группе менеджеры ещё не добавлены/);
+  assert.equal((html.match(/Менеджеров: 0/g) ?? []).length, 2);
 });
 
 test('separate personal and route-planner pages keep their own history below the report for KTSP and HTML-bound JSON', () => {
