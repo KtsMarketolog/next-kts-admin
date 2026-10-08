@@ -22,7 +22,7 @@ function harness(configured: string | undefined, fail = false) {
     } },
   };
   const exports: Record<string, (request: Request) => Promise<Response>> = {};
-  runInNewContext(code, { exports, Buffer, Response,
+  runInNewContext(code, { exports, Buffer, Response, setTimeout, clearTimeout,
     console: { error: (value: string) => messages.push(value) },
     process: { env: { DASHBOARD_USAGE_CRON_SECRET: configured } },
     require: (name: string) => { assert.ok(name in modules, name); return modules[name]; },
@@ -35,6 +35,98 @@ function request(token: string, body?: string) {
     method: 'POST', headers: { Authorization: `Bearer ${token}` }, body,
   });
 }
+
+function streamedRequest(body: ReadableStream<Uint8Array>, options: { token?: string; signal?: AbortSignal; contentLength?: string } = {}) {
+  return new Request('http://127.0.0.1:3000/api/cron/dashboard-usage', {
+    method: 'POST', body, duplex: 'half', signal: options.signal,
+    headers: { Authorization: `Bearer ${options.token ?? secret}`, ...(options.contentLength ? { 'Content-Length': options.contentLength } : {}) },
+  } as RequestInit);
+}
+
+test('retention accepts an empty POST stream, not just a null Web Request body', async () => {
+  for (const contentLength of [undefined, '0']) {
+    for (const emptyChunks of [0, 3]) {
+      const body = new ReadableStream<Uint8Array>({ start(controller) {
+        for (let i = 0; i < emptyChunks; i++) controller.enqueue(new Uint8Array());
+        controller.close();
+      } });
+      const req = streamedRequest(body, { contentLength });
+      assert.ok(req.body, 'reproduces the Next Node adapter, which supplies a stream for empty POSTs');
+      const h = harness(secret);
+      assert.equal((await h.exports.POST(req)).status, 200);
+      assert.equal(h.calls(), 1);
+      assert.equal(body.locked, false);
+    }
+  }
+  assert.equal((await harness(secret).exports.POST(request(secret, ''))).status, 200);
+});
+
+test('retention rejects any bytes even with Content-Length zero and never waits for cancellation', async () => {
+  for (const payload of [' ', '{}', '{"cutoff":"2100-01-01"}', 'x'.repeat(1024 * 1024)]) {
+    let cancelled = false;
+    let reads = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) { reads++; controller.enqueue(Buffer.from(payload)); },
+      cancel() { cancelled = true; return new Promise<void>(() => {}); },
+    }, { highWaterMark: 0 });
+    const h = harness(secret);
+    const response = await h.exports.POST(streamedRequest(body, { contentLength: '0' }));
+    assert.equal(response.status, 400);
+    assert.equal(h.calls(), 0);
+    assert.equal(reads, 1, 'reject immediately, do not read the rest of a large request');
+    assert.equal(cancelled, true);
+    assert.equal(body.locked, false);
+  }
+});
+
+test('retention rejects broken, consumed, aborted and endlessly empty streams without database work', async () => {
+  const broken = new ReadableStream<Uint8Array>({ start(controller) { controller.error(new Error('private request details')); } });
+  const endless = new ReadableStream<Uint8Array>({ pull(controller) { controller.enqueue(new Uint8Array()); } }, { highWaterMark: 0 });
+  const consumed = request(secret, '');
+  await consumed.text();
+  const drained = request(secret, '{"cutoff":"2100-01-01"}');
+  const drainedReader = drained.body!.getReader();
+  while (!(await drainedReader.read()).done) { /* Simulate an earlier consumer. */ }
+  drainedReader.releaseLock();
+  assert.equal(drained.bodyUsed, true);
+  assert.equal(drained.body!.locked, false);
+  const abort = new AbortController();
+  abort.abort();
+  const aborted = streamedRequest(new ReadableStream<Uint8Array>(), { signal: abort.signal });
+  for (const req of [streamedRequest(broken), streamedRequest(endless), consumed, drained, aborted]) {
+    const h = harness(secret);
+    const response = await h.exports.POST(req);
+    assert.equal(response.status, 400);
+    assert.equal(h.calls(), 0);
+    assert.doesNotMatch(await response.text(), /private/);
+  }
+});
+
+test('retention authenticates before reading the body and stops promptly on client abort', async () => {
+  let reads = 0;
+  const body = new ReadableStream<Uint8Array>({ pull() { reads++; } }, { highWaterMark: 0 });
+  const unauthorized = harness(secret);
+  assert.equal((await unauthorized.exports.POST(streamedRequest(body, { token: 'wrong' }))).status, 401);
+  assert.equal(reads, 0);
+  assert.equal(unauthorized.calls(), 0);
+  const abort = new AbortController();
+  const h = harness(secret);
+  const response = h.exports.POST(streamedRequest(body, { signal: abort.signal }));
+  abort.abort();
+  assert.equal((await response).status, 400);
+  assert.equal(h.calls(), 0);
+});
+
+test('retention body read has a deadline even when the client never closes its stream', async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+  const h = harness(secret);
+  const response = await h.exports.POST(streamedRequest(body));
+  assert.equal(response.status, 400);
+  assert.equal(cancelled, true);
+  assert.equal(body.locked, false);
+  assert.equal(h.calls(), 0);
+});
 
 test('retention endpoint is POST-only with a dedicated bounded secret before any database work', async () => {
   for (const [configured, token, status] of [
@@ -66,6 +158,7 @@ test('retention caller cannot supply a cutoff, actor or table and errors disclos
 
 test('standard release packages and installs independent retention before reload, activates only after success', () => {
   const workflow = readFileSync('.github/workflows/deploy.yml', 'utf8');
+  assert.match(workflow, /node --import tsx tests\/dashboard-usage-cron\.http\.integration\.ts/);
   assert.match(workflow, /cp scripts\/dashboard-usage-prune\.mjs deploy-artifact\/scripts\/dashboard-usage-prune\.mjs/);
   assert.match(workflow, /ops\/dashboard-usage\/kts-dashboard-usage\.timer deploy-artifact\/ops\/dashboard-usage\//);
   assert.match(workflow, /loginctl show-user/);

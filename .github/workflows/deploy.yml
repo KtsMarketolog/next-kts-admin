@@ -69,6 +69,7 @@ jobs:
           set -euo pipefail
           npm run lint
           npm test
+          node --import tsx tests/dashboard-usage-cron.http.integration.ts
           node --test ops/backup/tests/*.test.cjs
           npx tsc --noEmit --incremental false
           npm audit --omit=dev --audit-level=high
