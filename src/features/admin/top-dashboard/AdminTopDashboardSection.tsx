@@ -9,12 +9,15 @@ import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL,
+  TOP_DASHBOARD_HTML_MAX_BYTES,
+  TOP_DASHBOARD_HTML_MAX_MEGABYTES,
 } from '@/shared/lib/topDashboardLimits';
 import { encodeTopDashboardMultiFileBlobSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
 import { DashboardDataDates } from './DashboardDataDates';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
+import { requestProfitabilityFrameChange } from '@/features/admin/dashboard-usage/useProfitabilityAuditGuard';
 import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
 import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
 import { selectWorkingVersionPair } from './topDashboardHistory';
@@ -66,7 +69,7 @@ type TopDashboardDataContract = {
   htmlVersionId: number | null;
   mode: 'legacy' | 'generic' | 'disabled';
   snapshotFormat: TopDashboardSnapshotFormat | null;
-  profile: 'sales-analytics' | 'assortment-optimization' | 'purchases' | 'generic' | null;
+  profile: 'sales-analytics' | 'assortment-optimization' | 'purchases' | 'generic' | 'profitability' | 'profitability-unsupported' | null;
   directUploadTarget: {
     id: string | null;
     name: string | null;
@@ -95,7 +98,7 @@ type AdminTopDashboardSectionProps = {
   showStatus: (message: string) => void;
 };
 
-const MAX_HTML_BYTES = 5 * 1024 * 1024;
+const MAX_HTML_BYTES = TOP_DASHBOARD_HTML_MAX_BYTES;
 
 type WebkitFullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
@@ -209,7 +212,8 @@ function normalizeTopDashboardDataContract(value: unknown): TopDashboardDataCont
     && Number(source.htmlVersionId) > 0
     ? Number(source.htmlVersionId)
     : null;
-  if (source.mode === 'disabled') return { ...disabled, htmlVersionId };
+  if (source.mode === 'disabled') return { ...disabled, htmlVersionId,
+    profile: source.profile === 'profitability' || source.profile === 'profitability-unsupported' ? source.profile : null };
   if (
     source.mode === 'legacy'
     && (source.snapshotFormat === 'kts-bundle-v1' || source.snapshotFormat === 'purchases-v1')
@@ -348,6 +352,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
 
       const data = (await response.json()) as TopDashboardOverview;
       if (requestId !== overviewRequestIdRef.current) return null;
+      if (!requestProfitabilityFrameChange(previewFrameRef.current, false)) return null;
       const versions = Array.isArray(data.versions) ? data.versions : [];
       const normalized: TopDashboardOverview = {
         block: data.block,
@@ -448,6 +453,8 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   );
   const activeHtmlVersionId = overview?.activeVersionId ?? null;
   const hasActiveHtml = Boolean(activeHtmlVersionId);
+  const isUnsupportedProfitability = overview?.activeDataContract.profile === 'profitability-unsupported';
+  const isProfitabilityReport = overview?.activeDataContract.profile === 'profitability' || isUnsupportedProfitability;
   const activeDataContractMatches = overview !== null
     && overview.block.id === blockId
     && overview.activeDataContract.htmlVersionId === overview.activeVersionId;
@@ -583,7 +590,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
     }
     if (file.size <= 0 || file.size > MAX_HTML_BYTES) {
       setSelectedFile(null);
-      reportUploadFeedback('html', 'HTML-файл должен быть непустым и не больше 5 МБ');
+      reportUploadFeedback('html', `HTML-файл должен быть непустым и не больше ${TOP_DASHBOARD_HTML_MAX_MEGABYTES} МБ`);
       return;
     }
     setSelectedFile(file);
@@ -625,6 +632,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   };
 
   const uploadVersion = async () => {
+    if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     setHtmlUploadFeedback(null);
     if (!selectedFile) {
       reportUploadFeedback('html', 'Сначала выберите HTML-файл');
@@ -665,6 +673,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   };
 
   const uploadDataVersion = async () => {
+    if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     setDataUploadFeedback(null);
     if (!overview || (usesUniversalDataUpload ? !selectedFileCount : !selectedDataFile)) {
       reportUploadFeedback('data', 'Сначала выберите файл данных');
@@ -804,6 +813,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   };
 
   const activateDataVersion = async (version: TopDashboardDataVersion) => {
+    if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     if (!overview || version.status === 'active') return;
     if (!overview.activeVersionId) {
       showStatusRef.current('Сначала опубликуйте HTML-страницу');
@@ -840,6 +850,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   };
 
   const activateVersion = async (version: TopDashboardVersion) => {
+    if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     if (!overview || version.status === 'active') return;
     if (
       version.status === 'archived'
@@ -878,6 +889,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   };
 
   const deleteVersion = async (version: TopDashboardVersion) => {
+    if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     if (!overview || version.status === 'active') return;
     if (
       !window.confirm(
@@ -986,6 +998,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   };
 
   const deleteBlock = async () => {
+    if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     if (!overview || busyAction !== null) return;
 
     const title = overview.block.title;
@@ -1089,6 +1102,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
                 type="button"
                 disabled={busyAction !== null}
                 onClick={() => {
+                  if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
                   void loadOverview(selectedVersion.id);
                   setPreviewRevision((current) => current + 1);
                 }}
@@ -1152,21 +1166,25 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       >
         <div className={styles.sectionHeader}>
           <div>
-            <p>Общие данные</p>
+            <p>{isProfitabilityReport ? 'Локальные счета' : 'Общие данные'}</p>
             <h2>Данные дашборда</h2>
           </div>
           <span className={styles.headingMeta}>{versionCountLabel(workingDataVersions.length)}</span>
         </div>
 
         <p className={styles.topDashboardDataIntro}>
-          {hasActiveHtml
+          {isUnsupportedProfitability
+            ? 'Эта версия «Рентабельности счетов» требует адаптации журнала. Загрузка счетов отключена, чтобы не распространять личные файлы среди других сотрудников и не пропускать детализацию.'
+            : isProfitabilityReport
+            ? 'Загружайте счета и снимки кнопками внутри отчёта выше. Эти файлы используются только в открытом отчёте сотрудника и не становятся общими для всех.'
+            : hasActiveHtml
             ? 'Сохранённый файл автоматически откроется в дашборде у всех пользователей с доступом. Новый файл сразу заменит текущие данные, а предыдущая версия останется доступна для отката.'
             : 'Сначала опубликуйте HTML-страницу. После этого здесь можно будет сохранить подходящий файл данных для всех пользователей.'}
         </p>
 
         <div className={`${styles.topDashboardUploadCard} ${styles.topDashboardDataUploadCard}`}>
           <div>
-            <h3>{activeDataVersion ? 'Обновить данные' : 'Загрузить данные'}</h3>
+            <h3>{isProfitabilityReport ? 'Загрузка счетов внутри отчёта' : activeDataVersion ? 'Обновить данные' : 'Загрузить данные'}</h3>
             {!hasActiveHtml ? (
               <p>
                 Сначала опубликуйте HTML-страницу, затем здесь появится подходящий способ загрузки данных.
@@ -1175,6 +1193,10 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
               <p>
                 Данные о текущей HTML-странице устарели. Обновите страницу перед загрузкой файла.
               </p>
+            ) : isUnsupportedProfitability ? (
+              <p role="alert">Детализация для этой версии не подключена. Передайте авторский HTML для адаптации. Ранее записанные события остаются в журнале до окончания срока хранения.</p>
+            ) : isProfitabilityReport ? (
+              <p>Успешная загрузка счёта фиксируется в журнале: сотрудник, время, номер, номенклатура, количество, сумма и исходная валюта. Журнал доступен админу, TOP и админу TOP; хранение — один месяц.</p>
             ) : overview?.activeDataContract.mode === 'disabled' ? (
               <p>
                 В опубликованной HTML-странице не найдено поле для загрузки данных.
@@ -1200,7 +1222,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
               </p>
             )}
           </div>
-          {usesUniversalDataUpload ? (
+          {isProfitabilityReport ? null : usesUniversalDataUpload ? (
             <div className={styles.topDashboardMultiUploadControls}>
               {dataUploadTargets.map((descriptor) => {
                 const key = topDashboardUploadTargetKey(descriptor.target);
@@ -1256,6 +1278,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
                   className={styles.secondary}
                   disabled={busyAction !== null}
                   onClick={() => {
+                    if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
                     setSelectedVersionId(overview!.activeVersionId);
                     if (selectedVersionId === overview!.activeVersionId) probeRuntimeUploadTargets();
                     previewCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1312,7 +1335,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
           <UploadFeedbackMessage feedback={dataUploadFeedback} id="top-dashboard-data-upload-feedback" />
         </div>
 
-        {activeDataVersion ? (
+        {isProfitabilityReport ? null : activeDataVersion ? (
           <article className={styles.topDashboardActiveDataCard}>
             <div>
               <span className={styles.topDashboardDataCardEyebrow}>Сейчас используется</span>
@@ -1418,7 +1441,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
         <div className={styles.topDashboardUploadCard}>
           <div>
             <h3>Загрузить новую версию</h3>
-            <p>Самодостаточный HTML до 5 МБ сохранится как черновик. Хранятся действующий и один предыдущий рабочий HTML; неопубликованные черновики — отдельно. Общий лимит блока: 50 версий и 100 МБ.</p>
+            <p>Самодостаточный HTML до {TOP_DASHBOARD_HTML_MAX_MEGABYTES} МБ сохранится как черновик. Хранятся действующий и один предыдущий рабочий HTML; неопубликованные черновики — отдельно. Общий лимит блока: 50 версий и 100 МБ.</p>
           </div>
           <div className={styles.topDashboardUploadControls}>
             <label className={styles.topDashboardFilePicker} aria-disabled={busyAction !== null}>
@@ -1453,6 +1476,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
           <div><h3>Последний черновик</h3><div className={styles.topDashboardVersionTitle}><strong>{latestDraft.originalName}</strong></div><p className={styles.mutedText}>Версия #{latestDraft.id} · {formatDate(latestDraft.createdAt)}</p></div>
           <div className={styles.topDashboardVersionActions}>
             <button className={styles.secondary} type="button" disabled={busyAction !== null} onClick={() => {
+              if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
               setSelectedVersionId(latestDraft.id);
               setPreviewRevision((current) => current + 1);
             }}>Предпросмотр черновика</button>
@@ -1554,6 +1578,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
                         type="button"
                         disabled={busyAction !== null}
                         onClick={() => {
+                          if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
                           setSelectedVersionId(version.id);
                           setPreviewRevision((current) => current + 1);
                         }}

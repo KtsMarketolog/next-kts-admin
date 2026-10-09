@@ -9,3 +9,4 @@
 .notice { color: #687082; line-height: 1.55; font-size: 14px; }
 .filters { display: flex; gap: 16px; align-items: end; flex-wrap: wrap; margin: 20px 0; label { display: grid; gap: 8px; } }
 .table { overflow-x: auto; margin: 20px 0; table { width: 100%; border-collapse: collapse; text-align: left; } th { background: #f5f4fa; } td, th { padding: 12px; border-bottom: 1px solid #e7e8ee; vertical-align: top; } }
+.invoiceDetails { background: #faf9ff; section { margin-top: 14px; max-height: 520px; overflow: auto; } h3 { margin: 8px 0; } td:first-child { overflow-wrap: anywhere; } }

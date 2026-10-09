@@ -10,6 +10,7 @@ import { type AdminSession, isTopDashboardManagementSession, isTopDashboardSessi
 import * as access from '../src/shared/lib/dashboardAccess';
 import * as security from '../src/shared/lib/topDashboardContentSecurity';
 import * as officeView from '../src/shared/lib/dashboardOfficeView';
+import * as profitability from '../src/shared/lib/dashboardProfitabilityHtml';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
 
 const purchaser = (keys: string[] = []): AdminSession => ({
@@ -60,7 +61,7 @@ test('purchaser helpers require a persisted identity and exact grants, never man
 });
 
 /** Executes the actual route exports with inert DB/storage; auth predicates and frame checks are real. */
-function harness(relative: string, session: AdminSession | null, published = true) {
+function harness(relative: string, session: AdminSession | null, published = true, profitabilityFixture = false) {
   const calls: string[] = [];
   const getPublished = (blockId: number) => {
     calls.push(`published:${blockId}`);
@@ -93,6 +94,16 @@ function harness(relative: string, session: AdminSession | null, published = tru
     'node:stream': { Readable },
     '@/shared/lib/dashboardAccess': access,
     '@/shared/lib/dashboardOfficeView': officeView,
+    '@/shared/lib/dashboardProfitabilityHtml': {
+      ...profitability,
+      isSupportedProfitabilityHtml: (html: string) => profitabilityFixture || profitability.isSupportedProfitabilityHtml(html),
+    },
+    '@/shared/lib/db/topDashboardBlocksRepo': {
+      async isActiveTopDashboardHtmlVersion(id: number, version: number) {
+        calls.push(`active-html:${id}:${version}`);
+        return version === 19;
+      },
+    },
     '@/shared/lib/adminAuth': {
       isTopDashboardManagementSession,
       async requireTopDashboardSession() {
@@ -116,13 +127,15 @@ function harness(relative: string, session: AdminSession | null, published = tru
     },
     '@/shared/lib/topDashboardContentSecurity': {
       ...security,
-      injectTopDashboardDataAdapter(html: string, options: {readOnly: boolean}) {
+      injectTopDashboardDataAdapter(html: string, options: {readOnly: boolean; localInvoiceMode?: boolean}) {
         calls.push(`adapter-readonly:${options.readOnly}`);
+        calls.push(`adapter-local-invoices:${Boolean(options.localInvoiceMode)}`);
         return security.injectTopDashboardDataAdapter(html, options);
       },
-      createTopDashboardFrameBridgeScript(id: number, version: number, writable: boolean) {
+      createTopDashboardFrameBridgeScript(id: number, version: number, writable: boolean, invoice?: {preview: boolean; auditEnabled?: boolean}) {
         calls.push(`bridge-writable:${writable}`);
-        return security.createTopDashboardFrameBridgeScript(id, version, writable);
+        if (invoice) calls.push(`bridge-invoice-preview:${invoice.preview}`);
+        return security.createTopDashboardFrameBridgeScript(id, version, writable, invoice);
       },
     },
   };
@@ -156,6 +169,25 @@ test('office subview cannot bypass grants and is read-only even for report admin
     assert.ok(admin.calls.includes(part==='frame'?'bridge-writable:false':'adapter-readonly:true'));
     const html=await response.text();
     assert.match(html,part==='frame'?/content\?view=sales-office/:/data-kts-office-view/);
+  }
+});
+
+test('scoped invoice report allows active HTML without shared data, never drafts or office invoice imports', async () => {
+  for (const part of ['frame', 'content']) {
+    const relative = `[blockId]/versions/[versionId]/${part}/route.ts`;
+    const viewer = harness(relative, purchaser(['top:7']), false, true);
+    assert.equal((await viewer.request()).status, 200);
+    assert.ok(viewer.calls.includes('active-html:7:19'));
+    assert.ok(viewer.calls.includes(part === 'frame' ? 'bridge-invoice-preview:false' : 'adapter-local-invoices:true'));
+    assert.equal(viewer.calls.some(call => call.startsWith('data:') || call === 'storage'), false);
+    const draft = harness(relative, purchaser(['top:7']), false, true);
+    assert.equal((await draft.request('GET', '7', '18')).status, 404);
+    const office = harness(relative, {role:'admin',sessionId:'s',adminUserId:1}, false, true);
+    const response = await office.request('GET', '7', '19', true, '?view=sales-office');
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.doesNotMatch(html, /kts-profitability-audit-v1/);
+    assert.ok(office.calls.includes(part === 'frame' ? 'bridge-writable:false' : 'adapter-local-invoices:false'));
   }
 });
 

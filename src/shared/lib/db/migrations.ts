@@ -11,6 +11,7 @@ import { applyDashboardAccessMigration } from './dashboardAccessMigration';
 import { applyDashboardAudiencePolicyMigration } from './dashboardAudiencePolicyMigration';
 import { applyDashboardUsageMigration, applyDashboardUsageRetentionMigration } from './dashboardUsageMigration';
 import { applyDashboardDatesMigration } from './dashboardDatesMigration';
+import { applyDashboardProfitabilityAuditMigration } from './dashboardProfitabilityAuditMigration';
 
 type SchemaMigration = {
   id: string;
@@ -844,6 +845,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610080003_dashboard_dates', description: 'Explicit dashboard data dates', apply: applyDashboardDatesMigration},
   {id: '202610080004_dashboard_audience_policy', description: 'Explicit all-employee dashboard audiences with individual exceptions', apply: applyDashboardAudiencePolicyMigration},
   {id: '202610080005_dashboard_usage_retention', description: 'Index bounded monthly dashboard usage retention', apply: applyDashboardUsageRetentionMigration},
+  {id: '202610090001_dashboard_profitability_audit', description: 'Dedicated invoice audit details and 20 MiB TOP HTML support', apply: applyDashboardProfitabilityAuditMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

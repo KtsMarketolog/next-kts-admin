@@ -39,6 +39,7 @@ export type DashboardUsageRow = {
   id: string; actorKey: string; actorName: string; actorRole: string;
   dashboardKey: string; dashboardTitle: string; action: DashboardUsageAction;
   preview: boolean; versionId: number | null; createdAt: string;
+  hasProfitabilityDetails: boolean;
 };
 
 export async function listDashboardUsage(input: { before?: string; dashboardKey?: string; actorKey?: string; action?: DashboardUsageAction }) {
@@ -46,8 +47,10 @@ export async function listDashboardUsage(input: { before?: string; dashboardKey?
   const result = await query<{
     id: string; actor_key: string; actor_name: string; actor_role: string; dashboard_key: string;
     dashboard_title: string; action: DashboardUsageAction; is_preview: boolean; html_version_id: string | null; created_at: Date;
+    has_profitability_details: boolean;
   }>(`select event.id::text, event.actor_key, event.actor_role, event.dashboard_key, event.action, event.is_preview,
       event.html_version_id::text, event.created_at,
+      exists(select 1 from dashboard_profitability_audit_details details where details.usage_event_id = event.id) as has_profitability_details,
       coalesce(nullif(u.name, ''), nullif(m.name, ''), case when event.actor_key = 'admin:primary' then 'Основной администратор' else event.actor_key end) as actor_name,
       coalesce(block.title, case event.dashboard_key when 'manager:development' then 'Дашборды МР'
         when 'manager:support' then 'Дашборды МС' when 'route-planner' then 'Компоновщик рейсов'
@@ -67,6 +70,7 @@ export async function listDashboardUsage(input: { before?: string; dashboardKey?
     dashboardKey: row.dashboard_key, dashboardTitle: row.dashboard_title,
     action: row.action, preview: row.is_preview, versionId: row.html_version_id ? Number(row.html_version_id) : null,
     createdAt: new Date(row.created_at).toISOString(),
+    hasProfitabilityDetails: row.has_profitability_details === true,
   }));
   return { events: rows, nextCursor: result.rows.length > 50 ? rows.at(-1)!.id : null };
 }

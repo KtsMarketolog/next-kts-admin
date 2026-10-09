@@ -28,3 +28,7 @@ export const TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES = 512 * 1024;
 // Discovery is an inventory of available HTML fields, not the number selected
 // for one snapshot. Keep the inventory separate from the 32-target envelope cap.
 export const TOP_DASHBOARD_UPLOAD_MAX_DISCOVERED_TARGETS = 256;
+// TOP HTML may include its own PDF/XLSX libraries and reference data.
+// Personal manager dashboards and the per-block storage quota are unchanged.
+export const TOP_DASHBOARD_HTML_MAX_MEGABYTES = 20;
+export const TOP_DASHBOARD_HTML_MAX_BYTES = TOP_DASHBOARD_HTML_MAX_MEGABYTES * 1024 * 1024;

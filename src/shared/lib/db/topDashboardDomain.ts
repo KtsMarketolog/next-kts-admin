@@ -9,7 +9,9 @@ export type TopDashboardProfile =
   | 'sales-analytics'
   | 'assortment-optimization'
   | 'purchases'
-  | 'generic';
+  | 'generic'
+  | 'profitability'
+  | 'profitability-unsupported';
 
 export type TopDashboardBlockDataVersionStatus = 'active' | 'previous' | 'archived';
 

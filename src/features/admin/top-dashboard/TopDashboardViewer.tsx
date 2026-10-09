@@ -8,6 +8,7 @@ import styles from '@/app/admin/admin.module.scss';
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
 import { DashboardDataDates } from './DashboardDataDates';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
+import { requestProfitabilityFrameChange } from '@/features/admin/dashboard-usage/useProfitabilityAuditGuard';
 import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
 
 type TopDashboardPublishedOverview = {
@@ -108,6 +109,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
       if (!response.ok) {
         const message = await readError(response, 'Не удалось открыть отчёт');
         if (requestId !== requestIdRef.current) return;
+        if (!requestProfitabilityFrameChange(previewFrameRef.current, false)) return;
         setOverview(null);
         setLoadError(message);
         if (notifyOnError) showStatusRef.current(message);
@@ -116,10 +118,12 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
 
       const data = (await response.json()) as TopDashboardPublishedOverview;
       if (requestId !== requestIdRef.current) return;
+      if (!requestProfitabilityFrameChange(previewFrameRef.current, false)) return;
       setOverview(data);
       setLoadError(null);
     } catch {
       if (requestId !== requestIdRef.current) return;
+      if (!requestProfitabilityFrameChange(previewFrameRef.current, false)) return;
       const message = 'Не удалось открыть отчёт';
       setOverview(null);
       setLoadError(message);
@@ -221,6 +225,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
                 className={styles.secondary}
                 type="button"
                 onClick={() => {
+                  if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
                   void loadOverview();
                   setPreviewRevision((current) => current + 1);
                 }}

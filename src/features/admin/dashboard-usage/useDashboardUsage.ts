@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { DASHBOARD_USAGE_MARKER, DASHBOARD_USAGE_MAX_BATCH, readDashboardUsageMessage, type DashboardUsageAction, type DashboardUsageEvent } from '@/shared/lib/dashboardUsage';
+import { useProfitabilityAuditGuard } from './useProfitabilityAuditGuard';
 
 /** Opaque frames speak only to their authenticated parent, never to the API. */
 export function useDashboardUsage({ dashboardKey, iframeRef, preview = false, versionId = null, opaque = false }: {
   dashboardKey: string; iframeRef: RefObject<HTMLIFrameElement | null>;
   preview?: boolean; versionId?: number | null; opaque?: boolean;
 }) {
+  useProfitabilityAuditGuard(iframeRef);
   const recordRef = useRef<(action: DashboardUsageAction) => void>(() => {});
   const record = useCallback((action: DashboardUsageAction) => recordRef.current(action), []);
   useEffect(() => {

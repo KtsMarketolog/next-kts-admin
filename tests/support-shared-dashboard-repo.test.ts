@@ -107,6 +107,7 @@ test('shared migration only creates new report tables and does not migrate or co
     './dashboardUsageMigration': { applyDashboardUsageMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardDatesMigration': { applyDashboardDatesMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardAudiencePolicyMigration': { applyDashboardAudiencePolicyMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './dashboardProfitabilityAuditMigration': { applyDashboardProfitabilityAuditMigration: async () => { throw new Error('Unrelated migration must not run'); } },
   });
   await migrations.applySupportSharedDashboardMigration({ query: async (sql: string) => { statements.push(sql); } } as never);
   assert.equal(statements.length, 1);

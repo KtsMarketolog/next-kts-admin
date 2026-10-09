@@ -1,6 +1,8 @@
 import { createHash } from 'crypto';
 import sanitizeHtml from 'sanitize-html';
 import { dashboardUsageAdapterScript, dashboardUsageRelayScript } from './dashboardUsageBridge';
+import { dashboardProfitabilityBridgeScript } from './dashboardProfitabilityBridge';
+import { isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from './dashboardProfitabilityHtml';
 
 import type {
   TopDashboardProfile,
@@ -223,6 +225,14 @@ export function detectTopDashboardExpectedSnapshotFormat(
 export function detectTopDashboardDataContract(
   htmlContent: string,
 ): TopDashboardDataContract {
+  // V19 invoice files are private local calculations, not a shared snapshot.
+  // Never capture/restore these inputs through the generic multi-file bridge.
+  if (isSupportedProfitabilityHtml(htmlContent)) {
+    return { mode: 'disabled', snapshotFormat: null, profile: 'profitability', directUploadTarget: null };
+  }
+  if (isProfitabilityHtmlCandidate(htmlContent)) {
+    return { mode: 'disabled', snapshotFormat: null, profile: 'profitability-unsupported', directUploadTarget: null };
+  }
   const profile = detectTopDashboardExpectedProfile(htmlContent);
   const snapshotFormat = detectTopDashboardExpectedSnapshotFormat(htmlContent);
   if (profile && snapshotFormat) {
@@ -429,10 +439,11 @@ export function getTopDashboardDataAdapterScript(
   expectedProfile: TopDashboardProfile | null = null,
   readOnly = false,
   legacyReadyFunction: TopDashboardLegacyReadyFunction | null = null,
+  localInvoiceMode = false,
 ) {
   const expectedFormatJson = JSON.stringify(expectedFormat);
   const expectedProfileJson = JSON.stringify(expectedProfile);
-  const readOnlyJson = JSON.stringify(readOnly);
+  const readOnlyJson = JSON.stringify(readOnly && !localInvoiceMode);
   const legacyReadyFunctionJson = JSON.stringify(legacyReadyFunction);
   return String.raw`${dashboardUsageAdapterScript()}
 (() => {
@@ -442,7 +453,8 @@ export function getTopDashboardDataAdapterScript(
   const MAX_BYTES = ${TOP_DASHBOARD_DATA_MAX_BYTES};
   const EXPECTED_FORMAT = ${expectedFormatJson};
   const EXPECTED_PROFILE = ${expectedProfileJson};
-  const MULTI_FILE_MODE = EXPECTED_FORMAT === 'multi-file-v1' && EXPECTED_PROFILE === 'generic';
+  const LOCAL_INVOICE_MODE = ${JSON.stringify(localInvoiceMode)};
+  const MULTI_FILE_MODE = !LOCAL_INVOICE_MODE && EXPECTED_FORMAT === 'multi-file-v1' && EXPECTED_PROFILE === 'generic';
   const READ_ONLY = ${readOnlyJson};
   const LEGACY_READY_FUNCTION = ${legacyReadyFunctionJson};
   const RESTORE_START_EVENT = 'kts-top-dashboard-restore-start';
@@ -1117,7 +1129,7 @@ export function getTopDashboardDataAdapterScript(
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent) return;
     const data = event.data;
-    if (!data || typeof data !== 'object') return;
+    if (!data || typeof data !== 'object' || LOCAL_INVOICE_MODE) return;
     if (data.marker === MULTI_FILE_MARKER && data.type === 'probe-upload-targets') {
       reportUploadTargets(true, data.requestId);
       return;
@@ -1144,6 +1156,7 @@ export function getTopDashboardDataAdapterScript(
   });
 
   function ready() {
+    if (LOCAL_INVOICE_MODE) return;
     send('adapter-ready', {
       expectedFormat: EXPECTED_FORMAT,
       expectedProfile: EXPECTED_PROFILE,
@@ -1161,13 +1174,15 @@ export function getTopDashboardDataAdapterScript(
 
 export function injectTopDashboardDataAdapter(
   htmlContent: string,
-  options: { readOnly?: boolean } = {},
+  options: { readOnly?: boolean; localInvoiceMode?: boolean } = {},
 ) {
   const contract = detectTopDashboardDataContract(htmlContent);
   const expectedFormat = contract.snapshotFormat;
   const expectedProfile = contract.profile;
   const legacyReadyFunction = detectTopDashboardLegacyReadyFunction(htmlContent);
-  const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, options.readOnly === true, legacyReadyFunction)}</script>`;
+  const localInvoiceMode = options.localInvoiceMode === true && isSupportedProfitabilityHtml(htmlContent);
+  const readOnly = options.readOnly === true || contract.profile === 'profitability-unsupported';
+  const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, readOnly, legacyReadyFunction, localInvoiceMode)}</script>`;
   const head = HEAD_OPEN_PATTERN.exec(htmlContent);
   if (head) {
     const index = head.index + head[0].length;
@@ -1187,12 +1202,14 @@ export function createTopDashboardFrameBridgeScript(
   blockId: number,
   htmlVersionId: number,
   canManage: boolean,
+  profitability?: { preview: boolean; auditEnabled?: boolean },
 ) {
   const config = JSON.stringify({
     dataPath: `/api/admin/top-dashboard/blocks/${blockId}/data`,
     blockId,
     htmlVersionId,
     canManage,
+    localInvoiceMode: Boolean(profitability),
   });
 
   return String.raw`(() => {
@@ -1218,6 +1235,7 @@ export function createTopDashboardFrameBridgeScript(
   const SNAPSHOT_NAME = /\.json(?:\.gz)?$/i;
   const iframe = document.querySelector('#dashboard-frame');
   ${dashboardUsageRelayScript('iframe')}
+  ${profitability && profitability.auditEnabled !== false ? dashboardProfitabilityBridgeScript('iframe', { dashboardKey: `top:${blockId}`, versionId: htmlVersionId, preview: profitability.preview }) : ''}
   const notice = document.querySelector('#data-notice');
   let initialLoadStarted = false;
   let noticeTimer = 0;
@@ -2040,7 +2058,7 @@ export function createTopDashboardFrameBridgeScript(
   // Only the same-origin management page may request an upper-panel upload.
   // The sandboxed report cannot impersonate its parent or choose an endpoint.
   window.addEventListener('message', (event) => {
-    if (!CONFIG.canManage || event.source !== window.parent || event.origin !== window.location.origin) return;
+    if (CONFIG.localInvoiceMode || !CONFIG.canManage || event.source !== window.parent || event.origin !== window.location.origin) return;
     const data = event.data;
     if (!data || data.marker !== MANAGEMENT_MARKER || data.blockId !== CONFIG.blockId
       || data.htmlVersionId !== CONFIG.htmlVersionId) return;
@@ -2088,6 +2106,7 @@ export function createTopDashboardFrameBridgeScript(
       );
       return;
     }
+    if (CONFIG.localInvoiceMode) return;
     if (data.marker === MULTI_FILE_MARKER) {
       if (data.type === 'upload-targets') {
         acceptUploadTargets(data.targets, data.requestId);
@@ -2178,9 +2197,11 @@ export function createTopDashboardFrameBridgeScript(
     }
   });
 
-  prefetchPromise = prefetchActiveData();
-  probeAdapter();
-  probeTimer = window.setInterval(probeAdapter, 250);
+  if (!CONFIG.localInvoiceMode) {
+    prefetchPromise = prefetchActiveData();
+    probeAdapter();
+    probeTimer = window.setInterval(probeAdapter, 250);
+  }
 })();`;
 }
 
@@ -2199,7 +2220,7 @@ export function buildTopDashboardFrameSecurityPolicy(scriptContent: string) {
   ].join('; ');
 }
 
-export function buildTopDashboardContentSecurityPolicy(htmlContent: string) {
+export function buildTopDashboardContentSecurityPolicy(htmlContent: string, options: { allowBlobModules?: boolean } = {}) {
   const scriptHashes = Array.from(htmlContent.matchAll(INLINE_SCRIPT_PATTERN), (match) => {
     // HTML tokenization normalizes CRLF before CSP hashes are checked.
     const scriptContent = (match[1] ?? '').replace(/\r\n?/g, '\n');
@@ -2221,7 +2242,7 @@ export function buildTopDashboardContentSecurityPolicy(htmlContent: string) {
     "form-action 'none'",
     "connect-src 'none'",
     "frame-src 'none'",
-    `script-src ${scriptSource}`,
+    `script-src ${options.allowBlobModules ? 'blob: ' : ''}${scriptSource}`,
     "style-src 'unsafe-inline'",
     'img-src data: blob:',
     'font-src data: blob:',

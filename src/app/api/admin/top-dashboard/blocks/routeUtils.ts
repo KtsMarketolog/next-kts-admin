@@ -1,6 +1,9 @@
 import { createHash } from 'crypto';
+import { TOP_DASHBOARD_HTML_MAX_BYTES, TOP_DASHBOARD_HTML_MAX_MEGABYTES } from '@/shared/lib/topDashboardLimits';
+import { isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '@/shared/lib/dashboardProfitabilityHtml';
 
-const MAX_TOP_DASHBOARD_BYTES = 5 * 1024 * 1024;
+const MAX_TOP_DASHBOARD_BYTES = TOP_DASHBOARD_HTML_MAX_BYTES;
+const HTML_LIMIT_MESSAGE = `HTML-файл должен быть не больше ${TOP_DASHBOARD_HTML_MAX_MEGABYTES} МБ`;
 const MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024;
 const HTML_DOCUMENT_MARKER = /(?:<!doctype\s+html(?:\s|>)|<html(?:\s|>))/i;
 
@@ -40,15 +43,34 @@ export async function readTopDashboardHtmlUpload(
   request: Request,
 ): Promise<{ upload: UploadedHtml; error?: never } | { upload?: never; error: Response }> {
   if (contentLengthTooLarge(request)) {
-    return { error: errorResponse('HTML-файл должен быть не больше 5 МБ', 413) };
+    return { error: errorResponse(HTML_LIMIT_MESSAGE, 413) };
   }
 
-  const formData = await request.formData();
+  // Content-Length is optional and cannot be trusted to bound a multipart body.
+  if (!request.body) return { error: errorResponse('Выберите HTML-файл') };
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = []; let size = 0;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('upload-timeout')), 60_000); });
+  let formData: FormData;
+  try {
+    while (true) {
+      const part = await Promise.race([reader.read(), deadline]);
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > MAX_TOP_DASHBOARD_BYTES + MAX_MULTIPART_OVERHEAD_BYTES || chunks.length >= 65536) {
+        return { error: errorResponse(HTML_LIMIT_MESSAGE, 413) };
+      }
+      chunks.push(part.value);
+    }
+    formData = await new Response(Buffer.concat(chunks), { headers: { 'Content-Type': request.headers.get('content-type') || '' } }).formData();
+  } catch { return { error: errorResponse('Не удалось прочитать HTML-файл. Повторите загрузку') }; }
+  finally { clearTimeout(timeout); void reader.cancel().catch(() => {}); reader.releaseLock(); }
   const file = formData.get('file');
   if (!(file instanceof File)) return { error: errorResponse('Выберите HTML-файл') };
   if (file.size <= 0) return { error: errorResponse('HTML-файл пустой') };
   if (file.size > MAX_TOP_DASHBOARD_BYTES) {
-    return { error: errorResponse('HTML-файл должен быть не больше 5 МБ', 413) };
+    return { error: errorResponse(HTML_LIMIT_MESSAGE, 413) };
   }
   if (!/\.html?$/i.test(file.name)) {
     return { error: errorResponse('Загрузите файл с расширением .html или .htm') };
@@ -57,7 +79,7 @@ export async function readTopDashboardHtmlUpload(
   const bytes = Buffer.from(await file.arrayBuffer());
   if (bytes.length <= 0) return { error: errorResponse('HTML-файл пустой') };
   if (bytes.length > MAX_TOP_DASHBOARD_BYTES) {
-    return { error: errorResponse('HTML-файл должен быть не больше 5 МБ', 413) };
+    return { error: errorResponse(HTML_LIMIT_MESSAGE, 413) };
   }
   if (bytes.includes(0)) {
     return { error: errorResponse('HTML-файл содержит недопустимые нулевые байты') };
@@ -71,6 +93,9 @@ export async function readTopDashboardHtmlUpload(
   }
   if (!HTML_DOCUMENT_MARKER.test(htmlContent)) {
     return { error: errorResponse('В файле не найден полноценный HTML-документ') };
+  }
+  if (isProfitabilityHtmlCandidate(htmlContent) && !isSupportedProfitabilityHtml(htmlContent)) {
+    return { error: errorResponse('Для этой версии «Рентабельности счетов» ещё не подключён журнал детализации. Нужна адаптация авторского HTML; выгруженную из сайта копию используйте только локально.') };
   }
 
   return {

@@ -3,7 +3,9 @@ import {
   isTopDashboardManagementSession,
   requireTopDashboardSession,
 } from '@/shared/lib/adminAuth';
-import { isPublishedTopDashboardBlockVersion } from '@/shared/lib/db';
+import { getTopDashboardBlockVersionContent, isPublishedTopDashboardBlockVersion } from '@/shared/lib/db';
+import { isActiveTopDashboardHtmlVersion } from '@/shared/lib/db/topDashboardBlocksRepo';
+import { isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '@/shared/lib/dashboardProfitabilityHtml';
 import {
   buildTopDashboardFrameSecurityPolicy,
   createTopDashboardFrameBridgeScript,
@@ -29,10 +31,16 @@ export async function GET(request: Request, context: Context) {
     return Response.json({ error: 'Нет доступа к этому отчёту' }, { status: 403, headers: { 'Cache-Control': 'private, no-store' } });
   }
   if (!versionId) return Response.json({ error: 'Некорректная версия HTML' }, { status: 400 });
-  if (
-    !isTopDashboardManagementSession(session)
-    && !(await isPublishedTopDashboardBlockVersion(blockId, versionId))
-  ) {
+  const canManage = isTopDashboardManagementSession(session);
+  const version = await getTopDashboardBlockVersionContent(blockId, versionId);
+  if (!version) return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
+  const profitability = isSupportedProfitabilityHtml(version.htmlContent);
+  const unsupportedProfitability = !profitability && isProfitabilityHtmlCandidate(version.htmlContent);
+  // The approved self-contained invoice report does not require a shared
+  // snapshot; ordinary HTML reports retain their existing data-readiness gate.
+  const published = profitability ? await isActiveTopDashboardHtmlVersion(blockId, versionId)
+    : !canManage && await isPublishedTopDashboardBlockVersion(blockId, versionId);
+  if (!canManage && !published) {
     return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
   }
 
@@ -41,7 +49,9 @@ export async function GET(request: Request, context: Context) {
   const bridgeScript = createTopDashboardFrameBridgeScript(
     blockId,
     versionId,
-    isTopDashboardManagementSession(session) && !officeView,
+    canManage && !officeView,
+    profitability && !officeView ? { preview: !published }
+      : unsupportedProfitability || (profitability && officeView) ? { preview: true, auditEnabled: false } : undefined,
   );
   const html = `<!doctype html>
 <html lang="ru">
@@ -73,6 +83,7 @@ export async function GET(request: Request, context: Context) {
     allowfullscreen
   ></iframe>
   <div id="data-notice" role="status" aria-live="polite" hidden></div>
+  ${unsupportedProfitability ? '<div role="alert" style="position:fixed;bottom:14px;left:14px;right:14px;padding:12px;background:#fff0ee;color:#9d271e;font:600 14px Arial,sans-serif">Эта версия «Рентабельности» ещё не поддерживает журнал счетов. Загрузка счетов отключена до адаптации HTML; общие данные не изменяются.</div>' : ''}
   <script>${bridgeScript}</script>
 </body>
 </html>`;

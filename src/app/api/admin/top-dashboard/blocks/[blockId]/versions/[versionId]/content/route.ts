@@ -1,5 +1,7 @@
 import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
 import { injectSalesOfficeView } from '@/shared/lib/dashboardOfficeView';
+import { injectProfitabilityAuditAdapter, isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '@/shared/lib/dashboardProfitabilityHtml';
+import { isActiveTopDashboardHtmlVersion } from '@/shared/lib/db/topDashboardBlocksRepo';
 import {
   isTopDashboardManagementSession,
   requireTopDashboardSession,
@@ -43,16 +45,25 @@ export async function GET(request: Request, context: Context) {
   }
 
   try {
-    const version = isTopDashboardManagementSession(session)
+    const canManage = isTopDashboardManagementSession(session);
+    let version = canManage
       ? await getTopDashboardBlockVersionContent(blockId, versionId)
       : await getPublishedTopDashboardBlockVersionContent(blockId, versionId);
+    if (!version && !canManage) {
+      const localVersion = await getTopDashboardBlockVersionContent(blockId, versionId);
+      if (localVersion && isSupportedProfitabilityHtml(localVersion.htmlContent)
+        && await isActiveTopDashboardHtmlVersion(blockId, versionId)) version = localVersion;
+    }
     if (!version) return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
 
     const officeView = new URL(request.url).searchParams.get('view') === 'sales-office';
+    const profitability = !officeView && isSupportedProfitabilityHtml(version.htmlContent);
+    const unsupportedProfitability = !profitability && isProfitabilityHtmlCandidate(version.htmlContent);
     const adapted = injectTopDashboardDataAdapter(version.htmlContent, {
-      readOnly: officeView || !isTopDashboardManagementSession(session),
+      readOnly: officeView || !canManage || unsupportedProfitability,
+      localInvoiceMode: profitability,
     });
-    const htmlContent = officeView ? injectSalesOfficeView(adapted) : adapted;
+    const htmlContent = officeView ? injectSalesOfficeView(adapted) : profitability ? injectProfitabilityAuditAdapter(adapted) : adapted;
     const bytes = Buffer.from(htmlContent, 'utf8');
     return new Response(new Uint8Array(bytes), {
       headers: {
@@ -60,7 +71,7 @@ export async function GET(request: Request, context: Context) {
         'Content-Length': String(bytes.length),
         'Content-Disposition': 'inline; filename="dashboard.html"',
         'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-        'Content-Security-Policy': buildTopDashboardContentSecurityPolicy(htmlContent),
+        'Content-Security-Policy': buildTopDashboardContentSecurityPolicy(htmlContent, { allowBlobModules: profitability }),
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'SAMEORIGIN',
         'X-DNS-Prefetch-Control': 'off',

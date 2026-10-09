@@ -29,6 +29,7 @@ test('pair office frame keeps normal report ACL and forces read-only data adapte
     const source=readFileSync(`src/app/api/admin/top-dashboard/blocks/[blockId]/versions/[versionId]/${file}/route.ts`,'utf8');
     assert.match(source,/canReadTopDashboardBlock\(session, blockId\)/);
     assert.match(source,/searchParams\.get\('view'\) === 'sales-office'/);
-    assert.match(source,file==='frame' ? /isTopDashboardManagementSession\(session\) && !officeView/ : /readOnly: officeView \|\| !isTopDashboardManagementSession\(session\)/);
+    assert.match(source,/const canManage = isTopDashboardManagementSession\(session\)/);
+    assert.match(source,file==='frame' ? /canManage && !officeView/ : /readOnly: officeView \|\| !canManage/);
   }
 });
