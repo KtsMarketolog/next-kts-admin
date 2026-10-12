@@ -51,6 +51,8 @@ export type TopDashboardDataUpload = {
   uncompressedSize: number;
   sha256: string;
   snapshotFormat: TopDashboardSnapshotFormat;
+  // Advisory legacy metadata only. Optional sections are shared by different
+  // reports; the published HTML determines the persisted profile on upload.
   dashboardProfile: TopDashboardDataProfile | null;
   dataAsOf: string | null;
 };
@@ -455,8 +457,12 @@ function stringField(signature: SnapshotSignature, key: string) {
   return field?.kind === 'string' ? field.value : null;
 }
 
-function detectSnapshotFormat(signature: SnapshotSignature): TopDashboardSnapshotFormat | null {
+function detectSnapshotFormat(
+  signature: SnapshotSignature,
+  expectedFormat?: TopDashboardSnapshotFormat,
+): TopDashboardSnapshotFormat | null {
   if (!signature.rootObject) return null;
+  const formats: TopDashboardSnapshotFormat[] = [];
 
   const ktsVersion = numberField(signature, 'version');
   const ktsRows = numberField(signature, 'n');
@@ -471,7 +477,7 @@ function detectSnapshotFormat(signature: SnapshotSignature): TopDashboardSnapsho
     && fieldIs(signature, 'cols', 'object')
     && fieldIs(signature, 'extra', 'object')
   ) {
-    return 'kts-bundle-v1';
+    formats.push('kts-bundle-v1');
   }
 
   const purchasesVersion = numberField(signature, 'v');
@@ -482,10 +488,14 @@ function detectSnapshotFormat(signature: SnapshotSignature): TopDashboardSnapsho
     && fieldIs(signature, 'meta', 'object')
     && (!params || params.kind === 'object')
   ) {
-    return 'purchases-v1';
+    formats.push('purchases-v1');
   }
 
-  return null;
+  // Additional fields must not change the interpretation of an otherwise
+  // valid base format. Prefer the format of the published HTML if both match.
+  return expectedFormat && formats.includes(expectedFormat)
+    ? expectedFormat
+    : formats[0] ?? null;
 }
 
 function detectDashboardProfile(
@@ -504,7 +514,10 @@ function detectDashboardProfile(
   return null;
 }
 
-export async function readTopDashboardDataUpload(request: Request): Promise<UploadResult> {
+export async function readTopDashboardDataUpload(
+  request: Request,
+  expectedFormat?: TopDashboardSnapshotFormat,
+): Promise<UploadResult> {
   if (contentLengthTooLarge(request)) {
     return {
       error: errorResponse(
@@ -596,7 +609,7 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
     }
   }
 
-  const snapshotFormat = detectSnapshotFormat(inspection.signature);
+  const snapshotFormat = detectSnapshotFormat(inspection.signature, expectedFormat);
   if (!snapshotFormat) {
     return { error: errorResponse('Файл не похож на поддерживаемый снимок данных КТС') };
   }
@@ -620,7 +633,10 @@ export async function readTopDashboardDataUpload(request: Request): Promise<Uplo
   };
 }
 
-export async function readTopDashboardDataStreamUpload(request: Request): Promise<UploadResult> {
+export async function readTopDashboardDataStreamUpload(
+  request: Request,
+  expectedFormat?: TopDashboardSnapshotFormat,
+): Promise<UploadResult> {
   const originalName = readStreamOriginalName(request);
   if (!originalName || !/\.json(?:\.gz)?$/i.test(originalName)) {
     return { error: errorResponse('Загрузите файл с расширением .json или .json.gz') };
@@ -675,7 +691,7 @@ export async function readTopDashboardDataStreamUpload(request: Request): Promis
     };
   }
 
-  const snapshotFormat = detectSnapshotFormat(inspection.signature);
+  const snapshotFormat = detectSnapshotFormat(inspection.signature, expectedFormat);
   if (!snapshotFormat) {
     await pending.discard();
     return { error: errorResponse('Файл не похож на поддерживаемый снимок данных КТС') };

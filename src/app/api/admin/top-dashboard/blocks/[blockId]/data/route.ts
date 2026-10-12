@@ -253,13 +253,17 @@ export async function PUT(request: Request, context: Context) {
       );
     }
 
+    const expectedNativeFormat = expectedHtmlSnapshotFormat === 'kts-bundle-v1'
+      || expectedHtmlSnapshotFormat === 'purchases-v1'
+      ? expectedHtmlSnapshotFormat
+      : undefined;
     const parsed = multiFileUpload
       ? streamUpload
         ? await readTopDashboardMultiFileDataStreamUpload(request)
         : await readTopDashboardMultiFileDataUpload(request)
       : streamUpload
-        ? await readTopDashboardDataStreamUpload(request)
-        : await readTopDashboardDataUpload(request);
+        ? await readTopDashboardDataStreamUpload(request, expectedNativeFormat)
+        : await readTopDashboardDataUpload(request, expectedNativeFormat);
     if (parsed.error) return parsed.error;
     pendingFile = parsed.parsed.upload.pendingFile;
 
@@ -310,7 +314,7 @@ export async function PUT(request: Request, context: Context) {
     }
     if (
       expectedHtmlSnapshotFormat !== parsed.parsed.upload.snapshotFormat
-      || expectedHtmlProfile !== parsed.parsed.upload.dashboardProfile
+      || (multiFileUpload && expectedHtmlProfile !== parsed.parsed.upload.dashboardProfile)
     ) {
       return Response.json(
         { error: 'Этот файл данных не подходит для опубликованной HTML-страницы' },
@@ -323,6 +327,8 @@ export async function PUT(request: Request, context: Context) {
     }
     const persistedUpload = { ...parsed.parsed.upload };
     delete persistedUpload.pendingFile;
+    // Native reports share an extensible snapshot format. Bind accepted data to
+    // this HTML's profile, never reject it based on optional business sections.
     const actor = getTopDashboardActor(session);
     databaseAttempted = true;
     const result = await createAndActivateTopDashboardBlockDataVersion({

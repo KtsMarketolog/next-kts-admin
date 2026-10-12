@@ -264,43 +264,58 @@ function dataRoute(profile: dataUpload.TopDashboardDataProfile) {
   };
 }
 
-test('TOP data route activates modern sales but rejects cross-profile and ambiguous snapshots before writes', async () => {
+test('TOP data route accepts extensible snapshots by base format and persists the published HTML profile', async () => {
   await isolatedStorage(async (directory) => {
     const cases: Array<[dataUpload.TopDashboardDataProfile, unknown, number]> = [
       ['sales-analytics', sales, 201],
       ['sales-analytics', salesWithEmptyReserve, 201],
       ['assortment-optimization', assortment, 201],
       ['purchases', purchases, 201],
-      ['sales-analytics', assortment, 422],
-      ['assortment-optimization', sales, 422],
-      ['assortment-optimization', salesWithEmptyReserve, 422],
+      ['sales-analytics', assortment, 201],
+      ['assortment-optimization', sales, 201],
+      ['assortment-optimization', salesWithEmptyReserve, 201],
       ['purchases', sales, 422],
       ['sales-analytics', purchases, 422],
-      ['sales-analytics', bundle({ ...sales.extra, reserve: {} }), 422],
-      ['assortment-optimization', bundle({ ...sales.extra, transit: {} }), 422],
-      ['sales-analytics', bundle({}), 422],
+      ['sales-analytics', bundle({ ...sales.extra, reserve: { rows: [{ code: 'synthetic', qty: 2 }] }, humRule: {} }), 201],
+      ['assortment-optimization', bundle({ ...sales.extra, transit: {} }), 201],
+      ['sales-analytics', bundle({}), 201],
+      ['assortment-optimization', bundle({ futureSection: { version: 2, rows: [] } }), 201],
+      ['sales-analytics', { ...sales, futureTopLevel: { arbitrary: ['new', 'fields'] } }, 201],
+      ['purchases', { ...purchases, futureSection: { rows: [] }, extra: sales.extra }, 201],
+      // An incidental second signature must not override the HTML's own format.
+      ['purchases', { ...purchases, ...sales }, 201],
+      ['sales-analytics', { ...purchases, ...sales }, 201],
+      ['sales-analytics', { ...sales, version: 2 }, 400],
+      ['sales-analytics', { ...sales, n: -1 }, 400],
+      ['sales-analytics', { ...sales, n: 500_001 }, 400],
+      ['sales-analytics', { ...sales, cols: [] }, 400],
+      ['sales-analytics', { ...sales, dict: null }, 400],
+      ['sales-analytics', { ...sales, extra: [] }, 400],
       ['sales-analytics', { unrelated: 'json' }, 400],
     ];
     for (const [profile, snapshot, status] of cases) {
-      for (const streamed of [false, true]) {
-        const route = dataRoute(profile);
-        const response = await route.put(uploadRequest(snapshot, true, streamed).request);
-        assert.equal(response.status, status, `${profile}; stream=${streamed}`);
-        const result = await response.json();
-        assert.equal(route.slots(), 0);
-        if (status === 201) {
-          assert.equal(route.created.length, 1);
-          assert.equal(route.audit.length, 1);
-          assert.equal(route.created[0]!.dashboardProfile, profile);
-          assert.equal(route.created[0]!.expectedActiveVersionId, 84);
-          assert.equal(route.created[0]!.expectedActiveHtmlVersionId, 66);
-          assert.equal(route.created[0]!.boundHtmlVersionId, null);
-          assert.equal(result.state.activeVersionId, 85);
-          assert.equal(result.state.previousVersionId, 84);
-        } else {
-          assert.equal(route.created.length, 0, 'Rejected uploads must not replace the active snapshot');
-          assert.equal(route.audit.length, 0);
-          assert.match(result.error, status === 422 ? /не подходит/ : /поддерживаемый снимок/);
+      for (const compressed of [false, true]) {
+        for (const streamed of [false, true]) {
+          const route = dataRoute(profile);
+          const response = await route.put(uploadRequest(snapshot, compressed, streamed).request);
+          assert.equal(response.status, status, `${profile}; gzip=${compressed}; stream=${streamed}`);
+          const result = await response.json();
+          assert.equal(route.slots(), 0);
+          if (status === 201) {
+            assert.equal(route.created.length, 1);
+            assert.equal(route.audit.length, 1);
+            assert.equal(route.created[0]!.dashboardProfile, profile);
+            assert.equal(route.created[0]!.snapshotFormat, profile === 'purchases' ? 'purchases-v1' : 'kts-bundle-v1');
+            assert.equal(route.created[0]!.expectedActiveVersionId, 84);
+            assert.equal(route.created[0]!.expectedActiveHtmlVersionId, 66);
+            assert.equal(route.created[0]!.boundHtmlVersionId, null);
+            assert.equal(result.state.activeVersionId, 85);
+            assert.equal(result.state.previousVersionId, 84);
+          } else {
+            assert.equal(route.created.length, 0, 'Rejected uploads must not replace the active snapshot');
+            assert.equal(route.audit.length, 0);
+            assert.match(result.error, status === 422 ? /не подходит/ : /поддерживаемый снимок/);
+          }
         }
       }
     }
