@@ -1,5 +1,6 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { hashPassword, requireDashboardAccessManagementSession } from '@/shared/lib/adminAuth';
+import { requireDashboardAccessManagementSession } from '@/shared/lib/adminAuth';
+import { hashEmployeePassword } from '@/shared/lib/employeePasswordHash';
 import { AccessUserManagementError, assertAccessUserManagementAllowed, DashboardOptionsConflictError } from '@/shared/lib/accessUserManagement';
 import { createAccessUser, getAccessUsers, type AccessUserRole } from '@/shared/lib/db';
 import { parseDashboardAccess } from '@/shared/lib/dashboardAccess';
@@ -88,7 +89,8 @@ export async function POST(request: Request) {
       dashboardAccess,
       dashboardOptionsVersion,
       supportManagerId,
-      passwordHash: hashPassword(password),
+      passwordHash: await hashEmployeePassword(password),
+      password,
     }, session.role);
 
     await recordSecurityEvent({

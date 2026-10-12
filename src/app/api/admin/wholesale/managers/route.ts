@@ -1,5 +1,6 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { hashPassword, requireEmployee, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
+import { requireEmployee, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
+import { hashEmployeePassword } from '@/shared/lib/employeePasswordHash';
 import { createWholesaleManager, getWholesaleManagers } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
@@ -61,8 +62,8 @@ export async function POST(request: Request) {
       phone,
       role,
       supportManagerId: normalizedSupportManagerId,
-      passwordHash: hashPassword(password),
-      displayPassword: password,
+      passwordHash: await hashEmployeePassword(password),
+      password,
       isActive: Boolean(body.isActive ?? true),
       canAccessTopDashboard,
       canManageTopDashboard,

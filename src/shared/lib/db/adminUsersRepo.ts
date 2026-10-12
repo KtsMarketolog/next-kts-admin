@@ -3,6 +3,8 @@ import type { PoolClient } from 'pg';
 import { parseDashboardAccess } from '../dashboardAccess';
 import { AccessUserProfileForbiddenError, assertAccessUserManagementAllowed, assertDelegatedAccessOnly, DashboardOptionsConflictError } from '../accessUserManagement';
 import type { AdminSessionRole } from '../adminAuth';
+import { resolveEmployeePasswordCiphertext } from '../employeePasswordVault';
+import { revokeAdminUserSessions, revokeManagerSessions } from './adminSessionsRepo';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 import { dashboardAccessVersion, dashboardGrantOptionsVersion, getDashboardGrantOptions, getDashboardGrants, saveDashboardGrants, DASHBOARD_ACCESS_LOCK } from './dashboardAccessRepo';
@@ -55,6 +57,7 @@ type AccessUserInput = {
   dashboardAccess?: string[];
   dashboardAccessVersion?: string;
   passwordHash?: string;
+  password?: string;
   dashboardOptionsVersion?: string;
   supportManagerId?: number | null;
 };
@@ -79,6 +82,34 @@ type ParsedAccessUserId = {
   source: AccessUserSource;
   numericId: number;
 };
+
+type AccessUserCredentialRow = AccessUserRow & {
+  password_hash: string;
+  password_ciphertext: string | null;
+  display_password?: string | null;
+};
+
+type AccessUserUpdateResult = {
+  user: AccessUser;
+  previous: AccessUser;
+  roleChanged: boolean;
+  permissionsChanged: boolean;
+  passwordChanged: boolean;
+};
+
+async function revokeAccessUserSessions(client: Pick<PoolClient, 'query'>, user: AccessUser) {
+  if (user.source === 'admin') await revokeAdminUserSessions(user.numericId, client);
+  else await revokeManagerSessions(user.numericId, client);
+}
+
+async function finishAccessUserUpdate(client: Pick<PoolClient, 'query'>, result: AccessUserUpdateResult) {
+  // Source moves revoke before DELETE, while the session foreign key still identifies the account.
+  if (result.previous.source === result.user.source && (result.roleChanged || result.permissionsChanged
+    || result.passwordChanged || result.previous.isActive !== result.user.isActive)) {
+    await revokeAccessUserSessions(client, result.previous);
+  }
+  return result;
+}
 
 function normalizeLogin(login: string) {
   return login.trim().toLowerCase();
@@ -353,12 +384,13 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
       if (input.dashboardOptionsVersion !== dashboardGrantOptionsVersion(currentOptions)) throw new DashboardOptionsConflictError();
     }
     await assertLoginAvailable(input.login, undefined, client);
+    const passwordCiphertext = await resolveEmployeePasswordCiphertext({ password: input.password, passwordHash: input.passwordHash });
 
     if (isManagerAccessRole(input.role)) {
       const supportManagerId = await normalizeSupportManagerId(input.role, input.supportManagerId, undefined, client);
       const result = await client.query<AccessUserRow>(
-        `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, is_active, password_changed_at)
-         values ($1, $2, $3, '', $4, $5, $6, $7, now())
+        `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, is_active, password_changed_at, password_ciphertext)
+         values ($1, $2, $3, '', $4, $5, $6, $7, now(), $8)
          returning
            'manager'::text as source,
            id::text,
@@ -373,7 +405,7 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
            coalesce((select name from wholesale_managers support where support.id = wholesale_managers.support_manager_id), '') as support_manager_name,
            created_at::text,
            updated_at::text`,
-        [input.name, normalizeLogin(input.login), input.email, input.role, supportManagerId, input.passwordHash, input.isActive],
+        [input.name, normalizeLogin(input.login), input.email, input.role, supportManagerId, input.passwordHash, input.isActive, passwordCiphertext],
       );
       const user=mapAccessUser(result.rows[0]);
       user.dashboardAccess=await saveDashboardAccess(client,user.numericId,user.role,input.dashboardAccess);
@@ -383,9 +415,9 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
 
     const result = await client.query<AccessUserRow>(
       `insert into admin_users (
-         name, login, email, role, can_manage_top_dashboard, password_hash, is_active, password_changed_at
+         name, login, email, role, can_manage_top_dashboard, password_hash, is_active, password_changed_at, password_ciphertext
        )
-       values ($1, $2, $3, $4, $5, $6, $7, now())
+       values ($1, $2, $3, $4, $5, $6, $7, now(), $8)
        returning
          'admin'::text as source,
          id::text,
@@ -408,6 +440,7 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
         normalizeTopManagementAccess(input.role, input.canManageTopDashboard),
         input.passwordHash,
         input.isActive,
+        passwordCiphertext,
       ],
     );
     const user = mapAccessUser(result.rows[0]);
@@ -422,13 +455,7 @@ export async function updateAccessUser(
   input: AccessUserInput,
   currentAdminUserId?: number | null,
   actorRole: AdminSessionRole = 'admin',
-): Promise<{
-  user: AccessUser;
-  previous: AccessUser;
-  roleChanged: boolean;
-  permissionsChanged: boolean;
-  passwordChanged: boolean;
-}> {
+): Promise<AccessUserUpdateResult> {
   assertAccessUserManagementAllowed(actorRole, input.role);
   if (input.dashboardAccess !== undefined && parseDashboardAccess(input.dashboardAccess) === null) {
     throw new Error('Некорректный список доступных дашбордов');
@@ -441,13 +468,15 @@ export async function updateAccessUser(
     await client.query('select pg_advisory_xact_lock(hashtext($1))',[DASHBOARD_ACCESS_LOCK]);
 
     if (parsed.source === 'admin') {
-      const existingResult = await client.query<AccessUserRow>(
+      const existingResult = await client.query<AccessUserCredentialRow>(
         `select
            'admin'::text as source,
            id::text,
            name,
            login,
            email,
+           password_hash,
+           password_ciphertext,
            role,
            is_active,
            can_manage_top_dashboard,
@@ -472,7 +501,7 @@ export async function updateAccessUser(
         assertDelegatedAccessOnly(previous, input);
         const dashboardAccess = await saveDashboardAccess(client, previous.numericId, previous.role, input.dashboardAccess, previous);
         const user = { ...previous, dashboardAccess, dashboardAccessVersion: dashboardAccessVersion(dashboardAccess) };
-        return { previous, user, roleChanged: false, passwordChanged: false, permissionsChanged: dashboardAccessVersion(previous.dashboardAccess) !== user.dashboardAccessVersion };
+        return finishAccessUserUpdate(client, { previous, user, roleChanged: false, passwordChanged: false, permissionsChanged: dashboardAccessVersion(previous.dashboardAccess) !== user.dashboardAccessVersion });
       }
       const isSelf = previous.isCurrent;
       const nextRole = input.role;
@@ -488,12 +517,17 @@ export async function updateAccessUser(
       if (previous.role === 'admin' && (nextRole !== 'admin' || !input.isActive) && activeAdminCount <= 1) {
         throw new Error('Нельзя удалить или отключить последнего администратора');
       }
+      const passwordCiphertext = await resolveEmployeePasswordCiphertext({
+        password: input.passwordHash ? input.password : undefined,
+        passwordHash: input.passwordHash ?? existingRow.password_hash,
+        previousCiphertext: existingRow.password_ciphertext,
+      });
 
       if (isManagerAccessRole(nextRole)) {
         const supportManagerId = await normalizeSupportManagerId(nextRole, input.supportManagerId, undefined, client);
         const insertResult = await client.query<AccessUserRow>(
-          `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, is_active, password_changed_at)
-           select $1, $2, $3, '', $4, $5, coalesce($6::text, password_hash), $7, case when $6::text is null then password_changed_at else now() end
+          `insert into wholesale_managers (name, login, email, phone, role, support_manager_id, password_hash, is_active, password_changed_at, password_ciphertext)
+           select $1, $2, $3, '', $4, $5, coalesce($6::text, password_hash), $7, case when $6::text is null then password_changed_at else now() end, $9
            from admin_users
            where id = $8
            returning
@@ -519,8 +553,10 @@ export async function updateAccessUser(
             input.passwordHash ?? null,
             input.isActive,
             parsed.numericId,
+            passwordCiphertext,
           ],
         );
+        await revokeAccessUserSessions(client, previous);
         await client.query(`delete from admin_users where id = $1`, [parsed.numericId]);
         const user=mapAccessUser(insertResult.rows[0],currentAdminUserId);
         user.dashboardAccess=await saveDashboardAccess(client,user.numericId,user.role,input.dashboardAccess,previous);
@@ -543,6 +579,7 @@ export async function updateAccessUser(
              can_manage_top_dashboard = $6,
              password_hash = case when $7::text is null then password_hash else $7 end,
              password_changed_at = case when $7::text is null then password_changed_at else now() end,
+             password_ciphertext = $9,
              is_active = $8,
              updated_at = now()
          where id = $1
@@ -569,6 +606,7 @@ export async function updateAccessUser(
           nextCanManageTopDashboard,
           input.passwordHash ?? null,
           input.isActive,
+          passwordCiphertext,
         ],
       );
       const user = mapAccessUser(updateResult.rows[0], currentAdminUserId);
@@ -576,25 +614,28 @@ export async function updateAccessUser(
         client, user.numericId, nextRole, input.dashboardAccess, previous,
       );
       user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
-      return {
+      return finishAccessUserUpdate(client, {
         previous,
         user,
         roleChanged: previous.role !== nextRole || previous.isActive !== input.isActive,
         permissionsChanged: previous.canManageTopDashboard !== nextCanManageTopDashboard
           || JSON.stringify(previous.dashboardAccess) !== JSON.stringify(user.dashboardAccess),
         passwordChanged: Boolean(input.passwordHash),
-      };
+      });
     }
 
     // Lock the principal separately: PostgreSQL cannot FOR UPDATE an aggregate projection.
     await client.query('select id from wholesale_managers where id=$1 for update', [parsed.numericId]);
-    const existingResult = await client.query<AccessUserRow>(
+    const existingResult = await client.query<AccessUserCredentialRow>(
       `select
          'manager'::text as source,
          wm.id::text,
          wm.name,
          wm.login,
          wm.email,
+         wm.password_hash,
+         wm.password_ciphertext,
+         wm.display_password,
          coalesce(nullif(wm.role, ''), 'manager') as role,
          wm.is_active,
          wm.can_manage_top_dashboard,
@@ -622,8 +663,14 @@ export async function updateAccessUser(
       assertDelegatedAccessOnly(previous, input);
       const dashboardAccess = await saveDashboardAccess(client, previous.numericId, previous.role, input.dashboardAccess, previous);
       const user = { ...previous, dashboardAccess, dashboardAccessVersion: dashboardAccessVersion(dashboardAccess) };
-      return { previous, user, roleChanged: false, passwordChanged: false, permissionsChanged: dashboardAccessVersion(previous.dashboardAccess) !== user.dashboardAccessVersion };
+      return finishAccessUserUpdate(client, { previous, user, roleChanged: false, passwordChanged: false, permissionsChanged: dashboardAccessVersion(previous.dashboardAccess) !== user.dashboardAccessVersion });
     }
+    const passwordCiphertext = await resolveEmployeePasswordCiphertext({
+      password: input.passwordHash ? input.password : undefined,
+      passwordHash: input.passwordHash ?? existingRow.password_hash,
+      previousCiphertext: existingRow.password_ciphertext,
+      legacyPassword: input.passwordHash ? undefined : existingRow.display_password,
+    });
 
     if (!isManagerAccessRole(input.role)) {
       if (previous.priceListCount > 0) {
@@ -635,10 +682,10 @@ export async function updateAccessUser(
       );
       const insertResult = await client.query<AccessUserRow>(
         `insert into admin_users (
-           name, login, email, role, can_manage_top_dashboard, password_hash, is_active, password_changed_at
+           name, login, email, role, can_manage_top_dashboard, password_hash, is_active, password_changed_at, password_ciphertext
          )
          select $1, $2, $3, $4, $5, coalesce($6::text, password_hash), $7,
-                case when $6::text is null then password_changed_at else now() end
+                case when $6::text is null then password_changed_at else now() end, $9
          from wholesale_managers
          where id = $8
          returning
@@ -664,8 +711,10 @@ export async function updateAccessUser(
           input.passwordHash ?? null,
           input.isActive,
           parsed.numericId,
+          passwordCiphertext,
         ],
       );
+      await revokeAccessUserSessions(client, previous);
       await client.query(`delete from wholesale_managers where id = $1`, [parsed.numericId]);
       const user = mapAccessUser(insertResult.rows[0], currentAdminUserId);
       user.dashboardAccess = await saveDashboardAccess(client, user.numericId, user.role, input.dashboardAccess,previous);
@@ -690,6 +739,8 @@ export async function updateAccessUser(
            email = $4,
            password_hash = case when $5::text is null then password_hash else $5 end,
            password_changed_at = case when $5::text is null then password_changed_at else now() end,
+           password_ciphertext = $9,
+           display_password = '',
            is_active = $6,
            role = $7,
            support_manager_id = $8,
@@ -718,20 +769,21 @@ export async function updateAccessUser(
         input.isActive,
         input.role,
         supportManagerId,
+        passwordCiphertext,
       ],
     );
 
     const user=mapAccessUser(updateResult.rows[0],currentAdminUserId);
     user.dashboardAccess=await saveDashboardAccess(client,user.numericId,user.role,input.dashboardAccess,previous);
     user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
-    return {
+    return finishAccessUserUpdate(client, {
       previous,
       user,
       roleChanged:
         previous.role !== input.role || previous.isActive !== input.isActive || previous.supportManagerId !== supportManagerId,
       permissionsChanged: dashboardAccessVersion(previous.dashboardAccess)!==user.dashboardAccessVersion,
       passwordChanged: Boolean(input.passwordHash),
-    };
+    });
   });
 }
 
@@ -773,6 +825,7 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
       if (user.role === 'admin' && user.isActive && (await countActiveSiteAdmins(client)) <= 1) {
         throw new Error('Нельзя удалить последнего администратора');
       }
+      await revokeAccessUserSessions(client, user);
       await client.query(`delete from admin_users where id = $1`, [parsed.numericId]);
       return user;
     }
@@ -803,6 +856,7 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
     const row = existingResult.rows[0];
     if (!row) throw new Error('Пользователь не найден');
     const user = mapAccessUser(row, currentAdminUserId);
+    await revokeAccessUserSessions(client, user);
     await client.query(`delete from wholesale_managers where id = $1`, [parsed.numericId]);
     return user;
   });

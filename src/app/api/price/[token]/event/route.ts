@@ -1,5 +1,6 @@
 import { getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
-import { getPublicWholesalePriceList, trackAnalyticsEvent, type AnalyticsEventType } from '@/shared/lib/db';
+import { trackAnalyticsEvent, type AnalyticsEventType } from '@/shared/lib/db/analyticsRepo';
+import { getPublicWholesalePriceTelemetry, normalizePublicWholesalePriceToken } from '@/shared/lib/db/wholesalePriceTelemetryRepo';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
 
@@ -51,6 +52,30 @@ function cleanMetadata(input: unknown) {
   };
 }
 
+async function readEventBody(request: Request): Promise<{ body: unknown; tooLarge: boolean }> {
+  if (!request.body) return { body: null, tooLarge: false };
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {});
+        return { body: null, tooLarge: true };
+      }
+      chunks.push(part.value);
+    }
+    return { body: JSON.parse(Buffer.concat(chunks, size).toString('utf8')), tooLarge: false };
+  } catch {
+    return { body: null, tooLarge: false };
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function POST(request: Request, context: Context) {
   const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
   const contentLength = Number(request.headers.get('content-length') ?? 0);
@@ -61,15 +86,15 @@ export async function POST(request: Request, context: Context) {
   }
 
   const { token } = await context.params;
-  const priceList = await getPublicWholesalePriceList(token);
-  if (!priceList) {
+  const normalizedToken = normalizePublicWholesalePriceToken(token);
+  if (!normalizedToken) {
     const response = Response.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
     applySessionCookie(response.headers, publicSession);
     return response;
   }
 
   const [sessionLimit, globalLimit] = await Promise.all([
-    checkDbRateLimit(`public_price_event:token:${priceList.token}:session:${publicSession.sessionId}`, EVENT_SESSION_LIMIT, EVENT_LIMIT_WINDOW_MS),
+    checkDbRateLimit(`public_price_event:token:${normalizedToken}:session:${publicSession.sessionId}`, EVENT_SESSION_LIMIT, EVENT_LIMIT_WINDOW_MS),
     checkDbRateLimit('public_price_event:global', EVENT_GLOBAL_LIMIT, EVENT_LIMIT_WINDOW_MS),
   ]);
 
@@ -83,10 +108,22 @@ export async function POST(request: Request, context: Context) {
     return response;
   }
 
-  const body = await request.json().catch(() => null);
+  const { body, tooLarge } = await readEventBody(request);
+  if (tooLarge) {
+    const response = Response.json({ ok: false, error: 'BODY_TOO_LARGE' }, { status: 413 });
+    applySessionCookie(response.headers, publicSession);
+    return response;
+  }
   const eventType = cleanString(body && typeof body === 'object' ? (body as Record<string, unknown>).eventType : null) as AnalyticsEventType;
   if (!allowedEvents.has(eventType)) {
     const response = Response.json({ ok: false, error: 'INVALID_EVENT' }, { status: 400 });
+    applySessionCookie(response.headers, publicSession);
+    return response;
+  }
+
+  const priceList = await getPublicWholesalePriceTelemetry(normalizedToken);
+  if (!priceList) {
+    const response = Response.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
     applySessionCookie(response.headers, publicSession);
     return response;
   }

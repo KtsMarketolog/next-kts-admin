@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'crypto';
+import type { PoolClient } from 'pg';
 
 import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { parseDashboardAccess } from '../dashboardAccess';
@@ -201,9 +202,9 @@ export async function revokeStoredAdminSession(token: string) {
   );
 }
 
-export async function revokeAdminUserSessions(adminUserId: number) {
-  await ensureSiteSchema();
-  await query(
+export async function revokeAdminUserSessions(adminUserId: number, client?: Pick<PoolClient, 'query'>) {
+  if (!client) await ensureSiteSchema();
+  await (client ?? { query }).query(
     `update admin_sessions
      set revoked_at = coalesce(revoked_at, now())
      where admin_user_id = $1 and revoked_at is null`,
@@ -211,9 +212,9 @@ export async function revokeAdminUserSessions(adminUserId: number) {
   );
 }
 
-export async function revokeManagerSessions(managerId: number) {
-  await ensureSiteSchema();
-  await query(
+export async function revokeManagerSessions(managerId: number, client?: Pick<PoolClient, 'query'>) {
+  if (!client) await ensureSiteSchema();
+  await (client ?? { query }).query(
     `update admin_sessions
      set revoked_at = coalesce(revoked_at, now())
      where manager_id = $1 and revoked_at is null`,

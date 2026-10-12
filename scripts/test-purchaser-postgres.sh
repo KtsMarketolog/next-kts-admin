@@ -27,3 +27,4 @@ export ADMIN_SESSION_SECRET='synthetic-isolated-purchaser-test-only'
 node --import tsx --test tests/purchaser-access-db.integration.ts
 node --import tsx --test tests/dashboard-audience-db.integration.ts
 node --import tsx --test tests/admin-top-users-db.integration.ts
+node --import tsx --test tests/employee-password-db.integration.ts

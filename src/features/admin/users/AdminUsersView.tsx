@@ -7,6 +7,7 @@ import { ROLE_LABELS, USER_TABS, addButtonLabel, roleOptionsForTab } from './Adm
 import type { AccessUser, AccessUserRole, Draft, UserTab } from './AdminUsersTypes';
 import { AdminUsersDashboardAccessFields } from './AdminUsersDashboardAccessFields';
 import accessStyles from './AdminUsersDashboardAccess.module.scss';
+import { EmployeePasswordField } from '../shared/EmployeePasswordField';
 
 type AdminUsersViewProps = {
   users: AccessUser[];
@@ -24,6 +25,8 @@ type AdminUsersViewProps = {
   dashboardOptionsLoading: boolean;
   dashboardOptionsError: string | null;
   reloadDashboardOptions: () => Promise<void>;
+  requestError: string | null;
+  reloadUsers: () => Promise<void>;
   passwordDrafts: Record<string, string>;
   passwordEditIds: Record<string, boolean>;
   setPasswordDrafts: Dispatch<SetStateAction<Record<string, string>>>;
@@ -31,7 +34,6 @@ type AdminUsersViewProps = {
   createUser: () => Promise<void>;
   updateUser: (id: string, patch: Partial<AccessUser>) => void;
   updateUserRole: (id: string, role: AccessUserRole) => void;
-  copySavedPassword: (password?: string) => Promise<void>;
   saveUser: (user: AccessUser) => Promise<void>;
   deleteUser: (user: AccessUser) => Promise<void>;
 };
@@ -52,6 +54,8 @@ export function AdminUsersView({
   dashboardOptionsLoading,
   dashboardOptionsError,
   reloadDashboardOptions,
+  requestError,
+  reloadUsers,
   passwordDrafts,
   passwordEditIds,
   setPasswordDrafts,
@@ -59,7 +63,6 @@ export function AdminUsersView({
   createUser,
   updateUser,
   updateUserRole,
-  copySavedPassword,
   saveUser,
   deleteUser,
 }: AdminUsersViewProps) {
@@ -76,6 +79,9 @@ export function AdminUsersView({
       </div>
 
       {!canManageSiteAdmins && <p className={styles.mutedText}>Можно создавать сотрудников и назначать доступ к отчётам. Изменение существующих профилей, паролей и удаление — только у администратора сайта. Его учётные записи здесь не отображаются.</p>}
+
+      {requestError && <div role="alert"><p>{requestError}</p><button type="button" disabled={busyId !== null || loading} onClick={() => void reloadUsers()}>Обновить список и проверить результат</button></div>}
+      <fieldset disabled={busyId !== null || loading} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
 
       <div className={styles.userRoleTabs}>
         {USER_TABS.map((tab) => (
@@ -198,7 +204,6 @@ export function AdminUsersView({
         <div className={styles.userAccessList}>
           {filteredUsers.map((user) => {
             const passwordIsEdited = Boolean(passwordEditIds[user.id]);
-            const displayPassword = user.displayPassword || '';
 
             return (
               <article className={styles.userAccessCard} key={user.id}>
@@ -231,27 +236,7 @@ export function AdminUsersView({
                   </label>
                   {canManageSiteAdmins && <label className={user.role === 'manager' ? undefined : styles.userPasswordWide}>
                     <span>Пароль</span>
-                    <div className={styles.userPasswordCopyField}>
-                      <input
-                        className={styles.userPasswordCopyInput}
-                        type="text"
-                        autoComplete="new-password"
-                        spellCheck={false}
-                        readOnly
-                        placeholder="Пароль не сохранён"
-                        value={displayPassword}
-                        onClick={() => copySavedPassword(displayPassword)}
-                      />
-                      <button
-                        className={styles.userPasswordCopyButton}
-                        type="button"
-                        disabled={!displayPassword}
-                        title="Скопировать пароль"
-                        onClick={() => copySavedPassword(displayPassword)}
-                      >
-                        Скопировать
-                      </button>
-                    </div>
+                    <EmployeePasswordField endpoint={`/api/admin/users/${encodeURIComponent(user.id)}/password`} disabled={busyId !== null || passwordIsEdited} resetKey={user} />
                     {passwordIsEdited && (
                       <>
                         <input
@@ -348,6 +333,7 @@ export function AdminUsersView({
           })}
         </div>
       )}
+      </fieldset>
     </section>
   );
 }

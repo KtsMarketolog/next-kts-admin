@@ -67,6 +67,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     managerDraft,
     setManagerDraft,
     managerBusy,
+    managerRequestError,
     savedManagerId,
     managerCreated,
     setManagerCreated,
@@ -82,7 +83,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     managerRoleTitle,
     managerRoleRows,
     loadManagers,
-    copyManagerPassword,
     createManager,
     saveManager,
     deleteManager,
@@ -371,6 +371,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               managerPasswordEditIds={managerPasswordEditIds}
               managerPasswordDrafts={managerPasswordDrafts}
               busy={managerBusy}
+              requestError={managerRequestError}
+              reloadManagers={loadManagers}
               managerCreated={managerCreated}
               savedManagerId={savedManagerId}
               router={router}
@@ -381,7 +383,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
               setManagerPasswordDrafts={setManagerPasswordDrafts}
               setManagerPasswordEditIds={setManagerPasswordEditIds}
               createManager={createManager}
-              copyManagerPassword={copyManagerPassword}
               saveManager={saveManager}
               deleteManager={deleteManager}
             />

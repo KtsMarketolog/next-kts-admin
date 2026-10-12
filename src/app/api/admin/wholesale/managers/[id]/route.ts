@@ -1,5 +1,6 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { hashPassword, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
+import { requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
+import { hashEmployeePassword } from '@/shared/lib/employeePasswordHash';
 import {
   deleteWholesaleManager,
   getWholesaleManagerById,
@@ -89,8 +90,8 @@ export async function PUT(request: Request, context: Context) {
       email,
       phone,
       supportManagerId: normalizedSupportManagerId,
-      passwordHash: password ? hashPassword(password) : undefined,
-      displayPassword: password || undefined,
+      passwordHash: password ? await hashEmployeePassword(password) : undefined,
+      password: password || undefined,
       isActive,
       canAccessTopDashboard,
       canManageTopDashboard,

@@ -21,7 +21,8 @@ function routes(authorized = true) {
   const modules: Record<string, unknown> = {
     '@/shared/lib/adminAuth': {requireDashboardAccessManagementSession: async () => authorized
       ? {session: {role: 'admin', adminUserId: 1, sessionId: 'synthetic-admin'}, denied: null}
-      : {denied: new Response(null, {status: 403})}, hashPassword: () => 'synthetic-hash'},
+      : {denied: new Response(null, {status: 403})}},
+    '@/shared/lib/employeePasswordHash': {hashEmployeePassword: async () => 'synthetic-hash'},
     '@/shared/lib/adminSecurity': {enforceAdminActionRateLimit: async () => null},
     '@/shared/lib/dashboardAccess': access,
     '@/shared/lib/accessUserManagement': userManagement,
@@ -34,7 +35,7 @@ function routes(authorized = true) {
         writes.push(input);
         return {previous: user, user: {...user, ...input}, permissionsChanged: true};
       },
-      revokeAdminUserSessions: async (id: number) => {events.push(['revoke', id]);},
+      revokeAdminUserSessions: async () => {throw new Error('Revocation belongs inside the repository transaction');},
     },
     '@/shared/lib/db/securityAuditRepo': {recordSecurityEvent: async (event: unknown) => {events.push(event);}},
     '@/shared/lib/originProtection': {enforceSameOriginRequest},
@@ -88,11 +89,12 @@ test('both create and update reject wildcard permissions before any write', asyn
   }
 });
 
-test('create/update save only selected keys, force purchaser read-only, and revoke sessions on change', async () => {
+test('create/update save selected keys, force purchaser read-only, and leave revocation to the transaction', async () => {
   const api = routes();
   assert.equal((await api.collection.POST(request('POST', ['top:7', 'top:7']))).status, 200);
   assert.equal((await api.item.PUT(request('PUT', ['top:12']), context)).status, 200);
   assert.deepEqual(api.writes.map((input) => input.dashboardAccess), [['top:7'], ['top:12']]);
   assert.equal(api.writes.every((input) => input.canManageTopDashboard === false), true);
-  assert.ok(api.events.some((event) => Array.isArray(event) && event[0] === 'revoke' && event[1] === 42));
+  assert.ok(api.writes.every((input) => input.password === 'Synthetic12345'));
+  assert.ok(api.events.length > 0);
 });

@@ -14,7 +14,7 @@ export type Manager = {
   canManageTopDashboard: boolean;
   priceListCount: number;
   password?: string;
-  displayPassword: string;
+  displayPassword?: string;
 };
 
 export type ManagerRole = Manager['role'];

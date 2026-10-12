@@ -13,6 +13,7 @@ export type SecurityEventType =
   | 'two_factor_success'
   | 'two_factor_failed'
   | 'password_changed'
+  | 'employee_password_viewed'
   | 'admin_user_created'
   | 'admin_user_updated'
   | 'admin_user_deleted'
@@ -71,7 +72,7 @@ function trimMetadata(metadata: Record<string, unknown> | undefined) {
   return { truncated: true };
 }
 
-export async function recordSecurityEvent(input: RecordSecurityEventInput) {
+export async function recordSecurityEvent(input: RecordSecurityEventInput, options: { required?: boolean } = {}) {
   try {
     await ensureSiteSchema();
     await query(
@@ -106,6 +107,7 @@ export async function recordSecurityEvent(input: RecordSecurityEventInput) {
       ],
     );
   } catch (error) {
+    if (options.required) throw new Error('Security audit is unavailable');
     console.error('Failed to record security event', error);
   }
 }

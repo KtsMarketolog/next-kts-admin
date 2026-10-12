@@ -1,11 +1,10 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { hashPassword, requireDashboardAccessManagementSession } from '@/shared/lib/adminAuth';
+import { requireDashboardAccessManagementSession } from '@/shared/lib/adminAuth';
+import { hashEmployeePassword } from '@/shared/lib/employeePasswordHash';
 import { AccessUserManagementError, AccessUserProfileForbiddenError } from '@/shared/lib/accessUserManagement';
 import { parseDashboardAccess } from '@/shared/lib/dashboardAccess';
 import {
   deleteAccessUser,
-  revokeAdminUserSessions,
-  revokeManagerSessions,
   updateAccessUser,
   type AccessUserRole,
 } from '@/shared/lib/db';
@@ -33,14 +32,6 @@ function normalizeSupportManagerId(role: AccessUserRole, value: unknown) {
   if (role !== 'manager') return null;
   const numericId = Number(value);
   return Number.isInteger(numericId) && numericId > 0 ? numericId : null;
-}
-
-async function revokePreviousSessions(source: 'admin' | 'manager', numericId: number) {
-  if (source === 'admin') {
-    await revokeAdminUserSessions(numericId);
-    return;
-  }
-  await revokeManagerSessions(numericId);
 }
 
 export async function PUT(request: Request, context: Context) {
@@ -95,20 +86,12 @@ export async function PUT(request: Request, context: Context) {
         dashboardAccess,
         dashboardAccessVersion: body.dashboardAccessVersion,
         supportManagerId,
-        passwordHash: password ? hashPassword(password) : undefined,
+        passwordHash: password ? await hashEmployeePassword(password) : undefined,
+        password: password || undefined,
       },
       session.adminUserId ?? null,
       session.role,
     );
-
-    if (
-      result.roleChanged
-      || result.permissionsChanged
-      || result.passwordChanged
-      || result.previous.isActive !== result.user.isActive
-    ) {
-      await revokePreviousSessions(result.previous.source, result.previous.numericId);
-    }
 
     await recordSecurityEvent({
       eventType: 'admin_user_updated',
@@ -175,7 +158,6 @@ export async function DELETE(request: Request, context: Context) {
 
   try {
     const user = await deleteAccessUser(id, session.adminUserId ?? null, session.role);
-    await revokePreviousSessions(user.source, user.numericId);
 
     await recordSecurityEvent({
       eventType: 'admin_user_deleted',

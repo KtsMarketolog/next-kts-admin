@@ -81,7 +81,9 @@ test('all-employees policy isolated PostgreSQL acceptance', async (t) => {
       await assert.rejects(updateAccessUser(user.id, {...input, passwordHash: undefined, dashboardAccess: current.dashboardAccess, dashboardAccessVersion: current.dashboardAccessVersion}), /другом окне/);
       const restored = await setDashboardAudience(key, [...excluded.users.filter((item) => item.eligible && item.checked).map((item) => item.id), user.id], excluded.version, 'all');
       assert.equal(restored.users.find((item) => item.id === user.id)?.checked, true);
-      assert.equal(canViewDashboard(await getStoredAdminSession(stored.token), key), true);
+      assert.equal(await getStoredAdminSession(stored.token), null, 'restoring access must not revive a revoked session');
+      const refreshed = await createStoredAdminSession({role: 'purchaser', adminUserId: user.numericId});
+      assert.equal(canViewDashboard(await getStoredAdminSession(refreshed.token), key), true);
       assert.ok(!(updated.user.dashboardAccess.includes(key)));
       const future = await createAccessUser(values());
       assert.ok(future.dashboardAccess.includes(key), 'one exception never turns off the rule for future employees');

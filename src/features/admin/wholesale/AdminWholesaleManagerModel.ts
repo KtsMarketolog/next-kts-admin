@@ -27,21 +27,22 @@ export function isManagerRole(value: string | null): value is ManagerRole {
 
 export function readManagerRoleTab(): ManagerRole {
   if (typeof window === 'undefined') return 'manager';
-  const value = window.localStorage.getItem(MANAGER_ROLE_TAB_STORAGE_KEY);
-  return isManagerRole(value) ? value : 'manager';
+  try {
+    const value = window.localStorage.getItem(MANAGER_ROLE_TAB_STORAGE_KEY);
+    return isManagerRole(value) ? value : 'manager';
+  } catch { return 'manager'; }
 }
 
 export function saveManagerRoleTab(tab: ManagerRole) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(MANAGER_ROLE_TAB_STORAGE_KEY, tab);
+  try { window.localStorage.setItem(MANAGER_ROLE_TAB_STORAGE_KEY, tab); } catch { /* Optional UI preference. */ }
 }
 
-export function attachManagerPasswords(managers: Manager[]) {
+export function normalizeManagers(managers: Manager[]) {
   return managers.map((manager) => {
     const canManageTopDashboard = manager.canManageTopDashboard === true;
     return {
       ...manager,
-      displayPassword: manager.displayPassword || '',
       canAccessTopDashboard: manager.canAccessTopDashboard === true || canManageTopDashboard,
       canManageTopDashboard,
     };

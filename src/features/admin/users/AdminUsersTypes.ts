@@ -18,7 +18,7 @@ export type AccessUser = {
   supportManagerId: number | null;
   supportManagerName: string;
   isCurrent: boolean;
-  displayPassword: string;
+  displayPassword?: string;
 };
 
 export type Draft = {

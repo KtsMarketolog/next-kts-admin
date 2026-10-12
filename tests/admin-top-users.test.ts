@@ -57,8 +57,8 @@ function api(session: AdminSession | null) {
   const modules: Record<string, unknown> = {
     '@/shared/lib/adminAuth': {
       requireDashboardAccessManagementSession: async () => canAssignDashboardAccess(session) ? { denied: null, session } : { denied: new Response(null, { status: session ? 403 : 401 }), session: null },
-      hashPassword: () => 'hash-not-for-response',
     },
+    '@/shared/lib/employeePasswordHash': { hashEmployeePassword: async () => 'hash-not-for-response' },
     '@/shared/lib/accessUserManagement': management,
     '@/shared/lib/adminSecurity': { enforceAdminActionRateLimit: async () => null },
     '@/shared/lib/dashboardAccess': dashboards,

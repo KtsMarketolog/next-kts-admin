@@ -103,6 +103,7 @@ test('shared migration only creates new report tables and does not migrate or co
   const migrations = compile<typeof import('../src/shared/lib/db/migrations')>('../src/shared/lib/db/migrations.ts', {
     '../topDashboardLimits': limits, './client': {},
     './currencyDashboardMigration': { applyCurrencyDashboardMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './employeePasswordMigration': { applyEmployeePasswordMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardAccessMigration': { applyDashboardAccessMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardUsageMigration': { applyDashboardUsageMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardDatesMigration': { applyDashboardDatesMigration: async () => { throw new Error('Unrelated migration must not run'); } },

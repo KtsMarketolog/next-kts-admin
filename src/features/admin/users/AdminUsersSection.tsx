@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  moveAccessUserPassword as moveUserPassword,
-  readAccessUserPasswords as readSavedPasswords,
-  removeAccessUserPassword as removeUserPassword,
-  saveAccessUserPassword as saveUserPassword,
-} from '@/shared/lib/adminPasswordStorage';
+import { createEmployeeActionLock, employeeRequest, EmployeeRequestError, EMPLOYEE_UNKNOWN_OUTCOME, withoutEmployeePassword } from '../shared/employeeRequest';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import type { DashboardAccessOption } from '@/shared/lib/dashboardAccess';
 
@@ -30,27 +25,22 @@ type AdminUsersSectionProps = {
 
 function readActiveTab(): UserTab {
   if (typeof window === 'undefined') return 'admin';
-  const value = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
-  return isUserTab(value) ? value : 'admin';
+  try {
+    const value = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+    return isUserTab(value) ? value : 'admin';
+  } catch { return 'admin'; }
 }
 
 function saveActiveTab(tab: UserTab) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, tab);
+  try { window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, tab); } catch { /* Optional UI preference. */ }
 }
 
-function attachSavedPasswords(users: AccessUser[]) {
-  const passwords = readSavedPasswords();
+function normalizeUsers(users: AccessUser[]) {
   return users.map((user) => ({
-    ...user,
+    ...withoutEmployeePassword(user),
     dashboardAccess: Array.isArray(user.dashboardAccess) ? user.dashboardAccess : [],
-    displayPassword: user.displayPassword || passwords[user.id] || '',
   }));
-}
-
-async function readError(response: Response, fallback: string) {
-  const data = await response.json().catch(() => ({}));
-  return typeof data.error === 'string' ? data.error : fallback;
 }
 
 export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: AdminUsersSectionProps) {
@@ -66,6 +56,8 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
   const [dashboardOptionsVersion, setDashboardOptionsVersion] = useState<string | null>(null);
   const [dashboardOptionsLoading, setDashboardOptionsLoading] = useState(true);
   const [dashboardOptionsError, setDashboardOptionsError] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const actionLock = useRef(createEmployeeActionLock());
   const showStatusRef = useRef(showStatus);
   const draftAccessTouched = useRef(false);
 
@@ -77,20 +69,17 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
   const filteredUsers = useMemo(() => users.filter((user) => tabForRole(user.role) === activeTab), [activeTab, users]);
 
   const loadUsers = useCallback(async () => {
+    if (!actionLock.current.acquire()) return;
     setLoading(true);
     setDashboardOptionsLoading(true);
     try {
-      const response = await fetch('/api/admin/users', { cache: 'no-store' });
-      if (!response.ok) {
-        showStatusRef.current(await readError(response, 'Не удалось загрузить пользователей'));
-        setDashboardOptionsError('Не удалось загрузить список дашбордов.');
-        return;
-      }
-      const data = await response.json();
+      const data = await employeeRequest<{ users: AccessUser[]; dashboardOptions: unknown; dashboardOptionsVersion?: string }>('/api/admin/users');
       const accessUsers: AccessUser[] = Array.isArray(data.users) ? data.users : [];
       const visibleUsers = canManageSiteAdmins ? accessUsers : accessUsers.filter((user) => user.role !== 'admin');
-      // Do not even attach locally cached admin passwords to a delegated administration screen.
-      setUsers(canManageSiteAdmins ? attachSavedPasswords(visibleUsers) : visibleUsers.map((user) => ({ ...user, displayPassword: '' })));
+      setUsers(normalizeUsers(visibleUsers));
+      setPasswordDrafts({});
+      setPasswordEditIds({});
+      setRequestError(null);
       const options = readDashboardOptions(data.dashboardOptions);
       setDashboardOptions(options);
       setDashboardOptionsVersion(typeof data.dashboardOptionsVersion === 'string' ? data.dashboardOptionsVersion : null);
@@ -99,18 +88,18 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
       showStatusRef.current('Не удалось загрузить пользователей');
       setDashboardOptionsError('Не удалось загрузить список дашбордов.');
     } finally {
+      actionLock.current.release();
       setLoading(false);
       setDashboardOptionsLoading(false);
     }
   }, [canManageSiteAdmins]);
 
   const reloadDashboardOptions = async () => {
+    if (!actionLock.current.acquire()) return;
     setDashboardOptionsLoading(true);
     setDashboardOptionsError(null);
     try {
-      const response = await fetch('/api/admin/users', { cache: 'no-store' });
-      if (!response.ok) throw new Error('Не удалось загрузить список дашбордов.');
-      const data = await response.json();
+      const data = await employeeRequest<{ dashboardOptions: unknown; dashboardOptionsVersion?: string }>('/api/admin/users');
       const options = readDashboardOptions(data.dashboardOptions);
       if (!options) throw new Error('Сервер не передал корректный список дашбордов.');
       // Retry options only: preserve the administrator's unsaved user changes.
@@ -121,6 +110,7 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
       setDashboardOptions(null);
       setDashboardOptionsError(error instanceof Error ? error.message : 'Не удалось загрузить список дашбордов.');
     } finally {
+      actionLock.current.release();
       setDashboardOptionsLoading(false);
     }
   };
@@ -172,27 +162,10 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
     }, 2000);
   };
 
-  const copySavedPassword = async (password?: string) => {
-    if (!password) return;
-
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(password);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = password;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        document.execCommand('copy');
-        textarea.remove();
-      }
-      showStatusRef.current('Пароль скопирован');
-    } catch {
-      showStatusRef.current('Не удалось скопировать пароль');
-    }
+  const reportRequestError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Не удалось выполнить запрос';
+    setRequestError(message);
+    showStatusRef.current(message);
   };
 
   const validatePasswordBeforeSave = (password: string) => {
@@ -229,29 +202,17 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
       return;
     }
     if (!validatePasswordBeforeSave(payload.password)) return;
-
+    if (!actionLock.current.acquire()) return;
+    setRequestError(null);
     setBusyId('new');
-    const response = await fetch('/api/admin/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    setBusyId(null);
-
-    if (!response.ok) {
-      showStatusRef.current(await readError(response, 'Не удалось добавить пользователя'));
-      if (response.status === 409) {
-        setDashboardOptions(null);
-        setDashboardOptionsVersion(null);
-        setDashboardOptionsError('Общие доступы изменились. Обновите список и проверьте выбор; введённые данные сотрудника сохранены.');
-      }
-      return;
-    }
-
-    const data = await response.json();
-    if (data.user) {
-      const createdUser = { ...data.user, displayPassword: canManageSiteAdmins ? payload.password : '' };
-      if (canManageSiteAdmins) saveUserPassword(createdUser.id, payload.password);
+    try {
+      const data = await employeeRequest<{ user: AccessUser }>('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, { mutation: true });
+      if (!data.user?.id) throw new EmployeeRequestError(EMPLOYEE_UNKNOWN_OUTCOME);
+      const createdUser = withoutEmployeePassword(data.user);
       setUsers((current) => [...current, createdUser]);
       const nextTab = tabForRole(data.user.role);
       setActiveTab(nextTab);
@@ -259,6 +220,16 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
       setDraft({ ...emptyDraftForTab(nextTab), role, dashboardAccess: defaultDashboardAccess(dashboardOptions, role) });
       markSaved('new');
       showStatusRef.current('Пользователь добавлен');
+    } catch (error) {
+      reportRequestError(error);
+      if (error instanceof EmployeeRequestError && error.status === 409) {
+        setDashboardOptions(null);
+        setDashboardOptionsVersion(null);
+        setDashboardOptionsError('Общие доступы изменились. Обновите список и проверьте выбор; введённые данные сотрудника сохранены.');
+      }
+    } finally {
+      actionLock.current.release();
+      setBusyId(null);
     }
   };
 
@@ -275,32 +246,25 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
     }
     if (nextPassword && !validatePasswordBeforeSave(nextPassword)) return;
 
-    const payload = canManageSiteAdmins ? { ...user, password: nextPassword } : {
+    const payload = canManageSiteAdmins ? { ...withoutEmployeePassword(user), password: nextPassword } : {
       name: user.name, login: user.login, email: user.email, role: user.role,
       isActive: user.isActive, canManageTopDashboard: user.canManageTopDashboard,
       supportManagerId: user.supportManagerId, dashboardAccess: user.dashboardAccess,
       dashboardAccessVersion: user.dashboardAccessVersion,
     };
+    if (!actionLock.current.acquire()) return;
+    setRequestError(null);
     setBusyId(user.id);
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    setBusyId(null);
-
-    if (!response.ok) {
-      showStatusRef.current(await readError(response, 'Не удалось сохранить пользователя'));
-      return;
-    }
-
-    const data = await response.json();
-    if (data.user) {
-      const displayPassword = nextPassword || user.displayPassword || '';
-      const savedUser = { ...data.user, displayPassword };
+    try {
+      const data = await employeeRequest<{ user: AccessUser }>(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, { mutation: true });
+      if (!data.user?.id) throw new EmployeeRequestError(EMPLOYEE_UNKNOWN_OUTCOME);
+      const savedUser = withoutEmployeePassword(data.user);
       setUsers((current) => current.map((item) => (item.id === user.id ? savedUser : item)));
       setActiveTab(tabForRole(data.user.role));
-      if (nextPassword || data.user.id !== user.id) moveUserPassword(user.id, data.user.id, displayPassword);
       setPasswordDrafts((current) => {
         const next = { ...current };
         delete next[user.id];
@@ -315,23 +279,30 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
       });
       markSaved(data.user.id);
       showStatusRef.current('Пользователь сохранён');
+    } catch (error) {
+      reportRequestError(error);
+    } finally {
+      actionLock.current.release();
+      setBusyId(null);
     }
   };
 
   const deleteUser = async (user: AccessUser) => {
+    if (actionLock.current.isBusy()) return;
     if (!window.confirm(`Удалить пользователя ${user.login}?`)) return;
+    if (!actionLock.current.acquire()) return;
+    setRequestError(null);
     setBusyId(user.id);
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: 'DELETE' });
-    setBusyId(null);
-
-    if (!response.ok) {
-      showStatusRef.current(await readError(response, 'Не удалось удалить пользователя'));
-      return;
+    try {
+      await employeeRequest(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: 'DELETE' }, { mutation: true });
+      setUsers((current) => current.filter((item) => item.id !== user.id));
+      showStatusRef.current('Пользователь удалён');
+    } catch (error) {
+      reportRequestError(error);
+    } finally {
+      actionLock.current.release();
+      setBusyId(null);
     }
-
-    setUsers((current) => current.filter((item) => item.id !== user.id));
-    removeUserPassword(user.id);
-    showStatusRef.current('Пользователь удалён');
   };
 
   return (
@@ -354,6 +325,8 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
       dashboardOptionsLoading={dashboardOptionsLoading}
       dashboardOptionsError={dashboardOptionsError}
       reloadDashboardOptions={reloadDashboardOptions}
+      requestError={requestError}
+      reloadUsers={loadUsers}
       passwordDrafts={passwordDrafts}
       passwordEditIds={passwordEditIds}
       setPasswordDrafts={setPasswordDrafts}
@@ -361,7 +334,6 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
       createUser={createUser}
       updateUser={updateUser}
       updateUserRole={updateUserRole}
-      copySavedPassword={copySavedPassword}
       saveUser={saveUser}
       deleteUser={deleteUser}
     />

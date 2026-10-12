@@ -1,216 +1,126 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
-
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
+import { createEmployeeActionLock, employeeRequest, withoutEmployeePassword } from '../shared/employeeRequest';
+import { normalizeManagers, emptyManager, readManagerRoleTab, type Manager, type ManagerRole } from './AdminWholesaleModel';
 
-import {
-  attachManagerPasswords,
-  emptyManager,
-  readApiError,
-  readManagerRoleTab,
-  type Manager,
-  type ManagerRole,
-} from './AdminWholesaleModel';
-
-type UseWholesaleManagersOptions = {
-  showStatus: (message: string) => void;
-};
+type UseWholesaleManagersOptions = { showStatus: (message: string) => void };
 
 export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions) {
   const [managers, setManagers] = useState<Manager[]>([]);
   const [managerDraft, setManagerDraft] = useState(emptyManager);
   const [managerBusy, setManagerBusy] = useState(false);
+  const [managerRequestError, setManagerRequestError] = useState<string | null>(null);
   const [savedManagerId, setSavedManagerId] = useState<number | null>(null);
   const [managerCreated, setManagerCreated] = useState(false);
   const [managerRoleTab, setManagerRoleTab] = useState<ManagerRole>(() => readManagerRoleTab());
   const [managerPasswordDrafts, setManagerPasswordDrafts] = useState<Record<number, string>>({});
   const [managerPasswordEditIds, setManagerPasswordEditIds] = useState<Record<number, boolean>>({});
+  const actionLock = useRef(createEmployeeActionLock());
+  const statusRef = useRef(showStatus);
+  useEffect(() => { statusRef.current = showStatus; }, [showStatus]);
 
-  const supportManagers = useMemo(
-    () =>
-      managers
-        .filter((manager) => manager.role === 'support_manager' && manager.isActive)
-        .sort((first, second) => Number(second.isActive) - Number(first.isActive) || first.name.localeCompare(second.name, 'ru')),
-    [managers],
-  );
+  const supportManagers = useMemo(() => managers.filter((manager) => manager.role === 'support_manager' && manager.isActive)
+    .sort((first, second) => first.name.localeCompare(second.name, 'ru')), [managers]);
   const developmentManagers = useMemo(() => managers.filter((manager) => manager.role === 'manager'), [managers]);
   const supportManagerRows = useMemo(() => managers.filter((manager) => manager.role === 'support_manager'), [managers]);
   const managerRoleLabel = managerRoleTab === 'support_manager' ? 'менеджера по сопровождению' : 'менеджера по развитию';
   const managerRoleTitle = managerRoleTab === 'support_manager' ? 'Менеджер по сопровождению' : 'Менеджер по развитию';
   const managerRoleRows = managerRoleTab === 'support_manager' ? supportManagerRows : developmentManagers;
 
-  const loadManagers = useCallback(async () => {
-    const res = await fetch('/api/admin/wholesale/managers', { cache: 'no-store' });
-    if (!res.ok) return;
-    const data = await res.json();
-    setManagers(attachManagerPasswords(Array.isArray(data.managers) ? data.managers : []));
+  const readManagers = useCallback(async () => {
+    const data = await employeeRequest<{ managers: Manager[] }>('/api/admin/wholesale/managers');
+    return normalizeManagers(Array.isArray(data.managers) ? data.managers.map(withoutEmployeePassword) : []);
   }, []);
 
-  const validateManagerPassword = useCallback(
-    (password: string) => {
-      const passwordPolicy = validatePasswordPolicy(password);
-      if (!passwordPolicy.ok) {
-        showStatus(passwordPolicy.error || 'Пароль не подходит. Измените пароль и сохраните снова.');
-        return false;
-      }
-      return true;
-    },
-    [showStatus],
-  );
+  const runAction = useCallback(async (action: (committed: () => void) => Promise<void>) => {
+    if (!actionLock.current.acquire()) return;
+    setManagerBusy(true);
+    setManagerRequestError(null);
+    let committed = false;
+    try {
+      await action(() => { committed = true; });
+    } catch (error) {
+      const message = committed ? 'Изменение сохранено, но обновить список не удалось. Обновите список перед следующей операцией.'
+        : error instanceof Error ? error.message : 'Не удалось выполнить запрос';
+      setManagerRequestError(message);
+      statusRef.current(message);
+    } finally {
+      actionLock.current.release();
+      setManagerBusy(false);
+    }
+  }, []);
 
-  const copyManagerPassword = useCallback(
-    async (password?: string) => {
-      if (!password) return;
-      try {
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(password);
-        } else {
-          const textarea = document.createElement('textarea');
-          textarea.value = password;
-          textarea.style.position = 'fixed';
-          textarea.style.opacity = '0';
-          document.body.appendChild(textarea);
-          textarea.focus();
-          textarea.select();
-          document.execCommand('copy');
-          textarea.remove();
-        }
-        showStatus('Пароль скопирован');
-      } catch {
-        showStatus('Не удалось скопировать пароль');
-      }
-    },
-    [showStatus],
-  );
+  const loadManagers = useCallback(async () => runAction(async () => {
+    setManagers(await readManagers());
+    setManagerPasswordDrafts({});
+    setManagerPasswordEditIds({});
+  }), [readManagers, runAction]);
 
-  const createManager = useCallback(async () => {
+  const validateManagerPassword = (password: string) => {
+    const policy = validatePasswordPolicy(password);
+    if (!policy.ok) { statusRef.current(policy.error || 'Пароль не подходит'); return false; }
+    return true;
+  };
+
+  const createManager = async () => {
     if (!managerDraft.name.trim() || !managerDraft.login.trim() || !managerDraft.password.trim()) {
-      showStatus(`Заполните имя, логин и пароль ${managerRoleLabel}`);
-      return;
+      statusRef.current(`Заполните имя, логин и пароль ${managerRoleLabel}`); return;
     }
     if (!validateManagerPassword(managerDraft.password.trim())) return;
-
-    setManagerBusy(true);
-    const res = await fetch('/api/admin/wholesale/managers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...managerDraft,
-        name: managerDraft.name.trim(),
-        login: managerDraft.login.trim(),
-        email: managerDraft.email.trim(),
-        phone: managerDraft.phone.trim(),
-        role: managerRoleTab,
-        supportManagerId: null,
-        password: managerDraft.password.trim(),
-        canAccessTopDashboard: managerDraft.canAccessTopDashboard,
-        canManageTopDashboard: managerDraft.canManageTopDashboard,
-      }),
-    });
-    setManagerBusy(false);
-    if (!res.ok) {
-      showStatus(await readApiError(res, 'Не удалось добавить менеджера'));
-      return;
-    }
-
-    showStatus(`${managerRoleTitle} добавлен`);
-    setManagerCreated(true);
-    setManagerDraft(emptyManager);
-    await loadManagers();
-    window.setTimeout(() => setManagerCreated(false), 2200);
-  }, [loadManagers, managerDraft, managerRoleLabel, managerRoleTab, managerRoleTitle, showStatus, validateManagerPassword]);
-
-  const saveManager = useCallback(
-    async (manager: Manager) => {
-      const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
-      const nextPassword = passwordIsEdited ? (managerPasswordDrafts[manager.id] || '').trim() : '';
-      if (passwordIsEdited && !nextPassword) {
-        showStatus('Введите новый пароль или нажмите «Отменить пароль»');
-        return;
-      }
-      if (nextPassword && !validateManagerPassword(nextPassword)) return;
-
-      setManagerBusy(true);
-      const res = await fetch(`/api/admin/wholesale/managers/${manager.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...manager,
-          name: manager.name.trim(),
-          login: manager.login.trim(),
-          email: manager.email.trim(),
-          phone: manager.phone.trim(),
-          password: nextPassword,
-          supportManagerId: null,
-          canAccessTopDashboard: manager.canAccessTopDashboard,
-          canManageTopDashboard: manager.canManageTopDashboard,
+    await runAction(async (committed) => {
+      const data = await employeeRequest<{ id: number }>('/api/admin/wholesale/managers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...managerDraft,
+          name: managerDraft.name.trim(), login: managerDraft.login.trim(), email: managerDraft.email.trim(), phone: managerDraft.phone.trim(),
+          role: managerRoleTab, supportManagerId: null, password: managerDraft.password.trim(),
         }),
-      });
-      setManagerBusy(false);
-      if (!res.ok) {
-        showStatus(await readApiError(res, 'Не удалось сохранить менеджера'));
-        return;
-      }
-
-      setManagerPasswordDrafts((current) => {
-        const next = { ...current };
-        delete next[manager.id];
-        return next;
-      });
-      setManagerPasswordEditIds((current) => {
-        const next = { ...current };
-        delete next[manager.id];
-        return next;
-      });
-      showStatus('Менеджер сохранён');
-      setSavedManagerId(manager.id);
-      await loadManagers();
-      window.setTimeout(() => {
-        setSavedManagerId((current) => (current === manager.id ? null : current));
-      }, 2200);
-    },
-    [loadManagers, managerPasswordDrafts, managerPasswordEditIds, showStatus, validateManagerPassword],
-  );
-
-  const deleteManager = useCallback(
-    async (id: number) => {
-      if (!confirm('Удалить менеджера? Его прайсы останутся без менеджера.')) return;
-      setManagerBusy(true);
-      const res = await fetch(`/api/admin/wholesale/managers/${id}`, { method: 'DELETE' });
-      setManagerBusy(false);
-      showStatus(res.ok ? 'Менеджер удалён' : 'Не удалось удалить менеджера');
-      if (res.ok) {
-        await loadManagers();
-      }
-    },
-    [loadManagers, showStatus],
-  );
-
-  return {
-    managers,
-    setManagers,
-    managerDraft,
-    setManagerDraft,
-    managerBusy,
-    savedManagerId,
-    managerCreated,
-    setManagerCreated,
-    managerRoleTab,
-    setManagerRoleTab,
-    managerPasswordDrafts,
-    setManagerPasswordDrafts,
-    managerPasswordEditIds,
-    setManagerPasswordEditIds,
-    supportManagers,
-    developmentManagers,
-    managerRoleLabel,
-    managerRoleTitle,
-    managerRoleRows,
-    loadManagers,
-    copyManagerPassword,
-    createManager,
-    saveManager,
-    deleteManager,
+      }, { mutation: true });
+      committed();
+      setManagerDraft(emptyManager);
+      const fresh = (await readManagers()).find((manager) => manager.id === Number(data.id));
+      if (!fresh) throw new Error('Created manager absent from list');
+      setManagers((current) => [...current.filter((manager) => manager.id !== fresh.id), fresh]);
+      setManagerCreated(true);
+      statusRef.current(`${managerRoleTitle} добавлен`);
+      window.setTimeout(() => setManagerCreated(false), 2200);
+    });
   };
+
+  const saveManager = async (manager: Manager) => {
+    const edited = Boolean(managerPasswordEditIds[manager.id]);
+    const password = edited ? (managerPasswordDrafts[manager.id] || '').trim() : '';
+    if (edited && !password) { statusRef.current('Введите новый пароль или нажмите «Отменить пароль»'); return; }
+    if (password && !validateManagerPassword(password)) return;
+    await runAction(async (committed) => {
+      await employeeRequest(`/api/admin/wholesale/managers/${manager.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...withoutEmployeePassword(manager),
+          name: manager.name.trim(), login: manager.login.trim(), email: manager.email.trim(), phone: manager.phone.trim(), password, supportManagerId: null,
+        }),
+      }, { mutation: true });
+      committed();
+      setManagerPasswordDrafts((current) => { const next = { ...current }; delete next[manager.id]; return next; });
+      setManagerPasswordEditIds((current) => { const next = { ...current }; delete next[manager.id]; return next; });
+      const fresh = (await readManagers()).find((item) => item.id === manager.id);
+      if (!fresh) throw new Error('Saved manager absent from list');
+      // Do not discard unsaved changes in other rows when refreshing this one.
+      setManagers((current) => current.map((item) => item.id === manager.id ? fresh : item));
+      statusRef.current('Менеджер сохранён');
+      setSavedManagerId(manager.id);
+      window.setTimeout(() => setSavedManagerId((current) => current === manager.id ? null : current), 2200);
+    });
+  };
+
+  const deleteManager = async (id: number) => {
+    if (actionLock.current.isBusy() || !confirm('Удалить менеджера? Его прайсы останутся без менеджера.')) return;
+    await runAction(async () => {
+      await employeeRequest(`/api/admin/wholesale/managers/${id}`, { method: 'DELETE' }, { mutation: true });
+      setManagers((current) => current.filter((manager) => manager.id !== id));
+      statusRef.current('Менеджер удалён');
+    });
+  };
+
+  return { managers, setManagers, managerDraft, setManagerDraft, managerBusy, managerRequestError, savedManagerId, managerCreated, setManagerCreated,
+    managerRoleTab, setManagerRoleTab, managerPasswordDrafts, setManagerPasswordDrafts, managerPasswordEditIds, setManagerPasswordEditIds,
+    supportManagers, developmentManagers, managerRoleLabel, managerRoleTitle, managerRoleRows, loadManagers, createManager, saveManager, deleteManager };
 }

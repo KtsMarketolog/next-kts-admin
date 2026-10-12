@@ -54,7 +54,7 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
       assert.equal(isOperationalEmployeeSessionRole('purchaser'), false);
     });
 
-    await t.test('grants round-trip, deduplicate and refresh on an already open session', async () => {
+    await t.test('grants round-trip, deduplicate and revoke an already open session atomically', async () => {
       const report = await block();
       const values = input();
       const user = await createAccessUser({ ...values, dashboardAccess: [`top:${report.id}`, 'route-planner', `top:${report.id}`] });
@@ -64,7 +64,7 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
       assert.deepEqual((await getStoredAdminSession(stored.token))?.dashboardAccess, user.dashboardAccess);
       const updated = await updateAccessUser(user.id, { ...values, passwordHash: undefined, dashboardAccess: ['route-planner'] });
       assert.equal(updated.permissionsChanged, true);
-      assert.deepEqual((await getStoredAdminSession(stored.token))?.dashboardAccess, ['route-planner']);
+      assert.equal(await getStoredAdminSession(stored.token), null);
       const preserved = await updateAccessUser(user.id, { ...values, passwordHash: undefined, name: 'Renamed synthetic' });
       assert.equal(preserved.permissionsChanged, false);
       assert.deepEqual(preserved.user.dashboardAccess, ['route-planner']);
@@ -191,9 +191,11 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
       await assert.rejects(updateAccessUser(manager.id,{...values,passwordHash:undefined,dashboardAccess:[],dashboardAccessVersion:oldUser.dashboardAccessVersion}),/другом окне/);
       const removed=await updateAccessUser(manager.id,{...values,passwordHash:undefined,dashboardAccess:['manager:development'],dashboardAccessVersion:latest.dashboardAccessVersion});
       assert.equal(removed.user.role,'manager');assert.equal(removed.user.numericId,manager.numericId);
+      assert.equal(await getStoredAdminSession(stored.token),null);
+      const refreshed=await createStoredAdminSession({role:'manager',managerId:manager.numericId});
       assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),key),false);
-      assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),'manager:development'),true);
-      assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),'manager:support'),false);
+      assert.equal(canViewDashboard(await getStoredAdminSession(refreshed.token),'manager:development'),true);
+      assert.equal(canViewDashboard(await getStoredAdminSession(refreshed.token),'manager:support'),false);
       assert.equal((await getDashboardAudience(key)).users.find((user)=>user.id===manager.id)?.checked,false);
       await assert.rejects(setDashboardAudience(key,[manager.id],updated.version),/изменены/);
       const future=await createAccessUser({...input(),role:'top',canManageTopDashboard:false});

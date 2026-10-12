@@ -1,5 +1,6 @@
 import { getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
-import { getPublicWholesalePriceList, query, recordWholesalePriceView } from '@/shared/lib/db';
+import { query, recordWholesalePriceView } from '@/shared/lib/db';
+import { getPublicWholesalePriceTelemetry, normalizePublicWholesalePriceToken } from '@/shared/lib/db/wholesalePriceTelemetryRepo';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
 
@@ -18,13 +19,13 @@ function getHeaderIp(headersList: Headers) {
 
 export async function POST(request: Request, context: Context) {
   const { token } = await context.params;
-  const priceList = await getPublicWholesalePriceList(token);
-  if (!priceList) return Response.json({ error: 'Not found' }, { status: 404 });
+  const normalizedToken = normalizePublicWholesalePriceToken(token);
+  if (!normalizedToken) return Response.json({ error: 'Not found' }, { status: 404 });
 
   const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
   const sessionId = publicSession.sessionId;
   const [sessionLimit, globalLimit] = await Promise.all([
-    checkDbRateLimit(`public_price:token:${priceList.token}:session:${sessionId}`, VIEW_SESSION_LIMIT, VIEW_LIMIT_WINDOW_MS),
+    checkDbRateLimit(`public_price:token:${normalizedToken}:session:${sessionId}`, VIEW_SESSION_LIMIT, VIEW_LIMIT_WINDOW_MS),
     checkDbRateLimit('public_price:global', VIEW_GLOBAL_LIMIT, VIEW_LIMIT_WINDOW_MS),
   ]);
 
@@ -33,6 +34,9 @@ export async function POST(request: Request, context: Context) {
     applySessionCookie(response.headers, publicSession);
     return response;
   }
+
+  const priceList = await getPublicWholesalePriceTelemetry(normalizedToken);
+  if (!priceList) return Response.json({ error: 'Not found' }, { status: 404 });
 
   const adminSession = await getAdminSession();
   const actorType = isManagerSessionRole(adminSession?.role) ? 'manager' : adminSession ? 'admin' : 'client';

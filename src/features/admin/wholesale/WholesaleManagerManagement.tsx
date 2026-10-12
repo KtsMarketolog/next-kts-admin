@@ -3,6 +3,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
+import { EmployeePasswordField } from '../shared/EmployeePasswordField';
 
 import {
   MANAGER_ROLE_TABS,
@@ -26,6 +27,8 @@ type WholesaleManagerManagementProps = {
   managerPasswordEditIds: Record<number, boolean>;
   managerPasswordDrafts: Record<number, string>;
   busy: boolean;
+  requestError: string | null;
+  reloadManagers: () => Promise<void>;
   managerCreated: boolean;
   savedManagerId: number | null;
   router: RouterLike;
@@ -36,7 +39,6 @@ type WholesaleManagerManagementProps = {
   setManagerPasswordDrafts: Dispatch<SetStateAction<Record<number, string>>>;
   setManagerPasswordEditIds: Dispatch<SetStateAction<Record<number, boolean>>>;
   createManager: () => Promise<void>;
-  copyManagerPassword: (password?: string) => Promise<void>;
   saveManager: (manager: Manager) => Promise<void>;
   deleteManager: (id: number) => Promise<void>;
 };
@@ -63,6 +65,8 @@ export function WholesaleManagerManagement({
   managerPasswordEditIds,
   managerPasswordDrafts,
   busy,
+  requestError,
+  reloadManagers,
   managerCreated,
   savedManagerId,
   router,
@@ -73,12 +77,13 @@ export function WholesaleManagerManagement({
   setManagerPasswordDrafts,
   setManagerPasswordEditIds,
   createManager,
-  copyManagerPassword,
   saveManager,
   deleteManager,
 }: WholesaleManagerManagementProps) {
   return (
           <div className={styles.wholesaleManagersAdminBlock}>
+        {requestError && <div role="alert"><p>{requestError}</p><button type="button" disabled={busy} onClick={() => void reloadManagers()}>Обновить список и проверить результат</button></div>}
+        <fieldset disabled={busy} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
 
         <div className={styles.userRoleTabs}>
           {MANAGER_ROLE_TABS.map((tab) => (
@@ -155,7 +160,6 @@ export function WholesaleManagerManagement({
           <div className={styles.managerCards}>
           {managerRoleRows.map((manager) => {
             const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
-            const displayPassword = manager.displayPassword || '';
 
             return (
             <article className={styles.managerCard} key={manager.id}>
@@ -184,27 +188,7 @@ export function WholesaleManagerManagement({
                 </label>
                 <label className={styles.managerPasswordField}>
                   <span>Пароль</span>
-                  <div className={styles.userPasswordCopyField}>
-                    <input
-                      className={styles.userPasswordCopyInput}
-                      type="text"
-                      autoComplete="new-password"
-                      spellCheck={false}
-                      readOnly
-                      placeholder="Пароль не сохранён"
-                      value={displayPassword}
-                      onClick={() => copyManagerPassword(displayPassword)}
-                    />
-                    <button
-                      className={styles.userPasswordCopyButton}
-                      type="button"
-                      disabled={!displayPassword}
-                      title="Скопировать пароль"
-                      onClick={() => copyManagerPassword(displayPassword)}
-                    >
-                      Скопировать
-                    </button>
-                  </div>
+                  <EmployeePasswordField endpoint={`/api/admin/wholesale/managers/${manager.id}/password`} disabled={busy || passwordIsEdited} resetKey={manager} />
                   {passwordIsEdited && (
                     <>
                       <input
@@ -293,7 +277,6 @@ export function WholesaleManagerManagement({
           <div className={styles.userAccessList}>
             {managerRoleRows.map((manager) => {
               const passwordIsEdited = Boolean(managerPasswordEditIds[manager.id]);
-              const displayPassword = manager.displayPassword || '';
 
               return (
                 <article className={styles.userAccessCard} key={manager.id}>
@@ -322,27 +305,7 @@ export function WholesaleManagerManagement({
                     </label>
                     <label className={styles.userPasswordWide}>
                       <span>Пароль</span>
-                      <div className={styles.userPasswordCopyField}>
-                        <input
-                          className={styles.userPasswordCopyInput}
-                          type="text"
-                          autoComplete="new-password"
-                          spellCheck={false}
-                          readOnly
-                          placeholder="Пароль не сохранён"
-                          value={displayPassword}
-                          onClick={() => copyManagerPassword(displayPassword)}
-                        />
-                        <button
-                          className={styles.userPasswordCopyButton}
-                          type="button"
-                          disabled={!displayPassword}
-                          title="Скопировать пароль"
-                          onClick={() => copyManagerPassword(displayPassword)}
-                        >
-                          Скопировать
-                        </button>
-                      </div>
+                      <EmployeePasswordField endpoint={`/api/admin/wholesale/managers/${manager.id}/password`} disabled={busy || passwordIsEdited} resetKey={manager} />
                       {passwordIsEdited && (
                         <>
                           <input
@@ -410,7 +373,7 @@ export function WholesaleManagerManagement({
             {managerRoleRows.length === 0 ? <p className={styles.mutedText}>Менеджеров по сопровождению пока нет</p> : null}
           </div>
         )}
+        </fieldset>
           </div>
-
   );
 }

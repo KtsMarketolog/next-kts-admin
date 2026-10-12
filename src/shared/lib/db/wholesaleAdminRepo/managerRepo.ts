@@ -1,5 +1,7 @@
 import { query, withTransaction } from '../client';
 import { ensureSiteSchema } from '../schema';
+import { revokeManagerSessions } from '../adminSessionsRepo';
+import { resolveEmployeePasswordCiphertext } from '../../employeePasswordVault';
 import {
   normalizeLogin,
   normalizeManagerRole,
@@ -18,7 +20,6 @@ type ManagerRow = {
   login: string;
   email: string;
   phone: string;
-  display_password: string | null;
   role: string | null;
   can_access_top_dashboard: boolean;
   can_manage_top_dashboard: boolean;
@@ -37,7 +38,7 @@ function mapManager(row: ManagerRow): WholesaleManager {
     login: row.login,
     email: row.email,
     phone: row.phone,
-    displayPassword: row.display_password ?? '',
+    displayPassword: '',
     role: normalizeManagerRole(row.role),
     canAccessTopDashboard: row.can_access_top_dashboard || row.can_manage_top_dashboard,
     canManageTopDashboard: row.can_manage_top_dashboard,
@@ -59,7 +60,6 @@ export async function getWholesaleManagers() {
       m.login,
       m.email,
       m.phone,
-      m.display_password,
       coalesce(nullif(m.role, ''), 'manager') as role,
       m.can_access_top_dashboard,
       m.can_manage_top_dashboard,
@@ -168,7 +168,7 @@ export async function createWholesaleManager(input: {
   canManageTopDashboard?: boolean;
   supportManagerId?: number | null;
   passwordHash: string;
-  displayPassword?: string;
+  password?: string;
   isActive: boolean;
 }) {
   await ensureSiteSchema();
@@ -176,33 +176,36 @@ export async function createWholesaleManager(input: {
   const supportManagerId = role === 'manager' ? await normalizeWholesaleSupportManagerId(input.supportManagerId) : null;
   const canManageTopDashboard = input.canManageTopDashboard === true;
   const canAccessTopDashboard = input.canAccessTopDashboard === true || canManageTopDashboard;
-  const result = await query<{ id: string }>(
-    `with created as (insert into wholesale_managers (name, login, email, phone, role, can_access_top_dashboard, can_manage_top_dashboard, support_manager_id, password_hash, display_password, is_active, password_changed_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10::text, ''), $11, now())
-     returning id), grants as (
-       insert into dashboard_view_grants(manager_id,key)
-       select c.id,k.key from created c cross join (
-         select 'currency-rates' key union all
-         select case when $5='support_manager' then 'manager:support' else 'manager:development' end union all
-         select 'route-planner' where $5='support_manager' union all
-         select 'top:' || b.id from top_dashboard_blocks b where $6::boolean
-       ) k returning manager_id
-     ) select id from created`,
-    [
-      input.name,
-      normalizeLogin(input.login),
-      input.email,
-      input.phone,
-      role,
-      canAccessTopDashboard,
-      canManageTopDashboard,
-      supportManagerId,
-      input.passwordHash,
-      input.displayPassword ?? '',
-      input.isActive,
-    ],
-  );
-  return Number(result.rows[0].id);
+  return withTransaction(async (client) => {
+    const passwordCiphertext = await resolveEmployeePasswordCiphertext({ password: input.password, passwordHash: input.passwordHash });
+    const result = await client.query<{ id: string }>(
+      `with created as (insert into wholesale_managers (name, login, email, phone, role, can_access_top_dashboard, can_manage_top_dashboard, support_manager_id, password_hash, password_ciphertext, is_active, password_changed_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+       returning id), grants as (
+         insert into dashboard_view_grants(manager_id,key)
+         select c.id,k.key from created c cross join (
+           select 'currency-rates' key union all
+           select case when $5='support_manager' then 'manager:support' else 'manager:development' end union all
+           select 'route-planner' where $5='support_manager' union all
+           select 'top:' || b.id from top_dashboard_blocks b where $6::boolean
+         ) k returning manager_id
+       ) select id from created`,
+      [
+        input.name,
+        normalizeLogin(input.login),
+        input.email,
+        input.phone,
+        role,
+        canAccessTopDashboard,
+        canManageTopDashboard,
+        supportManagerId,
+        input.passwordHash,
+        passwordCiphertext,
+        input.isActive,
+      ],
+    );
+    return Number(result.rows[0].id);
+  });
 }
 
 export async function updateWholesaleManager(
@@ -216,7 +219,7 @@ export async function updateWholesaleManager(
     canManageTopDashboard: boolean;
     supportManagerId?: number | null;
     passwordHash?: string;
-    displayPassword?: string;
+    password?: string;
     isActive: boolean;
     revokeSessions: boolean;
   },
@@ -226,6 +229,20 @@ export async function updateWholesaleManager(
   const canManageTopDashboard = input.canManageTopDashboard === true;
   const canAccessTopDashboard = input.canAccessTopDashboard === true || canManageTopDashboard;
   await withTransaction(async (client) => {
+    const existing = await client.query<{
+      password_hash: string; password_ciphertext: string | null; display_password: string | null;
+      can_access_top_dashboard: boolean; can_manage_top_dashboard: boolean; is_active: boolean;
+    }>(`select password_hash, password_ciphertext, display_password,
+               can_access_top_dashboard, can_manage_top_dashboard, is_active
+        from wholesale_managers where id = $1 for update`, [id]);
+    const previous = existing.rows[0];
+    if (!previous) throw new Error('Менеджер не найден');
+    const passwordCiphertext = await resolveEmployeePasswordCiphertext({
+      password: input.passwordHash ? input.password : undefined,
+      passwordHash: input.passwordHash ?? previous.password_hash,
+      previousCiphertext: previous.password_ciphertext,
+      legacyPassword: input.passwordHash ? undefined : previous.display_password,
+    });
     await client.query(
       `update wholesale_managers
        set name = $2,
@@ -233,7 +250,8 @@ export async function updateWholesaleManager(
            email = $4,
            phone = $5,
            password_hash = case when $6::text is null then password_hash else $6 end,
-           display_password = case when $6::text is null then display_password else coalesce($9::text, '') end,
+           password_ciphertext = $9,
+           display_password = '',
            password_changed_at = case when $6::text is null then password_changed_at else now() end,
            is_active = $7,
            support_manager_id = $8,
@@ -250,24 +268,24 @@ export async function updateWholesaleManager(
         input.passwordHash ?? null,
         input.isActive,
         supportManagerId,
-        input.displayPassword ?? '',
+        passwordCiphertext,
         canAccessTopDashboard,
         canManageTopDashboard,
       ],
     );
 
-    if (input.revokeSessions) {
-      await client.query(
-        `update admin_sessions
-         set revoked_at = coalesce(revoked_at, now())
-         where manager_id = $1 and revoked_at is null`,
-        [id],
-      );
+    if (input.revokeSessions || Boolean(input.passwordHash) || previous.is_active !== input.isActive
+      || previous.can_access_top_dashboard !== canAccessTopDashboard
+      || previous.can_manage_top_dashboard !== canManageTopDashboard) {
+      await revokeManagerSessions(id, client);
     }
   });
 }
 
 export async function deleteWholesaleManager(id: number) {
   await ensureSiteSchema();
-  await query(`delete from wholesale_managers where id = $1`, [id]);
+  await withTransaction(async (client) => {
+    await revokeManagerSessions(id, client);
+    await client.query(`delete from wholesale_managers where id = $1`, [id]);
+  });
 }

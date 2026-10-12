@@ -6,6 +6,7 @@ import {
   TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
 } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
+import { applyEmployeePasswordMigration } from './employeePasswordMigration';
 import { applyCurrencyDashboardMigration } from './currencyDashboardMigration';
 import { applyDashboardAccessMigration } from './dashboardAccessMigration';
 import { applyDashboardAudiencePolicyMigration } from './dashboardAudiencePolicyMigration';
@@ -846,6 +847,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610080004_dashboard_audience_policy', description: 'Explicit all-employee dashboard audiences with individual exceptions', apply: applyDashboardAudiencePolicyMigration},
   {id: '202610080005_dashboard_usage_retention', description: 'Index bounded monthly dashboard usage retention', apply: applyDashboardUsageRetentionMigration},
   {id: '202610090001_dashboard_profitability_audit', description: 'Dedicated invoice audit details and 20 MiB TOP HTML support', apply: applyDashboardProfitabilityAuditMigration},
+  {id: '202610120001_employee_password_vault', description: 'Encrypted, hash-bound employee password display copies; preserve all login hashes and business data', apply: applyEmployeePasswordMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

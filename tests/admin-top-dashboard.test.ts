@@ -364,7 +364,8 @@ test('wholesale managers expose separate TOP viewing and management capabilities
   assert.match(viewSource, /canManageTopDashboard/);
   assert.match(repositorySource, /can_manage_top_dashboard/);
   assert.match(repositorySource, /withTransaction/);
-  assert.match(repositorySource, /if \(input\.revokeSessions\)/);
+  assert.match(repositorySource, /if \(input\.revokeSessions \|\| Boolean\(input\.passwordHash\)/);
+  assert.match(repositorySource, /await revokeManagerSessions\(id, client\)/);
   assert.match(sessionRepositorySource, /wm\.can_manage_top_dashboard/);
   assert.match(schemaSource, /wholesale_managers_top_management_access_check/);
   assert.match(createRouteSource, /typeof body\.canManageTopDashboard !== 'boolean'/);
