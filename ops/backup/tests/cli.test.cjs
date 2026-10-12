@@ -109,19 +109,21 @@ test('logs allow only fixed codes, never dependency messages or arbitrary codes'
   assert.match(cli.safeError({ code: 'RESTORE_SCHEMA_MISMATCH' }), /RESTORE_SCHEMA_MISMATCH/);
 });
 
-async function policyCase(t, policy, captureFails, cloudFails, oldUnsent = false) {
-  const f = await fixture(t), logs = [], states = [], calls = { capture: 0, cloud: 0 };
+async function policyCase(t, policy, captureFails, cloudFails, oldUnsent = false, options = {}) {
+  const f = await fixture(t), logs = [], states = [], calls = { capture: 0, cloud: 0, capacity:0, cloudActions:[] };
   const newest = { id: ID, createdAt: new Date().toISOString(), artifacts: [] };
   const old = { id: 'old', createdAt: new Date(Date.now() - 16 * DAY).toISOString(), artifacts: [] };
   const api = await loadWith({
-    context: async () => ({ root: f.root, config: { predeployCloudPolicy: policy } }), capacity: async () => {},
+    context: async () => ({ root: f.root, config: { predeployCloudPolicy: policy,
+      ...(Object.hasOwn(options,'retention') ? {predeployCloudRetention:options.retention} : {}) } }),
+    capacity: async () => { calls.capacity++; },
     manifests: async () => oldUnsent ? [old, newest] : [newest], verifyLocal: async () => {}, privateFile: common.privateFile,
     atomicJson: async (filename, value) => states.push([filename, value]), log: (message) => logs.push(message), ID: common.ID,
   }, {
-    sync: async () => { calls.cloud++; if (cloudFails) throw new Error('SECRET_TOKEN'); }, validReceipt: async () => false,
+    sync: async (_, __, syncOptions) => { calls.cloud++; calls.cloudActions.push(syncOptions?.action); if (cloudFails) throw new Error('SECRET_TOKEN'); }, validReceipt: async () => false,
   }, { capture: async () => { calls.capture++; if (captureFails) throw new Error('SECRET_TOKEN'); return newest; } });
   let error;
-  try { await api.main('predeploy'); } catch (caught) { error = caught; }
+  try { await api.main(options.action || 'predeploy'); } catch (caught) { error = caught; }
   return { error, logs, states, calls };
 }
 
@@ -146,6 +148,51 @@ test('agreed warn policy permits local-only deployment while retaining unsent hi
   assert.ok(result.logs.some((line) => line.includes('retained')));
   assert.ok(result.logs.every((line) => !line.includes('SECRET_TOKEN')));
   assert.equal((await policyCase(t, 'required', false, false)).error, undefined);
+});
+
+test('predeploy validates unknown and warn-plus-deferred retention modes before capacity, capture, or state writes', async t => {
+  for (const [policy, retention] of [['required','unknown'],['required',null],['required',''],['warn','deferred']]) {
+    const result = await policyCase(t,policy,false,false,false,{retention});
+    assert.equal(result.error?.code,'PREDEPLOY_RETENTION_POLICY');
+    assert.equal(result.calls.capacity,0);
+    assert.equal(result.calls.capture,0);
+    assert.equal(result.calls.cloud,0);
+    assert.equal(result.states.length,0);
+  }
+});
+
+test('missing, required, and deferred predeploy retention pass the action to cloud sync without weakening required policy', async t => {
+  for (const options of [{},{retention:'required'},{retention:'deferred'}]) {
+    const result = await policyCase(t,'required',false,false,false,options);
+    assert.equal(result.error,undefined);
+    assert.equal(result.calls.capture,1);
+    assert.deepEqual(result.calls.cloudActions,['predeploy']);
+    assert.ok(result.states.some(([name,value]) => name.endsWith('cloud.json') && value.ok === true));
+  }
+});
+
+test('deferred predeploy still stops on capture or fresh cloud verification failure', async t => {
+  const captureFailed = await policyCase(t,'required',true,false,false,{retention:'deferred'});
+  assert.ok(captureFailed.error);
+  assert.equal(captureFailed.calls.cloud,0);
+  const cloudFailed = await policyCase(t,'required',false,true,false,{retention:'deferred'});
+  assert.ok(cloudFailed.error);
+  assert.equal(cloudFailed.calls.capture,1);
+  assert.deepEqual(cloudFailed.calls.cloudActions,['predeploy']);
+  assert.ok(cloudFailed.states.some(([name,value]) => name.endsWith('cloud.json') && value.ok === false));
+  assert.ok(!cloudFailed.logs.some(message => message.includes('deployment continuing')));
+});
+
+test('daily and manual sync do not apply or reject the predeploy-only retention override', async t => {
+  for (const action of ['daily','sync']) for (const retention of ['deferred','unknown']) {
+    const result = await policyCase(t,'required',false,false,false,{action,retention});
+    assert.equal(result.error,undefined);
+    assert.equal(result.calls.capture,action === 'daily' ? 1 : 0);
+    assert.deepEqual(result.calls.cloudActions,[action === 'daily' ? 'daily' : undefined]);
+    const failure = await policyCase(t,'required',false,true,false,{action,retention});
+    assert.ok(failure.error);
+    assert.ok(failure.states.some(([name,value]) => name.endsWith('cloud.json') && value.ok === false));
+  }
 });
 
 test('exact 14-day pruning validates historical receipt and preserves newest/unconfirmed', async (t) => {

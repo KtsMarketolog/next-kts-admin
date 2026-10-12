@@ -19,6 +19,7 @@ const AUDITED_CLOUD = Object.freeze({
 const ERROR_CODES = new Set([
   'CONFIGURE_USAGE', 'CONFIGURE_PATH_GUARD', 'CONFIGURE_PROJECT_GUARD',
   'CONFIGURE_CLOUD_GUARD', 'CONFIGURE_RETENTION_GUARD', 'CONFIGURE_PRIVATE_AWS_INVALID', 'CONFIGURE_CHANGED',
+  'CONFIGURE_PREDEPLOY_RETENTION_GUARD',
 ]);
 
 function fail(code) { const error = new Error(code); error.code = code; return error; }
@@ -42,6 +43,16 @@ function candidate(config, args) {
   }
   if (args.length === 2 && args[0] === 'policy' && args[1] === 'required') {
     return { ...config, predeployCloudPolicy: 'required' };
+  }
+  if (args.length === 2 && args[0] === 'predeploy-retention' && ['deferred', 'required'].includes(args[1])) {
+    if (args[1] === 'deferred' && (config.predeployCloudPolicy !== 'required'
+        || config.cloudApproved !== true || !auditedCloud(config.cloud)
+        || !cloudTarget(config.cloud.bucket, config.cloud.kmsKeyId))) {
+      throw fail('CONFIGURE_PREDEPLOY_RETENTION_GUARD');
+    }
+    // Keep fresh cloud verification mandatory. Restoring the retention gate
+    // must also be possible when cloud credentials need repair.
+    return { ...config, predeployCloudRetention: args[1] };
   }
   if (args.length === 3 && args[0] === 'cloud') {
     const [, bucket, kmsKeyId] = args;
@@ -73,7 +84,8 @@ function candidate(config, args) {
 }
 
 function validatePrivateConfiguration(next, command) {
-  if (command !== 'cloud' && command !== 'retention') return;
+  const deferPredeploy = command === 'predeploy-retention' && next.predeployCloudRetention === 'deferred';
+  if (command !== 'cloud' && command !== 'retention' && !deferPredeploy) return;
   const ctx = { config: next, root: ROOT,
     run: () => { throw fail('CONFIGURE_PRIVATE_AWS_INVALID'); } };
   // Validate the existing private uploader profile before enabling any operation.
@@ -121,6 +133,11 @@ async function configure(args = process.argv.slice(2)) {
   if (await fs.readFile(CONFIG_FILE, 'utf8') !== original) throw fail('CONFIGURE_CHANGED');
   await atomicJson(CONFIG_FILE, next);
   await privateFile(CONFIG_FILE);
+  if (args[0] === 'predeploy-retention') {
+    return next.predeployCloudRetention === 'deferred'
+      ? 'Predeploy cloud retention deferred until explicitly restored; fresh local and cloud backup verification remains required'
+      : 'Predeploy cloud retention required; full cloud rotation checks restored';
+  }
   return args[0] === 'policy' ? 'Predeploy policy configured: required'
     : args[0] === 'retention' ? 'Cloud count retention configured: 5 copies; local retention: 14 days. Cloud policy and deletion access still require operational verification'
       : 'Cloud configuration enabled after local private-profile validation';

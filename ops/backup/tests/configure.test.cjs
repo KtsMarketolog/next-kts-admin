@@ -90,6 +90,47 @@ test('count retention refuses unapproved cloud and unrelated access or destinati
   }
 });
 
+test('predeploy retention deferral and restoration change only their own field', async () => {
+  const original = await example();
+  original.cloudApproved = true; original.predeployCloudPolicy = 'required';
+  original.cloudRetention.deleteApproved = true;
+  delete original.predeployCloudRetention;
+  const before = structuredClone(original);
+  const deferred = candidate(original, ['predeploy-retention', 'deferred']);
+  assert.deepEqual(deferred, { ...before, predeployCloudRetention: 'deferred' });
+  assert.deepEqual(original, before);
+  assert.deepEqual(candidate(deferred, ['predeploy-retention', 'deferred']), deferred);
+  assert.deepEqual(candidate(deferred, ['predeploy-retention', 'required']),
+    { ...before, predeployCloudRetention: 'required' });
+  for (const args of [['predeploy-retention'], ['predeploy-retention', 'warn'],
+    ['predeploy-retention', 'paused'], ['predeploy-retention', 'deferred', 'extra']]) {
+    assert.throws(() => candidate(original, args), { code: 'CONFIGURE_USAGE' });
+  }
+});
+
+test('predeploy deferral refuses weakened fresh-cloud policy or unapproved cloud settings', async () => {
+  const original = await example();
+  original.cloudApproved = true; original.predeployCloudPolicy = 'required';
+  for (const mutate of [
+    (c) => { delete c.predeployCloudPolicy; },
+    (c) => { c.predeployCloudPolicy = 'warn'; },
+    (c) => { c.predeployCloudPolicy = 'pending'; },
+    (c) => { c.cloudApproved = false; },
+    (c) => { c.cloud.profile = 'default'; },
+    (c) => { c.cloud.configFile = '/another-project/aws-config'; },
+    (c) => { c.cloud.credentialsFile = '/another-project/keys'; },
+    (c) => { c.cloud.bucket = 'mywood-backups'; },
+    (c) => { c.cloud.kmsKeyId = 'invalid'; },
+    (c) => { c.cloud.endpoint = 'https://unrelated.invalid'; },
+    (c) => { c.cloud.prefix = 'another-project/'; },
+    (c) => { c.cloud = null; },
+  ]) {
+    const changed = structuredClone(original); mutate(changed);
+    assert.throws(() => candidate(changed, ['predeploy-retention', 'deferred']),
+      { code: 'CONFIGURE_PREDEPLOY_RETENTION_GUARD' });
+  }
+});
+
 async function commissioning(options = {}) {
   const config = await example();
   options.mutateConfig?.(config);
@@ -125,7 +166,7 @@ async function commissioning(options = {}) {
   let error, result;
   try { result = await moduleObject.exports.configure(options.args ?? ['cloud', BUCKET, KEY]); }
   catch (caught) { error = caught; }
-  return { error, result, writes, accesses, validations };
+  return { error, result, writes, accesses, validations, originalConfig: config };
 }
 
 test('commissioning validates private AWS files before one atomic fixed-path write', async () => {
@@ -176,6 +217,36 @@ test('count commissioning validates both uses of the existing profile before per
     assert.ok(rejected.error); assert.equal(rejected.writes.length, 0);
     assert.ok(!safeError(rejected.error).includes('SECRET_EXAMPLE'));
   }
+});
+
+test('predeploy deferral validates private uploader before one fixed-path atomic write', async () => {
+  const options = { args: ['predeploy-retention', 'deferred'], mutateConfig: (config) => {
+    config.cloudApproved = true; config.predeployCloudPolicy = 'required';
+    config.cloudRetention.deleteApproved = true;
+  } };
+  const result = await commissioning(options);
+  assert.equal(result.error, undefined); assert.equal(result.validations, 1);
+  assert.equal(result.writes.length, 1); assert.equal(result.writes[0].filename, FILE);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.writes[0].value)),
+    { ...result.originalConfig, predeployCloudRetention: 'deferred' });
+  assert.ok(result.accesses.every((filename) => filename !== '/ignored-file'));
+  assert.match(result.result, /fresh local and cloud backup verification remains required/);
+  for (const additional of [{ badCredentials: true }, { concurrentChange: true },
+    { rootUser: true }, { worldReadable: true }, { symlink: DIRECTORY }]) {
+    const rejected = await commissioning({ ...options, ...additional });
+    assert.ok(rejected.error); assert.equal(rejected.writes.length, 0);
+    assert.ok(!safeError(rejected.error).includes('SECRET_EXAMPLE'));
+  }
+});
+
+test('restoring predeploy retention needs no usable credentials and preserves other policy', async () => {
+  const result = await commissioning({ args: ['predeploy-retention', 'required'], badCredentials: true,
+    mutateConfig: (config) => { config.predeployCloudRetention = 'deferred'; config.predeployCloudPolicy = 'required'; } });
+  assert.equal(result.error, undefined); assert.equal(result.validations, 0);
+  assert.equal(result.writes.length, 1); assert.equal(result.writes[0].filename, FILE);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.writes[0].value)),
+    { ...result.originalConfig, predeployCloudRetention: 'required' });
+  assert.match(result.result, /full cloud rotation checks restored/);
 });
 
 test('example keeps count deletion disabled and lifecycle does not expire completed objects', async () => {

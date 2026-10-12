@@ -272,6 +272,159 @@ test('count cleanup rejects damaged retained archive and preserves all six manif
   assert.equal(f.objects.size,24);
 });
 
+async function deferredFixture(t, newestAlreadyUploaded = false) {
+  const f = fixture(t);
+  const older = [5,4,3,2,1].map(age => f.makeManifest(age));
+  const newest = f.makeManifest(0);
+  await cloud.sync(f.ctx, newestAlreadyUploaded ? [...older,newest] : older);
+  f.enableCount();
+  f.ctx.config.predeployCloudPolicy = 'required';
+  f.ctx.config.predeployCloudRetention = 'deferred';
+  f.calls.length = 0;
+  return { ...f, older, newest, all:[...older,newest] };
+}
+
+function assertOnlyFreshDownloads(f) {
+  const expected = [...f.newest.artifacts.map(a => a.key), `manifests/${f.newest.id}.json`];
+  assert.deepEqual(f.calls.filter(c => c.operation === 'get-object').map(c => c.key), expected);
+  assert.ok(!f.calls.some(c => c.operation === 'delete-object'));
+}
+
+test('deferred predeploy uploads and fully verifies fresh archives and manifest without reading or deleting historical keepers', async t => {
+  const f = await deferredFixture(t);
+  f.corrupt(f.older[2].artifacts[0].key);
+  const results = await cloud.sync(f.ctx, f.all, { action:'predeploy' });
+  const expected = [...f.newest.artifacts.map(a => a.key), `manifests/${f.newest.id}.json`];
+  assert.deepEqual(f.calls.filter(c => c.operation === 'put-object').map(c => c.key), expected);
+  assertOnlyFreshDownloads(f);
+  const manifestPut = f.calls.findIndex(c => c.operation === 'put-object' && c.key === expected.at(-1));
+  for (const artifact of f.newest.artifacts) {
+    assert.ok(f.calls.slice(0,manifestPut).some(c => c.operation === 'get-object' && c.key === artifact.key));
+  }
+  const receipt = JSON.parse(fs.readFileSync(f.receiptPath(f.newest),'utf8'));
+  assert.equal(receipt.verification,'full-download-sha256');
+  assert.deepEqual(receipt.artifacts,f.newest.artifacts);
+  assert.equal(results.length,6);
+  assert.equal(await cloud.validReceipt(f.ctx,f.newest),true);
+  assert.equal(f.objects.size,24);
+  assert.ok(!fs.existsSync(path.join(f.root,'state/cloud-prune-in-progress.json')));
+});
+
+test('deferred predeploy with an existing newest receipt rechecks all fresh bytes without PUT or historical GET', async t => {
+  const f = await deferredFixture(t,true);
+  f.corrupt(f.older[2].artifacts[0].key);
+  await cloud.sync(f.ctx,f.all,{ action:'predeploy' });
+  assertOnlyFreshDownloads(f);
+  assert.ok(!f.calls.some(c => c.operation === 'put-object'));
+  assert.equal(f.objects.size,24);
+});
+
+for (const kind of ['archive','manifest']) {
+  test(`deferred predeploy rejects same-size fresh ${kind} corruption before issuing a receipt`, async t => {
+    const f = await deferredFixture(t);
+    const key = kind === 'archive' ? f.newest.artifacts[0].key : `manifests/${f.newest.id}.json`;
+    f.corrupt(key);
+    await assert.rejects(cloud.sync(f.ctx,f.all,{ action:'predeploy' }), /SHA-256 verification/);
+    assert.ok(f.calls.some(c => c.operation === 'get-object' && c.key === key));
+    assert.equal(fs.existsSync(f.receiptPath(f.newest)),false);
+    assert.ok(!f.calls.some(c => c.operation === 'delete-object'));
+    assert.ok(f.calls.filter(c => c.operation === 'get-object').every(c => c.key.includes(f.newest.id)));
+    assert.equal(f.objects.has(`manifests/${f.newest.id}.json`),kind === 'manifest');
+    for (const old of f.older) for (const artifact of old.artifacts) assert.ok(f.objects.has(artifact.key));
+  });
+
+  test(`deferred predeploy cannot trust an existing receipt after fresh ${kind} bytes are corrupted`, async t => {
+    const f = await deferredFixture(t,true);
+    const original = fs.readFileSync(f.receiptPath(f.newest));
+    const key = kind === 'archive' ? f.newest.artifacts[0].key : `manifests/${f.newest.id}.json`;
+    f.corrupt(key);
+    await assert.rejects(cloud.sync(f.ctx,f.all,{ action:'predeploy' }), /SHA-256 verification/);
+    assert.deepEqual(fs.readFileSync(f.receiptPath(f.newest)),original);
+    assert.ok(!f.calls.some(c => ['put-object','delete-object'].includes(c.operation)));
+    assert.ok(f.calls.some(c => c.operation === 'get-object' && c.key === key));
+  });
+}
+
+test('deferred predeploy leaves an interrupted cloud-prune journal untouched; required mode rechecks keepers before resuming', async t => {
+  const f = await deferredFixture(t,true);
+  f.ctx.config.predeployCloudRetention = 'required';
+  f.failDeletion(f.older[0].artifacts[0].key);
+  await assert.rejects(cloud.sync(f.ctx,f.all,{ action:'predeploy' }), { code:'CLOUD_RETENTION_DELETE' });
+  const marker = path.join(f.root,'state/cloud-prune-in-progress.json');
+  const journal = fs.readFileSync(marker), before = fs.statSync(marker);
+  const objectKeys = [...f.objects.keys()].sort();
+  assert.equal(objectKeys.length,23);
+  f.failDeletion(undefined);
+  f.corrupt(f.older[2].artifacts[0].key);
+  f.ctx.config.predeployCloudRetention = 'deferred';
+  f.calls.length = 0;
+  await cloud.sync(f.ctx,f.all,{ action:'predeploy' });
+  assertOnlyFreshDownloads(f);
+  assert.deepEqual(fs.readFileSync(marker),journal);
+  assert.equal(fs.statSync(marker).ino,before.ino);
+  assert.equal(fs.statSync(marker).mtimeMs,before.mtimeMs);
+  assert.deepEqual([...f.objects.keys()].sort(),objectKeys);
+  await assert.rejects(cloud.retentionHealth(f.ctx),{ code:'CLOUD_RETENTION_PENDING' });
+
+  f.ctx.config.predeployCloudRetention = 'required';
+  f.calls.length = 0;
+  await assert.rejects(cloud.sync(f.ctx,f.all,{ action:'predeploy' }),{ code:'CLOUD_RETENTION_VERIFY' });
+  assert.ok(f.calls.some(c => c.operation === 'get-object' && c.key === f.older[2].artifacts[0].key));
+  assert.ok(!f.calls.some(c => c.operation === 'delete-object'));
+  assert.deepEqual(fs.readFileSync(marker),journal);
+
+  f.corrupt(undefined);
+  f.calls.length = 0;
+  await cloud.sync(f.ctx,f.all,{ action:'predeploy' });
+  const firstDelete = f.calls.findIndex(c => c.operation === 'delete-object');
+  assert.ok(firstDelete >= 0);
+  for (const keeper of f.all.slice(1)) for (const artifact of keeper.artifacts) {
+    assert.ok(f.calls.slice(0,firstDelete).some(c => c.operation === 'get-object' && c.key === artifact.key));
+  }
+  assert.equal(fs.existsSync(marker),false);
+  assert.equal(f.objects.size,20);
+  assert.ok(f.calls.filter(c => c.operation === 'delete-object').every(c => c.key.includes(f.older[0].id)));
+});
+
+for (const [name, mode, action] of [
+  ['default sync with deferred configured','deferred',undefined],
+  ['daily with deferred configured','deferred','daily'],
+  ['explicit sync with deferred configured','deferred','sync'],
+  ['required predeploy','required','predeploy'],
+  ['predeploy with missing retention mode',undefined,'predeploy'],
+  ['daily with an unrelated unknown predeploy mode','unknown','daily'],
+]) {
+  test(`${name} still rejects corrupt historical keepers before any deletion`, async t => {
+    const f = await deferredFixture(t,true);
+    if (mode === undefined) delete f.ctx.config.predeployCloudRetention;
+    else f.ctx.config.predeployCloudRetention = mode;
+    const damaged = f.older[2].artifacts[0].key;
+    f.corrupt(damaged);
+    await assert.rejects(cloud.sync(f.ctx,f.all,action === undefined ? undefined : {action}),{ code:'CLOUD_RETENTION_VERIFY' });
+    assert.ok(f.calls.some(c => c.operation === 'get-object' && c.key === damaged));
+    assert.ok(!f.calls.some(c => c.operation === 'delete-object'));
+    assert.equal(f.objects.size,24);
+  });
+}
+
+test('monitoring still reports excess cloud count when predeploy rotation is deferred', async t => {
+  const f = await deferredFixture(t,true);
+  await assert.rejects(cloud.retentionHealth(f.ctx),{ code:'CLOUD_RETENTION_COUNT' });
+  assert.ok(!f.calls.some(c => c.operation === 'delete-object'));
+  assert.equal(f.objects.size,24);
+});
+
+test('cloud adapter rejects unknown or warn-plus-deferred predeploy mode before any cloud request', async t => {
+  const f = fixture(t), newest = f.makeManifest(0);
+  for (const [policy, mode] of [['required','unknown'],['required',null],['warn','deferred']]) {
+    f.ctx.config.predeployCloudPolicy = policy;
+    f.ctx.config.predeployCloudRetention = mode;
+    await assert.rejects(cloud.sync(f.ctx,[newest],{ action:'predeploy' }),{ code:'CLOUD_RETENTION_CONFIG' });
+    assert.equal(f.calls.length,0);
+    assert.equal(fs.existsSync(f.receiptPath(newest)),false);
+  }
+});
+
 test('existing age expiration and enabled/suspended versioning prevent count cleanup', async t => {
   const f = fixture(t), all = [5,4,3,2,1,0].map(age=>f.makeManifest(age));
   await cloud.sync(f.ctx,all);

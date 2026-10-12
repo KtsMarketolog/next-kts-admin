@@ -345,7 +345,15 @@ function receipt(ctx, api, manifest, descriptor) {
   return result;
 }
 
-async function sync(ctx, manifests) {
+async function sync(ctx, manifests, { action } = {}) {
+  const mode = ctx.config.predeployCloudRetention;
+  if (action === 'predeploy' && (![undefined, 'required', 'deferred'].includes(mode)
+      || (mode === 'deferred' && ctx.config.predeployCloudPolicy !== 'required'))) {
+    throw retentionError('CLOUD_RETENTION_CONFIG');
+  }
+  // Only the deployment path can defer the entire historical rotation. Never
+  // omit keeper verification while allowing deletion, or weaken fresh backups.
+  const deferRetention = action === 'predeploy' && mode === 'deferred';
   const api = setup(ctx);
   if (ctx.config.cloudRetention !== undefined) {
     // Reject incompatible lifecycle/versioning before consuming upload space;
@@ -353,6 +361,7 @@ async function sync(ctx, manifests) {
     await retentionAdapter(ctx).assertPolicy();
   }
   if (!Array.isArray(manifests)) fail('sync requires a list of complete manifests');
+  if (deferRetention && ctx.log) ctx.log('WARNING: predeploy cloud history rotation deferred by explicit configuration; fresh cloud verification remains mandatory; this operation will not delete cloud copies');
   // run.sh holds both .operation.lock and the separate .upload.lock with
   // kernel flock for this entire operation, including all awaits and retries.
   const results = [];
@@ -367,7 +376,7 @@ async function sync(ctx, manifests) {
         // This is verify-only: expiry, missing bytes, and corruption are errors,
         // never a reason to upload old data again and reset its lifecycle age.
         results.push(await verify(ctx, manifest));
-        await pruneCloud(ctx);
+        if (!deferRetention) await pruneCloud(ctx);
       } else {
         // Historical confirmed cloud copies may have legitimately expired or
         // rotated out of the latest five; do not HEAD/recreate them.
@@ -384,7 +393,7 @@ async function sync(ctx, manifests) {
     if (ctx.log) ctx.log(`Cloud backup verified: ${manifest.id}`);
     // Rotate after each fully verified upload, including backlog sets. Never
     // accumulate an entire outage's backlog before applying the count limit.
-    await pruneCloud(ctx);
+    if (!deferRetention) await pruneCloud(ctx);
   }
   return results;
 }

@@ -6,6 +6,7 @@ const DAY = 86400000;
 const ERRORS = Object.freeze({
   NO_BACKUPS: 'No completed project backups',
   PREDEPLOY_POLICY_PENDING: 'Predeploy cloud policy must be explicitly agreed before deployment',
+  PREDEPLOY_RETENTION_POLICY: 'Predeploy retention mode must be required or deferred; deferral requires verified cloud backup',
   PRUNE_UNCONFIRMED: 'Expired backup sets retained because cloud verification is unconfirmed',
   PRUNE_TRANSACTION_INVALID: 'Interrupted retention cleanup failed its guards; all remaining files preserved',
   BACKUP_STALE: 'Latest backup is older than 30 hours',
@@ -217,6 +218,10 @@ async function staleTemporary(ctx, now = Date.now()) {
 async function main(action = process.argv[2]) {
   const ctx = await context({database:['capture','daily','predeploy'].includes(action)});
   if(action === 'predeploy' && !['required','warn'].includes(ctx.config.predeployCloudPolicy)) throw fail('PREDEPLOY_POLICY_PENDING');
+  if(action === 'predeploy' && (
+    ![undefined,'required','deferred'].includes(ctx.config.predeployCloudRetention)
+    || (ctx.config.predeployCloudRetention === 'deferred' && ctx.config.predeployCloudPolicy !== 'required')
+  )) throw fail('PREDEPLOY_RETENTION_POLICY');
   // A power loss can persist unlink operations out of order. Finish authorized
   // cleanup before sync sees a half-removed manifest/receipt pair. Checks remain
   // read-only; recovery removes only the already journaled, non-newest set.
@@ -234,7 +239,7 @@ async function main(action = process.argv[2]) {
     } catch(error) { await state(ctx,'capture',{ok:false}); throw error; }
     if(action === 'capture') return;
     failurePhase = 'UPLOAD';
-    try { await require('./cloud.cjs').sync(ctx,await manifests(ctx)); await state(ctx,'cloud',{ok:true}); }
+    try { await require('./cloud.cjs').sync(ctx,await manifests(ctx),{action}); await state(ctx,'cloud',{ok:true}); }
     catch(error) {
       await state(ctx,'cloud',{ok:false});
       if(action === 'predeploy' && ctx.config.predeployCloudPolicy === 'warn') log('WARNING: deployment continuing with verified local backup only (explicitly configured policy)');
