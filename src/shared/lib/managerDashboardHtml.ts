@@ -173,19 +173,28 @@ export function buildPersonalDashboardFrame(input: DashboardFrameInput) {
   return buildDashboardFrame(input, 'personal');
 }
 
+export function buildPersonalDashboardReviewFrame(input: Omit<DashboardFrameInput, 'preview' | 'audience'> & { managerId: number }) {
+  if (!Number.isSafeInteger(input.managerId) || input.managerId < 1) throw new Error('Invalid review recipient');
+  return buildDashboardFrame({ ...input, preview: false, audience: 'development' }, 'personal', input.managerId);
+}
+
 export function buildSupportSharedDashboardFrame(input: Omit<DashboardFrameInput, 'audience' | 'emptyState'> & {emptyState?: 'no_snapshot' | 'expired'}) {
   return buildDashboardFrame(input, 'support_shared');
 }
 
-function buildDashboardFrame(input: DashboardFrameInput, scope: DashboardScope) {
+function buildDashboardFrame(input: DashboardFrameInput, scope: DashboardScope, reviewManagerId?: number) {
   const shared = scope === 'support_shared';
   const title = shared ? 'Общий дашборд сопровождения' : 'Личный дашборд продаж';
   const query = new URLSearchParams({version: String(input.versionId)});
-  if (!shared) query.set('audience', input.audience ?? 'development');
+  if (reviewManagerId) query.set('manager', String(reviewManagerId));
+  else if (!shared) query.set('audience', input.audience ?? 'development');
   if (input.preview) query.set('preview', '1');
-  const base = shared ? '/api/admin/manager-dashboard/shared/' : '/api/admin/manager-dashboard/';
+  const base = reviewManagerId ? '/api/admin/manager-dashboard/review/' : shared ? '/api/admin/manager-dashboard/shared/' : '/api/admin/manager-dashboard/';
   const contentPath = base + 'content?' + query.toString();
-  const dataPath = base + 'snapshots' + (input.snapshotId ? '?snapshot=' + input.snapshotId : '');
+  const dataQuery = new URLSearchParams();
+  if (reviewManagerId) dataQuery.set('manager', String(reviewManagerId));
+  if (input.snapshotId) dataQuery.set('snapshot', String(input.snapshotId));
+  const dataPath = base + 'snapshots' + (dataQuery.size ? '?' + dataQuery.toString() : '');
   const script = `(() => {
     'use strict';
     const frame = document.getElementById('personal');

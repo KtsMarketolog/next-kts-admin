@@ -33,10 +33,36 @@ test('personal checkboxes are bound to own operational audience and valid identi
     assert.equal(personalDashboardMode({...session,dashboardAccess:[]} ),null);
     assert.equal(personalDashboardMode({...session,managerId:undefined}),null);
   }
-  for(const role of ['top','purchaser','wholesale_admin'] as const){
+  for(const role of ['purchaser','wholesale_admin'] as const){
     const session:AdminSession={role,adminUserId:3,sessionId:'persisted',dashboardAccess:grants};
     assert.equal(canViewDashboard(session,grants[0]),false);assert.equal(canViewDashboard(session,grants[1]),false);
     assert.equal(personalDashboardMode(session),null);
+  }
+});
+
+test('TOP inherits only read access to MR without gaining ownership, management or assignment rights',()=>{
+  for(const dashboardAccess of [undefined,[],['manager:development','manager:support']]){
+    const session:AdminSession={role:'top',adminUserId:3,sessionId:'persisted',dashboardAccess};
+    assert.equal(permissions.hasDashboardInheritedViewRight(session,'manager:development'),true);
+    assert.equal(canViewDashboard(session,'manager:development'),true);
+    assert.equal(permissions.hasDashboardManagementRight(session,'manager:development'),false);
+    assert.equal(permissions.canAssignDashboardAccess(session),false);
+    assert.equal(personalDashboardMode(session),null);
+    for(const key of ['manager:support','top:7','route-planner','currency-rates','manager:*']){
+      assert.equal(permissions.hasDashboardInheritedViewRight(session,key),false,key);
+      assert.equal(canViewDashboard(session,key),false,key);
+    }
+    assert.equal(permissions.hasDashboardManagementRight({...session,canManageTopDashboard:true},'manager:development'),false);
+    assert.equal(canViewDashboard({...session,canManageTopDashboard:true},'manager:support'),false);
+  }
+  for(const adminUserId of [undefined,0,-1,0.5,NaN,Infinity,Number.MAX_SAFE_INTEGER+1]){
+    const session:AdminSession={role:'top',sessionId:'persisted',adminUserId,dashboardAccess:['manager:development']};
+    assert.equal(permissions.hasDashboardInheritedViewRight(session,'manager:development'),false);
+    assert.equal(canViewDashboard(session,'manager:development'),false);
+  }
+  assert.equal(canViewDashboard({role:'top',adminUserId:3,dashboardAccess:['manager:development']},'manager:development'),false);
+  for(const role of ['manager','support_manager','purchaser','wholesale_admin'] as const){
+    assert.equal(permissions.hasDashboardInheritedViewRight({role,adminUserId:3,managerId:4,sessionId:'persisted'},'manager:development'),false,role);
   }
 });
 

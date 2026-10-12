@@ -39,7 +39,7 @@ function routes(sessionRole: SessionRole, managerRole: ViewerRole = sessionRole 
   };
   const session = sessionRole === 'admin'
     ? { role: 'admin' as const, sessionId: 'admin-session' }
-    : { role: sessionRole, managerId: manager!.id, sessionId: 'manager-session' };
+    : { role: sessionRole, managerId: manager!.id, sessionId: 'manager-session', dashboardAccess: [`manager:${sessionRole === 'support_manager' ? 'support' : 'development'}`] };
   const origin = { enforceSameOriginRequest: () => null };
   const shared = compile<typeof import('../src/app/api/admin/manager-dashboard/_shared')>(
     '../src/app/api/admin/manager-dashboard/_shared.ts',
@@ -90,6 +90,20 @@ function request(path: string, referer?: string) {
   const headers = referer ? { referer: `https://example.test${referer}` } : undefined;
   return new Request(`https://example.test${path}`, { headers });
 }
+
+test('manager frame and content routes retain access to their own published HTML', async () => {
+  for (const [role, audience, version] of [['manager', 'development', 11], ['support_manager', 'support', 22]] as const) {
+    const api = routes(role);
+    const framePath = `/api/admin/manager-dashboard/frame?version=${version}&audience=${audience}`;
+    const frame = await api.frame.GET(request(framePath));
+    assert.equal(frame.status, 200);
+    assert.deepEqual(JSON.parse(await frame.text()), { versionId: version, preview: false, audience, emptyState: 'no_snapshot' });
+    const content = await api.content.GET(request(`/api/admin/manager-dashboard/content?version=${version}&audience=${audience}`, framePath));
+    assert.equal(content.status, 200);
+    assert.match(await content.text(), new RegExp(`data-audience="${audience}"`));
+    assert.deepEqual(api.htmlCalls, [{ id: version, preview: false, audience }, { id: version, preview: false, audience }]);
+  }
+});
 
 test('manager frame and content routes reject the other HTML audience before reading a version', async () => {
   for (const [role, own, other] of [

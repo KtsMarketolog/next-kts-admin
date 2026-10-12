@@ -16,6 +16,7 @@ import {
 } from '../managerDashboardDomain';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
+import { DASHBOARD_ACCESS_LOCK } from './dashboardAccessRepo';
 
 export type PersonalDashboardSnapshot = PersonalSnapshotMetadata & {
   id: number;
@@ -220,6 +221,101 @@ export async function getPersonalDashboardSnapshot(managerId: number, id?: numbe
       throw new PersonalDashboardError('SNAPSHOT_INTEGRITY', 'Не удалось проверить целостность снимка');
     }
     return { ...mapSnapshot(row), bytes: row.encrypted_payload };
+  });
+}
+
+export type PersonalDashboardReviewer = { adminUserId: number; sessionId: string };
+
+/** TOP's read authority is rechecked with the selected recipient in the same transaction. */
+async function personalReviewContext(client: PoolClient, viewer: PersonalDashboardReviewer, managerId?: number) {
+  positiveId(viewer.adminUserId);
+  if (managerId !== undefined) positiveId(managerId);
+  await client.query('select pg_advisory_xact_lock_shared(hashtext($1))', [DASHBOARD_ACCESS_LOCK]);
+  const authority = await client.query(`select s.id from admin_sessions s join admin_users u on u.id=s.admin_user_id
+    where s.id::text=$1 and u.id=$2 and s.role='top' and u.role='top' and u.is_active
+      and s.revoked_at is null and s.expires_at>now()
+      and (u.password_changed_at is null or s.created_at>=u.password_changed_at)
+    for share of s,u`, [viewer.sessionId, viewer.adminUserId]);
+  if (!authority.rowCount) throw new PersonalDashboardError('REVIEW_FORBIDDEN', 'Нет доступа к просмотру отчётов МР');
+  // Access changes and recipient role/email changes cannot race the ensuing data read.
+  const all = await currentManagers(client);
+  const grants = await client.query<{manager_id: string}>(`select manager_id::text from dashboard_effective_view_grants
+    where key='manager:development' and manager_id is not null`);
+  const granted = new Set(grants.rows.map((row) => row.manager_id));
+  const recipients = all.filter((manager) => manager.is_active && getPersonalDashboardAudience(manager.role) === 'development' && granted.has(manager.id));
+  const selected = managerId === undefined ? null : recipients.find((manager) => Number(manager.id) === managerId);
+  if (managerId !== undefined && !selected) throw new PersonalDashboardError('REVIEW_NOT_FOUND', 'Отчёт МР недоступен');
+  return { recipients, all, selected };
+}
+
+function personalReviewBinding(manager: ManagerRow, all: ManagerRow[]) {
+  const email = manager.email.trim().toLowerCase();
+  const emailHash = email ? getManagerEmailHash(email) : null;
+  const binding = emailHash ? resolvePersonalDashboardManager(bindings(all), emailHash) : null;
+  const bindingStatus = !emailHash ? 'missing_email' as const
+    : binding?.managerId === Number(manager.id) ? 'matched' as const : 'ambiguous_email' as const;
+  return { email, emailHash, bindingStatus };
+}
+
+function mapReviewSnapshot(row: SnapshotRow) {
+  return { id: Number(row.id), originalName: row.original_name, issued: row.issued,
+    expires: row.expires, receivedAt: row.received_at };
+}
+
+export async function getPersonalDashboardReviewOverview(viewer: PersonalDashboardReviewer, managerId?: number) {
+  await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    const { recipients, all, selected } = await personalReviewContext(client, viewer, managerId);
+    const html = await client.query<HtmlRow>(`select ${HTML_SELECT} from personal_dashboard_html_versions v
+      join personal_dashboard_html_state st on st.active_version_id=v.id and st.audience=v.audience
+      where v.audience='development' and v.first_published_at is not null`);
+    const version = html.rows[0];
+    const htmlVersion = version ? { id: Number(version.id), originalName: version.original_name,
+      audience: 'development' as const, firstPublishedAt: version.first_published_at } : null;
+    const managers = recipients.map((manager) => ({ id: Number(manager.id), name: manager.name, email: manager.email.trim().toLowerCase() }));
+    if (!selected) return { managers, selected: null, htmlVersion };
+    const binding = personalReviewBinding(selected, all);
+    const rows = binding.bindingStatus === 'matched' ? await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT}
+      from personal_dashboard_snapshots s left join personal_dashboard_snapshot_state st on st.manager_id=s.manager_id
+      where s.manager_id=$1 and s.email_hash=$2 order by s.issued desc,s.id desc limit 32`, [managerId, binding.emailHash]) : { rows: [] };
+    const history = rows.rows.map(mapReviewSnapshot);
+    const active = rows.rows.find((row) => row.id === row.active_snapshot_id);
+    return { managers, htmlVersion, selected: { managerId: Number(selected.id), name: selected.name,
+      email: binding.email, audience: 'development' as const, bindingStatus: binding.bindingStatus,
+      snapshot: active ? mapReviewSnapshot(active) : null, history } };
+  });
+}
+
+export async function getPersonalDashboardReviewHtml(viewer: PersonalDashboardReviewer, managerId: number, versionId: number) {
+  positiveId(versionId);
+  await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    await personalReviewContext(client, viewer, managerId);
+    const result = await client.query<{html_content: string}>(`select v.html_content from personal_dashboard_html_versions v
+      join personal_dashboard_html_state st on st.active_version_id=v.id and st.audience=v.audience
+      where v.id=$1 and v.audience='development' and v.first_published_at is not null`, [versionId]);
+    return result.rows[0]?.html_content ?? null;
+  });
+}
+
+export async function getPersonalDashboardReviewSnapshot(viewer: PersonalDashboardReviewer, managerId: number, id?: number) {
+  if (id !== undefined) positiveId(id);
+  await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    const { selected, all } = await personalReviewContext(client, viewer, managerId);
+    const binding = personalReviewBinding(selected!, all);
+    if (binding.bindingStatus !== 'matched') return null;
+    const result = await client.query<SnapshotRow & { encrypted_payload: Buffer }>(`select ${SNAPSHOT_SELECT},s.encrypted_payload
+      from personal_dashboard_snapshots s join personal_dashboard_snapshot_state st on st.manager_id=s.manager_id
+      where s.manager_id=$1 and s.email_hash=$2 and s.id=coalesce($3::bigint,st.active_snapshot_id)`, [managerId, binding.emailHash, id ?? null]);
+    const row = result.rows[0];
+    if (!row) return null;
+    if (row.expires < personalDashboardToday()) throw new PersonalDashboardError('EXPIRED', 'Срок действия снимка истёк; ожидается новый файл');
+    if (row.encrypted_payload.length !== Number(row.file_size)
+      || createHash('sha256').update(row.encrypted_payload).digest('hex') !== row.sha256) {
+      throw new PersonalDashboardError('SNAPSHOT_INTEGRITY', 'Не удалось проверить целостность снимка');
+    }
+    return { bytes: row.encrypted_payload, originalName: row.original_name, email: binding.email };
   });
 }
 

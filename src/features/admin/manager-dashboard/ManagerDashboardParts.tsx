@@ -83,18 +83,20 @@ export function ImportResults({ results, title }: { results: ManagerDashboardImp
 }
 
 export function DashboardFrame({
-  versionId, snapshotId, preview = false, revision = 0, audience = 'development',
+  versionId, snapshotId, preview = false, revision = 0, audience = 'development', reviewManagerId,
 }: {
   versionId: number;
   snapshotId?: number;
   preview?: boolean;
   revision?: number;
   audience?: PersonalDashboardAudience;
+  reviewManagerId?: number;
 }) {
   const [downloadStatus, setDownloadStatus] = useState('');
   const frameRef = useTopDashboardDownloadBridge(setDownloadStatus);
   useDashboardUsage({ dashboardKey: `manager:${audience}`, iframeRef: frameRef, preview, versionId });
   const params = new URLSearchParams({ version: String(versionId), revision: String(revision), audience });
+  if (reviewManagerId) { params.delete('audience'); params.set('manager', String(reviewManagerId)); }
   if (snapshotId) params.set('snapshot', String(snapshotId));
   if (preview) params.set('preview', '1');
   return (
@@ -104,7 +106,7 @@ export function DashboardFrame({
         ref={frameRef}
         className={styles.frame}
         key={params.toString()}
-        src={`/api/admin/manager-dashboard/frame?${params.toString()}`}
+        src={`/api/admin/manager-dashboard/${reviewManagerId ? 'review/' : ''}frame?${params.toString()}`}
         title={preview ? 'Предпросмотр HTML личного дашборда' : 'Личный дашборд менеджера'}
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="same-origin"

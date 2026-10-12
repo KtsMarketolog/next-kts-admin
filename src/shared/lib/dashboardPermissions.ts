@@ -24,6 +24,11 @@ export function hasDashboardViewGrant(session: AdminSession | null | undefined, 
     && Array.isArray(session.dashboardAccess) && session.dashboardAccess.includes(key);
 }
 
+/** TOP may read development reports without inheriting their administration. */
+export function hasDashboardInheritedViewRight(session: AdminSession | null | undefined, key: string) {
+  return key === 'manager:development' && session?.role === 'top' && hasDashboardIdentity(session);
+}
+
 /** Existing management rights are independent of the read-only checkboxes. */
 export function hasDashboardManagementRight(session: AdminSession | null | undefined, key: string) {
   if (!hasDashboardIdentity(session) || !validDashboardKey(key)) return false;
@@ -33,7 +38,7 @@ export function hasDashboardManagementRight(session: AdminSession | null | undef
 }
 
 export function canViewDashboardKey(session: AdminSession | null | undefined, key: string): boolean {
-  if (hasDashboardManagementRight(session, key)) return true;
+  if (hasDashboardManagementRight(session, key) || hasDashboardInheritedViewRight(session, key)) return true;
   if (!hasDashboardViewGrant(session, key)) return false;
   if (key === 'manager:development') return session!.role === 'manager' && Number(session!.managerId) > 0;
   if (key === 'manager:support') return session!.role === 'support_manager' && Number(session!.managerId) > 0;

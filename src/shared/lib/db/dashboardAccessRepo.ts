@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { AdminSessionRole } from '../adminAuth';
 import { DASHBOARD_REPORT_OPTIONS, parseDashboardAccess } from '../dashboardAccess';
-import { hasDashboardManagementRight } from '../dashboardPermissions';
+import { hasDashboardInheritedViewRight, hasDashboardManagementRight } from '../dashboardPermissions';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 
@@ -23,12 +23,13 @@ export function dashboardAccessVersion(keys: string[]) {
 }
 
 export function dashboardGrantLocked(principal: DashboardPrincipal, key: string): boolean {
-  return hasDashboardManagementRight({
+  const session = {
     role: principal.role,
     sessionId: 'persisted',
     ...(principal.source === 'admin' ? { adminUserId: principal.numericId } : { managerId: principal.numericId }),
     canManageTopDashboard: principal.canManageTopDashboard,
-  }, key);
+  };
+  return hasDashboardManagementRight(session, key) || hasDashboardInheritedViewRight(session, key);
 }
 
 export function dashboardGrantEligible(principal: DashboardPrincipal, key: string) {

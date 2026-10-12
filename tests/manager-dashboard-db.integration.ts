@@ -17,6 +17,7 @@ import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import {
   activatePersonalDashboardHtml, createPersonalDashboardHtml, deletePersonalDashboardHtml, getPersonalDashboardHtml,
   getPersonalDashboardSnapshot, getPersonalDashboardStatus, importPersonalDashboardSnapshot,
+  getPersonalDashboardReviewOverview, getPersonalDashboardReviewHtml, getPersonalDashboardReviewSnapshot,
   listPersonalDashboardAdmin, listPersonalDashboardImports, recordPersonalDashboardImportFailure,
 } from '../src/shared/lib/db/managerDashboardRepo';
 import { getManagerEmailHash, inspectPersonalSnapshot, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
@@ -717,6 +718,105 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         `select manager_id::text,snapshot_id::text from personal_dashboard_imports where id=$1`, [imported.id]);
       assert.equal(log.rows[0].manager_id, null);
       assert.equal(log.rows[0].snapshot_id, null);
+    });
+
+    await t.test('TOP MR review rechecks current authority, recipient scope, publication and encrypted snapshot binding', async () => {
+      const top = await query<{id: string}>('insert into admin_users(login,name,role) values($1,$2,\'top\') returning id::text',
+        [`review-top-${randomUUID()}`, 'Synthetic review TOP']);
+      const viewer = { adminUserId: Number(top.rows[0].id), sessionId: randomUUID() };
+      await query(`insert into admin_sessions(id,session_hash,role,admin_user_id,expires_at)
+        values($1,$2,'top',$3,now()+interval '1 hour')`, [viewer.sessionId, randomUUID(), viewer.adminUserId]);
+      const development = await manager('review-mr');
+      const support = await manager('review-ms', 'support_manager');
+      const other = await manager('review-other-mr');
+      const payload = bytes(development.email, -1);
+      const imported = await importFile(payload);
+      const supportSnapshot = await importFile(bytes(support.email));
+      assert.ok(imported.snapshotId);
+      assert.ok(supportSnapshot.snapshotId);
+      const snapshotId = imported.snapshotId;
+      const version = await html('review-published-mr', 'development');
+      const supportVersion = await html('review-published-ms', 'support');
+      await activatePersonalDashboardHtml({ versionId: version.id, audience: 'development',
+        expectedActiveVersionId: (await getPersonalDashboardHtml(undefined, false, 'development'))?.id ?? null, actorId: 'admin:integration-test' });
+      await activatePersonalDashboardHtml({ versionId: supportVersion.id, audience: 'support',
+        expectedActiveVersionId: (await getPersonalDashboardHtml(undefined, false, 'support'))?.id ?? null, actorId: 'admin:integration-test' });
+      const draft = await html('review-draft-mr', 'development');
+      const overview = await getPersonalDashboardReviewOverview(viewer, development.id);
+      assert.deepEqual(Object.keys(overview).sort(), ['htmlVersion', 'managers', 'selected']);
+      assert.equal(overview.htmlVersion?.id, version.id);
+      assert.equal(overview.htmlVersion?.audience, 'development');
+      assert.equal(overview.selected?.managerId, development.id);
+      assert.equal(overview.selected?.snapshot?.id, imported.snapshotId);
+      assert.equal(overview.managers.some((item) => item.id === support.id), false);
+      assert.equal((await getPersonalDashboardReviewOverview(viewer)).selected, null);
+      assert.match((await getPersonalDashboardReviewHtml(viewer, development.id, version.id)) ?? '', /review-published-mr/);
+      assert.equal(await getPersonalDashboardReviewHtml(viewer, development.id, supportVersion.id), null);
+      assert.equal(await getPersonalDashboardReviewHtml(viewer, development.id, draft.id), null);
+      const snapshot = await getPersonalDashboardReviewSnapshot(viewer, development.id, imported.snapshotId);
+      assert.ok(snapshot);
+      assert.ok(snapshot.bytes.equals(payload));
+      assert.equal(snapshot.email, development.email);
+      assert.equal(await getPersonalDashboardReviewSnapshot(viewer, other.id, imported.snapshotId), null);
+      assert.equal(await getPersonalDashboardReviewSnapshot(viewer, development.id, supportSnapshot.snapshotId), null);
+
+      const deniedRecipient = async (managerId: number) => {
+        await assert.rejects(getPersonalDashboardReviewOverview(viewer, managerId), { code: 'REVIEW_NOT_FOUND' });
+        await assert.rejects(getPersonalDashboardReviewHtml(viewer, managerId, version.id), { code: 'REVIEW_NOT_FOUND' });
+        await assert.rejects(getPersonalDashboardReviewSnapshot(viewer, managerId, snapshotId), { code: 'REVIEW_NOT_FOUND' });
+        assert.equal((await getPersonalDashboardReviewOverview(viewer)).managers.some((item) => item.id === managerId), false);
+      };
+      await deniedRecipient(support.id);
+      await query('update wholesale_managers set role=\'support_manager\' where id=$1', [development.id]);
+      await deniedRecipient(development.id);
+      await query('update wholesale_managers set role=\'manager\',is_active=false where id=$1', [development.id]);
+      await deniedRecipient(development.id);
+      await query('update wholesale_managers set is_active=true where id=$1', [development.id]);
+      await query('delete from dashboard_view_grants where manager_id=$1 and key=\'manager:development\'', [development.id]);
+      await deniedRecipient(development.id);
+      await query('insert into dashboard_view_grants(manager_id,key) values($1,\'manager:development\')', [development.id]);
+
+      const duplicate = await manager('review-hidden-duplicate', 'support_manager', true, ` ${development.email.toUpperCase()} `, false);
+      const ambiguous = await getPersonalDashboardReviewOverview(viewer, development.id);
+      assert.equal(ambiguous.selected?.bindingStatus, 'ambiguous_email');
+      assert.equal(ambiguous.selected?.snapshot, null);
+      assert.deepEqual(ambiguous.selected?.history, []);
+      assert.equal(await getPersonalDashboardReviewSnapshot(viewer, development.id, imported.snapshotId), null);
+      await query('update wholesale_managers set is_active=false where id=$1', [duplicate.id]);
+      await query('update wholesale_managers set email=\'\' where id=$1', [development.id]);
+      assert.equal((await getPersonalDashboardReviewOverview(viewer, development.id)).selected?.bindingStatus, 'missing_email');
+      assert.equal(await getPersonalDashboardReviewSnapshot(viewer, development.id, imported.snapshotId), null);
+      await query('update wholesale_managers set email=$2 where id=$1', [development.id, `changed-${randomUUID()}@example.test`]);
+      assert.equal(await getPersonalDashboardReviewSnapshot(viewer, development.id, imported.snapshotId), null);
+      await query('update wholesale_managers set email=$2 where id=$1', [development.id, development.email]);
+      await query('update personal_dashboard_snapshots set expires=$2 where id=$1', [imported.snapshotId, day(-1)]);
+      await assert.rejects(getPersonalDashboardReviewSnapshot(viewer, development.id, imported.snapshotId), { code: 'EXPIRED' });
+      await query('update personal_dashboard_snapshots set expires=$2,encrypted_payload=$3 where id=$1', [imported.snapshotId, day(45), Buffer.alloc(payload.length)]);
+      await assert.rejects(getPersonalDashboardReviewSnapshot(viewer, development.id, imported.snapshotId), { code: 'SNAPSHOT_INTEGRITY' });
+      await query('update personal_dashboard_snapshots set encrypted_payload=$2 where id=$1', [imported.snapshotId, payload]);
+
+      const deniedViewer = async () => {
+        await assert.rejects(getPersonalDashboardReviewOverview(viewer), { code: 'REVIEW_FORBIDDEN' });
+        await assert.rejects(getPersonalDashboardReviewHtml(viewer, development.id, version.id), { code: 'REVIEW_FORBIDDEN' });
+        await assert.rejects(getPersonalDashboardReviewSnapshot(viewer, development.id, snapshotId), { code: 'REVIEW_FORBIDDEN' });
+      };
+      const mutations = [
+        'update admin_users set is_active=false where id=$1',
+        'update admin_users set role=\'purchaser\' where id=$1',
+        'update admin_users set password_changed_at=now()+interval \'1 second\' where id=$1',
+        'update admin_sessions set role=\'admintop\' where admin_user_id=$1',
+        'update admin_sessions set revoked_at=now() where admin_user_id=$1',
+        'update admin_sessions set expires_at=now()-interval \'1 second\' where admin_user_id=$1',
+      ];
+      for (const sql of mutations) {
+        await query(sql, [viewer.adminUserId]);
+        await deniedViewer();
+        await query('update admin_users set role=\'top\',is_active=true,password_changed_at=null where id=$1', [viewer.adminUserId]);
+        await query('update admin_sessions set role=\'top\',revoked_at=null,expires_at=now()+interval \'1 hour\' where admin_user_id=$1', [viewer.adminUserId]);
+      }
+      await assert.rejects(getPersonalDashboardReviewOverview({ ...viewer, sessionId: randomUUID() }), { code: 'REVIEW_FORBIDDEN' });
+      await assert.rejects(getPersonalDashboardReviewOverview({ ...viewer, adminUserId: viewer.adminUserId + 100000 }), { code: 'REVIEW_FORBIDDEN' });
+      assert.ok((await getPersonalDashboardReviewSnapshot(viewer, development.id, imported.snapshotId))?.bytes.equals(payload));
     });
 
     await t.test('HTML version quotas are atomic per audience and never discard existing publications', async () => {

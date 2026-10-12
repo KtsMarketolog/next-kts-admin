@@ -15,6 +15,7 @@ import {
   type PersonalDashboardEmptyState,
 } from '../src/shared/lib/managerDashboardHtml';
 import {
+  canReviewPersonalDevelopmentDashboards,
   parsePersonalDashboardId,
   personalDashboardFreshness,
   personalDashboardFrameSelection,
@@ -44,6 +45,21 @@ test('personal dashboard requires a persisted session and explicit allowed emplo
     assert.equal(personalDashboardMode({ role: 'admintop', sessionId, adminUserId: id }), null);
   }
   assert.equal(personalDashboardMode({ role: 'client', sessionId } as unknown as AdminSession), null);
+});
+
+test('MR review is restricted to a persisted TOP identity and does not change personal ownership', () => {
+  assert.equal(canReviewPersonalDevelopmentDashboards(null), false);
+  const top: AdminSession = { role: 'top', sessionId: 'synthetic-top', adminUserId: 4 };
+  assert.equal(canReviewPersonalDevelopmentDashboards(top), true);
+  assert.equal(personalDashboardMode(top), null);
+  assert.equal(canReviewPersonalDevelopmentDashboards({ ...top, dashboardAccess: [] }), true);
+  assert.equal(canReviewPersonalDevelopmentDashboards({ ...top, sessionId: undefined }), false);
+  for (const adminUserId of [undefined, 0, -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(canReviewPersonalDevelopmentDashboards({ ...top, adminUserId, managerId: 5 }), false);
+  }
+  for (const role of ['admin', 'admintop', 'manager', 'support_manager', 'wholesale_admin', 'purchaser'] as const) {
+    assert.equal(canReviewPersonalDevelopmentDashboards({ ...top, role, managerId: 5, dashboardAccess: ['manager:development'] }), false, role);
+  }
 });
 
 test('HTML audience is selected from the viewer account and cannot be changed through a URL', () => {

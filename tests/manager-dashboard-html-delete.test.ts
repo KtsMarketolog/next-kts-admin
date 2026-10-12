@@ -88,6 +88,7 @@ function repository(options: { deleteFails?: boolean; emptyDelete?: boolean; mis
       '../managerDashboardAudience': audience,
       '../managerDashboardDomain': domain,
       '../managerDashboardImportPagination': pagination,
+      './dashboardAccessRepo': { DASHBOARD_ACCESS_LOCK: 'kts:dashboard-view-grants' },
       './client': { query: () => assert.fail('deletion must be transactional'), withTransaction: async (callback: (value: typeof client) => unknown) => {
         const before = structuredClone(states);
         const beforeVersions = new Map(versions);

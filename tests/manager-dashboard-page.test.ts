@@ -11,7 +11,10 @@ import * as security from '../src/shared/lib/managerDashboardSecurity';
 import * as permissions from '../src/shared/lib/dashboardPermissions';
 
 type Query = { [key: string]: string | string[] | undefined };
-type Page = (props: { searchParams: Promise<Query> }) => Promise<{ props: { mode: string; audience: audiences.PersonalDashboardAudience | null } }>;
+type Page = (props: { searchParams: Promise<Query> }) => Promise<{ type: unknown; props: { mode?: string; audience?: audiences.PersonalDashboardAudience | null } }>;
+
+const managementComponent = () => null;
+const reviewComponent = () => null;
 
 class PageRedirect extends Error {
   constructor(public location: string) { super(location); }
@@ -26,7 +29,8 @@ function page(session: AdminSession | null): Page {
     '@/shared/lib/managerDashboardAudience': audiences,
     '@/shared/lib/managerDashboardSecurity': security,
     '@/shared/lib/dashboardPermissions': permissions,
-    '@/features/admin/manager-dashboard/ManagerDashboard': { ManagerDashboard: () => null },
+    '@/features/admin/manager-dashboard/ManagerDashboard': { ManagerDashboard: managementComponent },
+    '@/features/admin/manager-dashboard/ManagerDashboardReview': { ManagerDashboardReview: reviewComponent },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/app/admin/manager-dashboard/page.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -50,6 +54,20 @@ test('administrator cards select MR/MS while the legacy URL retains the combined
       await assert.rejects(render({ searchParams: Promise.resolve({ audience }) }),
         (error: unknown) => error instanceof PageRedirect && error.location === '/admin/manager-dashboard');
     }
+  }
+});
+
+test('TOP opens the separate MR review and cannot switch it to MS or management through the URL', async () => {
+  const render = page({ role: 'top', adminUserId: 3, sessionId: 'synthetic-top-session', dashboardAccess: [] });
+  for (const audience of [undefined, 'development']) {
+    const result = await render({ searchParams: Promise.resolve({ audience, mode: 'manage', preview: '1' }) });
+    assert.equal(result.type, reviewComponent);
+    assert.notEqual(result.props.mode, 'manage');
+    assert.notEqual(result.props.audience, 'support');
+  }
+  for (const audience of ['support', 'invalid', '', ['development', 'support'], ['development', 'development']]) {
+    await assert.rejects(render({ searchParams: Promise.resolve({ audience }) }),
+      (error: unknown) => error instanceof PageRedirect && error.location === '/admin/manager-dashboard?audience=development');
   }
 });
 
@@ -79,7 +97,9 @@ test('query parameters never grant dashboard access to missing or unauthorized s
     { role: 'manager', managerId:17, sessionId: 'synthetic', dashboardAccess:[] },
     { role: 'support_manager', managerId: 0, sessionId: 'synthetic' },
     { role: 'wholesale_admin', adminUserId: 3, sessionId: 'synthetic' },
-    { role: 'top', adminUserId: 3, sessionId: 'synthetic' },
+    { role: 'top', adminUserId: 3 },
+    { role: 'top', adminUserId: 0, sessionId: 'synthetic' },
+    { role: 'top', managerId: 3, sessionId: 'synthetic' },
     { role: 'purchaser', adminUserId: 3, sessionId: 'synthetic', dashboardAccess: ['route-planner', 'top:7'] },
     { role: 'purchaser', adminUserId: 3, sessionId: 'synthetic', dashboardAccess: ['manager:development', 'manager:support'] },
   ];

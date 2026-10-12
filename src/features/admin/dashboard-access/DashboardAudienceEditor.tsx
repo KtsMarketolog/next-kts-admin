@@ -103,7 +103,7 @@ export function DashboardAudienceEditor({ dashboardKey, onSaved }: {
   if (hidden) return null;
   return <section className={styles.editor}>
     <h2>Кому доступен отчёт</h2>
-    <p>Те же галочки доступны в карточке сотрудника. Загрузка файлов, публикация и назначение доступов регулируются отдельно. Личные снимки доступны только их владельцам.</p>
+    <p>Те же галочки доступны в карточке сотрудника. Загрузка файлов, публикация и назначение доступов регулируются отдельно. Менеджеры видят свои снимки; ТОП также может просматривать личные отчёты МР.</p>
     <div className={styles.roleToolbar}>
       <label>
         <span>Роль сотрудников</span>
@@ -122,13 +122,13 @@ export function DashboardAudienceEditor({ dashboardKey, onSaved }: {
       <button type="button" disabled={busy || !currentData} onClick={() => setData((current) => current?.key === dashboardKey ? {...current, mode: 'individual', users: selectDashboardAudienceEmployees(current.users, current.users.map((user) => user.id), false)} : current)}>Снять выбор</button>
       <button type="button" disabled={busy} onClick={() => void load()}>Обновить список</button>
     </div>
-    <p>«Выбрать всех» включает доступ всем нынешним и будущим сотрудникам, независимо от фильтров. Неактивные сотрудники получат доступ только после активации. Личные отчёты — только своей группы и со своим снимком.</p>
+    <p>«Выбрать всех» включает доступ всем нынешним и будущим сотрудникам, независимо от фильтров. Неактивные сотрудники получат доступ только после активации. Менеджерам доступны личные отчёты своей группы; просмотр МР для ТОП включён по роли.</p>
     {currentData && <p>{currentData.mode === 'all' ? 'Режим: все сотрудники, включая будущих. Снятая галочка — персональное исключение.' : 'Режим: только выбранные сотрудники. Новым сотрудникам доступ автоматически не добавляется.'}</p>}
     {currentData?.mode === 'all' && <button type="button" disabled={busy} onClick={() => setData((current) => current?.key === dashboardKey ? {...current, mode: 'individual'} : current)}>Оставить только текущий выбор</button>}
     <p>Изменения применяются после нажатия «Сохранить доступы».</p>
     <div className={styles.employees}>{visible.map((user) => <label key={user.id}>
       <input type="checkbox" checked={user.checked} disabled={busy || user.locked || !user.eligible} onChange={(event) => select([user.id], event.target.checked)} />
-      <span><strong>{user.name}</strong><small>{user.login} · {dashboardAudienceRoleLabel(user.role)}{!user.isActive ? ' · Неактивен' : ''}{user.locked ? ' · Доступ по правам управления' : !user.eligible ? ' · Нет собственного личного отчёта этой группы' : ''}</small></span>
+      <span><strong>{user.name}</strong><small>{user.login} · {dashboardAudienceRoleLabel(user.role)}{!user.isActive ? ' · Неактивен' : ''}{user.locked ? ' · Доступ по роли' : !user.eligible ? ' · Нет собственного личного отчёта этой группы' : ''}</small></span>
     </label>)}</div>
     {currentData && visible.length === 0 && <p>Сотрудники не найдены.</p>}
     <button type="button" disabled={busy || !currentData} onClick={() => void save()}>{busy ? 'Подождите…' : 'Сохранить доступы'}</button>

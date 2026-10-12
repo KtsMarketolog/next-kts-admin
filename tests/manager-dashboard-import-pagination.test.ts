@@ -62,6 +62,7 @@ function repository(ids: string[]) {
       '../managerDashboardAudience': audience,
       '../managerDashboardDomain': domain,
       '../managerDashboardImportPagination': pagination,
+      './dashboardAccessRepo': { DASHBOARD_ACCESS_LOCK: 'kts:dashboard-view-grants' },
       './client': { query: client.query, withTransaction: async (callback: (value: typeof client) => unknown) => callback(client) },
       './schema': { ensureSiteSchema: async () => { schemaCalls++; } },
     },

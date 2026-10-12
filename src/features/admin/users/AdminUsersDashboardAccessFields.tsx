@@ -1,5 +1,5 @@
 import type { DashboardAccessOption } from '@/shared/lib/dashboardAccess';
-import { canViewDashboardKey, hasDashboardManagementRight } from '@/shared/lib/dashboardPermissions';
+import { canViewDashboardKey, hasDashboardInheritedViewRight, hasDashboardManagementRight } from '@/shared/lib/dashboardPermissions';
 import type { AccessUserRole } from './AdminUsersTypes';
 
 import { toggleDashboardAccess } from './AdminUsersDashboardAccess';
@@ -26,7 +26,7 @@ export function AdminUsersDashboardAccessFields({ value, options, loading, disab
       <legend>Доступные дашборды — только просмотр</legend>
       <p className={styles.help}>
         Галочки разрешают только просмотр. Права загрузки, публикации и управления доступами не меняются.
-        Личные отчёты доступны только своему менеджеру. Доступ по существующим правам управления отмечен отдельно.
+        Менеджеры видят свои личные отчёты; ТОП также может просматривать отчёты МР. Доступ по роли отмечен отдельно.
         Новые дашборды не добавляются автоматически.
       </p>
       {loading ? (
@@ -51,6 +51,7 @@ export function AdminUsersDashboardAccessFields({ value, options, loading, disab
                   <strong>{option.title}</strong>
                   {option.description && <small>{option.description}</small>}
                   {hasDashboardManagementRight(session, option.key) && <small>Доступ по правам управления — эти галочки его не отменяют.</small>}
+                  {hasDashboardInheritedViewRight(session, option.key) && <small>Просмотр отчётов МР по роли ТОП, без прав изменения.</small>}
                 </span>
               </label>
             ))}

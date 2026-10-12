@@ -1,10 +1,11 @@
 import { redirect } from 'next/navigation';
 
 import { ManagerDashboard } from '@/features/admin/manager-dashboard/ManagerDashboard';
+import { ManagerDashboardReview } from '@/features/admin/manager-dashboard/ManagerDashboardReview';
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { canAssignDashboardAccess } from '@/shared/lib/dashboardPermissions';
 import { getPersonalDashboardAudience, parsePersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
-import { personalDashboardMode } from '@/shared/lib/managerDashboardSecurity';
+import { canReviewPersonalDevelopmentDashboards, personalDashboardMode } from '@/shared/lib/managerDashboardSecurity';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,11 @@ export default async function ManagerDashboardPage({ searchParams }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const session = await getAdminSession();
+  if (canReviewPersonalDevelopmentDashboards(session)) {
+    const query = await searchParams;
+    if (query.audience !== undefined && query.audience !== 'development') redirect('/admin/manager-dashboard?audience=development');
+    return <ManagerDashboardReview />;
+  }
   const mode = personalDashboardMode(session);
   if (!mode) redirect('/admin');
 

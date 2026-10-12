@@ -1,7 +1,11 @@
 import type { AdminSession } from './adminAuth';
 import type { PersonalDashboardEmptyState } from './managerDashboardHtml';
 import { getPersonalDashboardAudience, parsePersonalDashboardAudience } from './managerDashboardAudience';
-import { canViewDashboardKey } from './dashboardPermissions';
+import { canViewDashboardKey, hasDashboardInheritedViewRight } from './dashboardPermissions';
+
+export function canReviewPersonalDevelopmentDashboards(session: AdminSession | null | undefined): boolean {
+  return hasDashboardInheritedViewRight(session, 'manager:development');
+}
 
 export function personalDashboardMode(session: AdminSession | null): 'manage' | 'view' | null {
   // Do not accept the legacy signed-cookie fallback: persisted sessions recheck
