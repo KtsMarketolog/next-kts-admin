@@ -5,6 +5,8 @@ import test from 'node:test';
 import * as crypto from 'node:crypto';
 import ts from 'typescript';
 
+import { isEmailTwoFactorOutageActive } from '../src/shared/lib/emailTwoFactorOutage';
+
 function load<T>(path: string, modules: Record<string, unknown>, messages: unknown[][] = [], env = {}) {
   const code = ts.transpileModule(readFileSync(path, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -24,6 +26,7 @@ function harness(kind: RouteKind, options: {
   invalidPassword?: boolean; smtpFails?: boolean; invalidationFails?: boolean;
   databaseFails?: boolean; twoFactor?: boolean; missingEmail?: boolean; validCode?: boolean;
   employee?: 'admin' | 'manager' | 'env';
+  outage?: { start: string; end: string; now: string };
 } = {}) {
   const messages: unknown[][] = [];
   const invalidated: unknown[][] = [];
@@ -81,6 +84,12 @@ function harness(kind: RouteKind, options: {
       recordWholesaleManagerLogin: async () => {}, trackAnalyticsEvent: async () => {}, recordClientUserLogin: async () => {},
     },
     '@/shared/lib/twoFactorDelivery': delivery,
+    '@/shared/lib/emailTwoFactorOutage': {
+      isEmailTwoFactorOutageActive: () => isEmailTwoFactorOutageActive(
+        new Date(options.outage?.now ?? '2026-10-12T13:45:10.000Z'),
+        { EMAIL_2FA_OUTAGE_START_AT: options.outage?.start, EMAIL_2FA_OUTAGE_END_AT: options.outage?.end },
+      ),
+    },
     '@/shared/lib/publicSession': {
       LOGIN_SESSION_COOKIE: 'kts_login_sid',
       getOrCreateSessionCookie: () => ({ sessionId: 'synthetic-login-session' }),
@@ -176,6 +185,52 @@ test('manager and legacy admin use the same safe SMTP failure path', async () =>
     assert.equal((await response.json()).code, 'TWO_FACTOR_DELIVERY_FAILED');
     assert.deepEqual(h.invalidated, [['challenge-a', 'synthetic-login-session']]);
     assert.equal(h.counts().sessions, 0);
+  }
+});
+
+test('bounded email outage exempts password-verified employees and clients, never bad credentials', async () => {
+  const outage = { start: '2026-10-12T13:45:10.000Z', end: '2027-01-12T13:45:10.000Z', now: '2026-11-01T00:00:00.000Z' };
+  for (const employee of ['admin', 'manager', 'env'] as const) {
+    const h = harness('admin', { employee, outage, smtpFails: true });
+    assert.equal((await h.post()).status, 200);
+    assert.deepEqual(h.counts(), { challenges: 0, sessions: 1, sent: 0 });
+    const invalid = harness('admin', { employee, outage, invalidPassword: true });
+    assert.equal((await invalid.post()).status, 401);
+    assert.deepEqual(invalid.counts(), { challenges: 0, sessions: 0, sent: 0 });
+  }
+  const client = harness('client', { outage });
+  const response = await client.post();
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).ok, true);
+  assert.deepEqual(client.counts(), { challenges: 0, sessions: 1, sent: 0 });
+  const invalidClient = harness('client', { outage, invalidPassword: true });
+  assert.equal((await invalidClient.post()).status, 401);
+  assert.deepEqual(invalidClient.counts(), { challenges: 0, sessions: 0, sent: 0 });
+});
+
+test('employee and client OTP are required before, at expiry and for invalid or oversized outage settings', async () => {
+  const range = { start: '2026-10-12T13:45:10.000Z', end: '2027-01-12T13:45:10.000Z', now: '2026-11-01T00:00:00.000Z' };
+  for (const outage of [
+    { ...range, now: '2026-10-12T13:45:09.999Z' },
+    { ...range, now: range.end },
+    { ...range, start: 'invalid' },
+    { ...range, end: '2027-01-12T13:45:10.001Z' },
+  ]) {
+    for (const employee of ['admin', 'manager', 'env'] as const) {
+      const h = harness('admin', { employee, outage });
+      const response = await h.post();
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).twoFactorRequired, true);
+      assert.deepEqual(h.counts(), { challenges: 1, sessions: 0, sent: 1 });
+    }
+    const client = harness('client', { outage });
+    const response = await client.post();
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).twoFactorRequired, true);
+    assert.deepEqual(client.counts(), { challenges: 1, sessions: 0, sent: 1 });
+    const clientWithoutOtp = harness('client', { outage, twoFactor: false });
+    assert.equal((await clientWithoutOtp.post()).status, 200);
+    assert.deepEqual(clientWithoutOtp.counts(), { challenges: 0, sessions: 1, sent: 0 });
   }
 });
 

@@ -9,6 +9,7 @@ import {
 } from '@/shared/lib/db/twoFactorRepo';
 import { getAdminUserByLogin, getWholesaleManagerByLogin, recordWholesaleManagerLogin, trackAnalyticsEvent } from '@/shared/lib/db';
 import { deliverTwoFactorCode, twoFactorDeliveryFailure } from '@/shared/lib/twoFactorDelivery';
+import { isEmailTwoFactorOutageActive } from '@/shared/lib/emailTwoFactorOutage';
 import { LOGIN_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie, type SessionCookieState } from '@/shared/lib/publicSession';
 import { checkDbRateLimit, getClientIp, resetDbRateLimit } from '@/shared/lib/rateLimit';
 
@@ -260,7 +261,7 @@ async function login(request: Request) {
   const adminUser = login ? await getAdminUserByLogin(login) : null;
   if (adminUser?.isActive && adminUser.passwordHash && verifyPassword(password, adminUser.passwordHash)) {
     await resetDbRateLimit(rateLimitKey);
-    if (isTwoFactorEnabled()) {
+    if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
       const response = await startTwoFactor({
         login: adminUser.login,
         actorType: 'admin',
@@ -303,7 +304,7 @@ async function login(request: Request) {
 
   if (validateAdminPassword(password)) {
     await resetDbRateLimit(rateLimitKey);
-    if (isTwoFactorEnabled()) {
+    if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
       const response = await startTwoFactor({
         login: login || 'env-admin',
         actorType: 'admin',
@@ -354,7 +355,7 @@ async function login(request: Request) {
   }
 
   await resetDbRateLimit(rateLimitKey);
-  if (isTwoFactorEnabled()) {
+  if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
     const response = await startTwoFactor({
       login: manager.login,
       actorType: 'manager',

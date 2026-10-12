@@ -8,6 +8,7 @@ import {
   generateTwoFactorCode,
 } from '@/shared/lib/db/twoFactorRepo';
 import { deliverTwoFactorCode, twoFactorDeliveryFailure } from '@/shared/lib/twoFactorDelivery';
+import { isEmailTwoFactorOutageActive } from '@/shared/lib/emailTwoFactorOutage';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { LOGIN_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie, type SessionCookieState } from '@/shared/lib/publicSession';
 import { checkDbRateLimit, getClientIp, resetDbRateLimit } from '@/shared/lib/rateLimit';
@@ -133,7 +134,7 @@ async function login(request: Request) {
 
   await resetDbRateLimit(rateLimitKey);
 
-  if (user.requireTwoFactor) {
+  if (user.requireTwoFactor && !isEmailTwoFactorOutageActive()) {
     const email = user.email || user.login;
     if (!email || !email.includes('@')) {
       return withSessionCookie(twoFactorDeliveryFailure(), loginSession);
