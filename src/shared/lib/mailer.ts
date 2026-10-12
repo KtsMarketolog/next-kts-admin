@@ -18,7 +18,7 @@ export async function sendSystemMail(input: {
   text: string;
   html: string;
   attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
-}) {
+}, timeouts?: { connectionTimeout: number; greetingTimeout: number; socketTimeout: number }) {
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: Number(process.env.SMTP_PORT || 465),
@@ -27,6 +27,7 @@ export async function sendSystemMail(input: {
       user: requireEnv('SMTP_USER'),
       pass: smtpPassword(),
     },
+    ...timeouts,
   });
 
   const user = requireEnv('SMTP_USER');

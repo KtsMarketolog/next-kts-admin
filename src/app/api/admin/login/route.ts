@@ -8,7 +8,7 @@ import {
   type TwoFactorChallengeActor,
 } from '@/shared/lib/db/twoFactorRepo';
 import { getAdminUserByLogin, getWholesaleManagerByLogin, recordWholesaleManagerLogin, trackAnalyticsEvent } from '@/shared/lib/db';
-import { sendSystemMail } from '@/shared/lib/mailer';
+import { deliverTwoFactorCode, twoFactorDeliveryFailure } from '@/shared/lib/twoFactorDelivery';
 import { LOGIN_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie, type SessionCookieState } from '@/shared/lib/publicSession';
 import { checkDbRateLimit, getClientIp, resetDbRateLimit } from '@/shared/lib/rateLimit';
 
@@ -51,15 +51,6 @@ function challengePredatesPasswordChange(
   return !Number.isFinite(challengeTime)
     || !Number.isFinite(passwordChangeTime)
     || challengeTime < passwordChangeTime;
-}
-
-async function sendTwoFactorCode(email: string, code: string) {
-  await sendSystemMail({
-    to: email,
-    subject: 'KTS: код подтверждения входа',
-    text: `Код подтверждения входа: ${code}. Он действует 10 минут.`,
-    html: `<p>Код подтверждения входа:</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>Код действует 10 минут.</p>`,
-  });
 }
 
 async function finishLogin(input: {
@@ -168,7 +159,7 @@ async function startTwoFactor(input: {
 }) {
   const email = twoFactorRecipient(input.email);
   if (!email) {
-    return Response.json({ error: 'Two-factor email is not configured' }, { status: 500 });
+    return twoFactorDeliveryFailure();
   }
 
   const code = generateTwoFactorCode();
@@ -181,7 +172,8 @@ async function startTwoFactor(input: {
     loginSessionId: input.loginSessionId,
     code,
   });
-  await sendTwoFactorCode(email, code);
+  const delivered = await deliverTwoFactorCode({ email, code, challengeId, loginSessionId: input.loginSessionId });
+  if (!delivered) return twoFactorDeliveryFailure();
   await recordSecurityEvent({
     eventType: 'two_factor_challenge_created',
     actorType: input.actorType,
@@ -202,7 +194,7 @@ async function startTwoFactor(input: {
   });
 }
 
-export async function POST(request: Request) {
+async function login(request: Request) {
   const ip = getClientIp(request);
   const loginSession = getOrCreateSessionCookie(request, LOGIN_SESSION_COOKIE);
 
@@ -399,4 +391,16 @@ export async function POST(request: Request) {
     metadata: { role: manager.role, twoFactor: false },
   });
   return withSessionCookie(Response.json({ ok: true, role: manager.role }), loginSession);
+}
+
+export async function POST(request: Request) {
+  try {
+    return await login(request);
+  } catch {
+    console.error('EMPLOYEE_LOGIN_UNAVAILABLE');
+    return Response.json(
+      { error: 'Login temporarily unavailable', code: 'LOGIN_UNAVAILABLE' },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
 }

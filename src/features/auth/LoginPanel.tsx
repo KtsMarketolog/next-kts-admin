@@ -6,9 +6,8 @@ import { useRouter } from 'next/navigation';
 
 import { EMPLOYEE_HOME_PATH } from '@/shared/lib/adminNavigation';
 
+import { LOGIN_SERVER_ERROR, requestLogin, type LoginMode } from './loginRequest';
 import styles from './LoginPanel.module.scss';
-
-type LoginMode = 'client' | 'employee';
 
 type LoginPanelProps = {
   defaultMode?: LoginMode;
@@ -33,104 +32,55 @@ export function LoginPanel({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
 
-  const submitEmployee = async () => {
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
     setBusy(true);
     setStatus('');
-
-    const res = await fetch('/api/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(twoFactorChallengeId ? { twoFactorChallengeId, twoFactorCode } : { login, password }),
-    });
-
-    const data = await res.json().catch(() => ({}));
-    setBusy(false);
-
-    if (data.twoFactorRequired && data.challengeId) {
-      setTwoFactorChallengeId(data.challengeId);
-      setTwoFactorEmail(typeof data.email === 'string' ? data.email : '');
-      setPassword('');
-      setStatus('');
-      return;
-    }
-
-    if (!res.ok) {
-      setStatus(
-        res.status === 429
-          ? 'Слишком много попыток. Попробуйте позже.'
-          : twoFactorChallengeId
-            ? 'Неверный код подтверждения'
-            : 'Неверный логин или пароль',
+    try {
+      const result = await requestLogin(
+        mode,
+        twoFactorChallengeId ? { twoFactorChallengeId, twoFactorCode } : { login, password },
       );
-      return;
-    }
-
-    if (data.role === 'manager' || data.role === 'support_manager') {
-      router.push(employeeRedirect);
-      return;
-    }
-
-    if (onEmployeeAuthenticated) {
+      if (result.kind === 'error') {
+        setStatus(result.message);
+        return;
+      }
+      if (result.kind === 'challenge') {
+        setTwoFactorChallengeId(result.challengeId);
+        setTwoFactorEmail(result.email);
+        setPassword('');
+        return;
+      }
+      if (mode === 'client') {
+        router.push(clientRedirect);
+        router.refresh();
+        return;
+      }
+      if (result.role === 'manager' || result.role === 'support_manager') {
+        router.push(employeeRedirect);
+        return;
+      }
       if (
-        data.role !== 'admin'
-        && data.role !== 'wholesale_admin'
-        && data.role !== 'top'
-        && data.role !== 'admintop'
-        && data.role !== 'purchaser'
+        result.role !== 'admin'
+        && result.role !== 'wholesale_admin'
+        && result.role !== 'top'
+        && result.role !== 'admintop'
+        && result.role !== 'purchaser'
       ) {
         setStatus('Не удалось определить права сотрудника');
         return;
       }
-      await onEmployeeAuthenticated(data.role);
-      return;
+      if (onEmployeeAuthenticated) {
+        await onEmployeeAuthenticated(result.role);
+        return;
+      }
+      router.push(employeeRedirect);
+    } catch {
+      setStatus(LOGIN_SERVER_ERROR);
+    } finally {
+      setBusy(false);
     }
-
-    router.push(employeeRedirect);
-  };
-
-  const submitClient = async () => {
-    setBusy(true);
-    setStatus('');
-
-    const res = await fetch('/api/client/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(twoFactorChallengeId ? { twoFactorChallengeId, twoFactorCode } : { login, password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    setBusy(false);
-
-    if (data.twoFactorRequired && data.challengeId) {
-      setTwoFactorChallengeId(data.challengeId);
-      setTwoFactorEmail(typeof data.email === 'string' ? data.email : '');
-      setPassword('');
-      setStatus('');
-      return;
-    }
-
-    if (!res.ok) {
-      setStatus(
-        res.status === 429
-          ? 'Слишком много попыток. Попробуйте позже.'
-          : twoFactorChallengeId
-            ? 'Неверный код подтверждения'
-            : 'Неверный логин или пароль',
-      );
-      return;
-    }
-
-    router.push(clientRedirect);
-    router.refresh();
-  };
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (mode === 'client') {
-      submitClient();
-      return;
-    }
-
-    await submitEmployee();
   };
 
   return (

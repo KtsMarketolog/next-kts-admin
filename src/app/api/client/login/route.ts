@@ -7,7 +7,7 @@ import {
   consumeTwoFactorChallenge,
   generateTwoFactorCode,
 } from '@/shared/lib/db/twoFactorRepo';
-import { sendSystemMail } from '@/shared/lib/mailer';
+import { deliverTwoFactorCode, twoFactorDeliveryFailure } from '@/shared/lib/twoFactorDelivery';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { LOGIN_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie, type SessionCookieState } from '@/shared/lib/publicSession';
 import { checkDbRateLimit, getClientIp, resetDbRateLimit } from '@/shared/lib/rateLimit';
@@ -24,15 +24,6 @@ function maskEmail(email: string) {
   const [name, domain] = email.split('@');
   if (!name || !domain) return '';
   return `${name.slice(0, 2)}***@${domain}`;
-}
-
-async function sendClientTwoFactorCode(email: string, code: string) {
-  await sendSystemMail({
-    to: email,
-    subject: 'KTS: код подтверждения входа',
-    text: `Код подтверждения входа: ${code}. Он действует 10 минут.`,
-    html: `<p>Код подтверждения входа:</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>Код действует 10 минут.</p>`,
-  });
 }
 
 async function finishClientLogin(input: {
@@ -67,7 +58,7 @@ async function finishClientLogin(input: {
   return Response.json({ ok: true });
 }
 
-export async function POST(request: Request) {
+async function login(request: Request) {
   const forbiddenOrigin = enforceSameOriginRequest(request);
   if (forbiddenOrigin) return forbiddenOrigin;
 
@@ -145,7 +136,7 @@ export async function POST(request: Request) {
   if (user.requireTwoFactor) {
     const email = user.email || user.login;
     if (!email || !email.includes('@')) {
-      return withSessionCookie(Response.json({ error: 'Client email is not configured' }, { status: 500 }), loginSession);
+      return withSessionCookie(twoFactorDeliveryFailure(), loginSession);
     }
 
     const code = generateTwoFactorCode();
@@ -157,7 +148,8 @@ export async function POST(request: Request) {
       loginSessionId: loginSession.sessionId,
       code,
     });
-    await sendClientTwoFactorCode(email, code);
+    const delivered = await deliverTwoFactorCode({ email, code, challengeId, loginSessionId: loginSession.sessionId });
+    if (!delivered) return withSessionCookie(twoFactorDeliveryFailure(), loginSession);
     await recordSecurityEvent({
       eventType: 'two_factor_challenge_created',
       actorType: 'client',
@@ -199,4 +191,16 @@ export async function POST(request: Request) {
   });
 
   return withSessionCookie(Response.json({ ok: true }), loginSession);
+}
+
+export async function POST(request: Request) {
+  try {
+    return await login(request);
+  } catch {
+    console.error('CLIENT_LOGIN_UNAVAILABLE');
+    return Response.json(
+      { error: 'Login temporarily unavailable', code: 'LOGIN_UNAVAILABLE' },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
 }

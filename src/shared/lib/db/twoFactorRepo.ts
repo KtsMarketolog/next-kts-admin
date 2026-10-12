@@ -92,6 +92,16 @@ export async function createTwoFactorChallenge(input: {
   return challengeId;
 }
 
+export async function invalidateTwoFactorChallenge(challengeId: string, loginSessionId: string) {
+  await ensureSiteSchema();
+  await query(
+    `update admin_2fa_challenges
+     set consumed_at = coalesce(consumed_at, now())
+     where id = $1 and login_session_id = $2`,
+    [challengeId, safeHeaderValue(loginSessionId, 160)],
+  );
+}
+
 export async function consumeTwoFactorChallenge(input: {
   challengeId: string;
   loginSessionId: string;
