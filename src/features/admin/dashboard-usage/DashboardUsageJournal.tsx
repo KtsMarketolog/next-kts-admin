@@ -184,11 +184,18 @@ export function DashboardUsageJournal() {
   }, [filter, includePreview]);
   useEffect(() => { void load(); return () => requestRef.current?.abort(); }, [load]);
   const reset = () => { setFilter({ dashboard: '', actor: '', action: '' }); setActorName(''); setIncludePreview(false); };
-  return <main className={styles.root}>
-    <header><div><h1>История использования дашбордов</h1><p>Журнал доступен ролям Администратор, Админ TOP и TOP. Показан последний месяц.</p></div><Link href="/admin/top">К отчётам</Link></header>
+  return <main className={styles.page}>
+    <div className={styles.root}>
+    <header className={styles.header}>
+      <div><p className={styles.eyebrow}>Панель управления</p><h1>Журнал и сотрудники</h1><p className={styles.notice}>История использования дашбордов за последний месяц. Доступна администратору, Админ ТОП и ТОП.</p></div>
+      <nav className={styles.navigation} aria-label="Навигация журнала">
+        <Link className={styles.backLink} href="/admin">← В админку</Link>
+        <Link className={styles.backLink} href="/admin/top">К отчётам</Link>
+      </nav>
+    </header>
     <p className={styles.notice}>Записываются открытия и поддерживаемые действия, без значений фильтров и паролей. Для успешных загрузок — имя и размер файла, без его содержимого. Только для подключённой «Рентабельности счетов» дополнительно сохраняются номер, номенклатура, количество, сумма и исходная валюта успешно загруженного счёта; сами файлы не сохраняются в журнале. Фоновые обновления не считаются действиями сотрудника. События внутри HTML передаются его адаптером и не подтверждают производительность сотрудника. Экспорт означает подготовку файла, а не подтверждение сохранения на устройстве. История начинается с подключения журнала.</p>
     <EmployeeUsageSummary onSelect={(actor, name) => { setFilter({ dashboard: '', actor, action: '' }); setActorName(name); setIncludePreview(false); eventsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} />
-    <section ref={eventsRef} aria-labelledby="usage-events-heading">
+    <section ref={eventsRef} className={styles.events} aria-labelledby="usage-events-heading">
     <h2 id="usage-events-heading">События{actorName ? `: ${actorName}` : ''}</h2>
     {filter.actor && <EmployeeReportDetails key={filter.actor} actorKey={filter.actor} onSelect={(dashboard) => { setFilter({ ...filter, dashboard, action: '' }); setIncludePreview(false); }} />}
     <div className={styles.filters}>
@@ -216,5 +223,6 @@ export function DashboardUsageJournal() {
     {cursor && <button type="button" disabled={busy} onClick={() => void load(cursor)}>Показать ещё 50</button>}
     <p className={styles.notice}>Срок хранения — один календарный месяц назад от текущего времени МСК. Просроченные записи скрыты и удаляются отдельным серверным заданием; история снимков и права на отчёты от этого не меняются.</p>
     </section>
+    </div>
   </main>;
 }

@@ -10,6 +10,7 @@ const interactiveCardClassName = `${styles.dashboardCard} ${styles.dashboardCard
 type AdminDashboardProps = {
   canAccessSite: boolean;
   canManageUsers?: boolean;
+  canReviewUsage?: boolean;
   topDashboardMode: 'manage' | 'view' | null;
   managerDashboardMode: 'manage' | 'view' | null;
   managerDashboardAudience?: PersonalDashboardAudience | null;
@@ -18,9 +19,22 @@ type AdminDashboardProps = {
   wholesaleHref: '/admin/wholesale/admin' | '/admin/wholesale/manager';
 };
 
+function DashboardUsageCard() {
+  return (
+    <Link className={interactiveCardClassName} href="/admin/dashboard-usage">
+      <div>
+        <h2>Журнал и сотрудники</h2>
+        <p>Кто и когда открывал отчёты, какие действия выполнял и файлы загружал. Сводка по сотрудникам и время просмотра.</p>
+      </div>
+      <span className={styles.dashboardCardLink}>Открыть журнал</span>
+    </Link>
+  );
+}
+
 export function AdminDashboard({
   canAccessSite,
   canManageUsers = false,
+  canReviewUsage = false,
   topDashboardMode,
   managerDashboardMode,
   canAccessReportsCatalog,
@@ -35,6 +49,7 @@ export function AdminDashboard({
         className={`${styles.dashboardGrid} ${styles.dashboardGridSingle}`}
         aria-label="Разделы панели управления"
       >
+        {canReviewUsage && <DashboardUsageCard />}
         <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
           <div>
             <h2>HTML-страницы и отчёты</h2>
@@ -52,6 +67,7 @@ export function AdminDashboard({
 
   return (
     <section className={styles.dashboardGrid} aria-label="Разделы панели управления">
+      {canReviewUsage && <DashboardUsageCard />}
       {canAccessSite ? (
         <Link className={interactiveCardClassName} href="/admin/site" replace scroll={false}>
           <div>

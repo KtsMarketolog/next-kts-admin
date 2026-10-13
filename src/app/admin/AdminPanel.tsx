@@ -514,6 +514,7 @@ export default function AdminPanel({
         <AdminDashboard
           canAccessSite={sessionRole === 'admin'}
           canManageUsers={canAssignDashboardAccess(reportSession)}
+          canReviewUsage={canReviewDashboardUsage(reportSession)}
           canAccessReportsCatalog={canAccessCatalog}
           topDashboardMode={topDashboardMode}
           managerDashboardMode={sessionRole === 'admin' || sessionRole === 'admintop' ? 'manage' : isManagerRole(sessionRole) ? 'view' : null}
