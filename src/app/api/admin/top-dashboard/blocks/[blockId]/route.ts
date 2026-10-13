@@ -19,7 +19,7 @@ import {
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
-import { detectTopDashboardDataContract } from '@/shared/lib/topDashboardContentSecurity';
+import { detectTopDashboardDataContract, detectTopDashboardExpectedProfile } from '@/shared/lib/topDashboardContentSecurity';
 import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
 import { detectTopDashboardUploadTargets } from '@/shared/lib/topDashboardUploadTargets';
 
@@ -49,14 +49,16 @@ export async function GET(_request: Request, context: Context) {
     if (!overview) {
       return Response.json({ error: 'Блок не найден' }, { status: 404 });
     }
-    if (!isTopDashboardManagementSession(session)) {
-      return Response.json(overview, {
-        headers: { 'Cache-Control': 'private, no-store' },
-      });
-    }
     const activeHtml = overview.activeVersionId
       ? await getTopDashboardBlockVersionContent(blockId, overview.activeVersionId)
       : null;
+    const instruction = activeHtml && detectTopDashboardExpectedProfile(activeHtml.htmlContent) === 'sales-analytics'
+      ? 'sales-analytics' : null;
+    if (!isTopDashboardManagementSession(session)) {
+      return Response.json({ ...overview, instruction }, {
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
     const activeDataContract = activeHtml
       ? {
           ...detectTopDashboardDataContract(activeHtml.htmlContent),
@@ -72,7 +74,7 @@ export async function GET(_request: Request, context: Context) {
           htmlVersionId: null,
         } as const;
 
-    return Response.json({ ...overview, activeDataContract }, {
+    return Response.json({ ...overview, activeDataContract, instruction }, {
       headers: { 'Cache-Control': 'private, no-store' },
     });
   } catch (error) {

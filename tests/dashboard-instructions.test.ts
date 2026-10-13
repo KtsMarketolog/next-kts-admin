@@ -1,0 +1,326 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import type { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
+import { open } from 'node:fs/promises';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import test from 'node:test';
+import ts from 'typescript';
+
+import type { AdminSession } from '../src/shared/lib/adminAuth';
+import * as permissions from '../src/shared/lib/dashboardPermissions';
+import * as instructions from '../src/shared/lib/dashboardInstructions';
+import { dashboardInstructionDownload } from '../src/shared/lib/dashboardInstructionDownload';
+import * as profile from '../src/shared/lib/topDashboardContentSecurity';
+
+const baseUrl = 'https://example.test/api/admin/dashboard-instructions';
+const salesHtml = '<!doctype html><script>const DASH_NAME = "аналитика_продаж";</script>';
+const pdfBytes = Buffer.from('%PDF-1.7\nSynthetic instruction, never personal data.\n%%EOF');
+const persisted = (role: AdminSession['role'], dashboardAccess: string[] = []): AdminSession => ({
+  role, sessionId: 'synthetic-session', dashboardAccess,
+  ...(role === 'manager' || role === 'support_manager' ? { managerId: 71 } : { adminUserId: 31 }),
+});
+const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+function safeHeaders(response: Response) {
+  for (const [name, value] of Object.entries(instructions.DASHBOARD_INSTRUCTION_HEADERS)) {
+    assert.equal(response.headers.get(name), value, name);
+  }
+}
+type RouteContext = { params: Promise<{ kind: string }> };
+type Handler = (request: Request, context: RouteContext) => Promise<Response>;
+
+// The actual route, real permission predicates and real profile detection run
+// against synthetic sessions and inert IO. Unexpected imports fail closed: no
+// owner snapshot, recipient, filesystem or personal repository can be loaded.
+function route(initialSession: AdminSession | null, options: { html?: string | null; failure?: 'auth' | 'profile' | 'file' } = {}) {
+  let session = initialSession;
+  const calls: string[] = [];
+  const modules: Record<string, unknown> = {
+    '@/shared/lib/adminAuth': { async getAdminSession() {
+      calls.push('auth');
+      if (options.failure === 'auth') throw new Error('Synthetic private session detail');
+      return session;
+    } },
+    '@/shared/lib/dashboardPermissions': permissions,
+    '@/shared/lib/dashboardInstructions': instructions,
+    '@/shared/lib/topDashboardContentSecurity': profile,
+    '@/shared/lib/db/topDashboardBlocksRepo': { async getActiveTopDashboardBlockHtmlContent(blockId: number) {
+      calls.push(`active-html:${blockId}`);
+      if (options.failure === 'profile') throw new Error('Synthetic private database detail');
+      return options.html === undefined ? salesHtml : options.html;
+    } },
+    '@/shared/lib/dashboardInstructionDownload': { async dashboardInstructionDownload(request: Request, kind: string, download: boolean) {
+      calls.push(`file:${kind}:${download ? 'attachment' : 'inline'}`);
+      if (options.failure === 'file') throw new Error('Synthetic private filesystem path');
+      return new Response(request.method === 'HEAD' ? null : pdfBytes, { headers: {
+        ...instructions.DASHBOARD_INSTRUCTION_HEADERS, 'Content-Type': 'application/pdf',
+      } });
+    } },
+  };
+  const code = ts.transpileModule(readFileSync(new URL('../src/app/api/admin/dashboard-instructions/[kind]/route.ts', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const testModule = { exports: {} as { GET: Handler; HEAD: Handler } };
+  new Function('require', 'module', 'exports', 'console', code)((name: string) => {
+    assert.ok(name in modules, `Unexpected dependency: ${name}`);
+    return modules[name];
+  }, testModule, testModule.exports, { error() {} });
+  return {
+    calls, setSession(next: AdminSession | null) { session = next; },
+    async request(kind = 'personal-sales', query = 'dashboardKey=manager%3Adevelopment', method: 'GET' | 'HEAD' = 'GET') {
+      const request = new Request(`${baseUrl}/${encodeURIComponent(kind)}?${query}`, { method });
+      const response = await testModule.exports[method](request, { params: Promise.resolve({ kind }) });
+      safeHeaders(response);
+      return response;
+    },
+  };
+}
+
+test('instruction descriptors bind exactly two static PDFs to their permitted report families', () => {
+  for (const key of ['manager:development', 'manager:support']) {
+    assert.equal(instructions.resolveDashboardInstruction('personal-sales', key), instructions.DASHBOARD_INSTRUCTIONS['personal-sales']);
+    assert.equal(instructions.resolveDashboardInstruction('sales-analytics', key), null);
+  }
+  assert.equal(instructions.resolveDashboardInstruction('sales-analytics', 'top:7'), instructions.DASHBOARD_INSTRUCTIONS['sales-analytics']);
+  for (const kind of ['personal-sales', 'sales-analytics', 'unknown', '__proto__', '../../private.pdf']) {
+    for (const key of ['currency-rates', 'route-planner', 'top:*', 'top:0', 'top:01', 'top:1e2', 'top:9007199254740992', '../top:7']) {
+      assert.equal(instructions.resolveDashboardInstruction(kind, key), null, `${kind} ${key}`);
+    }
+  }
+});
+
+test('personal PDF uses real role, identity and audience rights before all storage IO', async () => {
+  const cases: Array<[string, AdminSession | null, boolean, boolean]> = [
+    ['anonymous', null, false, false],
+    ['MR', persisted('manager', ['manager:development']), true, false],
+    ['MS', persisted('support_manager', ['manager:support']), false, true],
+    ['MR forged opposite audience', persisted('manager', ['manager:support']), false, false],
+    ['MS forged opposite audience', persisted('support_manager', ['manager:development']), false, false],
+    ['revoked MR grant', persisted('manager'), false, false],
+    ['TOP inherited review', persisted('top'), true, false],
+    ['TOP forged MS grant', persisted('top', ['manager:support']), true, false],
+    ['admin', { role: 'admin', sessionId: 'environment-admin' }, true, true],
+    ['admintop', persisted('admintop'), true, true],
+    ['purchaser forged personal grants', persisted('purchaser', ['manager:development', 'manager:support']), false, false],
+    ['wholesale admin forged personal grants', persisted('wholesale_admin', ['manager:development', 'manager:support']), false, false],
+    ['legacy admin', { role: 'admin' }, false, false],
+    ['legacy MR', { role: 'manager', managerId: 71, dashboardAccess: ['manager:development'] }, false, false],
+    ['missing TOP identity', { role: 'top', sessionId: 'legacy' }, false, false],
+    ['invalid manager identity', { ...persisted('manager', ['manager:development']), managerId: 0 }, false, false],
+  ];
+  for (const [label, session, development, support] of cases) {
+    for (const [audience, allowed] of [['development', development], ['support', support]] as const) {
+      const api = route(session);
+      const response = await api.request('personal-sales', `dashboardKey=manager%3A${audience}`);
+      assert.equal(response.status, allowed ? 200 : session ? 403 : 401, `${label}: ${audience}`);
+      assert.deepEqual(api.calls, allowed ? ['auth', 'file:personal-sales:inline'] : ['auth']);
+      if (allowed) assert.deepEqual(Buffer.from(await response.arrayBuffer()), pdfBytes);
+    }
+  }
+});
+
+test('Sales instruction requires the exact block grant and currently active Sales profile', async () => {
+  for (const role of ['manager', 'support_manager', 'top', 'purchaser', 'wholesale_admin'] as const) {
+    for (const assigned of [false, true]) {
+      const api = route(persisted(role, [assigned ? 'top:7' : 'top:8']));
+      assert.equal((await api.request('sales-analytics', 'dashboardKey=top%3A7')).status, assigned ? 200 : 403, `${role} ${assigned}`);
+      assert.deepEqual(api.calls, assigned ? ['auth', 'active-html:7', 'file:sales-analytics:inline'] : ['auth']);
+    }
+  }
+  for (const session of [persisted('admin'), persisted('admintop'), { ...persisted('top'), canManageTopDashboard: true }]) {
+    const api = route(session);
+    assert.equal((await api.request('sales-analytics', 'dashboardKey=top%3A7')).status, 200);
+  }
+  for (const html of [null, '<title>Аналитика продаж</title>', '<script>const DASH_NAME="оптимизация_ассортимента";</script>']) {
+    const api = route(persisted('purchaser', ['top:7']), { html });
+    assert.equal((await api.request('sales-analytics', 'dashboardKey=top%3A7')).status, 404);
+    assert.deepEqual(api.calls, ['auth', 'active-html:7'], 'no PDF read for missing, renamed or non-Sales published profile');
+  }
+});
+
+test('each GET and HEAD rechecks current session grants, without caching a successful authorization', async () => {
+  const api = route(persisted('manager', ['manager:development']));
+  assert.equal((await api.request()).status, 200);
+  api.calls.length = 0;
+  api.setSession(persisted('manager'));
+  assert.equal((await api.request()).status, 403);
+  assert.deepEqual(api.calls, ['auth']);
+  api.calls.length = 0;
+  api.setSession(null);
+  const response = await api.request('personal-sales', 'dashboardKey=manager%3Adevelopment', 'HEAD');
+  assert.equal(response.status, 401);
+  assert.equal(await response.text(), '');
+  assert.deepEqual(api.calls, ['auth']);
+});
+
+test('bad kind/key pairs, duplicates, unknown fields and traversal fail before all PDF/profile IO', async () => {
+  const cases: Array<[string, string, number]> = [
+    ['unknown', 'dashboardKey=manager%3Adevelopment', 404],
+    ['../../private.pdf', 'dashboardKey=manager%3Adevelopment', 404],
+    ['__proto__', 'dashboardKey=manager%3Adevelopment', 404],
+    ['personal-sales', 'dashboardKey=top%3A7', 404],
+    ['sales-analytics', 'dashboardKey=manager%3Asupport', 404],
+    ['personal-sales', '', 400],
+    ['personal-sales', 'dashboardKey=', 404],
+    ['sales-analytics', 'dashboardKey=top%3A01', 404],
+    ['personal-sales', 'dashboardKey=..%2F..%2Fprivate.pdf', 404],
+    ['personal-sales', 'dashboardKey=manager%3Adevelopment&dashboardKey=manager%3Asupport', 400],
+    ['personal-sales', 'dashboardKey=manager%3Adevelopment&download=1&download=1', 400],
+    ['personal-sales', 'dashboardKey=manager%3Adevelopment&download=0', 400],
+    ['personal-sales', 'dashboardKey=manager%3Adevelopment&download=', 400],
+    ...['managerId', 'snapshotId', 'versionId', 'filename', 'path'].map((name): [string, string, number] =>
+      ['personal-sales', `dashboardKey=manager%3Adevelopment&${name}=123`, 400]),
+  ];
+  for (const [kind, query, status] of cases) {
+    for (const method of ['GET', 'HEAD'] as const) {
+      const api = route(persisted('admin'));
+      const response = await api.request(kind, query, method);
+      assert.equal(response.status, status, `${method} ${kind} ${query}`);
+      assert.deepEqual(api.calls, ['auth']);
+      if (method === 'HEAD') assert.equal(await response.text(), '');
+    }
+  }
+});
+
+test('authorized HEAD preserves access/profile checks and download flag without a response body', async () => {
+  const api = route(persisted('purchaser', ['top:7']));
+  const response = await api.request('sales-analytics', 'dashboardKey=top%3A7&download=1', 'HEAD');
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), '');
+  assert.deepEqual(api.calls, ['auth', 'active-html:7', 'file:sales-analytics:attachment']);
+  const denied = route(persisted('manager', ['manager:development']));
+  assert.equal((await denied.request('personal-sales', 'dashboardKey=manager%3Asupport', 'HEAD')).status, 403);
+  assert.deepEqual(denied.calls, ['auth']);
+});
+
+test('auth, profile and file failures return private generic errors, including empty HEAD errors', async () => {
+  for (const failure of ['auth', 'profile', 'file'] as const) {
+    for (const method of ['GET', 'HEAD'] as const) {
+      const api = route(persisted('admin'), { failure });
+      const response = await api.request('sales-analytics', 'dashboardKey=top%3A7', method);
+      assert.equal(response.status, 500);
+      const body = await response.text();
+      assert.doesNotMatch(body, /Synthetic|private|filesystem|session detail/);
+      if (method === 'HEAD') assert.equal(body, '');
+    }
+  }
+});
+
+const originals = {
+  'personal-sales': '30391904310a5962e4d3336e704c9d45781f01d55de1ff7a9c0f614afdd51269',
+  'sales-analytics': 'bef931d0b3f37eac436265ba0cd9d2b667df57f46b79f85a1d4b8943f89260e5',
+} as const;
+const asset = (kind: instructions.DashboardInstructionKind) => readFileSync(new URL(`../assets/dashboard-instructions/${instructions.DASHBOARD_INSTRUCTIONS[kind].filename}`, import.meta.url));
+const downloadRequest = (init: RequestInit = {}) => new Request(`${baseUrl}/personal-sales?dashboardKey=manager%3Adevelopment`, init);
+
+test('both bundled original PDFs stream byte-identically with fixed safe inline/attachment names', async () => {
+  for (const kind of Object.keys(originals) as instructions.DashboardInstructionKind[]) {
+    const source = asset(kind);
+    assert.equal(source.subarray(0, 5).toString(), '%PDF-');
+    assert.equal(sha256(source), originals[kind]);
+    for (const attachment of [false, true]) {
+      const response = await dashboardInstructionDownload(downloadRequest(), kind, attachment);
+      assert.equal(response.status, 200);
+      safeHeaders(response);
+      assert.equal(response.headers.get('Content-Type'), 'application/pdf');
+      assert.equal(response.headers.get('Content-Length'), String(source.length));
+      assert.equal(response.headers.get('Accept-Ranges'), 'bytes');
+      assert.equal(response.headers.get('Content-Disposition'), `${attachment ? 'attachment' : 'inline'}; filename="${instructions.DASHBOARD_INSTRUCTIONS[kind].filename}"; filename*=UTF-8''${encodeURIComponent(instructions.DASHBOARD_INSTRUCTIONS[kind].downloadName)}`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      assert.equal(sha256(bytes), originals[kind]);
+      assert.deepEqual(bytes, source);
+    }
+  }
+});
+
+test('PDF ranges support fixed, clamped, open and suffix byte boundaries and If-Range falls back to full content', async () => {
+  const bytes = asset('personal-sales');
+  for (const [range, start, end] of [
+    ['bytes=0-0', 0, 0], ['bytes=2-15', 2, 15],
+    [`bytes=${bytes.length - 12}-`, bytes.length - 12, bytes.length - 1],
+    ['bytes=-12', bytes.length - 12, bytes.length - 1],
+    [`bytes=${bytes.length - 12}-${bytes.length + 100}`, bytes.length - 12, bytes.length - 1],
+    [`bytes=-${bytes.length + 1}`, 0, bytes.length - 1],
+  ] as const) {
+    const response = await dashboardInstructionDownload(downloadRequest({ headers: { range } }), 'personal-sales', false);
+    assert.equal(response.status, 206, range);
+    safeHeaders(response);
+    assert.equal(response.headers.get('Content-Range'), `bytes ${start}-${end}/${bytes.length}`);
+    assert.equal(response.headers.get('Content-Length'), String(end - start + 1));
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes.subarray(start, end + 1));
+  }
+  const response = await dashboardInstructionDownload(downloadRequest({ headers: { range: 'bytes=0-3', 'if-range': '"stale"' } }), 'personal-sales', false);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Content-Range'), null);
+  assert.equal(sha256(Buffer.from(await response.arrayBuffer())), originals['personal-sales']);
+});
+
+// Instrument real read-only file descriptors while executing the helper's real
+// source, so cancellation/HEAD/error tests can prove handle closure without
+// writing fixtures or relying on process-wide descriptor-count timing.
+function trackedDownload() {
+  let lastHandle: Awaited<ReturnType<typeof open>>;
+  let closed: Promise<void> = Promise.resolve();
+  const exports: { dashboardInstructionDownload?: typeof dashboardInstructionDownload } = {};
+  const modules: Record<string, unknown> = {
+    'node:path': { default: path }, 'node:stream': { Readable }, './dashboardInstructions': instructions,
+    'node:fs/promises': { async open(filename: string, flags: string) {
+      assert.equal(flags, 'r');
+      assert.equal(filename, path.join(process.cwd(), 'assets', 'dashboard-instructions', 'personal-sales-v34.pdf'));
+      lastHandle = await open(filename, flags);
+      // Node FileHandle emits close; @types/node 20 leaves its EventEmitter base as a TODO.
+      closed = new Promise<void>((resolve) => { (lastHandle as typeof lastHandle & EventEmitter).once('close', resolve); });
+      return lastHandle;
+    } },
+  };
+  const code = ts.transpileModule(readFileSync(new URL('../src/shared/lib/dashboardInstructionDownload.ts', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  new Function('require', 'exports', code)((name: string) => {
+    assert.ok(name in modules, `Unexpected dependency: ${name}`); return modules[name];
+  }, exports);
+  return {
+    get: (init: RequestInit = {}) => exports.dashboardInstructionDownload!(downloadRequest(init), 'personal-sales', false),
+    async assertClosed() { await closed; assert.equal(lastHandle.fd, -1); },
+  };
+}
+
+test('HEAD describes the full file even with Range, and all invalid ranges close descriptors', { timeout: 5_000 }, async () => {
+  const helper = trackedDownload();
+  const bytes = asset('personal-sales');
+  const head = await helper.get({ method: 'HEAD', headers: { range: 'bytes=0-3' } });
+  assert.equal(head.status, 200);
+  safeHeaders(head);
+  assert.equal(await head.text(), '');
+  assert.equal(head.headers.get('Content-Length'), String(bytes.length));
+  assert.equal(head.headers.get('Content-Range'), null);
+  await helper.assertClosed();
+  for (const range of ['bytes=-0', 'bytes=-', 'bytes=8-2', `bytes=${bytes.length}-`, 'bytes=0-1,5-6', 'bytes=9007199254740992-', 'bytes=0-9007199254740992', 'items=0-1']) {
+    const response = await helper.get({ headers: { range } });
+    assert.equal(response.status, 416, range);
+    safeHeaders(response);
+    assert.equal(response.headers.get('Content-Range'), `bytes */${bytes.length}`);
+    assert.equal(await response.text(), '');
+    await helper.assertClosed();
+  }
+});
+
+test('pre-aborted, interrupted and consumer-cancelled downloads close their read-only file handles', { timeout: 5_000 }, async () => {
+  const helper = trackedDownload();
+  const before = new AbortController();
+  before.abort();
+  await assert.rejects(helper.get({ signal: before.signal }), /Download cancelled/);
+  await helper.assertClosed();
+
+  const during = new AbortController();
+  const response = await helper.get({ signal: during.signal });
+  const body = response.arrayBuffer();
+  during.abort();
+  await assert.rejects(body, /Download cancelled/);
+  await helper.assertClosed();
+
+  const cancelled = await helper.get();
+  await cancelled.body!.cancel('Reader closed PDF tab');
+  await helper.assertClosed();
+});

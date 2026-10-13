@@ -7,6 +7,7 @@ import { ManagerDashboardImportJournal } from './ManagerDashboardImportJournal';
 import { RoutePlannerViewer } from './ManagerDashboardViewer';
 import { formatDashboardTimestamp, formatDashboardDataDate } from '@/shared/lib/dashboardDates';
 import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
+import { DashboardInstructions } from '@/features/admin/dashboard-instructions/DashboardInstructions';
 import { prepareSharedJsonUpload } from './sharedJsonUpload';
 import type { ManagerDashboardGroup, ManagerDashboardHtmlVersion, ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview, RoutePlannerOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
@@ -378,6 +379,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
                     <div><h3>Личный HTML дашборда</h3><p>HTML для личных отчётов этой группы. Каждый менеджер открывает свой файл данных.</p></div>
                     <span className={styles.badge}>{group.activeHtmlVersionId ? `Опубликована версия #${group.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
                   </div>
+                  <DashboardInstructions dashboardKey={`manager:${audience}`} kind="personal-sales" />
                   <form className={styles.uploadForm} onSubmit={(event) => void uploadHtml(event, audience)}>
                     <label htmlFor={`manager-dashboard-html-${audience}`}>Новая версия HTML · до 5 МБ</label>
                     <div className={styles.actions}>

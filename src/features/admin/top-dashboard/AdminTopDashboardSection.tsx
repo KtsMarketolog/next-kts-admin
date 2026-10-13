@@ -19,6 +19,7 @@ import { DashboardDataDates } from './DashboardDataDates';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
 import { requestProfitabilityFrameChange } from '@/features/admin/dashboard-usage/useProfitabilityAuditGuard';
 import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
+import { DashboardInstructions } from '@/features/admin/dashboard-instructions/DashboardInstructions';
 import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
 import { selectWorkingVersionPair } from './topDashboardHistory';
 import {
@@ -90,6 +91,7 @@ type TopDashboardOverview = {
   versions: TopDashboardVersion[];
   data: TopDashboardDataOverview;
   activeDataContract: TopDashboardDataContract;
+  instruction: 'sales-analytics' | null;
 };
 
 type AdminTopDashboardSectionProps = {
@@ -367,6 +369,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
           versions: Array.isArray(data.data?.versions) ? data.data.versions : [],
         },
         activeDataContract: normalizeTopDashboardDataContract(data.activeDataContract),
+        instruction: data.instruction === 'sales-analytics' ? data.instruction : null,
       };
       setLoadError(null);
       setOverview(normalized);
@@ -1091,6 +1094,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
                 </details>
               </div>
             ) : null}
+            {overview?.instruction === 'sales-analytics' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
           </div>
           {selectedVersion ? (
             <div className={styles.topDashboardPreviewActions}>

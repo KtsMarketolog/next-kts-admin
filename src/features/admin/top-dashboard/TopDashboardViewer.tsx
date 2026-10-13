@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import { DashboardInstructions } from '@/features/admin/dashboard-instructions/DashboardInstructions';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
 import { DashboardDataDates } from './DashboardDataDates';
@@ -22,6 +23,7 @@ type TopDashboardPublishedOverview = {
   dataUploadedAt?: string | null;
   dataAsOf?: string | null;
   htmlPublishedAt?: string | null;
+  instruction: 'sales-analytics' | null;
 };
 
 type TopDashboardViewerProps = {
@@ -218,6 +220,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
                 </details>
               </div>
             ) : null}
+            {overview?.instruction === 'sales-analytics' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
           </div>
           {overview ? (
             <div className={styles.topDashboardPreviewActions}>

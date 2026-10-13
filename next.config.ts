@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: __dirname,
   outputFileTracingIncludes: {
     '/api/admin/currency-dashboard/frame': ['./assets/currency-dashboard/**/*'],
+    '/api/admin/dashboard-instructions/*': ['./assets/dashboard-instructions/*.pdf'],
   },
   rewrites: async () => ({
     // beforeFiles is essential: the preserved legacy files still exist in public.

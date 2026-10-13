@@ -166,6 +166,7 @@ function managementOverview(): Manage {
 }
 
 type Element = { type: unknown; props: Record<string, unknown> };
+const audienceEditorModule = { DashboardAudienceEditor() {} };
 function elements(node: unknown): Element[] {
   if (Array.isArray(node)) return node.flatMap(elements);
   if (!node || typeof node !== 'object' || !('props' in node)) return [];
@@ -214,7 +215,8 @@ function management(options: {
     './sharedJsonUpload': sharedJsonUpload,
     './ManagerDashboardViewer': { RoutePlannerViewer },
     '@/shared/lib/dashboardDates': dashboardDates,
-    '@/features/admin/dashboard-access/DashboardAudienceEditor': { DashboardAudienceEditor() {} },
+    '@/features/admin/dashboard-access/DashboardAudienceEditor': audienceEditorModule,
+    '@/features/admin/dashboard-instructions/DashboardInstructions': { DashboardInstructions() {} },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -284,17 +286,17 @@ test('personal audience editors appear once per group next to HTML upload only f
   for (const canAssignAccess of [false, true]) {
     const view = management({canAssignAccess});
     const all = elements(view.render());
-    assert.equal(all.filter((node) => typeof node.props.dashboardKey === 'string').length, canAssignAccess ? 2 : 0);
+    assert.equal(all.filter((node) => node.type === audienceEditorModule.DashboardAudienceEditor).length, canAssignAccess ? 2 : 0);
     for (const audience of ['development', 'support'] as const) {
       const panel = view.find('section', (props) => props.id === `manager-dashboard-html-panel-${audience}`);
       const content = elements(panel).find((node) => node.props['data-dashboard-equal-row'] === 'html');
       assert.ok(content);
-      assert.equal(elements(content).filter((node) => node.props.dashboardKey === `manager:${audience}`).length, canAssignAccess ? 1 : 0);
+      assert.equal(elements(content).filter((node) => node.type === audienceEditorModule.DashboardAudienceEditor && node.props.dashboardKey === `manager:${audience}`).length, canAssignAccess ? 1 : 0);
       assert.equal(elements(panel).filter((node) => node.type === 'form').some((form) => elements(form).some((node) => node.props.dashboardKey)), false);
     }
   }
   const single = management({canAssignAccess: true, audience: 'support'});
-  assert.deepEqual(elements(single.render()).filter((node) => node.props.dashboardKey).map((node) => node.props.dashboardKey), ['manager:support']);
+  assert.deepEqual(elements(single.render()).filter((node) => node.type === audienceEditorModule.DashboardAudienceEditor).map((node) => node.props.dashboardKey), ['manager:support']);
 });
 
 test('shared audience editor follows data and HTML management while the published report stays first', () => {
@@ -937,6 +939,7 @@ test('separate personal and shared viewers preserve independent history, reload 
     react: hooks, 'react/jsx-runtime': jsx, './ManagerDashboard.module.scss': { default: {} }, './ManagerDashboardParts': parts,
     '@/shared/lib/dashboardDates': dashboardDates,
     '@/features/admin/top-dashboard/DashboardDataDates': { DashboardDataDates },
+    '@/features/admin/dashboard-instructions/DashboardInstructions': { DashboardInstructions() {} },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardViewer.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },

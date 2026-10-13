@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import adminStyles from '@/app/admin/admin.module.scss';
+import { DashboardInstructions } from '@/features/admin/dashboard-instructions/DashboardInstructions';
 import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
 import { DashboardFrame, formatDashboardDate, isSnapshotExpired, SnapshotStatus } from './ManagerDashboardParts';
 import type { ManagerDashboardBindingStatus, ManagerDashboardHtmlVersion, ManagerDashboardSnapshot } from './types';
@@ -85,6 +86,7 @@ export function ManagerDashboardReview() {
         </div>
       </div>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      <DashboardInstructions dashboardKey="manager:development" kind="personal-sales" />
       <section className={styles.panel} aria-busy={loading}>
         <div className={styles.sectionHeading}><div><h2>Отчёты менеджеров по развитию</h2><p>Выберите менеджера для просмотра. Для открытия данных нужен пароль его снимка.</p></div></div>
         <div className={styles.actions}>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DashboardInstructions } from '@/features/admin/dashboard-instructions/DashboardInstructions';
 import { DashboardDataDates } from '@/features/admin/top-dashboard/DashboardDataDates';
 import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
 
@@ -22,6 +23,7 @@ export function ManagerDashboardViewer({ overview, loading, onReload }: ViewerPr
   const personalSelection = useReportSelection(managerDashboardViewIdentity(overview));
   return (
     <div className={styles.stack}>
+      <DashboardInstructions dashboardKey={`manager:${overview.audience}`} kind="personal-sales" />
       <PersonalDashboardViewer key={personalSelection.identity} overview={overview} loading={loading} onReload={onReload} selection={personalSelection} />
       <DashboardDataHistory overview={overview} personalSelection={personalSelection} />
     </div>

@@ -87,6 +87,7 @@ function management(options: {
     './ManagerDashboardViewer': { RoutePlannerViewer() {} },
     '@/shared/lib/dashboardDates': dashboardDates,
     '@/features/admin/dashboard-access/DashboardAudienceEditor': { DashboardAudienceEditor() {} },
+    '@/features/admin/dashboard-instructions/DashboardInstructions': { DashboardInstructions() {} },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardManagement.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },

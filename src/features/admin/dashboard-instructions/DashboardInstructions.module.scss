@@ -1,0 +1,42 @@
+.instructions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 10px 0;
+  color: #201750;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.label {
+  font-weight: 600;
+
+  span {
+    margin-left: 8px;
+    color: #66647c;
+    font-size: 12px;
+    font-weight: 400;
+  }
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 6px 12px;
+    border: 1px solid #d6d2e8;
+    border-radius: 6px;
+    background: #fff;
+    color: #291080;
+    text-decoration: none;
+
+    &:hover { background: #f5f3ff; }
+    &:focus-visible { outline: 2px solid #291080; outline-offset: 2px; }
+  }
+}

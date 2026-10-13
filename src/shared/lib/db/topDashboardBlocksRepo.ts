@@ -1569,6 +1569,20 @@ export async function createTopDashboardBlockVersion(
   });
 }
 
+/** Report-level callers must check the exact block's viewing permission first. */
+export async function getActiveTopDashboardBlockHtmlContent(blockId: number): Promise<string | null> {
+  await ensureSiteSchema();
+  const result = await query<{ html_content: string }>(
+    `select version.html_content
+     from top_dashboard_block_state state
+     join top_dashboard_block_versions version
+       on version.block_id = state.block_id and version.id = state.active_version_id
+     where state.block_id = $1 limit 1`,
+    [blockId],
+  );
+  return result.rows[0]?.html_content ?? null;
+}
+
 export async function getTopDashboardBlockVersionContent(
   blockId: number,
   versionId: number,
