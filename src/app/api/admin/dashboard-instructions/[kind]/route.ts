@@ -19,8 +19,9 @@ async function serve(request: Request, context: Context) {
     if (!session) return error('Необходим вход в кабинет', 401);
     const { kind } = await context.params;
     const query = new URL(request.url).searchParams;
-    if (query.getAll('dashboardKey').length !== 1 || query.getAll('download').length > 1
-      || [...query.keys()].some((key) => !['dashboardKey', 'download'].includes(key))
+    if (query.getAll('dashboardKey').length !== 1 || query.getAll('download').length > 1 || query.getAll('format').length > 1
+      || [...query.keys()].some((key) => !['dashboardKey', 'download', 'format'].includes(key))
+      || (query.has('format') && !['pdf', 'video'].includes(query.get('format')!))
       || (query.has('download') && query.get('download') !== '1')) {
       return error('Некорректный запрос инструкции', 400);
     }
@@ -35,7 +36,7 @@ async function serve(request: Request, context: Context) {
         return error('Инструкция не найдена для этого отчёта', 404);
       }
     }
-    return await dashboardInstructionDownload(request, kind as DashboardInstructionKind, query.get('download') === '1');
+    return await dashboardInstructionDownload(request, kind as DashboardInstructionKind, query.get('download') === '1', query.get('format') === 'video' ? 'video' : 'pdf');
   } catch (cause) {
     console.error('Failed to serve dashboard instruction', cause);
     return error('Не удалось открыть инструкцию. Попробуйте ещё раз.', 500);

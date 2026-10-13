@@ -220,7 +220,6 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
                 </details>
               </div>
             ) : null}
-            {overview?.instruction === 'sales-analytics' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
           </div>
           {overview ? (
             <div className={styles.topDashboardPreviewActions}>
@@ -265,6 +264,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
           </div>
         ) : null}
       </section>
+      {overview?.instruction === 'sales-analytics' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
     </div>
   );
 }

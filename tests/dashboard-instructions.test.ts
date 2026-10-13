@@ -17,6 +17,9 @@ import * as profile from '../src/shared/lib/topDashboardContentSecurity';
 const baseUrl = 'https://example.test/api/admin/dashboard-instructions';
 const salesHtml = '<!doctype html><script>const DASH_NAME = "аналитика_продаж";</script>';
 const pdfBytes = Buffer.from('%PDF-1.7\nSynthetic instruction, never personal data.\n%%EOF');
+const videoBytes = Buffer.from('\0\0\0\x18ftypmp42Synthetic video, never personal data.');
+type InstructionFormat = 'pdf' | 'video';
+const formats: InstructionFormat[] = ['pdf', 'video'];
 const persisted = (role: AdminSession['role'], dashboardAccess: string[] = []): AdminSession => ({
   role, sessionId: 'synthetic-session', dashboardAccess,
   ...(role === 'manager' || role === 'support_manager' ? { managerId: 71 } : { adminUserId: 31 }),
@@ -50,11 +53,11 @@ function route(initialSession: AdminSession | null, options: { html?: string | n
       if (options.failure === 'profile') throw new Error('Synthetic private database detail');
       return options.html === undefined ? salesHtml : options.html;
     } },
-    '@/shared/lib/dashboardInstructionDownload': { async dashboardInstructionDownload(request: Request, kind: string, download: boolean) {
-      calls.push(`file:${kind}:${download ? 'attachment' : 'inline'}`);
+    '@/shared/lib/dashboardInstructionDownload': { async dashboardInstructionDownload(request: Request, kind: string, download: boolean, format: InstructionFormat = 'pdf') {
+      calls.push(`file:${kind}:${format}:${download ? 'attachment' : 'inline'}`);
       if (options.failure === 'file') throw new Error('Synthetic private filesystem path');
-      return new Response(request.method === 'HEAD' ? null : pdfBytes, { headers: {
-        ...instructions.DASHBOARD_INSTRUCTION_HEADERS, 'Content-Type': 'application/pdf',
+      return new Response(request.method === 'HEAD' ? null : format === 'video' ? videoBytes : pdfBytes, { headers: {
+        ...instructions.DASHBOARD_INSTRUCTION_HEADERS, 'Content-Type': format === 'video' ? 'video/mp4' : 'application/pdf',
       } });
     } },
   };
@@ -77,7 +80,7 @@ function route(initialSession: AdminSession | null, options: { html?: string | n
   };
 }
 
-test('instruction descriptors bind exactly two static PDFs to their permitted report families', () => {
+test('instruction descriptors bind only static manuals to their permitted report families', () => {
   for (const key of ['manager:development', 'manager:support']) {
     assert.equal(instructions.resolveDashboardInstruction('personal-sales', key), instructions.DASHBOARD_INSTRUCTIONS['personal-sales']);
     assert.equal(instructions.resolveDashboardInstruction('sales-analytics', key), null);
@@ -90,7 +93,7 @@ test('instruction descriptors bind exactly two static PDFs to their permitted re
   }
 });
 
-test('personal PDF uses real role, identity and audience rights before all storage IO', async () => {
+test('personal PDF and video use the same real role, identity and audience rights before all storage IO', async () => {
   const cases: Array<[string, AdminSession | null, boolean, boolean]> = [
     ['anonymous', null, false, false],
     ['MR', persisted('manager', ['manager:development']), true, false],
@@ -111,50 +114,70 @@ test('personal PDF uses real role, identity and audience rights before all stora
   ];
   for (const [label, session, development, support] of cases) {
     for (const [audience, allowed] of [['development', development], ['support', support]] as const) {
-      const api = route(session);
-      const response = await api.request('personal-sales', `dashboardKey=manager%3A${audience}`);
-      assert.equal(response.status, allowed ? 200 : session ? 403 : 401, `${label}: ${audience}`);
-      assert.deepEqual(api.calls, allowed ? ['auth', 'file:personal-sales:inline'] : ['auth']);
-      if (allowed) assert.deepEqual(Buffer.from(await response.arrayBuffer()), pdfBytes);
+      for (const format of formats) {
+        const api = route(session);
+        const response = await api.request('personal-sales', `dashboardKey=manager%3A${audience}&format=${format}`);
+        assert.equal(response.status, allowed ? 200 : session ? 403 : 401, `${label}: ${audience} ${format}`);
+        assert.deepEqual(api.calls, allowed ? ['auth', `file:personal-sales:${format}:inline`] : ['auth']);
+        if (allowed) assert.deepEqual(Buffer.from(await response.arrayBuffer()), format === 'video' ? videoBytes : pdfBytes);
+      }
     }
   }
 });
 
-test('Sales instruction requires the exact block grant and currently active Sales profile', async () => {
-  for (const role of ['manager', 'support_manager', 'top', 'purchaser', 'wholesale_admin'] as const) {
-    for (const assigned of [false, true]) {
-      const api = route(persisted(role, [assigned ? 'top:7' : 'top:8']));
-      assert.equal((await api.request('sales-analytics', 'dashboardKey=top%3A7')).status, assigned ? 200 : 403, `${role} ${assigned}`);
-      assert.deepEqual(api.calls, assigned ? ['auth', 'active-html:7', 'file:sales-analytics:inline'] : ['auth']);
+test('Sales PDF and video require the exact block grant and currently active Sales profile', async () => {
+  for (const format of formats) {
+    for (const role of ['manager', 'support_manager', 'top', 'purchaser', 'wholesale_admin'] as const) {
+      for (const assigned of [false, true]) {
+        const api = route(persisted(role, [assigned ? 'top:7' : 'top:8']));
+        assert.equal((await api.request('sales-analytics', `dashboardKey=top%3A7&format=${format}`)).status, assigned ? 200 : 403, `${role} ${assigned} ${format}`);
+        assert.deepEqual(api.calls, assigned ? ['auth', 'active-html:7', `file:sales-analytics:${format}:inline`] : ['auth']);
+      }
+    }
+    for (const session of [persisted('admin'), persisted('admintop'), { ...persisted('top'), canManageTopDashboard: true }]) {
+      const api = route(session);
+      assert.equal((await api.request('sales-analytics', `dashboardKey=top%3A7&format=${format}`)).status, 200);
+    }
+    for (const html of [null, '<title>Аналитика продаж</title>', '<script>const DASH_NAME="оптимизация_ассортимента";</script>']) {
+      const api = route(persisted('purchaser', ['top:7']), { html });
+      assert.equal((await api.request('sales-analytics', `dashboardKey=top%3A7&format=${format}`)).status, 404);
+      assert.deepEqual(api.calls, ['auth', 'active-html:7'], 'no manual read for missing, renamed or non-Sales published profile');
     }
   }
-  for (const session of [persisted('admin'), persisted('admintop'), { ...persisted('top'), canManageTopDashboard: true }]) {
-    const api = route(session);
-    assert.equal((await api.request('sales-analytics', 'dashboardKey=top%3A7')).status, 200);
-  }
-  for (const html of [null, '<title>Аналитика продаж</title>', '<script>const DASH_NAME="оптимизация_ассортимента";</script>']) {
-    const api = route(persisted('purchaser', ['top:7']), { html });
-    assert.equal((await api.request('sales-analytics', 'dashboardKey=top%3A7')).status, 404);
-    assert.deepEqual(api.calls, ['auth', 'active-html:7'], 'no PDF read for missing, renamed or non-Sales published profile');
+});
+
+test('omitted format preserves PDF URLs and explicit PDF/video reach only the matching stream descriptor', async () => {
+  for (const [query, format] of [['', 'pdf'], ['&format=pdf', 'pdf'], ['&format=video', 'video']] as const) {
+    for (const attachment of [false, true]) {
+      const api = route(persisted('manager', ['manager:development']));
+      const response = await api.request('personal-sales', `dashboardKey=manager%3Adevelopment${query}${attachment ? '&download=1' : ''}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), format === 'pdf' ? 'application/pdf' : 'video/mp4');
+      assert.deepEqual(api.calls, ['auth', `file:personal-sales:${format}:${attachment ? 'attachment' : 'inline'}`]);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), format === 'pdf' ? pdfBytes : videoBytes);
+    }
   }
 });
 
 test('each GET and HEAD rechecks current session grants, without caching a successful authorization', async () => {
-  const api = route(persisted('manager', ['manager:development']));
-  assert.equal((await api.request()).status, 200);
-  api.calls.length = 0;
-  api.setSession(persisted('manager'));
-  assert.equal((await api.request()).status, 403);
-  assert.deepEqual(api.calls, ['auth']);
-  api.calls.length = 0;
-  api.setSession(null);
-  const response = await api.request('personal-sales', 'dashboardKey=manager%3Adevelopment', 'HEAD');
-  assert.equal(response.status, 401);
-  assert.equal(await response.text(), '');
-  assert.deepEqual(api.calls, ['auth']);
+  for (const format of formats) {
+    const api = route(persisted('manager', ['manager:development']));
+    const query = `dashboardKey=manager%3Adevelopment&format=${format}`;
+    assert.equal((await api.request('personal-sales', query)).status, 200);
+    api.calls.length = 0;
+    api.setSession(persisted('manager'));
+    assert.equal((await api.request('personal-sales', query)).status, 403);
+    assert.deepEqual(api.calls, ['auth']);
+    api.calls.length = 0;
+    api.setSession(null);
+    const response = await api.request('personal-sales', query, 'HEAD');
+    assert.equal(response.status, 401);
+    assert.equal(await response.text(), '');
+    assert.deepEqual(api.calls, ['auth']);
+  }
 });
 
-test('bad kind/key pairs, duplicates, unknown fields and traversal fail before all PDF/profile IO', async () => {
+test('bad kind/key pairs, duplicates, unknown fields and traversal fail before all manual/profile IO', async () => {
   const cases: Array<[string, string, number]> = [
     ['unknown', 'dashboardKey=manager%3Adevelopment', 404],
     ['../../private.pdf', 'dashboardKey=manager%3Adevelopment', 404],
@@ -174,9 +197,24 @@ test('bad kind/key pairs, duplicates, unknown fields and traversal fail before a
   ];
   for (const [kind, query, status] of cases) {
     for (const method of ['GET', 'HEAD'] as const) {
+      for (const format of formats) {
+        const api = route(persisted('admin'));
+        const response = await api.request(kind, `${query}&format=${format}`, method);
+        assert.equal(response.status, status, `${method} ${kind} ${query} ${format}`);
+        assert.deepEqual(api.calls, ['auth']);
+        if (method === 'HEAD') assert.equal(await response.text(), '');
+      }
+    }
+  }
+});
+
+test('invalid, repeated and traversal format values are rejected before profile or filesystem IO', async () => {
+  for (const suffix of ['format=', 'format=mp4', 'format=VIDEO', 'format=unknown', 'format=video%20',
+    'format=..%2F..%2Fprivate.mp4', 'format=pdf&format=video', 'format=video&format=video', 'format=pdf&format=pdf']) {
+    for (const method of ['GET', 'HEAD'] as const) {
       const api = route(persisted('admin'));
-      const response = await api.request(kind, query, method);
-      assert.equal(response.status, status, `${method} ${kind} ${query}`);
+      const response = await api.request('sales-analytics', `dashboardKey=top%3A7&${suffix}`, method);
+      assert.equal(response.status, 400, `${method} ${suffix}`);
       assert.deepEqual(api.calls, ['auth']);
       if (method === 'HEAD') assert.equal(await response.text(), '');
     }
@@ -184,25 +222,29 @@ test('bad kind/key pairs, duplicates, unknown fields and traversal fail before a
 });
 
 test('authorized HEAD preserves access/profile checks and download flag without a response body', async () => {
-  const api = route(persisted('purchaser', ['top:7']));
-  const response = await api.request('sales-analytics', 'dashboardKey=top%3A7&download=1', 'HEAD');
-  assert.equal(response.status, 200);
-  assert.equal(await response.text(), '');
-  assert.deepEqual(api.calls, ['auth', 'active-html:7', 'file:sales-analytics:attachment']);
-  const denied = route(persisted('manager', ['manager:development']));
-  assert.equal((await denied.request('personal-sales', 'dashboardKey=manager%3Asupport', 'HEAD')).status, 403);
-  assert.deepEqual(denied.calls, ['auth']);
+  for (const format of formats) {
+    const api = route(persisted('purchaser', ['top:7']));
+    const response = await api.request('sales-analytics', `dashboardKey=top%3A7&download=1&format=${format}`, 'HEAD');
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), '');
+    assert.deepEqual(api.calls, ['auth', 'active-html:7', `file:sales-analytics:${format}:attachment`]);
+    const denied = route(persisted('manager', ['manager:development']));
+    assert.equal((await denied.request('personal-sales', `dashboardKey=manager%3Asupport&format=${format}`, 'HEAD')).status, 403);
+    assert.deepEqual(denied.calls, ['auth']);
+  }
 });
 
 test('auth, profile and file failures return private generic errors, including empty HEAD errors', async () => {
-  for (const failure of ['auth', 'profile', 'file'] as const) {
-    for (const method of ['GET', 'HEAD'] as const) {
-      const api = route(persisted('admin'), { failure });
-      const response = await api.request('sales-analytics', 'dashboardKey=top%3A7', method);
-      assert.equal(response.status, 500);
-      const body = await response.text();
-      assert.doesNotMatch(body, /Synthetic|private|filesystem|session detail/);
-      if (method === 'HEAD') assert.equal(body, '');
+  for (const format of formats) {
+    for (const failure of ['auth', 'profile', 'file'] as const) {
+      for (const method of ['GET', 'HEAD'] as const) {
+        const api = route(persisted('admin'), { failure });
+        const response = await api.request('sales-analytics', `dashboardKey=top%3A7&format=${format}`, method);
+        assert.equal(response.status, 500);
+        const body = await response.text();
+        assert.doesNotMatch(body, /Synthetic|private|filesystem|session detail/);
+        if (method === 'HEAD') assert.equal(body, '');
+      }
     }
   }
 });
@@ -211,7 +253,14 @@ const originals = {
   'personal-sales': '30391904310a5962e4d3336e704c9d45781f01d55de1ff7a9c0f614afdd51269',
   'sales-analytics': 'bef931d0b3f37eac436265ba0cd9d2b667df57f46b79f85a1d4b8943f89260e5',
 } as const;
-const asset = (kind: instructions.DashboardInstructionKind) => readFileSync(new URL(`../assets/dashboard-instructions/${instructions.DASHBOARD_INSTRUCTIONS[kind].filename}`, import.meta.url));
+const videoOriginals = {
+  'personal-sales': '594c406eb321b5a0bfb76c50c76b9f8e690312a2695310dd796565f5cedcc7fa',
+  'sales-analytics': '8011e72362892465e95e545c0d0083fb6fcc440684eb9fa1e9e4114e15fdaed6',
+} as const;
+const asset = (kind: instructions.DashboardInstructionKind, format: InstructionFormat = 'pdf') => {
+  const instruction = instructions.DASHBOARD_INSTRUCTIONS[kind];
+  return readFileSync(new URL(`../assets/dashboard-instructions/${format === 'video' ? instruction.video.filename : instruction.filename}`, import.meta.url));
+};
 const downloadRequest = (init: RequestInit = {}) => new Request(`${baseUrl}/personal-sales?dashboardKey=manager%3Adevelopment`, init);
 
 test('both bundled original PDFs stream byte-identically with fixed safe inline/attachment names', async () => {
@@ -231,6 +280,60 @@ test('both bundled original PDFs stream byte-identically with fixed safe inline/
       assert.equal(sha256(bytes), originals[kind]);
       assert.deepEqual(bytes, source);
     }
+  }
+});
+
+test('both bundled original MP4s stream byte-identically with video MIME and safe inline/attachment names', async () => {
+  for (const kind of Object.keys(videoOriginals) as instructions.DashboardInstructionKind[]) {
+    const source = asset(kind, 'video');
+    const descriptor = instructions.DASHBOARD_INSTRUCTIONS[kind].video;
+    assert.equal(source.subarray(4, 8).toString(), 'ftyp');
+    assert.equal(sha256(source), videoOriginals[kind]);
+    assert.equal(descriptor.filename, `${kind}-${instructions.DASHBOARD_INSTRUCTIONS[kind].version}.mp4`);
+    for (const attachment of [false, true]) {
+      const response = await dashboardInstructionDownload(downloadRequest(), kind, attachment, 'video');
+      assert.equal(response.status, 200);
+      safeHeaders(response);
+      assert.equal(response.headers.get('Content-Type'), 'video/mp4');
+      assert.equal(response.headers.get('Content-Length'), String(source.length));
+      assert.equal(response.headers.get('Accept-Ranges'), 'bytes');
+      assert.equal(response.headers.get('Content-Disposition'), `${attachment ? 'attachment' : 'inline'}; filename="${descriptor.filename}"; filename*=UTF-8''${encodeURIComponent(descriptor.downloadName)}`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      assert.equal(sha256(bytes), videoOriginals[kind]);
+      assert.deepEqual(bytes, source);
+    }
+  }
+});
+
+test('MP4 initial probing and seeks return exact bounded ranges for both videos', async () => {
+  for (const kind of Object.keys(videoOriginals) as instructions.DashboardInstructionKind[]) {
+    const bytes = asset(kind, 'video');
+    const seek = Math.floor(bytes.length / 2);
+    for (const [range, start, end] of [
+      ['bytes=0-1', 0, 1], ['bytes=0-4095', 0, 4095],
+      [`bytes=${seek}-${seek + 8191}`, seek, seek + 8191],
+      [`bytes=${bytes.length - 4096}-`, bytes.length - 4096, bytes.length - 1],
+      ['bytes=-4096', bytes.length - 4096, bytes.length - 1],
+      [`bytes=${bytes.length - 2}-${bytes.length + 100}`, bytes.length - 2, bytes.length - 1],
+    ] as const) {
+      const response = await dashboardInstructionDownload(downloadRequest({ headers: { range } }), kind, false, 'video');
+      assert.equal(response.status, 206, `${kind} ${range}`);
+      safeHeaders(response);
+      assert.equal(response.headers.get('Content-Type'), 'video/mp4');
+      assert.equal(response.headers.get('Content-Range'), `bytes ${start}-${end}/${bytes.length}`);
+      assert.equal(response.headers.get('Content-Length'), String(end - start + 1));
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes.subarray(start, end + 1));
+    }
+    const head = await dashboardInstructionDownload(downloadRequest({ method: 'HEAD', headers: { range: 'bytes=0-1' } }), kind, false, 'video');
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get('Content-Type'), 'video/mp4');
+    assert.equal(head.headers.get('Content-Length'), String(bytes.length));
+    assert.equal(head.headers.get('Content-Range'), null);
+    assert.equal(await head.text(), '');
+    const fallback = await dashboardInstructionDownload(downloadRequest({ headers: { range: 'bytes=0-1', 'if-range': '"old"' } }), kind, false, 'video');
+    assert.equal(fallback.status, 200);
+    assert.equal(fallback.headers.get('Content-Range'), null);
+    assert.equal(sha256(Buffer.from(await fallback.arrayBuffer())), videoOriginals[kind]);
   }
 });
 
@@ -259,7 +362,7 @@ test('PDF ranges support fixed, clamped, open and suffix byte boundaries and If-
 // Instrument real read-only file descriptors while executing the helper's real
 // source, so cancellation/HEAD/error tests can prove handle closure without
 // writing fixtures or relying on process-wide descriptor-count timing.
-function trackedDownload() {
+function trackedDownload(format: InstructionFormat = 'pdf') {
   let lastHandle: Awaited<ReturnType<typeof open>>;
   let closed: Promise<void> = Promise.resolve();
   const exports: { dashboardInstructionDownload?: typeof dashboardInstructionDownload } = {};
@@ -267,7 +370,7 @@ function trackedDownload() {
     'node:path': { default: path }, 'node:stream': { Readable }, './dashboardInstructions': instructions,
     'node:fs/promises': { async open(filename: string, flags: string) {
       assert.equal(flags, 'r');
-      assert.equal(filename, path.join(process.cwd(), 'assets', 'dashboard-instructions', 'personal-sales-v34.pdf'));
+      assert.equal(filename, path.join(process.cwd(), 'assets', 'dashboard-instructions', `personal-sales-v34.${format === 'video' ? 'mp4' : 'pdf'}`));
       lastHandle = await open(filename, flags);
       // Node FileHandle emits close; @types/node 20 leaves its EventEmitter base as a TODO.
       closed = new Promise<void>((resolve) => { (lastHandle as typeof lastHandle & EventEmitter).once('close', resolve); });
@@ -281,46 +384,50 @@ function trackedDownload() {
     assert.ok(name in modules, `Unexpected dependency: ${name}`); return modules[name];
   }, exports);
   return {
-    get: (init: RequestInit = {}) => exports.dashboardInstructionDownload!(downloadRequest(init), 'personal-sales', false),
+    get: (init: RequestInit = {}) => exports.dashboardInstructionDownload!(downloadRequest(init), 'personal-sales', false, format),
     async assertClosed() { await closed; assert.equal(lastHandle.fd, -1); },
   };
 }
 
-test('HEAD describes the full file even with Range, and all invalid ranges close descriptors', { timeout: 5_000 }, async () => {
-  const helper = trackedDownload();
-  const bytes = asset('personal-sales');
-  const head = await helper.get({ method: 'HEAD', headers: { range: 'bytes=0-3' } });
-  assert.equal(head.status, 200);
-  safeHeaders(head);
-  assert.equal(await head.text(), '');
-  assert.equal(head.headers.get('Content-Length'), String(bytes.length));
-  assert.equal(head.headers.get('Content-Range'), null);
-  await helper.assertClosed();
-  for (const range of ['bytes=-0', 'bytes=-', 'bytes=8-2', `bytes=${bytes.length}-`, 'bytes=0-1,5-6', 'bytes=9007199254740992-', 'bytes=0-9007199254740992', 'items=0-1']) {
-    const response = await helper.get({ headers: { range } });
-    assert.equal(response.status, 416, range);
-    safeHeaders(response);
-    assert.equal(response.headers.get('Content-Range'), `bytes */${bytes.length}`);
-    assert.equal(await response.text(), '');
+test('PDF/video HEAD describes the full file even with Range, and all invalid ranges close descriptors', { timeout: 5_000 }, async () => {
+  for (const format of formats) {
+    const helper = trackedDownload(format);
+    const bytes = asset('personal-sales', format);
+    const head = await helper.get({ method: 'HEAD', headers: { range: 'bytes=0-3' } });
+    assert.equal(head.status, 200);
+    safeHeaders(head);
+    assert.equal(await head.text(), '');
+    assert.equal(head.headers.get('Content-Length'), String(bytes.length));
+    assert.equal(head.headers.get('Content-Range'), null);
     await helper.assertClosed();
+    for (const range of ['bytes=-0', 'bytes=-', 'bytes=8-2', `bytes=${bytes.length}-`, 'bytes=0-1,5-6', 'bytes=9007199254740992-', 'bytes=0-9007199254740992', 'items=0-1']) {
+      const response = await helper.get({ headers: { range } });
+      assert.equal(response.status, 416, range);
+      safeHeaders(response);
+      assert.equal(response.headers.get('Content-Range'), `bytes */${bytes.length}`);
+      assert.equal(await response.text(), '');
+      await helper.assertClosed();
+    }
   }
 });
 
 test('pre-aborted, interrupted and consumer-cancelled downloads close their read-only file handles', { timeout: 5_000 }, async () => {
-  const helper = trackedDownload();
-  const before = new AbortController();
-  before.abort();
-  await assert.rejects(helper.get({ signal: before.signal }), /Download cancelled/);
-  await helper.assertClosed();
+  for (const format of formats) {
+    const helper = trackedDownload(format);
+    const before = new AbortController();
+    before.abort();
+    await assert.rejects(helper.get({ signal: before.signal }), /Download cancelled/);
+    await helper.assertClosed();
 
-  const during = new AbortController();
-  const response = await helper.get({ signal: during.signal });
-  const body = response.arrayBuffer();
-  during.abort();
-  await assert.rejects(body, /Download cancelled/);
-  await helper.assertClosed();
+    const during = new AbortController();
+    const response = await helper.get({ signal: during.signal });
+    const body = response.arrayBuffer();
+    during.abort();
+    await assert.rejects(body, /Download cancelled/);
+    await helper.assertClosed();
 
-  const cancelled = await helper.get();
-  await cancelled.body!.cancel('Reader closed PDF tab');
-  await helper.assertClosed();
+    const cancelled = await helper.get();
+    await cancelled.body!.cancel('Reader closed manual');
+    await helper.assertClosed();
+  }
 });

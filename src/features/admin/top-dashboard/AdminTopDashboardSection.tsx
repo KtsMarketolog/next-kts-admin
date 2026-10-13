@@ -1094,7 +1094,6 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
                 </details>
               </div>
             ) : null}
-            {overview?.instruction === 'sales-analytics' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
           </div>
           {selectedVersion ? (
             <div className={styles.topDashboardPreviewActions}>
@@ -1162,6 +1161,8 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
           </div>
         )}
       </section>
+
+      {overview?.instruction === 'sales-analytics' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
 
       <section
         id="top-dashboard-data-upload"

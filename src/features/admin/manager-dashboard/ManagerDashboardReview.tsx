@@ -86,7 +86,6 @@ export function ManagerDashboardReview() {
         </div>
       </div>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
-      <DashboardInstructions dashboardKey="manager:development" kind="personal-sales" />
       <section className={styles.panel} aria-busy={loading}>
         <div className={styles.sectionHeading}><div><h2>Отчёты менеджеров по развитию</h2><p>Выберите менеджера для просмотра. Для открытия данных нужен пароль его снимка.</p></div></div>
         <div className={styles.actions}>
@@ -103,6 +102,7 @@ export function ManagerDashboardReview() {
         {!loading && overview && !overview.managers.length ? <p className={styles.empty}>Нет активных менеджеров с доступом к отчётам МР.</p> : null}
       </section>
       {selected ? <ReviewReport key={identity} selected={selected} htmlVersion={overview!.htmlVersion} revision={revision} /> : null}
+      <DashboardInstructions dashboardKey="manager:development" kind="personal-sales" />
     </main>
   );
 }

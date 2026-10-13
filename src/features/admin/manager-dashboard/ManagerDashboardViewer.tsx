@@ -23,8 +23,8 @@ export function ManagerDashboardViewer({ overview, loading, onReload }: ViewerPr
   const personalSelection = useReportSelection(managerDashboardViewIdentity(overview));
   return (
     <div className={styles.stack}>
-      <DashboardInstructions dashboardKey={`manager:${overview.audience}`} kind="personal-sales" />
       <PersonalDashboardViewer key={personalSelection.identity} overview={overview} loading={loading} onReload={onReload} selection={personalSelection} />
+      <DashboardInstructions dashboardKey={`manager:${overview.audience}`} kind="personal-sales" />
       <DashboardDataHistory overview={overview} personalSelection={personalSelection} />
     </div>
   );

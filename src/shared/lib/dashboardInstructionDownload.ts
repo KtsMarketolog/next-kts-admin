@@ -1,11 +1,12 @@
 import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { DASHBOARD_INSTRUCTIONS, DASHBOARD_INSTRUCTION_HEADERS, type DashboardInstructionKind } from './dashboardInstructions';
+import { DASHBOARD_INSTRUCTIONS, DASHBOARD_INSTRUCTION_HEADERS, type DashboardInstructionKind, type DashboardInstructionFormat } from './dashboardInstructions';
 
 /** Called only after the current session and exact report have been authorised. */
-export async function dashboardInstructionDownload(request: Request, kind: DashboardInstructionKind, download: boolean) {
-  const instruction = DASHBOARD_INSTRUCTIONS[kind];
+export async function dashboardInstructionDownload(request: Request, kind: DashboardInstructionKind, download: boolean, format: DashboardInstructionFormat = 'pdf') {
+  const entry = DASHBOARD_INSTRUCTIONS[kind];
+  const instruction = format === 'video' ? entry.video : entry;
   const file = await open(path.join(process.cwd(), 'assets', 'dashboard-instructions', instruction.filename), 'r');
   let streamOwnsHandle = false;
   try {
@@ -13,7 +14,7 @@ export async function dashboardInstructionDownload(request: Request, kind: Dashb
     if (!stat.isFile() || stat.size === 0) throw new Error('Instruction file unavailable');
     const headers = new Headers({
       ...DASHBOARD_INSTRUCTION_HEADERS,
-      'Content-Type': 'application/pdf',
+      'Content-Type': format === 'video' ? 'video/mp4' : 'application/pdf',
       'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${instruction.filename}"; filename*=UTF-8''${encodeURIComponent(instruction.downloadName)}`,
       'Accept-Ranges': 'bytes',
     });

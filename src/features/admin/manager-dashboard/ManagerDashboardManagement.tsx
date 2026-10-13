@@ -379,7 +379,6 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
                     <div><h3>Личный HTML дашборда</h3><p>HTML для личных отчётов этой группы. Каждый менеджер открывает свой файл данных.</p></div>
                     <span className={styles.badge}>{group.activeHtmlVersionId ? `Опубликована версия #${group.activeHtmlVersionId}` : 'Пока не опубликован'}</span>
                   </div>
-                  <DashboardInstructions dashboardKey={`manager:${audience}`} kind="personal-sales" />
                   <form className={styles.uploadForm} onSubmit={(event) => void uploadHtml(event, audience)}>
                     <label htmlFor={`manager-dashboard-html-${audience}`}>Новая версия HTML · до 5 МБ</label>
                     <div className={styles.actions}>
@@ -510,6 +509,10 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
         </form>
         <ImportResults results={results} title="Результат последней операции" />
       </section> : null}
+
+      {personalOverview ? groups.filter((group) => !audience || group.audience === audience).map((group) => (
+        <DashboardInstructions key={group.audience} dashboardKey={`manager:${group.audience}`} kind="personal-sales" />
+      )) : null}
 
       <section id="manager-dashboard-html-history" className={styles.panel} aria-labelledby="manager-dashboard-html-history-heading">
         <div className={styles.sectionHeading}><div><h2 id="manager-dashboard-html-history-heading">История HTML и откат</h2><p>Действующий и один предыдущий рабочий HTML для каждого отчёта. Неопубликованные черновики перечислены отдельно.</p></div></div>
