@@ -47,13 +47,15 @@ const baselines = {
   '2026-09-30': { COPPER: baseline('2026-09-30', 'CEZ6', 10000), BR: baseline('2026-09-30', 'BRZ6', 70) },
 };
 
-function source(kind: unknown, params: Record<string, unknown>, stale: boolean) {
+function source(kind: unknown, params: Record<string, unknown>, stale: boolean, cbrDate: string) {
   let value: Record<string, unknown>;
   switch (kind) {
     case 'cbr-daily': value = {
-      Date: '2026-09-30T00:00:00+03:00', Valute: Object.fromEntries([
+      Date: `${cbrDate}T00:00:00+03:00`, Valute: Object.fromEntries((cbrDate === '2026-09-30' ? [
         ['USD', 91, 1, 90], ['EUR', 100, 1, 99], ['CNY', 12.5, 1, 12.4], ['KZT', 18.5, 100, 18.4],
-      ].map(([code, current, nominal, previous]) => [code, { CharCode: code, Name: code, Value: current, Nominal: nominal, Previous: previous }])),
+      ] : [
+        ['USD', 92, 1, 91], ['EUR', 99, 1, 100], ['CNY', 12.6, 1, 12.5], ['KZT', 18.6, 100, 18.5],
+      ]).map(([code, current, nominal, previous]) => [code, { CharCode: code, Name: code, Value: current, Nominal: nominal, Previous: previous }])),
     }; break;
     case 'cbr-history': value = { data: historicalRates }; break;
     case 'moex-currency': value = { marketdata: {
@@ -97,6 +99,7 @@ async function main() {
   assert.equal(frameSandbox.split(' ').includes('allow-same-origin'), false, 'Host must preserve opaque-origin isolation');
   const output = await mkdtemp('/private/tmp/kts-currency-browser-');
   let envelope = initialState(), staleSources = false, saveRequests = 0, successfulWrites = 0;
+  let fixtureCbrDate = '2026-09-30';
   const methods: string[] = [], serverErrors: string[] = [];
   let origin = '';
   const server = createServer(async (request, response) => {
@@ -106,11 +109,29 @@ async function main() {
       if (url.pathname === '/') {
         const unsafe = url.searchParams.has('unsafe');
         const viewer = url.searchParams.has('viewer');
+        const account = url.searchParams.get('account') || 'fixture-account';
         response.writeHead(200, { ...common, 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': 'fixture-auth=secret; SameSite=Strict' }).end(`<!doctype html><html><body style="margin:0">
 <iframe id="report" sandbox="${frameSandbox}" style="width:100%;height:1100px;border:0" src="/frame${viewer ? '?viewer=1' : ''}"></iframe><script>
 const channel='kts-currency-v1',nonce=${JSON.stringify(nonce)},frame=document.getElementById('report');
+const deviceKey=${JSON.stringify(`kts-currency-fixture-device:${account}`)},deviceKeys=['kts_seen','kts_prefs','kts_log'];
+window.__fixtureLocalMethods=[];window.__fixtureNotifications=[];
 window.addEventListener('message',async event=>{
 const m=event.data;if(event.source!==frame.contentWindow||event.origin!=='null'||m?.channel!==channel||m.nonce!==nonce||typeof m.id!=='string'||! /^[a-zA-Z0-9:_-]{1,100}$/.test(m.id))return;
+const reply=result=>frame.contentWindow.postMessage({channel,nonce,id:m.id,result},'*');
+if(['device:get','device:set','notification:permission','notification:show'].includes(m.method)){
+  window.__fixtureLocalMethods.push(m.method);
+  try{
+    if(m.method==='device:get'){reply({values:JSON.parse(localStorage.getItem(deviceKey)||'{}'),persistent:true});return;}
+    if(m.method==='device:set'){
+      if(!deviceKeys.includes(m.params?.key))throw new Error('Unsupported device key');
+      const values=JSON.parse(localStorage.getItem(deviceKey)||'{}');values[m.params.key]=m.params.value;
+      localStorage.setItem(deviceKey,JSON.stringify(values));reply({persistent:true});return;
+    }
+    if(m.method==='notification:permission'){reply({permission:'granted'});return;}
+    if(typeof m.params?.body!=='string')throw new Error('Invalid notification body');
+    window.__fixtureNotifications.push(m.params.body);reply({shown:true});return;
+  }catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{message:error.message,status:400}},'*');return;}
+}
 try{const response=await fetch('/rpc',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json','x-fixture-unsafe':${JSON.stringify(unsafe ? '1' : '0')}},body:JSON.stringify({method:m.method,params:m.params})});
 const body=await response.json();frame.contentWindow.postMessage({channel,nonce,id:m.id,...(response.ok?{result:body}:{error:{message:body.error,status:response.status,code:body.code}})},'*');}
 catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{message:error.message,status:500}},'*');}});
@@ -143,7 +164,7 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
           envelope = { revision: envelope.revision + 1, current: { ...structuredClone(snapshot), at: fixtureAt, savedAt: fixtureAt, actor: 'admintop:fixture' }, previous };
           successfulWrites += 1; result = envelope;
         } else if (method === 'baselines:get') result = baselines;
-        else if (method === 'source') result = source(params.kind, params, staleSources);
+        else if (method === 'source') result = source(params.kind, params, staleSources, fixtureCbrDate);
         response.writeHead(200, { ...common, 'Content-Type': 'application/json' }).end(JSON.stringify(result));
       } else response.writeHead(404, common).end();
     } catch (error) {
@@ -162,6 +183,7 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
       try { await access(engine.executablePath()); } catch { console.log(`SKIP ${engineName}: executable unavailable`); continue; }
       engines += 1;
       envelope = initialState(); staleSources = false; saveRequests = 0; successfulWrites = 0;
+      fixtureCbrDate = '2026-09-30';
       methods.length = 0; serverErrors.length = 0;
       const browser = await engine.launch({ headless: true });
       const blocked: string[] = [], errors: string[] = [], warnings: string[] = [];
@@ -189,6 +211,26 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
       };
       try {
         const first = await createPage(), second = await createPage();
+        const assertAuthorTiles = async (item: typeof first) => {
+          const tiles = await item.frame.evaluate(() => Array.from(document.querySelectorAll('#tiles .tile')).map(tile => ({
+            opacity: getComputedStyle(tile).opacity,
+            background: getComputedStyle(tile).backgroundColor,
+            rate: getComputedStyle(tile.querySelector('.rate')!).color,
+            code: getComputedStyle(tile.querySelector('.code')!).color,
+          })));
+          assert.equal(tiles.length, 4, 'All four CBR currency cards render');
+          for (const tile of tiles) assert.deepEqual(tile, {
+            opacity: '1', background: 'rgb(255, 255, 255)', rate: 'rgb(27, 3, 137)', code: 'rgb(13, 24, 91)',
+          }, 'Currency cards preserve the author’s colors at full opacity');
+        };
+        const reloadPage = async (item: typeof first, suffix?: string) => {
+          if (suffix === undefined) await item.page.reload();
+          else await item.page.goto(origin + suffix);
+          item.frame = item.page.frames().find((candidate: { url(): string }) => new URL(candidate.url()).pathname === '/frame');
+          assert.ok(item.frame);
+          await item.frame.waitForFunction(() => document.querySelector('#saveStatus')?.textContent?.includes('ревизия'));
+          await item.frame.waitForFunction(() => document.querySelector('#sourceStatus')?.textContent?.includes('LME Cash Settlement') && document.querySelectorAll('#tiles .tile').length === 4);
+        };
         const openForm = async (item: typeof first, id: string) => {
           const details = item.report.locator('details').filter({ has: item.report.locator(`#${id}`) });
           if (!(await details.getAttribute('open'))) await details.locator('summary').click();
@@ -198,6 +240,9 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
           assert.match(await item.report.locator('#an').innerText(), /Fixture Analyst & Co/);
           assert.match(await item.report.locator('#saveStatus').innerText(), /ревизия 1/);
           assert.equal(await item.report.locator('#rollbackShared').isDisabled(), true);
+          await assertAuthorTiles(item);
+          assert.match(await item.report.locator('#alertMsg').innerText(), /Курс ЦБ на 30\.09\.2026:.*дашборд запущен/);
+          assert.equal(await item.report.locator('#bigAlert').evaluate((element: Element) => element.classList.contains('show')), false, 'First-ever launch retains the original silent banner without a popup');
         }
         assert.equal(saveRequests, 0, 'Initial source refreshes must never write a manual snapshot');
         await first.page.screenshot({ path: path.join(output, `${engineName}-main.png`) });
@@ -261,6 +306,7 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
         const viewer = await createPage('/?viewer=1');
         assert.equal(await viewer.report.locator('#readOnlyStatus').isVisible(), true);
         assert.match(await viewer.report.locator('#cpsRates').innerText(), /123,45/);
+        await assertAuthorTiles(viewer);
         for (const selector of ['#cpsForm input', '#cpsForm button', '#anForm textarea', '#anForm button', '#cuForm input', '#cuForm button', '#tOpen', '#snapFile', '#rollbackShared']) {
           const controls = viewer.report.locator(selector);
           for (let index = 0; index < await controls.count(); index += 1) assert.equal(await controls.nth(index).isDisabled(), true, selector);
@@ -285,6 +331,11 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
         assert.equal(methods.slice(viewerMethodsStart).some(method => ['snapshot:save', 'snapshot:rollback'].includes(method)), false);
         assert.equal(await viewer.report.locator('#rollbackShared').isDisabled(), true, 'Busy cycles must not enable viewer mutations');
         assert.equal(await viewer.report.locator('#tOpen').isDisabled(), true);
+        await viewer.report.locator('#tSound').click();
+        await viewer.page.waitForFunction(() => JSON.parse(localStorage.getItem('kts-currency-fixture-device:fixture-account') || '{}').kts_prefs?.sound === true);
+        await reloadPage(viewer);
+        assert.equal(await viewer.report.locator('#tSound').getAttribute('aria-pressed'), 'true', 'Read-only users can persist their own device preferences');
+        assert.equal(await viewer.report.locator('#cpsForm input').first().isDisabled(), true, 'Restoring preferences never unlocks shared editing');
         await viewer.report.locator('#reloadShared').click();
         await viewer.report.locator('[data-page="pgSum"]').click();
         await viewer.report.locator('#summaryMonth').fill('2026-01');
@@ -310,6 +361,64 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
         assert.ok((await escaped.report.locator('#log').innerText()).includes(attack));
         assert.equal(await escaped.report.locator('#injected').count(), 0, 'Untrusted strings render as text, not HTML');
         assert.equal(await escaped.frame.evaluate(() => Boolean((window as unknown as { __unsafe?: boolean }).__unsafe)), false);
+
+        const lifecycle = await createPage();
+        await lifecycle.page.waitForFunction(() => JSON.parse(localStorage.getItem('kts-currency-fixture-device:fixture-account') || '{}').kts_seen?.cbrDate === '2026-09-30T00:00:00+03:00');
+        for (const selector of ['#tSound', '#tVoice', '#tNotif', '#alertX', '#tAuto']) await lifecycle.report.locator(selector).click();
+        await lifecycle.page.waitForFunction(() => {
+          const preferences = JSON.parse(localStorage.getItem('kts-currency-fixture-device:fixture-account') || '{}').kts_prefs;
+          return preferences?.sound && preferences.voice && preferences.notif && preferences.alertMini && preferences.auto;
+        });
+        assert.deepEqual(await lifecycle.page.evaluate(() => (window as unknown as { __fixtureNotifications: string[] }).__fixtureNotifications), [], 'Enabling notifications does not invent a market alert');
+        assert.ok(await lifecycle.page.evaluate(() => (window as unknown as { __fixtureLocalMethods: string[] }).__fixtureLocalMethods.includes('notification:permission')), 'Notification permission is requested through the authenticated parent');
+
+        fixtureCbrDate = '2026-10-01';
+        await lifecycle.page.clock.setFixedTime(new Date('2026-10-01T09:00:00.000Z'));
+        await reloadPage(lifecycle);
+        await lifecycle.frame.waitForFunction(() => document.querySelector('#bigAlert')?.classList.contains('show') && document.querySelector('#bigTxt')?.textContent?.includes('Новый курс ЦБ на 01.10.2026'));
+        const dailyMessage = await lifecycle.report.locator('#bigTxt').innerText();
+        for (const fragment of ['USD 92,00 (+1,00)', 'EUR 99,00 (−1,00)', 'CNY 12,60 (+0,10)', 'KZT 18,60 (+0,10)']) {
+          assert.ok(dailyMessage.includes(fragment), `New-day alert includes the current value and exact delta: ${fragment}`);
+        }
+        assert.match(await lifecycle.report.locator('#bigTtl').innerText(), /Центробанк установил новый курс/i);
+        await lifecycle.page.waitForFunction(() => {
+          const state = JSON.parse(localStorage.getItem('kts-currency-fixture-device:fixture-account') || '{}');
+          return state.kts_seen?.cbrDate === '2026-10-01T00:00:00+03:00' && state.kts_log?.some((entry: { msg: string }) => entry.msg.includes('Новый курс ЦБ на 01.10.2026'));
+        });
+        await lifecycle.page.waitForFunction(() => (window as unknown as { __fixtureNotifications: string[] }).__fixtureNotifications.length === 1);
+        assert.deepEqual(await lifecycle.page.evaluate(() => (window as unknown as { __fixtureNotifications: string[] }).__fixtureNotifications), [dailyMessage]);
+        await lifecycle.page.screenshot({ path: path.join(output, `${engineName}-new-cbr-day.png`) });
+
+        await reloadPage(lifecycle);
+        assert.equal(await lifecycle.report.locator('#bigAlert').evaluate((element: Element) => element.classList.contains('show')), false, 'Reloading the same rate day must not replay the popup');
+        assert.equal(await lifecycle.report.locator('#alertMsg').innerText(), dailyMessage, 'The last new-course banner survives reopening');
+        assert.deepEqual(await lifecycle.page.evaluate(() => (window as unknown as { __fixtureNotifications: string[] }).__fixtureNotifications), [], 'Reloading does not repeat the system notification');
+        for (const selector of ['#tSound', '#tVoice', '#tNotif', '#tAuto']) assert.equal(await lifecycle.report.locator(selector).getAttribute('aria-pressed'), 'true', `${selector} restores its device preference`);
+        assert.equal(await lifecycle.report.locator('#alert').evaluate((element: Element) => element.classList.contains('mini')), true, 'Collapsed banner preference is restored');
+        assert.equal((await lifecycle.report.locator('#alertX').innerText()).toLocaleLowerCase('ru-RU'), 'развернуть');
+        assert.equal(await lifecycle.report.locator('#log li').filter({ hasText: dailyMessage }).count(), 1, 'The daily notification journal survives reload without duplicates');
+        await assertAuthorTiles(lifecycle);
+
+        envelope = { ...envelope, revision: envelope.revision + 1, current: {
+          ...envelope.current!, data: { ...envelope.current!.data, kts_log: [{ t: '2026-10-01T09:01:00.000Z', msg: 'Another administrator updated the shared snapshot', risk: false }] },
+        } };
+        await lifecycle.report.locator('#reloadShared').click();
+        await lifecycle.frame.waitForFunction((revision: number) => document.querySelector('#saveStatus')?.textContent?.includes(`ревизия ${revision}`), envelope.revision);
+        assert.equal(await lifecycle.report.locator('#log li').filter({ hasText: dailyMessage }).count(), 1, 'A new shared snapshot never erases the device alert journal');
+        await reloadPage(lifecycle);
+        assert.equal(await lifecycle.report.locator('#log li').filter({ hasText: dailyMessage }).count(), 1, 'Device journal remains durable after installing another administrator’s snapshot');
+
+        await reloadPage(lifecycle, '/?account=another-account');
+        assert.match(await lifecycle.report.locator('#alertMsg').innerText(), /Курс ЦБ на 01\.10\.2026:.*дашборд запущен/);
+        for (const selector of ['#tSound', '#tVoice', '#tNotif', '#tAuto']) assert.equal(await lifecycle.report.locator(selector).getAttribute('aria-pressed'), 'false', 'Another account must not inherit device preferences');
+        assert.equal(await lifecycle.report.locator('#log li').filter({ hasText: dailyMessage }).count(), 0, 'Another account must not inherit the private alert journal');
+        assert.equal(await lifecycle.report.locator('#bigAlert').evaluate((element: Element) => element.classList.contains('show')), false);
+        await reloadPage(lifecycle, '/');
+        assert.equal(await lifecycle.report.locator('#tSound').getAttribute('aria-pressed'), 'true', 'Returning to the first account restores its settings');
+        assert.equal(await lifecycle.report.locator('#log li').filter({ hasText: dailyMessage }).count(), 1);
+        assert.equal(successfulWrites, 2, 'Device lifecycle and notification preferences never write a shared snapshot');
+        fixtureCbrDate = '2026-09-30';
+
         const isolation = await first.frame.evaluate(async () => {
           let parentBlocked = false, cookiesBlocked = false, storageBlocked = false, fetchBlocked = false, externalFetchBlocked = false;
           try { void window.parent.document.body; } catch { parentBlocked = true; }
@@ -323,8 +432,8 @@ catch(error){frame.contentWindow.postMessage({channel,nonce,id:m.id,error:{messa
         assert.deepEqual(blocked, [], 'CSP stops forbidden traffic before the network layer');
         assert.deepEqual(serverErrors, [], 'All fixture RPC calls satisfy the real snapshot contract');
         assert.deepEqual(errors, [], 'No runtime errors in Chromium/WebKit');
-        console.log(JSON.stringify({ engine: engineName, result: 'pass', hydration: 'two contexts', saveRequests, successfulWrites, revision: envelope.revision, calendarAndExports: 'January 2026', isolation, output }));
-        for (const item of [first, second, viewer, stale, escaped]) await item.context.close();
+        console.log(JSON.stringify({ engine: engineName, result: 'pass', hydration: 'two contexts', saveRequests, successfulWrites, revision: envelope.revision, calendarAndExports: 'January 2026', persistedAlertsAndPreferences: 'new day, reload, snapshot revision, account isolation', authorTileColors: 'full opacity', isolation, output }));
+        for (const item of [first, second, viewer, stale, escaped, lifecycle]) await item.context.close();
       } catch (error) {
         console.error(JSON.stringify({ engine: engineName, errors, warnings, serverErrors, methods, output })); throw error;
       } finally { await browser.close(); }

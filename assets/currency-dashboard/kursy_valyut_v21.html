@@ -23,7 +23,7 @@ html{font-size:clamp(12.5px,0.72vw,26px);scroll-padding-top:env(safe-area-inset-
 *,*::before,*::after{box-sizing:inherit}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:1rem;line-height:1.45}
 button,input{font:inherit;color:inherit}
-button:disabled,input:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}
+button:disabled:not(.tile),input:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}
 :focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .cond{font-family:var(--cond);text-transform:uppercase;letter-spacing:.07em}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -287,6 +287,7 @@ table.sum td small{font-size:.8rem;margin-left:.3rem}
 <div class="big-alert" id="bigAlert" role="alert"><div class="ico" id="bigIco">🔔</div><div><div class="ttl" id="bigTtl">Изменение курса</div><div class="txt" id="bigTxt"></div></div><div class="bar" id="bigBar"></div></div>
 <div class="snap-hint" id="snapHint"></div>
 <p class="hint" id="readOnlyStatus" role="status" style="padding:.5rem 1.1rem" hidden>Только просмотр. Изменять общие данные могут пользователи с правом управления отчётами.</p>
+<p class="hint" id="deviceStatus" role="status" style="padding:.5rem 1.1rem" hidden></p>
 <div class="snd-hint" id="sndHint">Звук включён, но браузер блокирует его до первого действия на странице. Щёлкните в любом месте один раз.</div>
 
 <div class="tabs" role="tablist">
@@ -490,8 +491,27 @@ const iso=d=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'num
 const ruDate=s=>{const [y,m,d]=s.slice(0,10).split("-");return `${d}.${m}.${y}`;};
 const ruDateLong=s=>{const d=new Date(s.slice(0,10)+"T12:00:00");return d.toLocaleDateString("ru-RU",{day:"numeric",month:"long"})+", "+d.toLocaleDateString("ru-RU",{weekday:"long"});};
 const MANUAL_KEYS=["kts_cpsRates","kts_an","kts_cu","kts_log"];
+const DEVICE_KEYS=["kts_seen","kts_prefs","kts_log"];
 const memoryStore=new Map();
-const store={get(k){return memoryStore.has(k)?JSON.parse(memoryStore.get(k)):null;},set(k,v){memoryStore.set(k,JSON.stringify(v));}};
+let deviceLoaded=false,deviceWrites=Promise.resolve();
+const store={get(k){return memoryStore.has(k)?JSON.parse(memoryStore.get(k)):null;},set(k,v){memoryStore.set(k,JSON.stringify(v));persistDeviceValue(k,v);}};
+function deviceWarning(){const box=document.getElementById('deviceStatus');box.hidden=false;box.textContent='Браузер не сохраняет настройки и историю уведомлений. После закрытия страницы они могут сброситься. Общие данные на сервере не затронуты.';}
+function persistDeviceValue(key,value){
+  if(!deviceLoaded||!DEVICE_KEYS.includes(key))return;
+  const copy=JSON.parse(JSON.stringify(value));
+  deviceWrites=deviceWrites.then(()=>rpc('device:set',{key,value:copy})).then(result=>{if(!result.persistent)deviceWarning();}).catch(()=>deviceWarning());
+}
+async function loadDeviceState(){
+  try{const result=await rpc('device:get');
+    DEVICE_KEYS.forEach(key=>{if(result.values?.[key]!=null)memoryStore.set(key,JSON.stringify(result.values[key]));});
+    deviceLoaded=true;if(!result.persistent)deviceWarning();
+  }catch(error){deviceWarning();}
+}
+function mergeLogs(...logs){
+  const entries=new Map();
+  logs.flat().forEach(e=>entries.set(JSON.stringify([e.t,e.msg,!!e.risk]),e));
+  return [...entries.values()].sort((a,b)=>b.t.localeCompare(a.t)).slice(0,200);
+}
 const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function parseNumber(value,{optional=false,zero=false}={}){
   const s=String(value).trim().replace(/[\s\u00a0\u202f]/g,'');
@@ -655,7 +675,7 @@ document.getElementById("cpsForm").addEventListener("submit",async e=>{
   e.preventDefault();const f=e.target;
   try{requireManage();const next={eur:parseNumber(f.eur.value),cny:parseNumber(f.cny.value),usd:parseNumber(f.usd.value,{optional:true}),from:parseDate(f.from.value),to:parseDate(f.to.value)};
     if(next.to<next.from)throw new Error('Дата окончания не может быть раньше начала.');
-    await saveSharedPatch({kts_cpsRates:next},'Внутренний курс СПС-холод обновлён');f.closest('details').open=false;
+    await saveSharedPatch({kts_cpsRates:next},`Внутренний курс СПС-холод обновлён: евро ${nf(next.eur,2)}, юань ${nf(next.cny,2)}, действует ${ruDate(next.from)} – ${ruDate(next.to)}`,false,{});f.closest('details').open=false;
   }catch(error){showSaveError(error);}
 });
 
@@ -720,8 +740,9 @@ function say(text){
   speechSynthesis.cancel();speechSynthesis.speak(u);
 }
 function sysNotify(title,body){
-  if(!prefs.notif||!("Notification"in window)||Notification.permission!=="granted")return;
-  try{new Notification(title,{body,tag:"kts-rate",renotify:true,requireInteraction:true,silent:false});}catch(e){}
+  if(!prefs.notif)return;
+  // The trusted host owns browser permissions; the report remains sandboxed.
+  deviceWrites.then(()=>rpc('notification:show',{body})).catch(()=>{});
 }
 const speakNum=(v,d=2)=>nf(v,d).replace(/\u00a0/g,"");
 let bigT=null;
@@ -732,14 +753,17 @@ function showBig(e,title){const b=document.getElementById("bigAlert");b.classLis
   const bar=document.getElementById("bigBar");bar.style.animation="none";void bar.offsetWidth;bar.style.animation="";
   b.classList.add("show");clearTimeout(bigT);bigT=setTimeout(()=>b.classList.remove("show"),20000);}
 document.getElementById("bigAlert").onclick=()=>{document.getElementById("bigAlert").classList.remove("show");clearTimeout(bigT);};
-function announce(msg,{risk=false,speech=null,silent=false,title="Изменение курса"}={}){
-  const e={t:new Date().toISOString(),msg,risk};
+function presentAnnouncement(e,{speech=null,silent=false,title="Изменение курса"}={}){
   showStrip(e);if(!silent)showBig(e,title);
-  const log=store.get("kts_log")||[];log.unshift(e);store.set("kts_log",log.slice(0,200));renderLog();
   if(silent)return;
-  if(prefs.sound)chime(risk);
-  if(prefs.voice)setTimeout(()=>say(speech||msg),prefs.sound?800:0);
-  sysNotify("Курсы валют",msg);
+  if(prefs.sound)chime(e.risk);
+  if(prefs.voice)setTimeout(()=>say(speech||e.msg),prefs.sound?800:0);
+  sysNotify("Курсы валют",e.msg);
+}
+function announce(msg,options={}){
+  const e={t:new Date().toISOString(),msg,risk:!!options.risk};
+  const log=store.get("kts_log")||[];log.unshift(e);store.set("kts_log",log.slice(0,200));
+  presentAnnouncement(e,options);renderLog();
 }
 function renderLog(){
   const log=store.get("kts_log")||[];
@@ -756,7 +780,11 @@ document.addEventListener("visibilitychange",()=>{const a=getAudio();if(a&&a.sta
 function setTog(id,key){
   const b=document.getElementById(id);b.setAttribute("aria-pressed",prefs[key]);
   b.onclick=async()=>{prefs[key]=!prefs[key];
-    if(key==='notif'&&prefs.notif){prefs.notif=false;alert('Системные уведомления недоступны в защищённом окне. Используйте звук и голос при открытой вкладке.');}
+    if(key==='notif'&&prefs.notif){
+      try{const result=await rpc('notification:permission');prefs.notif=result.permission==='granted';}
+      catch(error){prefs.notif=false;}
+      if(!prefs.notif)alert('Браузер не разрешил системные уведомления. Всплывающее окно внутри отчёта продолжит работать. Разрешите уведомления для сайта в настройках браузера.');
+    }
     store.set("kts_prefs",prefs);b.setAttribute("aria-pressed",prefs[key]);
     const a=getAudio();if(a&&a.state!=="running")await a.resume().catch(()=>{});sndHint();
     if(prefs[key]&&key==="sound")chime(false);
@@ -770,7 +798,7 @@ function checkCbrChange(){
   const T=state.today;const seen=store.get("kts_seen")||{};
   if(!seen.cbrDate){store.set("kts_seen",{...seen,cbrDate:T.Date});
     announce(`Курс ЦБ на ${ruDate(T.Date)}: ${CODES.filter(c=>T.Valute[c]).map(c=>`${c} ${nf(T.Valute[c].Value,2)}`).join(", ")} — дашборд запущен`,{silent:true});return;}
-  if(seen.cbrDate===T.Date)return;
+  if(T.Date.slice(0,10)<=seen.cbrDate.slice(0,10))return;
   const N={USD:"доллар",EUR:"евро",CNY:"юань"};
   const parts=[],sp=[];let risk=false;
   CODES.forEach(c=>{const v=T.Valute[c];if(!v)return;const d=v.Value-v.Previous;if(d>0)risk=true;
@@ -781,6 +809,7 @@ function checkCbrChange(){
 }
 const MOEX_THR=0.3; // % движения на бирже для оповещения
 function checkMoexChange(){
+  if(sourceStates['moex-currency']?.stale)return;
   if(!state.moex)return;const seen=store.get("kts_seen")||{};seen.moex=seen.moex||{};let touched=false;
   state.moex.forEach(m=>{const prev=seen.moex[m.id];
     if(prev==null){seen.moex[m.id]=m.last;touched=true;return;}
@@ -886,10 +915,11 @@ function renderFutures(){
   const br=state.fut?.BR;document.getElementById("brLive").innerHTML=`<div class="l">Нефть Brent · фьючерс Мосбиржи, $/баррель</div>`+liveBlock("BR",br?.last,v=>nf(v,2));
 }
 function checkFutChange(){
-  const seen=store.get("kts_seen")||{};seen.fut=seen.fut||{};let touched=false;
+  if(sourceStates['moex-futures']?.stale)return;
+  const seen=store.get("kts_seen")||{};seen.fut=seen.fut||{};seen.futContracts=seen.futContracts||{};let touched=false;
   [["COPPER",0.5,"Медь LME онлайн","медь"],["BR",1.0,"Нефть Brent","нефть Брент"]].forEach(([a,thr,ttl,nm])=>{
     const f=state.fut?.[a];const cur=a==="COPPER"?f?.lastUsd:f?.last;if(cur==null)return;
-    const prev=seen.fut[a];if(prev==null){seen.fut[a]=cur;touched=true;return;}
+    const prev=seen.fut[a];if(prev==null||seen.futContracts[a]!==f.secid){seen.fut[a]=cur;seen.futContracts[a]=f.secid;touched=true;return;}
     const pct=(cur-prev)/prev*100;
     if(Math.abs(pct)>=thr){announce(`${ttl}: ${nf(cur,a==="BR"?2:0)} ${a==="BR"?"$/барр.":"$/т"}, ${sgn(pct)}${nf(Math.abs(pct),2)}% с последнего сигнала`,{risk:pct>0,title:a==="COPPER"?"Движение цены меди":"Движение цены нефти",speech:`${nm}: ${speakNum(cur,a==="BR"?2:0)}, ${pct>0?"рост":"снижение"} на ${speakNum(Math.abs(pct),1)} процента`});seen.fut[a]=cur;touched=true;}
   });
@@ -904,6 +934,13 @@ async function loadCopper(){
   const result=await getJSON('copper');
   if(!Array.isArray(result.rows)||!result.rows.length)throw new Error('Нет официальных цен LME');
   state.copperAuto={rows:result.rows,at:result.fetched_at};
+  const last=result.rows.reduce((a,b)=>a.date>b.date?a:b),seen=store.get('kts_seen')||{},prev=seen.copper;
+  if(!prev||last.date>prev.date){
+    store.set('kts_seen',{...seen,copper:{date:last.date,cash:last.cash}});
+    if(prev){const dd=last.cash-prev.cash;
+      announce(`Медь LME ${ruDate(last.date)}: Cash ${nf(last.cash,0)} $/т (${sgn(dd)}${nf(Math.abs(dd),0)}), 3-мес. ${nf(last.m3,0)} $/т`,{risk:dd>0,title:'Новая официальная цена меди LME',speech:`Медь на Лондонской бирже ${speakNum(last.cash,0)} долларов за тонну, ${dd>0?'рост':'снижение'} на ${speakNum(Math.abs(dd),0)}`});
+    }
+  }
 }
 async function refreshCopper(){try{await loadCopper();state.errors.cu=false;}catch(e){state.errors.cu=true;sourceFailed('copper',e);}renderCu();renderTicker();renderSum();}
 
@@ -940,7 +977,8 @@ document.getElementById('cuForm').addEventListener('submit',async e=>{e.preventD
   try{requireManage();const d=manualCopper(store.get('kts_cu')),pr=parseNumber(f.price.value,{optional:true}),lm=parseNumber(f.lmci.value,{optional:true}),date=parseDate(f.date.value);
     d.prem=parseNumber(f.prem.value,{zero:true});if(lm!==null){d.lmci=lm;d.lmciDate=date;}
     if(pr!==null)d.rows=d.rows.filter(r=>r.date!==date).concat({date,price:pr}).sort((a,b)=>a.date.localeCompare(b.date));
-    await saveSharedPatch({kts_cu:d},'Ручные данные меди обновлены');f.price.value='';f.lmci.value='';f.closest('details').open=false;
+    const parts=[];if(pr!==null)parts.push(`lme.com ${nf(pr,0)} $/т`);if(lm!==null)parts.push(`fx678 ${nf(lm,0)} + ${nf(d.prem,0)} = ${nf(lm+d.prem,0)} $/т`);
+    await saveSharedPatch({kts_cu:d},parts.length?`Медь ${ruDate(date)}: ${parts.join('; ')}`:'Ручные данные меди обновлены',false,parts.length?{}:null);f.price.value='';f.lmci.value='';f.closest('details').open=false;
   }catch(error){showSaveError(error);}});
 
 /* ---------- Сводка за месяц ---------- */
@@ -1101,7 +1139,7 @@ const dirtyForms=new Set();
 ['cpsForm','anForm','cuForm'].forEach(id=>document.getElementById(id).addEventListener('input',()=>dirtyForms.add(id)));
 function formatSavedAt(at){return new Date(at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}
 function manualSnapshotData(source){const data={};MANUAL_KEYS.forEach(k=>{if(source[k]!=null)data[k]=k==='kts_cu'?manualCopper(source[k]):source[k];});return data;}
-function makeSnapshot(){const data={};MANUAL_KEYS.forEach(k=>{const v=store.get(k);if(v!=null)data[k]=v;});return {at:new Date().toISOString(),version:'V21',data:manualSnapshotData(data)};}
+function makeSnapshot(){const data={};MANUAL_KEYS.forEach(k=>{const v=k==='kts_log'?sharedEnvelope.current?.data?.kts_log:store.get(k);if(v!=null)data[k]=v;});return {at:new Date().toISOString(),version:'V21',data:manualSnapshotData(data)};}
 function updateHistoryStatus(){
   const current=sharedEnvelope.current,previous=sharedEnvelope.previous;
   document.getElementById('previousStatus').textContent=previous?'Предыдущая версия: '+formatSavedAt(previous.savedAt)+' МСК · '+previous.actor:'Предыдущей сохранённой версии пока нет.';
@@ -1113,7 +1151,7 @@ function installEnvelope(envelope,preserveDrafts=[]){
   const usageDataChanged=!sharedLoaded||envelope.revision!==sharedEnvelope.revision;
   sharedEnvelope=envelope;sharedLoaded=true;dirtyForms.clear();preserveDrafts.forEach(id=>dirtyForms.add(id));
   const data=manualSnapshotData(envelope.current?.data||{});
-  MANUAL_KEYS.forEach(k=>{if(data[k]!==undefined)store.set(k,data[k]);else memoryStore.delete(k);});
+  MANUAL_KEYS.forEach(k=>{if(k==='kts_log')store.set(k,mergeLogs(store.get(k)||[],data[k]||[]));else if(data[k]!==undefined)store.set(k,data[k]);else memoryStore.delete(k);});
   state.cps=store.get('kts_cpsRates')||CPS_DEFAULT;
   renderAn();renderAll();renderLog();updateHistoryStatus();
   document.getElementById('snapHint').classList.remove('show');
@@ -1139,16 +1177,18 @@ async function loadShared(force=false){
   if(!force&&dirtyForms.size){const hint=document.getElementById('snapHint');hint.textContent='На сервере есть новая версия. Незавершённый ввод сохранён на экране. Для загрузки новой версии нажмите «Загрузить актуальные общие данные».';hint.classList.add('show');return;}
   installEnvelope(next);
 }
-async function saveSharedPatch(patch,message,replace=false){
+async function saveSharedPatch(patch,message,replace=false,announcement=null){
   requireManage();
   if(!sharedLoaded)throw new Error('Сначала загрузите актуальные общие данные с сервера.');
   if(savingShared)throw new Error('Дождитесь завершения текущего сохранения.');
   const snapshot=makeSnapshot();snapshot.data=manualSnapshotData(replace?patch:{...snapshot.data,...patch});
-  snapshot.data.kts_log=[{t:new Date().toISOString(),msg:message,risk:false},...(snapshot.data.kts_log||[])].slice(0,200);
+  const event={t:new Date().toISOString(),msg:message,risk:false};
+  snapshot.data.kts_log=[event,...(snapshot.data.kts_log||[])].slice(0,200);
   setSharedBusy(true);
   try{const next=await rpc('snapshot:save',{snapshot,expectedRevision:sharedEnvelope.revision});
     const forms={kts_cpsRates:'cpsForm',kts_an:'anForm',kts_cu:'cuForm'},savedForms=Object.keys(patch).map(k=>forms[k]);
-    installEnvelope(next,replace?[]:[...dirtyForms].filter(id=>!savedForms.includes(id)));}
+    installEnvelope(next,replace?[]:[...dirtyForms].filter(id=>!savedForms.includes(id)));
+    if(announcement)presentAnnouncement(event,announcement);}
   finally{setSharedBusy(false);}
 }
 document.getElementById('reloadShared').onclick=async()=>{
@@ -1216,6 +1256,8 @@ const runningJobs=new Set();
 async function runJob(fn){if(runningJobs.has(fn))return;runningJobs.add(fn);try{await fn();}catch(error){setStatus();}finally{runningJobs.delete(fn);}}
 (async function init(){
   document.getElementById('readOnlyStatus').hidden=CAN_MANAGE;setSharedBusy(false);
+  await loadDeviceState();Object.assign(prefs,store.get('kts_prefs')||{});
+  ['tSound|sound','tVoice|voice','tNotif|notif'].forEach(x=>{const [id,key]=x.split('|');document.getElementById(id).setAttribute('aria-pressed',!!prefs[key]);});
   state.cps=CPS_DEFAULT;renderCps();renderAn();renderLog();applyMini();sndHint();renderCu();setAuto(!!prefs.auto);
   try{await loadShared();}catch(error){showSaveError(error);}
   await refreshBaselines();

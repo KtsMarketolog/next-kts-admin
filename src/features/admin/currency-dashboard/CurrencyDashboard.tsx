@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import { CURRENCY_RPC_CHANNEL, CURRENCY_RPC_MAX_BYTES, parseCurrencyRpcRequest } from '@/shared/lib/currencyDashboardRpc';
+import { createCurrencyDeviceBridge, isCurrencyDeviceMethod } from '@/shared/lib/currencyDashboardDeviceState';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
 import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
 
@@ -12,7 +13,7 @@ import styles from './currency-dashboard.module.scss';
 const SOURCE_LABELS: Record<string, string> = { 'cbr-daily':'Курсы ЦБ', 'cbr-history':'История ЦБ', 'moex-currency':'Валюты Мосбиржи', 'moex-futures':'Фьючерсы Мосбиржи', world:'Мировые курсы', copper:'Медь LME' };
 const dateFormat = new Intl.DateTimeFormat('ru-RU', {dateStyle:'short', timeStyle:'short', timeZone:'Europe/Moscow'});
 
-export function CurrencyDashboard({ nonce, canManage, embedded = false, canAssignAccess = false }: { nonce: string; canManage: boolean; embedded?: boolean; canAssignAccess?: boolean }) {
+export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = false, canAssignAccess = false }: { nonce: string; deviceScope: string | null; canManage: boolean; embedded?: boolean; canAssignAccess?: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const container = useRef<HTMLElement>(null);
   const [error, setError] = useState('');
@@ -23,6 +24,17 @@ export function CurrencyDashboard({ nonce, canManage, embedded = false, canAssig
     let disposed = false;
     const pending = new Map<string, AbortController>();
     const completed = new Set<string>();
+    const deviceCommand = createCurrencyDeviceBridge(deviceScope, () => window.localStorage, () => {
+      if (!window.isSecureContext || !('Notification' in window)) return null;
+      return {
+        permission: () => Notification.permission,
+        requestPermission: () => Notification.requestPermission(),
+        show: (body: string) => {
+          const options: NotificationOptions & { renotify: boolean } = { body, tag: 'kts-rate', renotify: true, requireInteraction: true, silent: false };
+          new Notification('Курсы валют', options);
+        },
+      };
+    });
     const receive = async (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== 'null') return;
       const data = event.data;
@@ -41,6 +53,10 @@ export function CurrencyDashboard({ nonce, canManage, embedded = false, canAssig
       const timeout = setTimeout(() => controller.abort(), 60_000);
       pending.set(data.id, controller);
       try {
+        if (isCurrencyDeviceMethod(data.method)) {
+          reply({ result: await deviceCommand(data.method, data.params) });
+          return;
+        }
         const payload = parseCurrencyRpcRequest(data);
         if (!canManage && (payload.method === 'snapshot:save' || payload.method === 'snapshot:rollback')) {
           reply({error:{message:'На этом экране доступен только просмотр.', status:403, code:'CURRENCY_READ_ONLY'}});
@@ -85,7 +101,7 @@ export function CurrencyDashboard({ nonce, canManage, embedded = false, canAssig
       window.removeEventListener('message', receive);
       for (const controller of pending.values()) controller.abort();
     };
-  }, [nonce, canManage]);
+  }, [nonce, deviceScope, canManage]);
 
   const fullScreen = async () => {
     try {

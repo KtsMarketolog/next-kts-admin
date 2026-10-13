@@ -10,7 +10,7 @@ import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboard
 import type { DashboardPairConfig, DashboardPairOverview, DashboardPairPanel, DashboardPairView } from '@/shared/lib/dashboardPair';
 import styles from './DashboardPair.module.scss';
 
-export function DashboardPair() {
+export function DashboardPair({currencyDeviceScope}: {currencyDeviceScope:string | null}) {
   const [overview, setOverview] = useState<DashboardPairOverview | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -77,7 +77,7 @@ export function DashboardPair() {
     {overview?.configured ? <div className={styles.panels} data-layout={layout}>
       {overview.panels.map((panel) => <section key={panel.key} className={styles.panel}>
         <h2>{panel.title}</h2>
-        {panel.available ? <PairReport panel={panel} /> : <p>{panel.message}</p>}
+        {panel.available ? <PairReport panel={panel} currencyDeviceScope={currencyDeviceScope} /> : <p>{panel.message}</p>}
       </section>)}
     </div> : overview ? <section className={styles.panel}>
       <h2>Пара отчётов ещё не назначена</h2><p>Согласованная пара: «Курсы валют и медь» и «Аналитика продаж — Экран для офиса». Опубликуйте аналитику продаж с данными или выберите её в настройках ниже.</p>
@@ -116,9 +116,9 @@ function PairSettings({overview, busy, save}: {overview:DashboardPairOverview; b
   </details>;
 }
 
-function PairReport({panel}: {panel:DashboardPairPanel}) {
+function PairReport({panel, currencyDeviceScope}: {panel:DashboardPairPanel; currencyDeviceScope:string | null}) {
   const [nonce] = useState(() => globalThis.crypto.randomUUID());
-  if (panel.kind === 'currency') return <CurrencyDashboard nonce={nonce} canManage={false} embedded />;
+  if (panel.kind === 'currency') return <CurrencyDashboard nonce={nonce} deviceScope={currencyDeviceScope} canManage={false} embedded />;
   if (panel.kind === 'route-planner' && panel.versionId) return <SharedDashboardFrame versionId={panel.versionId} snapshotId={panel.snapshotId} />;
   if (panel.kind === 'top' && panel.versionId) return <PairTopReport panel={panel} />;
   return <p>Отчёт пока не опубликован.</p>;

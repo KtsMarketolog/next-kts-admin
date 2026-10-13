@@ -150,6 +150,10 @@ function sharedHarness(canManage = true) {
     ${variable('MANUAL_KEYS')}
     ${variable('memoryStore')}
     ${variable('store')}
+    function persistDeviceValue(){}
+    ${fn('mergeLogs')}
+    const announcements=[];
+    function presentAnnouncement(event){announcements.push(event);}
     ${fn('manualCopper')}
     const state={},CPS_DEFAULT={eur:1};
     let resolveRpc,rejectRpc;
@@ -202,6 +206,157 @@ test('polling never downgrades a newer revision or silently destroys a dirty dra
   runInContext("sharedEnvelope.revision=3;resolveRpc({revision:2,current:null,previous:null})", context);
   await stale;
   assert.equal(runInContext('sharedEnvelope.revision', context), 3);
+});
+
+test('manual change announcement waits for server success and does not duplicate journal events', async () => {
+  const { context } = sharedHarness();
+  const failed = runInContext("saveSharedPatch({kts_cpsRates:{eur:110}},'Курс обновлён',false,{})", context);
+  assert.equal(runInContext('announcements.length', context), 0);
+  runInContext("rejectRpc(new Error('network'))", context);
+  await assert.rejects(failed);
+  assert.equal(runInContext('announcements.length', context), 0);
+  const success = runInContext("saveSharedPatch({kts_cpsRates:{eur:110}},'Курс обновлён',false,{})", context);
+  runInContext("resolveRpc({revision:2,current:{at:'2026-09-30T00:00:00Z',savedAt:'2026-09-30T00:00:00Z',actor:'Admin',data:{kts_cpsRates:{eur:110},kts_log:[{t:'2026-09-30T00:00:00Z',msg:'Курс обновлён',risk:false}]}},previous:null})", context);
+  await success;
+  assert.equal(runInContext('announcements.length', context), 1);
+  assert.equal(runInContext("store.get('kts_log').length", context), 1);
+});
+
+test('shared refresh preserves and deduplicates automatic notification history', () => {
+  const { context } = sharedHarness();
+  runInContext(`
+    const local={t:'2026-09-30T00:00:00Z',msg:'Новый курс ЦБ',risk:false};
+    store.set('kts_log',[local]);
+    installEnvelope({revision:2,current:{savedAt:'2026-09-30T01:00:00Z',actor:'Admin',data:{kts_log:[local,{t:'2026-09-29T00:00:00Z',msg:'Ручной курс',risk:true}]}}});
+  `, context);
+  assert.deepEqual(plain(runInContext("store.get('kts_log').map(e=>e.msg)", context)), ['Новый курс ЦБ', 'Ручной курс']);
+  runInContext('installEnvelope({revision:3,current:null,previous:null})', context);
+  assert.equal(runInContext("store.get('kts_log').length", context), 2);
+});
+
+test('saving common manual data never publishes the account device notification history', () => {
+  const { context } = sharedHarness();
+  runInContext("store.set('kts_log',[{t:'2026-09-30T00:00:00Z',msg:'Private automatic event',risk:false}])", context);
+  assert.equal(runInContext('makeSnapshot().data.kts_log', context), undefined);
+  runInContext("sharedEnvelope.current.data.kts_log=[{t:'2026-09-29T00:00:00Z',msg:'Common manual event',risk:false}]", context);
+  assert.deepEqual(plain(runInContext('makeSnapshot().data.kts_log.map(e=>e.msg)', context)), ['Common manual event']);
+});
+
+test('older cached CBR publication does not roll back the seen marker or cause a duplicate new-course alert', () => {
+  const context = createContext({});
+  runInContext(`
+    const state={today:{Date:'2026-09-29T00:00:00+03:00'}},events=[];
+    let saved={cbrDate:'2026-09-30T00:00:00+03:00'};
+    const store={get(){return saved;},set(_key,value){saved=value;}};
+    function announce(msg){events.push(msg);}
+    ${fn('checkCbrChange')}
+    checkCbrChange();state.today.Date='2026-09-30T00:00:00+03:00';checkCbrChange();
+  `, context);
+  assert.equal(runInContext('events.length', context), 0);
+  assert.equal(runInContext('saved.cbrDate', context), '2026-09-30T00:00:00+03:00');
+});
+
+test('persisted futures alert never compares prices of different contracts', () => {
+  const context = createContext({});
+  runInContext(`
+    const state={fut:{BR:{secid:'BRF7',last:74}}},events=[],sourceStates={};
+    let saved={fut:{BR:70},futContracts:{BR:'BRZ6'}};
+    const store={get(){return saved;},set(_key,value){saved=value;}};
+    function announce(msg){events.push(msg);}
+    ${variable('nf')}
+    ${variable('sgn')}
+    ${variable('speakNum')}
+    ${fn('checkFutChange')}
+    checkFutChange();
+  `, context);
+  assert.equal(runInContext('events.length', context), 0);
+  assert.equal(runInContext('saved.fut.BR', context), 74);
+  assert.equal(runInContext('saved.futContracts.BR', context), 'BRF7');
+  runInContext('state.fut.BR.last=75;checkFutChange()', context);
+  assert.equal(runInContext('events.length', context), 1);
+});
+
+test('stale exchange fallback cannot move seen prices or generate false movement alerts', () => {
+  const context = createContext({});
+  runInContext(`
+    const sourceStates={'moex-currency':{stale:true},'moex-futures':{stale:true}};
+    const state={moex:[{id:'CNYRUB_TOM',last:12}],fut:{BR:{secid:'BRF7',last:70}}};
+    const seen={moex:{CNYRUB_TOM:13},fut:{BR:75},futContracts:{BR:'BRF7'}};
+    const store={get(){return seen;},set(){throw new Error('Must not change seen');}};
+    function announce(){throw new Error('Must not announce');}
+    ${fn('checkFutChange')}
+    ${fn('checkMoexChange')}
+    checkFutChange();checkMoexChange();
+  `, context);
+  assert.equal(runInContext('seen.moex.CNYRUB_TOM', context), 13);
+  assert.equal(runInContext('seen.fut.BR', context), 75);
+});
+
+test('device state restores before rates are checked, queues immutable writes, and never persists manual fields', async () => {
+  const requests: { method: string; params?: unknown }[] = [];
+  const warning = { hidden: true, textContent: '' };
+  const context = createContext({ document: { getElementById: () => warning }, rpc: async (method: string, params?: unknown) => {
+    requests.push({ method, params });
+    return method === 'device:get' ? { persistent: true, values: { kts_seen: { cbrDate: '2026-09-30T00:00:00Z' }, kts_prefs: { sound: true } } } : { persistent: true };
+  } });
+  runInContext([variable('DEVICE_KEYS'), variable('memoryStore'), variable('deviceLoaded'), variable('store'), fn('deviceWarning'), fn('persistDeviceValue'), fn('loadDeviceState')].join('\n'), context);
+  await runInContext('loadDeviceState()', context);
+  assert.equal(runInContext("store.get('kts_prefs').sound", context), true);
+  runInContext("const p={sound:true};store.set('kts_prefs',p);p.sound=false;store.set('kts_prefs',p);store.set('kts_cpsRates',{eur:999})", context);
+  await runInContext('deviceWrites', context);
+  assert.deepEqual(plain(requests.slice(1)), [
+    { method: 'device:set', params: { key: 'kts_prefs', value: { sound: true } } },
+    { method: 'device:set', params: { key: 'kts_prefs', value: { sound: false } } },
+  ]);
+  assert.equal(warning.hidden, true);
+  const init = script.slice(script.indexOf('(async function init()'));
+  assert.ok(init.indexOf('await loadDeviceState()') < init.indexOf('await refreshCbr()'));
+});
+
+test('device read failure is explicit and cannot overwrite previously saved state', async () => {
+  const warning = { hidden: true, textContent: '' };
+  let calls = 0;
+  const context = createContext({ document: { getElementById: () => warning }, rpc: async () => { calls++; throw new Error('unavailable'); } });
+  runInContext([variable('DEVICE_KEYS'), variable('memoryStore'), variable('deviceLoaded'), variable('store'), fn('deviceWarning'), fn('persistDeviceValue'), fn('loadDeviceState')].join('\n'), context);
+  await runInContext('loadDeviceState()', context);
+  runInContext("store.set('kts_prefs',{sound:false})", context);
+  await runInContext('deviceWrites', context);
+  assert.equal(calls, 1);
+  assert.equal(warning.hidden, false);
+  assert.match(warning.textContent, /Общие данные на сервере не затронуты/);
+});
+
+test('official LME change alerts survive reloads but never announce first, same or older publication', async () => {
+  const context = createContext({});
+  runInContext(`
+    const state={},events=[];let saved=null;
+    const store={get(){return saved;},set(_key,value){saved=value;}};
+    let rows=[{date:'2026-09-29',cash:10000,m3:10100}];
+    async function getJSON(){return {rows,fetched_at:'2026-09-30T00:00:00Z'};}
+    function announce(msg,options){events.push({msg,options});}
+    ${variable('nf')}
+    ${variable('sgn')}
+    ${variable('ruDate')}
+    ${variable('speakNum')}
+    ${fn('loadCopper')}
+  `, context);
+  await runInContext('loadCopper()', context);
+  assert.equal(runInContext('events.length', context), 0);
+  runInContext("state.copperAuto=null;rows=[{date:'2026-09-30',cash:10200,m3:10300}]", context);
+  await runInContext('loadCopper()', context);
+  assert.equal(runInContext('events.length', context), 1);
+  assert.match(runInContext('events[0].msg', context), /Медь LME 30.09.2026/);
+  assert.equal(runInContext('events[0].options.risk', context), true);
+  await runInContext('loadCopper()', context);
+  runInContext("rows=[{date:'2026-09-29',cash:10000,m3:10100}]", context);
+  await runInContext('loadCopper()', context);
+  assert.equal(runInContext('events.length', context), 1);
+  assert.equal(runInContext('saved.copper.date', context), '2026-09-30');
+});
+
+test('author currency cards retain full opacity while actual disabled controls remain dimmed', () => {
+  assert.match(html, /button:disabled:not\(\.tile\),input:disabled,textarea:disabled\{opacity:\.55/);
+  assert.doesNotMatch(html, /button:disabled,/);
 });
 
 test('failed source refresh keeps the last successful time and is explicitly stale', async () => {
