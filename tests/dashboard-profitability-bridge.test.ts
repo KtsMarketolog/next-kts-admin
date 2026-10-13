@@ -68,6 +68,20 @@ test('invoice bridge accepts only validated opaque child messages and pins API i
   assert.ok(!Object.hasOwn(body, 'actor') && !Object.hasOwn(body, 'createdAt'));
   assert.match(state.notice.textContent, /сохранена/);
 });
+test('file metadata shares the immutable invoice event and invalid names never reach the API', async () => {
+  const state = fixture();
+  const message = { marker, type: 'invoice', nonce: state.nonce(), eventId, invoice: exampleInvoice(), upload: {name:'Счёт.pdf',size:42} };
+  for (const upload of [{...message.upload,name:'../x.pdf'}, {...message.upload,bytes:'private'}, {...message.upload,name:'\u202eexe.pdf'}]) {
+    state.send({...message,upload});
+  }
+  assert.equal(state.requests.length, 0);
+  state.send(message);
+  await until(() => state.acks().some(entry => entry.ok === true));
+  assert.deepEqual(parseProfitabilityAuditRequest(JSON.parse(String(state.requests[0].init.body))).upload,message.upload);
+  state.send({...message,upload:{...message.upload,name:'different.pdf'}});
+  await until(() => state.acks().at(-1)?.ok === false);
+  assert.equal(state.requests.length,1,'same event cannot be relabeled with a different filename');
+});
 
 test('only trusted pending state is relayed to the top page and transport failures cannot hide unsaved details', async () => {
   const state=fixture(async()=>new Response('',{status:409}));

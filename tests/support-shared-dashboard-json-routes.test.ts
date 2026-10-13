@@ -25,6 +25,7 @@ function api(role: Role = 'admin', options: {
   missingSnapshot?: boolean; readError?: Error; grants?: string[];
 } = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
+  const uploadUsage: Array<Record<string, unknown>> = [];
   const observe = (name: string, fn: (...args: unknown[]) => unknown = () => undefined) => async (...args: unknown[]) => {
     calls.push({name, args}); return fn(...args);
   };
@@ -51,6 +52,7 @@ function api(role: Role = 'admin', options: {
   const route = compile<typeof import('../src/app/api/admin/manager-dashboard/shared/json/route')>(
     '../src/app/api/admin/manager-dashboard/shared/json/route.ts', {
       'node:stream': {Readable}, '@/shared/lib/managerDashboardDomain': {PersonalDashboardError},
+      '@/shared/lib/dashboardUploadUsage': { recordDashboardUploadUsage: async (_session: unknown, input: Record<string, unknown>) => { uploadUsage.push(input); return true; } },
       '@/shared/lib/managerDashboardSecurity': security, '../../_shared': base, '../_shared': shared,
       '@/shared/lib/db/supportSharedDashboardRepo': {
         assertSupportSharedJsonUploadTarget: observe('preflight', () => {if (options.preflightError) throw options.preflightError;}),
@@ -69,7 +71,7 @@ function api(role: Role = 'admin', options: {
       '@/shared/lib/topDashboardDataStorage': {deleteTopDashboardDataFiles: observe('prune')},
       '@/shared/lib/topDashboardUploadConcurrency': {acquireDistributedTopDashboardDataUploadSlot: observe('lock', () => options.busy ? null : observe('release'))},
     });
-  return {route, calls, snapshot};
+  return {route, calls, snapshot, uploadUsage};
 }
 const URL_ROOT = 'https://example.test/api/admin/manager-dashboard/shared/json';
 function upload(headers: Record<string, string> = {}, suffix = '') {
@@ -86,6 +88,7 @@ test('shared JSON writes authorize persisted administrators and origin before pr
     const harness = api(role, options);
     assert.equal((await harness.route.POST(upload())).status, status);
     assert.deepEqual(harness.calls, []);
+    assert.equal(harness.uploadUsage.length, 0);
   }
   const harness = api();
   assert.equal((await harness.route.POST(upload({origin: 'https://evil.test'}))).status, 403);
@@ -104,6 +107,7 @@ test('shared JSON rejects malformed headers, scope injection and request sizes b
     const response = await harness.route.POST(upload(headers));
     assert.ok([400, 413].includes(response.status));
     assert.deepEqual(harness.calls, []);
+    assert.equal(harness.uploadUsage.length, 0);
   }
   const harness = api();
   assert.equal((await harness.route.POST(upload({}, '?managerId=21'))).status, 400);
@@ -122,6 +126,8 @@ test('JSON import preserves committed bytes and returns metadata without file pa
   const harness = api('admintop');
   const response = await harness.route.POST(upload());
   assert.equal(response.status, 201);
+  assert.equal(harness.uploadUsage.length, 1);
+  assert.deepEqual(harness.uploadUsage[0], { dashboardKey: 'route-planner', versionId: 8, resourceKey: 'shared-json:9', name: 'маршруты.json', size: 18, type: 'data' });
   const result = await response.json();
   assert.deepEqual(result.snapshot, harness.snapshot);
   assert.equal('prunedStoragePaths' in result, false);
@@ -142,6 +148,7 @@ test('duplicates discard only incoming bytes; known rejection discards; uncertai
     assert.equal(harness.calls.filter((call) => call.name === 'discard').length, 1);
     assert.equal(harness.calls.filter((call) => call.name === 'release').length, 1);
     if ('importError' in options) assert.equal(harness.calls.some((call) => call.name === 'prune'), false);
+    assert.equal(harness.uploadUsage.length, 0, 'duplicates and failed saves are not new uploads');
   }
 });
 

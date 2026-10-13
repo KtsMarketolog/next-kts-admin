@@ -13,6 +13,7 @@ import { applyDashboardAudiencePolicyMigration } from './dashboardAudiencePolicy
 import { applyDashboardUsageMigration, applyDashboardUsageRetentionMigration } from './dashboardUsageMigration';
 import { applyDashboardDatesMigration } from './dashboardDatesMigration';
 import { applyDashboardProfitabilityAuditMigration } from './dashboardProfitabilityAuditMigration';
+import { applyDashboardUsageDetailsMigration } from './dashboardUsageDetailsMigration';
 
 type SchemaMigration = {
   id: string;
@@ -848,6 +849,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610080005_dashboard_usage_retention', description: 'Index bounded monthly dashboard usage retention', apply: applyDashboardUsageRetentionMigration},
   {id: '202610090001_dashboard_profitability_audit', description: 'Dedicated invoice audit details and 20 MiB TOP HTML support', apply: applyDashboardProfitabilityAuditMigration},
   {id: '202610120001_employee_password_vault', description: 'Encrypted, hash-bound employee password display copies; preserve all login hashes and business data', apply: applyEmployeePasswordMigration},
+  {id: '202610140001_dashboard_usage_details', description: 'Reviewed upload metadata and visible report time, preserving existing journal and business data', apply: applyDashboardUsageDetailsMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import sanitizeHtml from 'sanitize-html';
 import { dashboardUsageAdapterScript, dashboardUsageRelayScript } from './dashboardUsageBridge';
+import { instrumentReviewedDashboardUsage } from './dashboardUsageProfiles';
 import { dashboardProfitabilityBridgeScript } from './dashboardProfitabilityBridge';
 import { isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from './dashboardProfitabilityHtml';
 
@@ -1182,6 +1183,7 @@ export function injectTopDashboardDataAdapter(
   const legacyReadyFunction = detectTopDashboardLegacyReadyFunction(htmlContent);
   const localInvoiceMode = options.localInvoiceMode === true && isSupportedProfitabilityHtml(htmlContent);
   const readOnly = options.readOnly === true || contract.profile === 'profitability-unsupported';
+  htmlContent = instrumentReviewedDashboardUsage(htmlContent);
   const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, readOnly, legacyReadyFunction, localInvoiceMode)}</script>`;
   const head = HEAD_OPEN_PATTERN.exec(htmlContent);
   if (head) {

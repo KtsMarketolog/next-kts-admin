@@ -1,4 +1,5 @@
 import { createSupportSharedDashboardHtml, deleteSupportSharedDashboardHtml } from '@/shared/lib/db/supportSharedDashboardRepo';
+import { recordDashboardUploadUsage } from '@/shared/lib/dashboardUploadUsage';
 import { detectSupportSharedHtmlFormat } from '@/shared/lib/supportSharedRoutePlannerHtml';
 import { parsePersonalDashboardId, readPersonalRequestBytes } from '@/shared/lib/managerDashboardSecurity';
 import { readTopDashboardHtmlUpload } from '../../../top-dashboard/blocks/routeUtils';
@@ -19,6 +20,8 @@ export async function POST(request: Request) {
       return personalJson({error: 'Нужен HTML личного отчёта kts-personal v1 или компоновщика рейсов'}, 400);
     }
     const version = await createSupportSharedDashboardHtml({...result.upload, actorId: access.actorId});
+    await recordDashboardUploadUsage(access.session, { dashboardKey: 'route-planner', versionId: version.id,
+      resourceKey: `shared-html:${version.id}`, name: version.originalName, size: version.fileSize, type: 'html' });
     return personalJson({version}, 201);
   } catch (error) { return personalApiError(error); }
 }

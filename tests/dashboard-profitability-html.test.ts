@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { injectProfitabilityAuditAdapter, isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '../src/shared/lib/dashboardProfitabilityHtml';
 import { parseProfitabilityInvoice } from '../src/shared/lib/dashboardProfitabilityAudit';
+import { instrumentReviewedProfitabilityUsage } from '../src/shared/lib/dashboardUsageProfiles';
 
 const marker = 'kts-profitability-audit-v1';
 const nonce = '01234567-89ab-4def-8123-456789abcdef';
@@ -23,6 +24,7 @@ function syntheticProfile() {
   vm.runInNewContext(source, {
     exports,
     require(name: string) {
+      if (name === './dashboardUsageProfiles') return { instrumentReviewedProfitabilityUsage };
       assert.equal(name, 'node:crypto');
       return { createHash(algorithm: string) {
         let input = '';
@@ -156,6 +158,19 @@ test('file identity and trusted import events suppress automatic restoration, de
   state.fireDocument('drop', { isTrusted: true, dataTransfer: { files: [dropped] } });
   state.record([invoice()], dropped);
   assert.equal(state.invoices().length, 4);
+});
+test('file name and size accompany successful invoices only, without paths, bytes or original File properties', () => {
+  const state = adapterFixture(); state.init();
+  const file = { name: 'C:\\private\\Счёт\u202e-123.pdf', size: 1234, path: '/private/secret', text: 'PRIVATE-CONTENT' };
+  state.record([invoice()], file);
+  assert.equal(state.invoices().length, 0, 'unselected files are not audited');
+  state.mark(file);
+  assert.equal(state.invoices().length, 0, 'selection alone is not a successful upload');
+  state.record([invoice()], file);
+  assert.deepEqual(state.invoices()[0].upload, { name: 'Счёт-123.pdf', size: 1234 });
+  assert.doesNotMatch(JSON.stringify(state.invoices()[0]), /PRIVATE|private|path|text/);
+  const first = state.invoices()[0]; state.advance(10000);
+  assert.deepEqual(state.invoices().at(-1), first, 'retry preserves immutable file metadata');
 });
 
 test('missing numbers, original line-sum fallback, unavailable amount and signed quantities preserve truth', () => {

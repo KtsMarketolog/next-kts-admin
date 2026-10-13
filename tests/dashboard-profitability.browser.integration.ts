@@ -103,6 +103,15 @@ async function main() {
         await inner.dispose();
         const report = page.frames().find((frame: any) => frame.url().includes(contentPath)); assert.ok(report);
         await report.waitForSelector('#fInv', {state:'attached'});
+        await page.evaluate(() => {
+          const frame = document.querySelector<HTMLIFrameElement>('#dashboard-frame')!;
+          const root = window as unknown as {fixtureUsage: Array<{action:string}>}; root.fixtureUsage = [];
+          window.addEventListener('message', event => {
+            if(event.source === frame.contentWindow && event.origin === 'null'
+              && event.data?.marker === 'kts-dashboard-usage-v1' && event.data.type === 'event') root.fixtureUsage.push(event.data);
+          });
+          window.postMessage({marker:'kts-dashboard-usage-v1',type:'init',nonce:'synthetic_profit_usage_nonce_123'},location.origin);
+        });
         assert.equal(await report.locator('#fInv').isDisabled(), false, 'viewer can import local invoices');
         assert.equal(await report.locator('#fSnap').isDisabled(), false);
         assert.equal(await report.evaluate(() => typeof (window as any).getPdfJs), 'function');
@@ -123,6 +132,8 @@ async function main() {
         assert.equal(requestBodies[requestsBefore], requestBodies[requestsBefore+1], 'retry preserves same event ID and body');
         assert.equal(accepted.at(-1)!.invoice.invoiceNumber, 'SYNTHETIC-XLSX');
         assert.equal(accepted.at(-1)!.invoice.lines[0].quantity, 2);
+        assert.equal(accepted.at(-1)!.upload?.name, 'synthetic.xlsx');
+        assert.ok(accepted.at(-1)!.upload!.size > 0);
         await report.locator('#fInv').setInputFiles(pdfPath);
         await page.waitForFunction(() => document.querySelector('#profitability-audit-notice')?.textContent?.includes('сохранена'));
         await new Promise<void>((resolve, reject) => {
@@ -131,12 +142,20 @@ async function main() {
         assert.equal(accepted.at(-1)!.invoice.invoiceNumber, 'SYNTHETIC-PDF');
         assert.equal(accepted.at(-1)!.invoice.lines[0].quantity, 3);
         assert.equal(accepted.at(-1)!.invoice.dealAmount, 75);
+        assert.deepEqual(accepted.at(-1)!.upload, {name:'synthetic.pdf',size:pdf.length});
         await report.locator('#fSnap').setInputFiles(snapshotPath);
         await new Promise<void>((resolve, reject) => {
           const start=Date.now(); const poll=()=>accepted.length>=before+3?resolve():Date.now()-start>10000?reject(new Error('Synthetic snapshot audit not received')):setTimeout(poll,100);poll();
         });
         assert.equal(accepted.at(-1)!.invoice.invoiceNumber, 'SYNTHETIC-SNAPSHOT');
         assert.equal(accepted.at(-1)!.invoice.currency, 'USD');
+        assert.equal(accepted.at(-1)!.upload?.name, 'synthetic.json');
+        await report.locator('.mitem[data-view="load"]').click();
+        await report.locator('.mitem[data-view="sum"]').click();
+        await report.locator('#nomQ').fill('Synthetic');
+        await page.waitForFunction(() => (window as unknown as {fixtureUsage:Array<{action:string}>}).fixtureUsage.some(event=>event.action==='filter_changed'));
+        const actions = await page.evaluate(() => (window as unknown as {fixtureUsage:Array<{action:string}>}).fixtureUsage.map(event=>event.action));
+        assert.ok(actions.includes('tab_changed') && actions.includes('calculation_completed'),'reviewed V19 navigation/filter calculations reach generic usage without invoice values');
         await report.waitForFunction(()=>document.querySelector('#kts-profitability-audit-notice')?.textContent?.includes('записана в журнал: 3'));
         const screenshotDir=process.env.KTS_PROFITABILITY_QA_DIR;
         if(screenshotDir){await mkdir(screenshotDir,{recursive:true});await page.screenshot({path:path.join(screenshotDir,`${engine}-${mobile?'mobile':'desktop'}-success.png`)});}

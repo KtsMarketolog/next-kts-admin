@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import { DASHBOARD_USAGE_MARKER, DASHBOARD_USAGE_MAX_BATCH, readDashboardUsageMessage, type DashboardUsageAction, type DashboardUsageEvent } from '@/shared/lib/dashboardUsage';
+import { DASHBOARD_USAGE_MARKER, readDashboardUsageMessageDetails, type DashboardUsageAction, type DashboardUsageEvent } from '@/shared/lib/dashboardUsage';
 import { useProfitabilityAuditGuard } from './useProfitabilityAuditGuard';
+import { useDashboardUsageDelivery } from './DashboardUsageDeliveryProvider';
 
 /** Opaque frames speak only to their authenticated parent, never to the API. */
 export function useDashboardUsage({ dashboardKey, iframeRef, preview = false, versionId = null, opaque = false }: {
@@ -10,52 +11,64 @@ export function useDashboardUsage({ dashboardKey, iframeRef, preview = false, ve
   preview?: boolean; versionId?: number | null; opaque?: boolean;
 }) {
   useProfitabilityAuditGuard(iframeRef);
+  const delivery = useDashboardUsageDelivery();
   const recordRef = useRef<(action: DashboardUsageAction) => void>(() => {});
   const record = useCallback((action: DashboardUsageAction) => recordRef.current(action), []);
   useEffect(() => {
     const nonce = crypto.randomUUID().replaceAll('-', '');
-    let events: DashboardUsageEvent[] = [], stopped = false, sending = false, opened = false;
+    let stopped = false, opened = false;
+    let observedFrame: HTMLIFrameElement | null = null, inViewport = false;
+    const viewing = delivery?.viewing.register({ dashboardKey, preview, versionId });
+    const updateVisible = () => viewing?.setVisible(!stopped && opened && inViewport && !document.hidden);
+    const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
+      const entry = entries.find((item) => item.target === observedFrame);
+      if (!entry) return;
+      inViewport = entry.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
+      updateVisible();
+    });
     const recent = new Map<DashboardUsageAction, number>();
-    const enqueue = (action: DashboardUsageAction) => {
-      if (stopped || document.hidden) return;
+    const enqueue = (action: DashboardUsageAction, upload?: DashboardUsageEvent['upload']) => {
+      // A user-selected import may finish after the tab becomes hidden; retain that success.
+      if (stopped || (document.hidden && !upload)) return;
+      // Presence and successful server uploads cannot be asserted by report actions.
+      if (action === 'viewing_time' || action === 'file_uploaded') return;
       const now = Date.now();
-      if (now - (recent.get(action) ?? 0) < (action === 'data_loaded' ? 10_000 : 500)) return;
+      if (!upload && now - (recent.get(action) ?? 0) < (action === 'data_loaded' ? 10_000 : 500)) return;
       recent.set(action, now);
-      if (events.length < 100) events.push({ id: crypto.randomUUID().replaceAll('-', ''), action });
+      delivery?.enqueue({ dashboardKey, preview, versionId }, { id: crypto.randomUUID().replaceAll('-', ''), action, ...(upload ? { upload } : {}) });
     };
     recordRef.current = enqueue;
-    const flush = async () => {
-      if (sending || events.length === 0) return;
-      const batch = events.splice(0, DASHBOARD_USAGE_MAX_BATCH); sending = true;
-      try {
-        const response = await fetch('/api/admin/dashboard-usage', { method: 'POST', credentials: 'same-origin',
-          cache: 'no-store', keepalive: true, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dashboardKey, preview, versionId, events: batch }) });
-        // Fail closed on lost access, without disrupting the actual report.
-        if (response.status === 401 || response.status === 403) { stopped = true; events = []; }
-      } catch { /* Usage is best-effort, not a reason to block a business report. */ }
-      finally { sending = false; }
+    const probe = () => {
+      if (observedFrame !== iframeRef.current) {
+        observer?.disconnect(); observedFrame = iframeRef.current; inViewport = false; opened = false; updateVisible();
+        if (observedFrame) observer?.observe(observedFrame);
+      }
+      iframeRef.current?.contentWindow?.postMessage({ marker: DASHBOARD_USAGE_MARKER, type: 'init', nonce }, opaque ? '*' : window.location.origin);
     };
-    const probe = () => iframeRef.current?.contentWindow?.postMessage({ marker: DASHBOARD_USAGE_MARKER, type: 'init', nonce }, opaque ? '*' : window.location.origin);
     const receive = (event: MessageEvent) => {
       if (event.source !== iframeRef.current?.contentWindow || event.origin !== (opaque ? 'null' : window.location.origin)) return;
       if (event.data?.marker === DASHBOARD_USAGE_MARKER && event.data.type === 'ready') { probe(); return; }
-      const action = readDashboardUsageMessage(event.data, nonce);
-      if (action) {
+      const message = readDashboardUsageMessageDetails(event.data, nonce);
+      if (message) {
         if (!opened) { enqueue('report_open'); opened = true; }
-        if (action !== 'report_open') enqueue(action);
+        updateVisible();
+        if (message.action !== 'report_open') enqueue(message.action, message.upload);
       }
     };
     window.addEventListener('message', receive);
     const initialProbe = window.setInterval(probe, 1000);
-    const flushTimer = window.setInterval(() => { void flush(); }, 5000);
-    const visibility = () => { if (document.hidden) void flush(); else probe(); };
+    const visibility = () => { updateVisible(); if (document.hidden) void delivery?.flush(); else probe(); };
+    const pageHide = () => { viewing?.setVisible(false); void delivery?.flush(); };
     document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('pagehide', pageHide);
     probe();
     return () => {
       window.removeEventListener('message', receive); document.removeEventListener('visibilitychange', visibility);
-      clearInterval(initialProbe); clearInterval(flushTimer); recordRef.current = () => {}; void flush();
+      window.removeEventListener('pagehide', pageHide);
+      stopped = true;
+      observer?.disconnect(); viewing?.dispose();
+      clearInterval(initialProbe); recordRef.current = () => {}; void delivery?.flush();
     };
-  }, [dashboardKey, iframeRef, opaque, preview, versionId]);
+  }, [dashboardKey, delivery, iframeRef, opaque, preview, versionId]);
   return record;
 }

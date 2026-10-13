@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 
 import { detectTopDashboardDataContract } from '../topDashboardContentSecurity';
 import { normalizeDashboardDataDate } from '../dashboardDates';
-import { isSupportedProfitabilityHtml } from '../dashboardProfitabilityHtml';
+import { isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '../dashboardProfitabilityHtml';
 import { TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
 import { enqueueDashboardFilesForDeletion } from './dashboardFileCleanupRepo';
@@ -1746,8 +1746,8 @@ export async function activateTopDashboardBlockVersion(
       throw new TopDashboardStateConflictError(currentActiveVersionId);
     }
 
-    const versionResult = await client.query<{ first_published_at: string | null }>(
-      `select first_published_at::text
+    const versionResult = await client.query<{ first_published_at: string | null; html_content: string }>(
+      `select first_published_at::text, html_content
        from top_dashboard_block_versions
        where block_id = $1 and id = $2
        limit 1`,
@@ -1756,26 +1756,42 @@ export async function activateTopDashboardBlockVersion(
     const version = versionResult.rows[0];
     if (!version) throw new TopDashboardVersionNotFoundError();
 
-    assertValidDashboardDataContract(input.expectedSnapshotFormat, input.expectedProfile);
+    const localOnlyProfitability = isSupportedProfitabilityHtml(version.html_content);
+    if (localOnlyProfitability) {
+      // Recheck the stored source inside the transaction. This exception permits
+      // only the reviewed local invoice workflow, never a shared data binding.
+      if (input.expectedSnapshotFormat !== null || input.expectedProfile !== 'profitability') {
+        throw new TopDashboardDataCompatibilityError('Личные счета этого отчёта нельзя публиковать как общие данные');
+      }
+    } else {
+      if (isProfitabilityHtmlCandidate(version.html_content)) {
+        throw new TopDashboardDataCompatibilityError('Эта версия отчёта рентабельности ещё не поддерживается');
+      }
+      assertValidDashboardDataContract(input.expectedSnapshotFormat, input.expectedProfile);
+    }
 
-    if (currentActiveVersionId === input.versionId) {
-      return {
-        activeVersionId: input.versionId,
-        previousVersionId: numericId(state.previous_version_id),
-        updatedAt: state.updated_at,
-        change: 'unchanged',
-        prunedStoragePaths: [],
-      };
+    const unchanged = currentActiveVersionId === input.versionId;
+    const unchangedResult = {
+      activeVersionId: input.versionId,
+      previousVersionId: numericId(state.previous_version_id),
+      updatedAt: state.updated_at,
+      change: 'unchanged' as const,
+      prunedStoragePaths: [],
+    };
+    if (unchanged && !localOnlyProfitability) {
+      return unchangedResult;
     }
 
     const dataResult = await client.query<{
       active_version_id: string | null;
+      previous_version_id: string | null;
       snapshot_format: TopDashboardSnapshotFormat | null;
       dashboard_profile: TopDashboardProfile | null;
       bound_html_version_id: string | null;
     }>(
       `select
          data_state.active_version_id::text,
+         data_state.previous_version_id::text,
          data_versions.snapshot_format,
          data_versions.dashboard_profile,
          data_versions.bound_html_version_id::text
@@ -1790,6 +1806,9 @@ export async function activateTopDashboardBlockVersion(
     );
     const dataState = dataResult.rows[0];
     if (!dataState) throw new TopDashboardBlockDataStateNotFoundError();
+    if (unchanged && dataState.active_version_id === null && dataState.previous_version_id === null) {
+      return unchangedResult;
+    }
     if (dataState.active_version_id !== null) {
       if (!dataState.snapshot_format || !dataState.dashboard_profile) {
         throw new TopDashboardBlockDataVersionNotFoundError();
@@ -1805,7 +1824,7 @@ export async function activateTopDashboardBlockVersion(
       const activeDataBinding = numericId(dataState.bound_html_version_id);
 
       // Native JSON retains its existing format/profile compatibility checks.
-      if (!targetIsGeneric && !activeDataIsGeneric) {
+      if (!localOnlyProfitability && !targetIsGeneric && !activeDataIsGeneric) {
         assertDashboardDataCompatibility({
           htmlVersionId: input.versionId,
           htmlSnapshotFormat: input.expectedSnapshotFormat,
@@ -1819,21 +1838,25 @@ export async function activateTopDashboardBlockVersion(
     }
 
     await initializeDashboardDataContexts(client, input.blockId);
-    const targetContext = await client.query<TopDashboardStateRow>(
+    const targetContext = localOnlyProfitability ? null : (await client.query<TopDashboardStateRow>(
       `select active_version_id::text, previous_version_id::text
        from top_dashboard_block_data_context_state
        where block_id = $1 and context_key = $2`,
       [input.blockId, dashboardDataContextKey(input.expectedSnapshotFormat!, input.expectedProfile!, input.versionId)],
-    );
-    // A new generic HTML starts empty; a rollback restores its exact saved pair.
+    )).rows[0];
+    // A local-only report has no shared data pointers/context. The previous
+    // report's saved pair stays intact for rollback, just as for generic HTML.
     await client.query(
       `update top_dashboard_block_data_state
        set active_version_id = $2, previous_version_id = $3,
            updated_by_admin_user_id = $4, updated_by_manager_id = $5, updated_at = now()
        where block_id = $1`,
-      [input.blockId, numericId(targetContext.rows[0]?.active_version_id),
-        numericId(targetContext.rows[0]?.previous_version_id), input.adminUserId, input.managerId],
+      [input.blockId, numericId(targetContext?.active_version_id),
+        numericId(targetContext?.previous_version_id), input.adminUserId, input.managerId],
     );
+    // A legacy already-active local report may still have shared pointers.
+    // Detach them without changing the HTML rollback pair or deleting history.
+    if (unchanged) return unchangedResult;
 
     await client.query(
       `update top_dashboard_block_versions

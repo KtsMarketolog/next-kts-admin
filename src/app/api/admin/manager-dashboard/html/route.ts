@@ -1,4 +1,5 @@
 import { readTopDashboardHtmlUpload } from '../../top-dashboard/blocks/routeUtils';
+import { recordDashboardUploadUsage } from '@/shared/lib/dashboardUploadUsage';
 import { createPersonalDashboardHtml, deletePersonalDashboardHtml } from '@/shared/lib/db/managerDashboardRepo';
 import { isPersonalDashboardHtml } from '@/shared/lib/managerDashboardHtml';
 import { readPersonalRequestBytes } from '@/shared/lib/managerDashboardSecurity';
@@ -22,6 +23,8 @@ export async function POST(request: Request) {
       return personalJson({error: 'Нужен HTML личного дашборда продаж с контрактом kts-personal v1 (совместим с v12). Общий TOP-дашборд сюда не подходит.'}, 400);
     }
     const version = await createPersonalDashboardHtml({...result.upload, actorId: access.actorId, audience});
+    await recordDashboardUploadUsage(access.session, { dashboardKey: `manager:${audience}`, versionId: version.id,
+      resourceKey: `personal-html:${audience}:${version.id}`, name: version.originalName, size: version.fileSize, type: 'html' });
     return personalJson({version}, 201);
   } catch (error) { return personalApiError(error); }
 }

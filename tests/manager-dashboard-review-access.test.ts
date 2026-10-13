@@ -71,6 +71,7 @@ test('TOP review rights cannot enter owner routes, import history or any persona
   const repository = new Proxy({}, { get: (_target, property) => forbiddenIo(String(property)) });
   const common = {
     'node:crypto': crypto,
+    '@/shared/lib/dashboardUploadUsage': repository,
     '@/shared/lib/db/managerDashboardRepo': repository,
     '@/shared/lib/managerDashboardAudience': audiences,
     '@/shared/lib/managerDashboardSecurity': security,

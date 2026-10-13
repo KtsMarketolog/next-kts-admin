@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test, { mock } from 'node:test';
 import type { AdminSessionRole } from '../src/shared/lib/adminAuth';
+import type { TopDashboardSnapshotFormat } from '../src/shared/lib/db/topDashboardDomain';
 import type { ProfitabilityAuditRequest, ProfitabilityInvoice } from '../src/shared/lib/dashboardProfitabilityAudit';
 import { MAX_PROFITABILITY_AUDIT_BODY } from '../src/shared/lib/dashboardProfitabilityAudit';
 import { createAccessUser } from '../src/shared/lib/db/adminUsersRepo';
@@ -53,7 +54,10 @@ test('profitability details isolated PostgreSQL acceptance', async (t) => {
   guard();
   // This test-only loader substitution never changes production profile detection.
   // It permits wholly synthetic invoices/HTML while exercising real SQL and ACL.
-  const profile = { isSupportedProfitabilityHtml: (html: string) => html === SUPPORTED_HTML };
+  const profile = {
+    isSupportedProfitabilityHtml: (html: string) => html === SUPPORTED_HTML,
+    isProfitabilityHtmlCandidate: (html: string) => html === SUPPORTED_HTML || html.includes('Unreviewed invoice version'),
+  };
   const moduleMock = mock.module('../src/shared/lib/dashboardProfitabilityHtml.ts', {
     namedExports: profile, defaultExport: profile,
   });
@@ -61,8 +65,12 @@ test('profitability details isolated PostgreSQL acceptance', async (t) => {
     const { recordDashboardProfitabilityAudit: record, readDashboardProfitabilityAudit: read, ProfitabilityAuditError } =
       await import('../src/shared/lib/db/dashboardProfitabilityAuditRepo');
     const { createTopDashboardBlock, isActiveTopDashboardHtmlVersion, getPublishedTopDashboardBlocks,
-      getPublishedTopDashboardBlockOverview, getPublishedTopDashboardBlockVersionContent } =
+      getPublishedTopDashboardBlockOverview, getPublishedTopDashboardBlockVersionContent,
+      activateTopDashboardBlockVersion, createAndActivateTopDashboardBlockDataVersion,
+      activateTopDashboardBlockDataVersion, getActiveTopDashboardBlockDataContent, getTopDashboardBlockOverview } =
       await import('../src/shared/lib/db/topDashboardBlocksRepo');
+    const { TopDashboardDataCompatibilityError, TopDashboardStateConflictError } =
+      await import('../src/shared/lib/db/topDashboardDomain');
     const forbidden = (error: unknown) => error instanceof ProfitabilityAuditError && error.status === 403;
     const conflict = (error: unknown) => error instanceof ProfitabilityAuditError && error.status === 409;
     await ensureSiteSchema();
@@ -88,6 +96,107 @@ test('profitability details isolated PostgreSQL acceptance', async (t) => {
     });
     const count = async () => Number((await query('select count(*)::text as count from dashboard_profitability_audit_details')).rows[0].count);
     let acceptedId = '';
+
+    const publishLocal = (blockId: number, versionId: number, expectedActiveVersionId: number | null) =>
+      activateTopDashboardBlockVersion({ blockId, versionId, expectedActiveVersionId,
+        expectedSnapshotFormat: null, expectedProfile: 'profitability', adminUserId: admin.user.numericId, managerId: null });
+
+    await t.test('normal publication admits exact local-only V19 without any shared data, retaining CAS and catalog readiness', async () => {
+      const item = await createTopDashboardBlock({ title: 'Synthetic normal V19 publication', createdByAdminUserId: null, createdByManagerId: null });
+      const target = await htmlVersion(item.id, SUPPORTED_HTML, false);
+      const rejected = await htmlVersion(item.id, '<input type="file" id="fInv">Unreviewed invoice version', false);
+      await assert.rejects(publishLocal(item.id, rejected, null), TopDashboardDataCompatibilityError);
+      await assert.rejects(activateTopDashboardBlockVersion({ blockId: item.id, versionId: rejected, expectedActiveVersionId: null,
+        expectedSnapshotFormat: 'multi-file-v1', expectedProfile: 'generic', adminUserId: admin.user.numericId, managerId: null }),
+      TopDashboardDataCompatibilityError);
+      await assert.rejects(activateTopDashboardBlockVersion({ blockId: item.id, versionId: target, expectedActiveVersionId: null,
+        expectedSnapshotFormat: 'multi-file-v1', expectedProfile: 'generic', adminUserId: admin.user.numericId, managerId: null }),
+      TopDashboardDataCompatibilityError);
+      assert.equal((await getTopDashboardBlockOverview(item.id)).activeVersionId, null);
+      const published = await publishLocal(item.id, target, null);
+      assert.equal(published.change, 'published');
+      assert.equal(published.activeVersionId, target);
+      assert.deepEqual(published.prunedStoragePaths, []);
+      assert.equal((await publishLocal(item.id, target, target)).change, 'unchanged');
+      await assert.rejects(publishLocal(item.id, rejected, null), TopDashboardStateConflictError);
+      const overview = await getPublishedTopDashboardBlockOverview(item.id);
+      assert.equal(overview?.activeVersionId, target);
+      assert.equal(overview?.dataUploadedAt, null);
+      assert.ok((await getPublishedTopDashboardBlocks()).some(row => row.id === item.id));
+      assert.equal((await getPublishedTopDashboardBlockVersionContent(item.id, target))?.htmlContent, SUPPORTED_HTML);
+      assert.equal(await getActiveTopDashboardBlockDataContent(item.id, target), null);
+      assert.equal((await query('select count(*)::int as count from top_dashboard_block_data_context_state where block_id=$1', [item.id])).rows[0].count, 0);
+    });
+
+    for (const kind of ['generic', 'native'] as const) {
+      await t.test(`local-only publication hides ${kind} shared data and rollback restores its exact saved pair`, async () => {
+        const item = await createTopDashboardBlock({ title: `Synthetic ${kind} rollback`, createdByAdminUserId: null, createdByManagerId: null });
+        const generic = kind === 'generic';
+        const originalHtml = generic ? '<input id="files" type="file">'
+          : '<script>const DASH_NAME="аналитика_продаж"; const data={format:"kts-bundle",version:1};</script>';
+        const expectedSnapshotFormat = generic ? 'multi-file-v1' as const : 'kts-bundle-v1' as const;
+        const expectedProfile = generic ? 'generic' as const : 'sales-analytics' as const;
+        const original = await htmlVersion(item.id, originalHtml, false);
+        const target = await htmlVersion(item.id, SUPPORTED_HTML, false);
+        const actor = { adminUserId: admin.user.numericId, managerId: null };
+        await activateTopDashboardBlockVersion({ blockId: item.id, versionId: original, expectedActiveVersionId: null,
+          expectedSnapshotFormat, expectedProfile, ...actor });
+        const input = (previous: number | null, label: string) => {
+          const content = Buffer.from(label);
+          return { blockId: item.id, expectedActiveHtmlVersionId: original, expectedActiveVersionId: previous,
+            expectedHtmlSnapshotFormat: expectedSnapshotFormat, expectedHtmlProfile: expectedProfile,
+            originalName: `${label}.bin`, content, storagePath: null, fileSize: content.length, uncompressedSize: content.length,
+            sha256: createHash('sha256').update(content).digest('hex'), snapshotFormat: expectedSnapshotFormat,
+            dashboardProfile: expectedProfile, boundHtmlVersionId: generic ? original : null,
+            uploadedByAdminUserId: admin.user.numericId, uploadedByManagerId: null };
+        };
+        const a = await createAndActivateTopDashboardBlockDataVersion(input(null, 'first'));
+        const b = await createAndActivateTopDashboardBlockDataVersion(input(a.version.id, 'second'));
+        // The selected older snapshot must win over chronological upload order on rollback.
+        await activateTopDashboardBlockDataVersion({ blockId: item.id, expectedActiveHtmlVersionId: original,
+          versionId: a.version.id, expectedActiveVersionId: b.version.id,
+          expectedHtmlSnapshotFormat: expectedSnapshotFormat, expectedHtmlProfile: expectedProfile, ...actor });
+        const before = (await getTopDashboardBlockOverview(item.id)).data;
+        const result = await publishLocal(item.id, target, original);
+        assert.deepEqual(result.prunedStoragePaths, []);
+        const local = await getTopDashboardBlockOverview(item.id);
+        assert.equal(local.previousVersionId, original);
+        assert.equal(local.data.activeVersionId, null);
+        assert.equal(local.data.previousVersionId, null);
+        assert.equal(await getActiveTopDashboardBlockDataContent(item.id, target), null);
+        await assert.rejects(createAndActivateTopDashboardBlockDataVersion({ ...input(null, 'must-not-share'),
+          expectedActiveHtmlVersionId: target, expectedHtmlSnapshotFormat: null as unknown as TopDashboardSnapshotFormat, expectedHtmlProfile: 'profitability',
+          boundHtmlVersionId: generic ? target : null }), TopDashboardDataCompatibilityError);
+        await assert.rejects(activateTopDashboardBlockDataVersion({ blockId: item.id, expectedActiveHtmlVersionId: target,
+          versionId: a.version.id, expectedActiveVersionId: null,
+          expectedHtmlSnapshotFormat: null as unknown as TopDashboardSnapshotFormat, expectedHtmlProfile: 'profitability', ...actor }), TopDashboardDataCompatibilityError);
+        const rollback = await activateTopDashboardBlockVersion({ blockId: item.id, versionId: original,
+          expectedActiveVersionId: target, expectedSnapshotFormat, expectedProfile, ...actor });
+        assert.equal(rollback.change, 'rolled_back');
+        assert.deepEqual(rollback.prunedStoragePaths, []);
+        const restored = (await getTopDashboardBlockOverview(item.id)).data;
+        assert.equal(restored.activeVersionId, before.activeVersionId);
+        assert.equal(restored.previousVersionId, before.previousVersionId);
+        assert.deepEqual(restored.versions, before.versions);
+        assert.equal((await getActiveTopDashboardBlockDataContent(item.id, original))?.id, a.version.id);
+        // Defensive handling of legacy/manual states must not leave private HTML
+        // pointing at an unrelated native shared snapshot even on an idempotent call.
+        await query(`update top_dashboard_block_state set active_version_id=$2,previous_version_id=$3 where block_id=$1`,
+          [item.id, target, original]);
+        assert.equal((await publishLocal(item.id, target, target)).change, 'unchanged');
+        const detached = await getTopDashboardBlockOverview(item.id);
+        assert.equal(detached.previousVersionId, original);
+        assert.equal(detached.data.activeVersionId, null);
+        assert.equal(detached.data.previousVersionId, null);
+        assert.equal(await getActiveTopDashboardBlockDataContent(item.id, target), null);
+        await activateTopDashboardBlockVersion({ blockId: item.id, versionId: original,
+          expectedActiveVersionId: target, expectedSnapshotFormat, expectedProfile, ...actor });
+        const secondRestored = (await getTopDashboardBlockOverview(item.id)).data;
+        assert.equal(secondRestored.activeVersionId, before.activeVersionId);
+        assert.equal(secondRestored.previousVersionId, before.previousVersionId);
+        assert.deepEqual(secondRestored.versions, before.versions);
+      });
+    }
 
     await t.test('migration increases TOP HTML to 20 MiB, not personal HTML limits', async () => {
       const accepted = await query<{ id: string }>(`insert into top_dashboard_block_versions
@@ -126,6 +235,19 @@ test('profitability details isolated PostgreSQL acceptance', async (t) => {
       assert.equal(JSON.stringify(listed).includes(invoice.invoiceNumber!), false);
       assert.equal(await read(admin.session, '9223372036854775808'), null);
       assert.equal(await read(admin.session, '0'), null);
+    });
+
+    await t.test('successful invoice file metadata persists on its single usage event and is immutable on retry', async () => {
+      const request = input({ upload: { name: 'Синтетический-счёт.pdf', size: 12345 } });
+      const event = await record(purchaser.session, request);
+      const details = (await query('select upload_name,upload_size from dashboard_usage_event_details where usage_event_id=$1', [event.id])).rows;
+      assert.equal(details.length, 1); assert.equal(details[0].upload_name, request.upload!.name); assert.equal(Number(details[0].upload_size), 12345);
+      assert.equal((await record(purchaser.session, request)).id, event.id);
+      await assert.rejects(record(purchaser.session, {...request, upload: {...request.upload!,name:'different.pdf'}}), conflict);
+      const {upload: _upload, ...legacyRequest} = request;
+      void _upload;
+      await assert.rejects(record(purchaser.session, legacyRequest), conflict);
+      assert.deepEqual(await read(admin.session,event.id), invoice);
     });
 
     await t.test('published catalog and readers admit only the exact supported self-contained profile without data', async () => {

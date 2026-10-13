@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { PersonalDashboardAudience } from './managerDashboardAudience';
 import { dashboardUsageRelayScript } from './dashboardUsageBridge';
+import { instrumentReviewedDashboardUsage } from './dashboardUsageProfiles';
 
 import { buildTopDashboardContentSecurityPolicy, buildTopDashboardFrameSecurityPolicy, getTopDashboardDataAdapterScript } from './topDashboardContentSecurity';
 import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_MAX_BYTES, TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH, TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE, TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE } from './topDashboardDownloadBridge';
@@ -149,6 +150,7 @@ export function getPersonalDashboardAdapterScript(scope: DashboardScope = 'perso
 
 export function injectPersonalDashboardAdapter(html: string, scope: DashboardScope = 'personal') {
   if (!isPersonalDashboardHtml(html)) throw new Error('HTML не поддерживает контракт личного снимка kts-personal v1');
+  html = instrumentReviewedDashboardUsage(html);
   const script = `<script data-kts-personal-download-adapter="1">${getTopDashboardDataAdapterScript(null, null, true)}</script><script data-kts-personal-adapter="1">${getPersonalDashboardAdapterScript(scope)}</script>`;
   const index = html.toLowerCase().lastIndexOf('</body>');
   return index >= 0 ? html.slice(0, index) + script + html.slice(index) : html + script;

@@ -203,6 +203,7 @@ function deleteRoute(session: Session, options: { error?: Error; limited?: boole
   const route = compile<typeof import('../src/app/api/admin/manager-dashboard/html/route')>(
     '../src/app/api/admin/manager-dashboard/html/route.ts', {
       '../../top-dashboard/blocks/routeUtils': {},
+      '@/shared/lib/dashboardUploadUsage': { recordDashboardUploadUsage: async () => assert.fail('DELETE must not record a file upload') },
       '@/shared/lib/db/managerDashboardRepo': { deletePersonalDashboardHtml: async (input: { versionId: number; audience: Audience }) => {
         calls.push(input);
         if (options.error) throw options.error;

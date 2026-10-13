@@ -1,5 +1,6 @@
 import { isPersonalDashboardHtml } from './managerDashboardHtml';
 import { dashboardUsageRelayScript } from './dashboardUsageBridge';
+import { instrumentReviewedDashboardUsage } from './dashboardUsageProfiles';
 import { buildTopDashboardContentSecurityPolicy, buildTopDashboardFrameSecurityPolicy, getTopDashboardDataAdapterScript } from './topDashboardContentSecurity';
 import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_MAX_BYTES, TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE, TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE } from './topDashboardDownloadBridge';
 
@@ -21,6 +22,7 @@ export function detectSupportSharedHtmlFormat(html: string): SupportSharedHtmlFo
 
 export function injectSupportSharedRoutePlannerAdapter(html: string) {
   if (detectSupportSharedHtmlFormat(html) !== 'route-planner-v1') throw new Error('Несовместимый HTML компоновщика');
+  html = instrumentReviewedDashboardUsage(html);
   // Expose only the existing loading boundary, not the internal state. The
   // supplied calculations and render functions are not rewritten.
   const hooked = html.replace(LOAD_HOOK, 'window.__ktsLoadSharedSnapshot = loadSnapshot; window.UI = {');
@@ -80,6 +82,7 @@ function routePlannerAdapterScript() {
         if (printed || !html || html.length > 5 * 1024 * 1024) return;
         printed = true;
         window.parent.postMessage({marker,type:'print',html}, '*');
+        if (window.__ktsDashboardUsage) window.__ktsDashboardUsage.record('export_started');
       }};
     };
     window.addEventListener('message', async (event) => {

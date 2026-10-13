@@ -52,6 +52,12 @@ export function dashboardProfitabilityBridgeScript(frameExpression: string, conf
     }
     function text(value, max) { return typeof value === 'string' && value.trim().length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value); }
     function number(value, max) { return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= max; }
+    function upload(value) {
+      if (!object(value, ['name','size']) || !text(value.name, 255) || ['.','..'].includes(value.name)
+        || /[/\\\u202a-\u202e\u2066-\u2069]/.test(value.name)
+        || !Number.isSafeInteger(value.size) || value.size < 0 || value.size > 2147483648) return null;
+      return {name:value.name,size:value.size};
+    }
     function invoice(value) {
       if (!object(value, ['schemaVersion','documentType','invoiceNumber','currency','dealAmount','amountSource','lines'])
         || value.schemaVersion !== 1 || !['invoice','quote'].includes(value.documentType)
@@ -126,10 +132,13 @@ export function dashboardProfitabilityBridgeScript(frameExpression: string, conf
     async function accept(data) {
       const epoch = generation;
       if (typeof data.eventId !== 'string' || !/^[A-Za-z0-9_-]{16,80}$/.test(data.eventId)) return;
-      if (!object(data, ['marker','type','nonce','eventId','invoice'])) return fail(data.eventId, 'Некорректная детализация счёта не сохранена.');
+      const hasUpload = Object.hasOwn(data, 'upload');
+      if (!object(data, ['marker','type','nonce','eventId','invoice', ...(hasUpload ? ['upload'] : [])])) return fail(data.eventId, 'Некорректная детализация счёта не сохранена.');
       const parsed = invoice(data.invoice);
-      if (!parsed) return fail(data.eventId, 'Некорректная детализация счёта не сохранена.');
-      const body = JSON.stringify({eventId:data.eventId,dashboardKey:config.dashboardKey,versionId:config.versionId,preview:config.preview,invoice:parsed});
+      const parsedUpload = hasUpload ? upload(data.upload) : null;
+      if (!parsed || (hasUpload && !parsedUpload)) return fail(data.eventId, 'Некорректная детализация счёта не сохранена.');
+      const body = JSON.stringify({eventId:data.eventId,dashboardKey:config.dashboardKey,versionId:config.versionId,preview:config.preview,invoice:parsed,
+        ...(parsedUpload ? {upload:parsedUpload} : {})});
       const bytes = new TextEncoder().encode(body);
       if (bytes.length > MAX_BODY) return fail(data.eventId, 'Детализация счёта слишком большая и не сохранена в журнале.');
       if (hashing >= MAX_PENDING) return fail(data.eventId, 'Очередь журнала заполнена. Повторите отправку после завершения текущей операции.');

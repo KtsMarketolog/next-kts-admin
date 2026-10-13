@@ -28,6 +28,7 @@ type Route = {GET(request: Request): Promise<Response>; POST(request: Request): 
 
 function routes(role: Role = 'support_manager', options: {grants?: readonly string[]; inactive?: boolean; currentRole?: string; limit?: boolean; noSnapshot?: boolean; expired?: boolean; routePlanner?: boolean; foreignPreviewSnapshot?: boolean} = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
+  const uploadUsage: Array<Record<string, unknown>> = [];
   const migratedGrants = role === 'support_manager' ? ['manager:support', 'route-planner', 'currency-rates']
     : role === 'manager' ? ['manager:development', 'currency-rates'] : [];
   const session = role ? {role, sessionId: 'synthetic-session', adminUserId: 2, managerId: 71, dashboardAccess: options.grants ?? migratedGrants} : null;
@@ -59,12 +60,13 @@ function routes(role: Role = 'support_manager', options: {grants?: readonly stri
     getSupportSharedDashboardSnapshot: observed('snapshot', (_manager, id) => id === undefined || id === 31 ? {...sharedSnapshot, bytes: Buffer.from('encrypted-fixture')} : null),
     getSupportSharedDashboardJsonPreviewMetadata: observed('preview-metadata', (htmlVersionId) => options.noSnapshot ? null
       : {id: htmlVersionId === 23 ? 82 : 81, htmlVersionId: options.foreignPreviewSnapshot ? 99 : htmlVersionId}),
-    createSupportSharedDashboardHtml: observed('create', () => ({id: 24})),
+    createSupportSharedDashboardHtml: observed('create', () => ({id: 24, originalName: 'shared.html', fileSize: Buffer.byteLength(fixture)})),
     activateSupportSharedDashboardHtml: observed('publish', () => ({activeHtmlVersionId: 24})),
     deleteSupportSharedDashboardHtml: observed('delete', () => ({deleted: true})),
     importSupportSharedDashboardSnapshot: observed('import', () => ({status: 'imported', snapshot: sharedSnapshot})),
   };
   const common = {
+    '@/shared/lib/dashboardUploadUsage': { recordDashboardUploadUsage: async (_session: unknown, input: Record<string, unknown>) => { uploadUsage.push(input); return true; } },
     '@/shared/lib/db/supportSharedDashboardRepo': repo,
     '@/shared/lib/managerDashboardHtml': html,
     '@/shared/lib/supportSharedRoutePlannerHtml': routePlannerHtml,
@@ -87,7 +89,7 @@ function routes(role: Role = 'support_manager', options: {grants?: readonly stri
   const sharedOverviewRoute = compile<Route>('../src/app/api/admin/manager-dashboard/shared/route.ts', {
     '@/shared/lib/db/supportSharedDashboardRepo': repo, '../_shared': base, './_shared': shared,
   });
-  return {frame: route('frame'), content: route('content'), snapshots: route('snapshots'), html: route('html'), publish: route('publish'), overview: overviewRoute, sharedOverview: sharedOverviewRoute, calls};
+  return {frame: route('frame'), content: route('content'), snapshots: route('snapshots'), html: route('html'), publish: route('publish'), overview: overviewRoute, sharedOverview: sharedOverviewRoute, calls, uploadUsage};
 }
 
 const ROOT = 'https://example.test/api/admin/manager-dashboard/shared/';
@@ -275,10 +277,15 @@ test('shared uploads, publication and deletion use only separate repository muta
   const api = routes('admintop');
   const form = new FormData(); form.set('file', new File([fixture], 'shared.html'));
   assert.equal((await api.html.POST(request('html', {method: 'POST', headers: {origin: 'https://example.test'}, body: form}))).status, 201);
+  assert.equal(api.uploadUsage.length, 1);
+  assert.deepEqual(api.uploadUsage[0], { dashboardKey: 'route-planner', versionId: 24, resourceKey: 'shared-html:24', name: 'shared.html', size: Buffer.byteLength(fixture), type: 'html' });
   assert.equal((await api.publish.POST(request('publish', json({versionId: 24, expectedActiveVersionId: 22})))).status, 200);
   assert.equal((await api.html.DELETE(request('html?id=23', {method: 'DELETE', headers: {origin: 'https://example.test'}}))).status, 200);
   const imported = await api.snapshots.POST(request('snapshots', {method: 'POST', headers: {origin: 'https://example.test'}, body: snapshotForm()}));
   assert.equal(imported.status, 200);
+  assert.equal(api.uploadUsage.length, 2, 'publication/deletion do not invent uploads; successful snapshot is logged once');
+  assert.equal(api.uploadUsage[1].resourceKey, 'shared-snapshot:31');
+  assert.equal(api.uploadUsage[1].name, 'shared.ktsp');
   assert.deepEqual(api.calls.map((call) => call.name), ['create', 'publish', 'delete', 'import']);
   assert.deepEqual(api.calls[1].args, [{versionId: 24, expectedActiveVersionId: 22, actorId: 'admintop:2'}]);
   assert.deepEqual(api.calls[2].args, [{versionId: 23, actorId: 'admintop:2'}]);
@@ -299,6 +306,7 @@ test('shared upload needs explicit group-sharing confirmation, single file and s
     assert.equal((await api.publish.POST(request('publish', json(body)))).status, 400);
   }
   assert.deepEqual(api.calls, []);
+  assert.equal(api.uploadUsage.length, 0);
 });
 
 test('personal overview no longer exposes the separate route planner', async () => {

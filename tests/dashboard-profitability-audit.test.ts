@@ -14,6 +14,14 @@ test('invoice protocol preserves original currency and fractional quantity, miss
   assert.deepEqual(protocol.parseProfitabilityInvoice({ ...invoice, invoiceNumber: null, dealAmount: null, amountSource: 'unavailable' }).dealAmount, null);
   assert.equal(protocol.parseProfitabilityInvoice({ ...invoice, dealAmount: -12, lines: [{ nomenclature: 'Возврат', quantity: -1 }] }).dealAmount, -12);
 });
+test('invoice upload metadata is optional, bounded and never accepts paths or file content', () => {
+  const upload = { name: 'Счёт-123.pdf', size: 4321 };
+  assert.deepEqual(protocol.parseProfitabilityAuditRequest({ ...payload, upload }), { ...payload, upload });
+  for (const invalid of [null, {}, { ...upload, text: 'private' }, { ...upload, name: '../invoice.pdf' },
+    { ...upload, name: 'a\\b.pdf' }, { ...upload, name: '\u202eexe.pdf' }, { ...upload, size: -1 }, { ...upload, size: 2147483649 }]) {
+    assert.throws(() => protocol.parseProfitabilityAuditRequest({ ...payload, upload: invalid }), /Некорректная детализация/);
+  }
+});
 test('invoice protocol refuses private extras, ambiguous values, oversized and nonfinite fields', () => {
   const invalid = [
     { ...payload, actor: 'admin:1' }, { ...payload, createdAt: '2026-01-01' }, { ...payload, preview: 'false' },

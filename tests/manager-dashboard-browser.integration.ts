@@ -121,11 +121,20 @@ async function runScope(scope: DashboardScope) {
     window.fixtureViewerEmail = ${JSON.stringify(VIEWER_EMAIL)};
     window.fixtureDownloads = [];
     window.fixtureMessages = [];
+    window.fixtureUsage = [];
+    const usageNonce = 'synthetic_usage_browser_nonce_123';
+    const probeUsage = () => document.getElementById('shell').contentWindow.postMessage({marker:'kts-dashboard-usage-v1',type:'init',nonce:usageNonce},location.origin);
+    document.getElementById('shell').addEventListener('load',probeUsage);
     window.addEventListener('message', async (event) => {
       const frame = document.getElementById('shell');
       if (event.source !== frame.contentWindow || event.origin !== window.location.origin) return;
       const data = event.data || {};
       window.fixtureMessages.push({marker:data.marker,type:data.type,keys:Object.keys(data)});
+      if (data.marker === 'kts-dashboard-usage-v1') {
+        if(data.type === 'ready') probeUsage();
+        if(data.type === 'event' && data.nonce === usageNonce) window.fixtureUsage.push(data);
+        return;
+      }
       if (data.marker !== '${DOWNLOAD_MARKER}' || data.type !== 'download-request' || !(data.blob instanceof Blob)) return;
       const bytes = new Uint8Array(await data.blob.arrayBuffer());
       window.fixtureDownloads.push({name:data.name,size:bytes.length,type:data.blob.type,magic:Array.from(bytes.slice(0,4))});
@@ -306,6 +315,11 @@ async function runScope(scope: DashboardScope) {
         await content.waitForFunction(() => D !== null && document.querySelector('.kpi'));
         assert.equal(await content.locator('#pass').count(), 0, 'the unlocked v12 removes the password gate');
         assert.deepEqual(await content.evaluate(stateExpression), reference, `${engineName}: initial KPI, control and rendered content match standalone v12`);
+        const reviewedUsage = adaptedHtml.includes('"id":"personal-sales-v34"');
+        if (reviewedUsage) {
+          await integrated.waitForFunction(() => (window as unknown as { fixtureUsage: Array<{action:string}> }).fixtureUsage.some(event => event.action === 'data_loaded'));
+          assert.deepEqual(await integrated.evaluate('window.fixtureUsage.map(event=>event.action)'), ['report_open','data_loaded'], 'password attempts and initial automatic rendering are not filter/calculation activity');
+        }
 
         const isolation = await content.evaluate(`(async () => {
           let parentBlocked = false, storageBlocked = false, networkBlocked = false;
@@ -339,15 +353,17 @@ async function runScope(scope: DashboardScope) {
         await content.locator('#synthetic-popup-probe').evaluate((node: HTMLElement) => node.remove());
 
         for (const page of [standalone, content]) await page.locator('label[data-set="setM"][data-v="9"]').click();
+        if (reviewedUsage) await integrated.waitForFunction(() => (window as unknown as { fixtureUsage: Array<{action:string}> }).fixtureUsage.slice(-2).map(event=>event.action).join(',') === 'filter_changed,calculation_completed');
         assert.deepEqual(await content.evaluate(stateExpression), await standalone.evaluate(stateExpression), `${engineName}: month filter and calculated KPIs match`);
         assert.equal(await content.evaluate('agg(fact("*")).rev'), 200);
         for (const page of [standalone, content]) await page.locator('label[data-set="setM"][data-v="0"]').click();
 
         // Navigation uses dynamically rendered inline handlers in supplied v12.
         // Keep this a real user click: direct calls to render() would hide CSP integration bugs.
-        for (const [index, tab] of ['summary', 'yoy', 'clients', 'goods', 'kp', 'lost', 'disc'].entries()) {
-          await standalone.locator('nav button').nth(index).click();
-          await content.locator('nav button').nth(index).click();
+        for (const tab of ['summary', 'yoy', 'clients', 'goods', 'kp', 'lost', 'disc']) {
+          const selector = `nav button[onclick^="U.tab='${tab}'"]`;
+          await standalone.locator(selector).click();
+          await content.locator(selector).click();
           const actualTab = await content.evaluate('U.tab');
           if (actualTab !== tab) {
             failures.push(`${engineName}: rendered v12 tab navigation did not switch to ${tab} (check dynamic inline onclick CSP).`);
@@ -356,8 +372,8 @@ async function runScope(scope: DashboardScope) {
           assert.deepEqual(await content.evaluate(stateExpression), await standalone.evaluate(stateExpression), `${engineName}: ${tab} navigation and calculations match standalone`);
           if (tab === 'goods' || tab === 'kp') {
             const dimension = tab === 'goods' ? 'nom' : 'partner';
-            const label = tab === 'goods' ? /^Позиция$/ : /^Клиент$/;
-            for (const page of [standalone, content]) await page.locator('label').filter({ hasText: label }).click();
+            const selector = tab === 'goods' ? `[onclick^="U.goodsDim='nom'"]` : `[onclick^="U.kpDim='partner'"]`;
+            for (const page of [standalone, content]) await page.locator(selector).click();
             const actualDimension = await content.evaluate(tab === 'goods' ? 'U.goodsDim' : 'U.kpDim');
             if (actualDimension !== dimension) failures.push(`${engineName}: dynamic ${tab} dimension click failed.`);
             else assert.deepEqual(await content.evaluate(stateExpression), await standalone.evaluate(stateExpression), `${engineName}: ${tab} dimension matches standalone`);
@@ -389,6 +405,14 @@ async function runScope(scope: DashboardScope) {
         assert.equal(exported.type, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         const messages = await integrated.evaluate('window.fixtureMessages');
         assert.ok(messages.every((entry: { keys: string[] }) => !entry.keys.some((key) => /password|plaintext|payload|rows/i.test(key))));
+        if (reviewedUsage) {
+          await integrated.waitForFunction(() => (window as unknown as { fixtureUsage: Array<{action:string}> }).fixtureUsage.some(event => event.action === 'export_started'));
+          const usage = await integrated.evaluate('window.fixtureUsage');
+          assert.ok(usage.filter((event:{action:string})=>event.action==='tab_changed').length >= 6, 'actual author tab switches reach the usage journal');
+          assert.ok(usage.filter((event:{action:string})=>event.action==='filter_changed').length >= 6, 'actual period, dimension and goods filters reach the journal');
+          assert.ok(usage.filter((event:{action:string})=>event.action==='calculation_completed').length >= 12, 'only completed synchronous author calculations are recorded');
+          assert.ok(usage.every((event:object)=>Object.keys(event).sort().join(',')==='action,marker,nonce,type'));
+        }
         assert.deepEqual(externalRequests, [], 'original and integrated fixtures make no external requests');
         assert.deepEqual(scriptErrors, [], 'both original and integrated v12 execute without script errors');
         assert.ok(receivedRequests.every((request) => request.method === 'GET' && !request.body && !request.url.includes(PASSWORD)), 'password entry and decryption send no request body, password, or mutation to the server');

@@ -76,7 +76,10 @@ export async function recordDashboardProfitabilityAudit(
   if (Buffer.byteLength(serialized, 'utf8') > MAX_PROFITABILITY_AUDIT_BODY) {
     throw new Error('Некорректная детализация');
   }
-  const payloadHash = createHash('sha256').update(serialized).digest('hex');
+  // Preserve hashes for earlier clients; new requests bind filename/size to the
+  // immutable financial event, so a retry cannot silently relabel its document.
+  const payloadHash = createHash('sha256').update(input.upload
+    ? JSON.stringify({ invoice: input.invoice, upload: input.upload }) : serialized).digest('hex');
   const blockId = Number(input.dashboardKey.slice(4));
   await ensureSiteSchema();
   await assertCurrentSession({ query }, session, input);
@@ -110,6 +113,10 @@ export async function recordDashboardProfitabilityAudit(
     if (id) {
       await client.query(`insert into dashboard_profitability_audit_details(usage_event_id, invoice, payload_sha256)
         values ($1, $2::jsonb, $3)`, [id, serialized, payloadHash]);
+      if (input.upload) {
+        await client.query(`insert into dashboard_usage_event_details(usage_event_id, upload_name, upload_size)
+          values ($1, $2, $3)`, [id, input.upload.name, input.upload.size]);
+      }
       return { id };
     }
 

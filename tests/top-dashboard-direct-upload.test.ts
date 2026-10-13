@@ -259,6 +259,7 @@ function directRouteHarness(options: {
   storageCommitError?: Error;
 } = {}) {
   const calls: string[] = [];
+  const uploadUsage: Array<{ session: unknown; input: Record<string, unknown> }> = [];
   let created: Record<string, unknown> | null = null;
   let preserved = false;
   let discardedFile = false;
@@ -294,6 +295,7 @@ function directRouteHarness(options: {
     },
   };
   const dependencies: Record<string, unknown> = {
+    '@/shared/lib/dashboardUploadUsage': { async recordDashboardUploadUsage(session: unknown, input: Record<string, unknown>) { uploadUsage.push({ session, input }); return true; } },
     '@/shared/lib/dashboardAccess': dashboardAccess,
     'node:stream': {},
     '@/shared/lib/adminAuth': {
@@ -354,7 +356,7 @@ function directRouteHarness(options: {
     },
   });
   return {
-    calls,
+    calls, uploadUsage,
     created: () => created,
     discardedFile: () => discardedFile,
     put(headers: Record<string, string> = {}) {
@@ -382,6 +384,7 @@ test('direct route rejects unauthorized/cross-origin or inconsistent protocols b
   ] as const) {
     assert.equal((await harness.put(headers)).status, status);
     assert.deepEqual(harness.calls, []);
+    assert.equal(harness.uploadUsage.length, 0);
   }
 });
 
@@ -391,6 +394,7 @@ test('direct route validates destinations/HTML binding before commit and always 
     assert.equal((await harness.put()).status, options.forgedTarget ? 400 : 409);
     assert.deepEqual(harness.calls, ['slot', 'overview', 'parse', 'discard', 'release']);
     assert.equal(harness.created(), null);
+    assert.equal(harness.uploadUsage.length, 0);
   }
 });
 
@@ -403,11 +407,16 @@ test('direct route retains prior data version CAS and preserves files after succ
   assert.equal(harness.created()?.boundHtmlVersionId, 19);
   assert.equal(harness.created()?.storagePath, 'test.ktsmf');
   assert.equal('pendingFile' in harness.created()!, false);
+  assert.equal(harness.uploadUsage.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.uploadUsage[0].input)), {
+    dashboardKey: 'top:7', versionId: 19, resourceKey: 'top-data:7:71', name: 'dashboard-files.ktsmf', size: 80, type: 'data',
+  });
 
   const conflicted = directRouteHarness({ commitConflict: true });
   assert.equal((await conflicted.put()).status, 409);
   assert.deepEqual(conflicted.calls, ['slot', 'overview', 'parse', 'commit', 'create', 'discard', 'release']);
   assert.equal(conflicted.discardedFile(), true);
+  assert.equal(conflicted.uploadUsage.length, 0);
 });
 
 test('direct route keeps possibly committed file bytes when the database COMMIT acknowledgement is lost', async () => {
@@ -415,6 +424,7 @@ test('direct route keeps possibly committed file bytes when the database COMMIT 
   assert.equal((await harness.put()).status, 500);
   assert.deepEqual(harness.calls, ['slot', 'overview', 'parse', 'commit', 'create', 'preserve', 'discard', 'release']);
   assert.equal(harness.discardedFile(), false, 'active database references must not lose their file after uncertain commit');
+  assert.equal(harness.uploadUsage.length, 0, 'unknown COMMIT outcome is not a confirmed upload');
 });
 
 test('direct route discards files on known quota rejection and failures before the database attempt', async () => {
@@ -422,11 +432,13 @@ test('direct route discards files on known quota rejection and failures before t
   assert.equal((await quota.put()).status, 409);
   assert.deepEqual(quota.calls, ['slot', 'overview', 'parse', 'commit', 'create', 'discard', 'release']);
   assert.equal(quota.discardedFile(), true);
+  assert.equal(quota.uploadUsage.length, 0);
 
   const storage = directRouteHarness({ storageCommitError: new Error('file rename failed') });
   assert.equal((await storage.put()).status, 500);
   assert.deepEqual(storage.calls, ['slot', 'overview', 'parse', 'commit', 'discard', 'release']);
   assert.equal(storage.discardedFile(), true);
+  assert.equal(storage.uploadUsage.length, 0);
 });
 
 test('ordinary universal uploads retain the protected-frame request requirement', async () => {
@@ -434,4 +446,5 @@ test('ordinary universal uploads retain the protected-frame request requirement'
   const response = await harness.put({ 'x-kts-top-dashboard-direct-files': '0' });
   assert.equal(response.status, 409);
   assert.deepEqual(harness.calls, ['slot', 'overview', 'parse', 'discard', 'release']);
+  assert.equal(harness.uploadUsage.length, 0);
 });

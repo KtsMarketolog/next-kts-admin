@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { instrumentReviewedProfitabilityUsage } from './dashboardUsageProfiles';
 
 // This fingerprint covers only the author's application script, never the private embedded stock.
 // A new author version must be reviewed before enabling detailed invoice instrumentation.
@@ -71,6 +72,11 @@ function auditAdapterScript(): string {
     return value;
   }
   function finite(value, max) { return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= max; }
+  function uploadMetadata(file) {
+    if (typeof file.name !== 'string' || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > 2147483648) return null;
+    var name = file.name.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 255);
+    return name && name !== '.' && name !== '..' ? { name: name, size: file.size } : null;
+  }
   function project(inv) {
     if (!inv || !Array.isArray(inv.lines)) throw new Error('В счёте нет распознанных позиций.');
     // Manual rows are entered in RUB even in a foreign-currency document. They are not original invoice items.
@@ -121,7 +127,7 @@ function auditAdapterScript(): string {
       notice.setAttribute('aria-label', 'Журнал загрузки счетов');
       notice.style.cssText = 'position:fixed;bottom:8px;left:8px;max-width:min(680px,calc(100vw - 16px));z-index:2147483647;padding:9px 12px;border:1px solid #b9c5d9;border-radius:8px;background:#f5f8ff;color:#18253e;font:12px/1.45 system-ui,sans-serif;box-shadow:0 2px 10px #0002;box-sizing:border-box';
       var disclosure = document.createElement('div');
-      disclosure.textContent = 'При загрузке счёта в журнал сохраняются пользователь, номер, позиции, количество, исходная сумма и валюта.';
+      disclosure.textContent = 'При загрузке счёта в журнал сохраняются пользователь, имя и размер файла, номер, позиции, количество, исходная сумма и валюта.';
       notice.appendChild(disclosure);
       status = document.createElement('div');
       status.setAttribute('role', 'status');
@@ -162,7 +168,7 @@ function auditAdapterScript(): string {
     if (!queue.length || now < nextAttempt) return;
     var item = queue[0];
     try {
-      window.parent.postMessage({ marker: marker, type: 'invoice', nonce: nonce, eventId: item.eventId, invoice: item.invoice }, '*');
+      window.parent.postMessage(Object.assign({ marker: marker, type: 'invoice', nonce: nonce, eventId: item.eventId, invoice: item.invoice }, item.upload ? { upload: item.upload } : {}), '*');
       nextAttempt = now + 10000;
     } catch (_) {
       error = 'Не удалось отправить запись на сайт.';
@@ -185,16 +191,17 @@ function auditAdapterScript(): string {
   function recordInvoices(invoices, file) {
     // File identity ties success hooks to a real local import, not a shared snapshot restore or bundled demo.
     if (!file || !selectedFiles.has(file) || !Array.isArray(invoices)) return;
+    var upload = uploadMetadata(file);
     invoices.forEach(function (inv) {
       try {
         if (queue.length >= MAX_QUEUE) throw new Error('Очередь журнала заполнена. Дождитесь записи предыдущих документов.');
         var invoice = project(inv);
         var eventId = uuid();
         // Reserve room for the trusted wrapper envelope (dashboard/version/preview metadata).
-        if (new TextEncoder().encode(JSON.stringify({ eventId: eventId, invoice: invoice })).byteLength > MAX_BODY - 1024) {
+        if (new TextEncoder().encode(JSON.stringify({ eventId: eventId, invoice: invoice, upload: upload })).byteLength > MAX_BODY - 1024) {
           throw new Error('Детализация счёта превышает 1 МБ; запись не отправлена.');
         }
-        queue.push({ eventId: eventId, invoice: invoice, created: Date.now() });
+        queue.push({ eventId: eventId, invoice: invoice, upload: upload, created: Date.now() });
       } catch (reason) {
         rejected++;
         error = reason instanceof Error ? reason.message : 'Не удалось подготовить запись.';
@@ -250,7 +257,7 @@ export function injectProfitabilityAuditAdapter(html: string): string {
   if (!head || head.index >= application.start) return html;
   const invoiceHook = INVOICE_SUCCESS + "\n      try { if (!DEMO) window.__ktsProfitabilityAuditV19.recordInvoices([inv], f); } catch (_) { /* Audit must not change report calculations. */ }";
   const snapshotHook = SNAPSHOT_SUCCESS + "\n    try { if (!DEMO) window.__ktsProfitabilityAuditV19.recordInvoices(d.invs, f); } catch (_) { /* Audit must not change report calculations. */ }";
-  const source = application.source.replace(INVOICE_SUCCESS, invoiceHook).replace(SNAPSHOT_SUCCESS, snapshotHook);
+  const source = instrumentReviewedProfitabilityUsage(application.source).replace(INVOICE_SUCCESS, invoiceHook).replace(SNAPSHOT_SUCCESS, snapshotHook);
   const patched = html.slice(0, application.start) + source + html.slice(application.end);
   const insertAt = head.index + head[0].length;
   return patched.slice(0, insertAt) + `\n<script ${ADAPTER_ATTRIBUTE}>${auditAdapterScript()}</script>\n` + patched.slice(insertAt);

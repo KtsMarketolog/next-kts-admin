@@ -73,7 +73,11 @@ export async function PUT(request: Request, context: Context) {
     const contract = detectTopDashboardDataContract(targetHtml.htmlContent);
     const expectedSnapshotFormat = contract.snapshotFormat;
     const expectedProfile = contract.profile;
-    if (contract.mode === 'disabled' || !expectedSnapshotFormat || !expectedProfile) {
+    // The reviewed invoice report is self-contained. Disabled shared uploads do
+    // not disable publishing it; unknown profitability versions remain rejected.
+    const localOnlyProfitability = contract.mode === 'disabled'
+      && expectedSnapshotFormat === null && expectedProfile === 'profitability';
+    if (!localOnlyProfitability && (contract.mode === 'disabled' || !expectedSnapshotFormat || !expectedProfile)) {
       return Response.json(
         { error: 'В HTML не найдено поддерживаемое поле выбора файлов' },
         { status: 422 },

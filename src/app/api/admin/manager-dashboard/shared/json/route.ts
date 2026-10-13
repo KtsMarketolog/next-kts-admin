@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { recordDashboardUploadUsage } from '@/shared/lib/dashboardUploadUsage';
 
 import {
   assertSupportSharedJsonUploadTarget, getSupportSharedDashboardJsonSnapshot, getSupportSharedDashboardJsonPreviewSnapshot,
@@ -73,6 +74,9 @@ export async function POST(request: Request) {
     const result = await importSupportSharedDashboardJson({htmlVersionId, expectedActiveSnapshotId: expectedId,
       originalName: filename, savedAt: prepared.savedAt, fileSize: pending.fileSize, sha256: pending.sha256, storagePath, actorId: access.actorId});
     if (result.status === 'imported') pending.preserve();
+    if (result.status === 'imported') await recordDashboardUploadUsage(access.session, {
+      dashboardKey: 'route-planner', versionId: htmlVersionId, resourceKey: `shared-json:${result.snapshot.id}`,
+      name: filename, size: pending.fileSize, type: 'data' });
     // Duplicate content keeps its existing file. The unused incoming file is discarded below.
     await deleteTopDashboardDataFiles(result.prunedStoragePaths).catch(() => { console.error('Shared route planner file cleanup failed'); });
     return personalJson({status: result.status, snapshot: result.snapshot,

@@ -202,8 +202,10 @@ function dataRoute(profile: dataUpload.TopDashboardDataProfile) {
     : `<script>const DASH_NAME="${profile === 'sales-analytics' ? 'аналитика_продаж' : 'оптимизация_ассортимента'}"; const snapshot={format:"kts-bundle"};</script>`;
   const created: Array<Record<string, unknown>> = [];
   const audit: Array<Record<string, unknown>> = [];
+  const uploadUsage: Array<Record<string, unknown>> = [];
   let slots = 0;
   const dependencies: Record<string, unknown> = {
+    '@/shared/lib/dashboardUploadUsage': { async recordDashboardUploadUsage(_session: unknown, input: Record<string, unknown>) { uploadUsage.push(input); return true; } },
     'node:stream': { Readable },
     '@/shared/lib/dashboardAccess': {},
     '@/shared/lib/adminAuth': {
@@ -259,7 +261,7 @@ function dataRoute(profile: dataUpload.TopDashboardDataProfile) {
     },
   });
   return {
-    created, audit, slots: () => slots,
+    created, audit, uploadUsage, slots: () => slots,
     put: (request: Request) => exports.PUT!(request, { params: Promise.resolve({ blockId: '4' }) }),
   };
 }
@@ -304,6 +306,9 @@ test('TOP data route accepts extensible snapshots by base format and persists th
           if (status === 201) {
             assert.equal(route.created.length, 1);
             assert.equal(route.audit.length, 1);
+            assert.equal(route.uploadUsage.length, 1);
+            assert.equal(route.uploadUsage[0].dashboardKey, 'top:4');
+            assert.equal(route.uploadUsage[0].resourceKey, 'top-data:4:85');
             assert.equal(route.created[0]!.dashboardProfile, profile);
             assert.equal(route.created[0]!.snapshotFormat, profile === 'purchases' ? 'purchases-v1' : 'kts-bundle-v1');
             assert.equal(route.created[0]!.expectedActiveVersionId, 84);
@@ -314,6 +319,7 @@ test('TOP data route accepts extensible snapshots by base format and persists th
           } else {
             assert.equal(route.created.length, 0, 'Rejected uploads must not replace the active snapshot');
             assert.equal(route.audit.length, 0);
+            assert.equal(route.uploadUsage.length, 0);
             assert.match(result.error, status === 422 ? /не подходит/ : /поддерживаемый снимок/);
           }
         }

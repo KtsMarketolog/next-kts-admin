@@ -93,6 +93,7 @@ function harness(relative: string, session: AdminSession | null, published = tru
   const dependencies: Record<string, unknown> = {
     'node:stream': { Readable },
     '@/shared/lib/dashboardAccess': access,
+    '@/shared/lib/dashboardUploadUsage': infrastructure,
     '@/shared/lib/dashboardOfficeView': officeView,
     '@/shared/lib/dashboardProfitabilityHtml': {
       ...profitability,

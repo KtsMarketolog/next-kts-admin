@@ -16,11 +16,42 @@ Dates are server receipt times, shown in Moscow time; no claimed client time is
 treated as authoritative.
 
 The parent hook pins an exact iframe window, origin and per-instance nonce. The
-same-origin wrapper relays only an allowlisted action string from its exact opaque
-child. Neither passwords, input values, filter selections, file names nor financial
-payloads are included. HTML scripts cannot choose employee IDs or arbitrary API
-endpoints through this bridge. Reports remain functional if logging is unavailable;
-logging is best-effort, not a financial audit or proof of employee productivity.
+same-origin wrapper relays only allowlisted action/metadata from its exact opaque
+child. Passwords, input values, filter selections, local paths and raw files are
+never included. Successful supported imports can supply a basename (at most 255
+characters) and byte size. Financial details use the separate reviewed V19 adapter.
+HTML scripts cannot choose employee IDs or arbitrary API endpoints through this
+bridge. Reports remain functional if logging is unavailable; logging is not proof
+of employee productivity or a cryptographic financial audit.
+
+## Delivery and employee summary
+
+The admin layout fixes the current persisted session ID when it renders. Ordinary
+event POSTs require that exact session scope; a changed session is rejected before
+any write, not rebound to another user. The in-memory queue survives report
+remounts, retains event IDs until acknowledgement and retries network/5xx/429
+failures with capped exponential backoff and Retry-After. Requests have a 10-second
+deadline. The queue holds at most 500 validated events, sends at most 20/8KiB per
+request, and shows delivery failures/overflow instead of claiming success.
+No events or financial metadata are persisted in browser storage. A hard page
+close/crash can still lose unacknowledged events; a pending-queue navigation warning
+and final keepalive attempt reduce this risk but are not a durable offline outbox.
+
+`GET /api/admin/dashboard-usage?view=employees` lists active employee accounts,
+including those without events, with name search and keyset pagination (50/page).
+It separates the last opening, last event and last real interaction. Selecting an
+employee opens `?view=employee&actor=...` report totals and the filtered event list.
+Both summaries exclude preview/archive events and apply the same monthly cutoff.
+The names/sizes of successfully uploaded files are visible in event details.
+
+Visible report time is collected by the parent, not supplied by HTML: the browser
+tab must be visible and the report iframe must intersect the viewport. Pulses are
+normally 15 seconds, capped at 60 after a suspension, and flush on visibility or
+report changes. Simultaneously visible reports share a pulse-window ID; employee
+totals take the maximum interval per window rather than doubling a paired screen.
+Per-report totals retain each report's own visible interval. This is not active
+work time, and historical viewing durations cannot be reconstructed. Concurrent
+independent browser tabs/devices are not globally deduplicated.
 
 ## Supported actions
 
@@ -36,11 +67,25 @@ logging is best-effort, not a financial audit or proof of employee productivity.
   successful load.
 - `export_started`: validated export Blob prepared/requested or browser download
   initiated. This is **not** a guarantee the user saved the file to disk.
+- `file_uploaded`: server-only event after an HTML/data/personal snapshot upload
+  is successfully persisted. Client POST and iframe messages cannot emit it.
+  A short bounded same-ID server retry never turns an already-saved file into a
+  false upload failure; an exhausted audit write is logged separately.
+- `viewing_time`: parent-only visible interval, hidden from the ordinary event
+  list unless explicitly selected. Included in the employee/report summaries.
 
-`report_open` and `data_loaded` are not active-interaction events. Auto-switching
-tabs and synthetic DOM changes are excluded. Preview/archive mode is tagged
-separately. No continuous mouse/keyboard tracking, active-time estimation or input
-contents are recorded.
+`report_open`, automatic `data_loaded`, and time pulses are not active-interaction
+events. A successful user file import with validated filename metadata is counted
+as an interaction. Auto-switching tabs and synthetic DOM changes are excluded.
+Preview/archive mode is tagged separately. No continuous mouse/keyboard tracking
+or input contents are recorded.
+
+The current reviewed application-script fingerprints cover sales V98 (including
+the climate variant), assortment V96, purchasing V55, strategy V24, personal
+sales V34, route planner V26 and profitability V19. Their trusted tab/filter
+intent and successful processing boundaries are explicit; failure/cancellation
+does not count as completed calculation. A future changed application fingerprint
+keeps the generic bridge but must be reviewed for semantic completion hooks.
 
 ## Contract for HTML authors
 
@@ -57,12 +102,13 @@ window.dispatchEvent(new CustomEvent('kts:dashboard-usage', {
 }));
 ```
 
-Supported action strings are listed above. Do not emit completion on validation
+Only client semantic actions are available to HTML (not `file_uploaded` or
+`viewing_time`). Do not emit completion on validation
 errors, cancellation, failed promises or timers. Interactive callbacks require a
 recent trusted user interaction. The supplied HTML controls its own callbacks,
 so this journal is not a cryptographic attestation of business results. Detailed
-invoice auditing is intentionally not implemented before reviewing the actual
-profitability HTML and its successful processing boundary.
+invoice auditing uses a separate, reviewed V19 adapter described below; it must
+never be inferred from ordinary file selection or arbitrary financial forms.
 
 ## Monthly retention and deployment
 
@@ -71,8 +117,10 @@ The POST-only `/api/cron/dashboard-usage` endpoint requires its own
 the cutoff itself. It cannot select another table, employee, report or date.
 One transaction deletes at most 10 batches of 1,000 expired usage events using
 the `(created_at,id)` index. A non-blocking advisory lock excludes concurrent jobs;
-SQL lock/statement timeouts bound contention. No HTML versions, snapshots,
-employees, security audit or other application data are deleted. If a backlog
+SQL lock/statement timeouts bound contention. Associated invoice, filename and
+visible-time detail rows are removed with their expired usage event through foreign
+keys. No HTML versions,
+snapshots, employees, security audit or other application data are deleted. If a backlog
 exceeds 10,000 entries, subsequent runs continue clearing it.
 
 `kts-dashboard-usage.timer` runs every 15 minutes, independently of browsers and
@@ -117,22 +165,34 @@ journalctl --user -u kts-dashboard-usage.service -n 20 --no-pager
 If preflight reports missing lingering, stop and arrange explicit host
 configuration; the installer/workflow does not run privileged `loginctl` commands.
 
-## Pending invoice audit
+## Reviewed invoice audit
 
-The requested record is: employee, invoice number, item names and quantities,
-deal amount and currency, action time. User identity and receipt time must remain
-server-derived. The eventual adapter should emit only this reviewed schema after
-successful invoice processing/calculation, with the existing source/nonce/report
-version checks; not when a file is merely selected. Do not capture raw files,
-arbitrary form values, passwords, supplier bank details or extra customer data.
-The exact field paths, units, amount basis and successful callback must be mapped
-from the real report before coding. No generic invoice extraction is enabled.
+The supplied profitability V19 has a separate application-script fingerprint and
+adapter. After a successful user-initiated invoice/quote or local invoice snapshot
+import, it submits invoice number, original item names and quantities, source deal
+amount and currency. The server derives the employee and receipt time, rechecks
+the session/report/version, and atomically stores the event and its details.
+Identical retries retain their event ID. Unacknowledged imports show a visible
+warning and guard navigation. Missing parsed numbers or amounts are explicit;
+filenames are not represented as invoice numbers. Manual edits, demo data and
+automatic restore do not count as an original invoice import.
+
+The journal exposes details only to its existing reviewer roles. No raw invoice
+files, passwords, arbitrary form values or bank details are captured. A changed
+profitability application must be reviewed before enabling its import adapter;
+there is no generic invoice extraction. Deploying the journal code does not
+publish a profitability report or grant anyone access to one. Publication and
+audience selection are separate operations.
 
 ## Verification
 
 `node --import tsx --test tests/dashboard-usage.test.ts tests/dashboard-usage-cron.test.ts tests/dashboard-usage-install.test.ts`
 
 `node --import tsx tests/dashboard-usage.browser.integration.ts`
+
+`node --import tsx tests/dashboard-usage-delivery.browser.integration.ts`
+
+`node --import tsx tests/dashboard-usage-journal.browser.integration.ts`
 
 `KTS_TEST_PG_BIN=/path/to/postgresql/bin bash scripts/test-dashboard-usage-postgres.sh`
 

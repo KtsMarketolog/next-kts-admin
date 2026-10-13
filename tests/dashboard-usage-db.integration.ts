@@ -6,7 +6,7 @@ import { enforceAdminActionRateLimit } from '../src/shared/lib/adminSecurity';
 import { createAccessUser, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
 import { createStoredAdminSession, getStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
 import { query, withTransaction } from '../src/shared/lib/db/client';
-import { DASHBOARD_USAGE_RETENTION_CUTOFF_SQL, dashboardUsageActorKey, listDashboardUsage, recordDashboardUsage, pruneExpiredDashboardUsage } from '../src/shared/lib/db/dashboardUsageRepo';
+import { DASHBOARD_USAGE_RETENTION_CUTOFF_SQL, dashboardUsageActorKey, listDashboardUsage, listDashboardUsageEmployees, listDashboardUsageEmployeeReports, recordDashboardUsage, pruneExpiredDashboardUsage } from '../src/shared/lib/db/dashboardUsageRepo';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import { createTopDashboardBlock } from '../src/shared/lib/db/topDashboardBlocksRepo';
 
@@ -59,14 +59,17 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
       await assert.rejects(recordDashboardUsage(viewer, { ...batch, preview: true }), /Нет доступа/);
       await assert.rejects(recordDashboardUsage({ ...viewer, sessionId: undefined }, batch), /Нет доступа/);
       await updateAccessUser(user.id, { ...input, passwordHash: undefined, dashboardAccess: [] });
-      const revoked = (await getStoredAdminSession(stored.token))!;
+      assert.equal(await getStoredAdminSession(stored.token), null, 'Changing access revokes the old login session');
+      const deniedLogin = await createStoredAdminSession({ role: 'purchaser', adminUserId: user.numericId });
+      const revoked = (await getStoredAdminSession(deniedLogin.token))!;
       await assert.rejects(recordDashboardUsage(revoked, { ...batch, events: [{ id: randomUUID(), action: 'filter_changed' }] }), /Нет доступа/);
       assert.equal((await listDashboardUsage({ actorKey })).events.length, 1);
       await updateAccessUser(user.id, { ...input, passwordHash: undefined });
     });
 
     await t.test('pagination is bounded, ordered and stable; filters work across pages', async () => {
-      const refreshed = (await getStoredAdminSession(stored.token))!;
+      const login = await createStoredAdminSession({ role: 'purchaser', adminUserId: user.numericId });
+      const refreshed = (await getStoredAdminSession(login.token))!;
       for (let count = 0; count < 3; count++) {
         await recordDashboardUsage(refreshed, { ...batch, events: Array.from({ length: 20 }, () => ({ id: randomUUID(), action: 'filter_changed' as const })) });
       }
@@ -83,6 +86,58 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
       assert.equal(opens.events.length, 1);
     });
 
+    await t.test('employee summary and per-report details retain safe file metadata, deduplicate viewing windows and include never-used employees', async () => {
+      const secondBlock = await createTopDashboardBlock({ title: 'Synthetic second visible report', createdByAdminUserId: null, createdByManagerId: null });
+      const secondKey = `top:${secondBlock.id}`;
+      const user = await createAccessUser({ ...input, name: 'Summary actor', login: `usage-summary-${randomUUID()}`, dashboardAccess: [key, secondKey] });
+      const never = await createAccessUser({ ...input, name: 'Summary never used', login: `usage-never-${randomUUID()}` });
+      const disabled = await createAccessUser({ ...input, name: 'Summary disabled', login: `usage-disabled-${randomUUID()}`, isActive: false });
+      const manager = await createAccessUser({ ...input, name: 'Summary manager never used', login: `usage-manager-${randomUUID()}`, role: 'manager' });
+      const stored = await createStoredAdminSession({ role: 'purchaser', adminUserId: user.numericId });
+      const session = (await getStoredAdminSession(stored.token))!;
+      const actor = dashboardUsageActorKey(session);
+      const windowId = randomUUID();
+      const events = [
+        { id: randomUUID(), action: 'report_open' as const },
+        { id: randomUUID(), action: 'data_loaded' as const },
+        { id: randomUUID(), action: 'data_loaded' as const, upload: { name: 'Счёт-синтетика.xlsx', size: 1234 } },
+        { id: randomUUID(), action: 'file_uploaded' as const, upload: { name: 'Синтетический-отчёт.html', size: 2048 }, uploadType: 'html' as const },
+        { id: randomUUID(), action: 'viewing_time' as const, durationSeconds: 20, viewingWindowId: windowId },
+        { id: randomUUID(), action: 'viewing_time' as const, durationSeconds: 15, viewingWindowId: randomUUID() },
+      ];
+      await recordDashboardUsage(session, { ...batch, events });
+      await recordDashboardUsage(session, { ...batch, events });
+      await recordDashboardUsage(session, { ...batch, dashboardKey: secondKey, events: [
+        { id: randomUUID(), action: 'viewing_time', durationSeconds: 20, viewingWindowId: windowId },
+      ] });
+      // Expired and preview records must never inflate summary duration/interaction.
+      await query(`insert into dashboard_usage_events(actor_key,actor_role,dashboard_key,event_id,action,is_preview,created_at)
+        values ($1,'purchaser',$2,$3,'filter_changed',true,now()),
+          ($1,'purchaser',$2,$4,'filter_changed',false,now()-interval '2 months')`, [actor, key, randomUUID(), randomUUID()]);
+      const summary = await listDashboardUsageEmployees({ search: 'Summary' });
+      const entry = summary.employees.find((row) => row.actorKey === actor)!;
+      assert.equal(entry.viewingSeconds, 35, 'paired reports share one viewing window, not 55 seconds');
+      assert.equal(entry.uploadCount, 2);
+      assert.equal(entry.interactionCount, 2, 'automatic data loads and time pulses are not user actions');
+      assert.equal(entry.reportCount, 2);
+      assert.ok(entry.lastOpenedAt && entry.lastUsedAt && entry.lastInteractionAt);
+      assert.equal(summary.employees.find((row) => row.actorKey === `admin:${never.numericId}`)?.lastUsedAt, null);
+      assert.equal(summary.employees.find((row) => row.actorKey === `manager:${manager.numericId}`)?.viewingSeconds, 0);
+      assert.equal(summary.employees.some((row) => row.actorKey === `admin:${disabled.numericId}`), false);
+      const reports = await listDashboardUsageEmployeeReports({ actorKey: actor });
+      assert.equal(reports.reports.find((row) => row.dashboardKey === key)?.viewingSeconds, 35);
+      assert.equal(reports.reports.find((row) => row.dashboardKey === secondKey)?.viewingSeconds, 20);
+      const ordinary = await listDashboardUsage({ actorKey: actor });
+      assert.equal(ordinary.events.length, 4, 'default history excludes time pulses, preview and expiry');
+      assert.equal(ordinary.events.find((row) => row.action === 'file_uploaded')?.upload?.name, 'Синтетический-отчёт.html');
+      assert.equal((await listDashboardUsage({ actorKey: actor, includePreview: true })).events.length, 5);
+      assert.equal((await listDashboardUsage({ actorKey: actor, action: 'viewing_time' })).events.length, 3);
+      const eventId = (await query('select id from dashboard_usage_events where actor_key=$1 and event_id=$2', [actor, events[2].id])).rows[0].id;
+      assert.equal((await query('select count(*)::int as n from dashboard_usage_event_details where usage_event_id=$1', [eventId])).rows[0].n, 1);
+      await query('delete from dashboard_usage_events where id=$1', [eventId]);
+      assert.equal((await query('select count(*)::int as n from dashboard_usage_event_details where usage_event_id=$1', [eventId])).rows[0].n, 0);
+    });
+
     await t.test('database-backed action limit is per actor and returns retryable HTTP 429', async () => {
       const action = `usage-test-${randomUUID()}`;
       assert.equal(await enforceAdminActionRateLimit(viewer, action, 2, 60_000), null);
@@ -92,6 +147,29 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
       assert.ok(Number(rejected?.headers.get('Retry-After')) > 0);
       assert.equal(await enforceAdminActionRateLimit(viewer2, action, 2, 60_000), null);
       assert.ok(Number((await query('select max(count) as count from rate_limit_buckets')).rows[0].count) >= 3);
+    });
+
+    await t.test('locked metadata storage fails within its bounded timeout and rolls back the whole usage write', async () => {
+      const id = randomUUID();
+      const started = Date.now();
+      await withTransaction(async (client) => {
+        await client.query('lock table dashboard_usage_event_details in access exclusive mode');
+        await assert.rejects(recordDashboardUsage(viewer2, { ...batch, events: [
+          { id, action: 'data_loaded', upload: { name: 'Synthetic.xlsx', size: 10 } },
+        ] }), /lock timeout/);
+      });
+      assert.ok(Date.now() - started < 5000);
+      assert.equal((await query('select count(*)::int as n from dashboard_usage_events where event_id=$1', [id])).rows[0].n, 0);
+    });
+
+    await t.test('database metadata constraints reject partial nullable, path and oversized values', async () => {
+      const id = (await query(`insert into dashboard_usage_events(actor_key,actor_role,dashboard_key,event_id,action)
+        values ($1,'purchaser',$2,$3,'data_loaded') returning id`, [dashboardUsageActorKey(viewer2), key, randomUUID()])).rows[0].id;
+      await assert.rejects(query('insert into dashboard_usage_event_details(usage_event_id) values($1)', [id]), /check constraint/);
+      await assert.rejects(query('insert into dashboard_usage_event_details(usage_event_id,upload_name) values($1,$2)', [id, 'partial.xlsx']), /check constraint/);
+      await assert.rejects(query('insert into dashboard_usage_event_details(usage_event_id,upload_name,upload_size) values($1,$2,$3)', [id, '../path.xlsx', 10]), /check constraint/);
+      await assert.rejects(query('insert into dashboard_usage_event_details(usage_event_id,duration_seconds,viewing_window_id) values($1,61,$2)', [id, randomUUID()]), /check constraint/);
+      await query('delete from dashboard_usage_events where id=$1', [id]);
     });
 
     await t.test('deleting employee or report does not erase audit history', async () => {
@@ -114,6 +192,8 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
           ($1,'admin','currency-rates','boundary-event-retained','report_open',(${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL})+interval '1 minute')`, [actor]);
       assert.equal((await listDashboardUsage({ actorKey: actor })).events.length, 2, 'Expired rows are hidden even before the scheduler runs');
       const unrelatedBefore = (await query('select count(*)::int as total from dashboard_usage_events where actor_key<>$1', [actor])).rows[0].total;
+      const unrelatedExpiredBefore = (await query(`select count(*)::int as total from dashboard_usage_events
+        where actor_key<>$1 and created_at < (${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL})`, [actor])).rows[0].total;
       await withTransaction(async (client) => {
         await client.query('select pg_advisory_xact_lock(hashtext($1))', ['kts:dashboard-usage-retention']);
         const blocked = await pruneExpiredDashboardUsage();
@@ -125,11 +205,11 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
       assert.equal(first.remaining, true);
       assert.equal(first.skipped, null);
       const second = await pruneExpiredDashboardUsage();
-      assert.equal(second.deleted, 5);
+      assert.equal(second.deleted, 5 + unrelatedExpiredBefore);
       assert.equal(second.remaining, false);
       assert.equal((await pruneExpiredDashboardUsage()).deleted, 0);
       assert.equal((await query('select count(*)::int as total from dashboard_usage_events where actor_key=$1', [actor])).rows[0].total, 2);
-      assert.equal((await query('select count(*)::int as total from dashboard_usage_events where actor_key<>$1', [actor])).rows[0].total, unrelatedBefore);
+      assert.equal((await query('select count(*)::int as total from dashboard_usage_events where actor_key<>$1', [actor])).rows[0].total, unrelatedBefore - unrelatedExpiredBefore);
       const calendar = await query(`select ((timestamptz '2026-03-31T20:00:00Z' at time zone 'Europe/Moscow')-interval '1 month') at time zone 'Europe/Moscow' as cutoff`);
       assert.equal(new Date(calendar.rows[0].cutoff).toISOString(), '2026-02-28T20:00:00.000Z');
     });

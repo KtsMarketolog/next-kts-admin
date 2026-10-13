@@ -1,4 +1,6 @@
-/** Dedicated opt-in invoice audit. Never add these fields to generic usage events. */
+import { parseDashboardUsageUpload, type DashboardUsageUpload } from './dashboardUsage';
+
+/** Dedicated opt-in invoice audit. Never add financial fields to generic usage events. */
 export const MAX_PROFITABILITY_AUDIT_BODY = 1024 * 1024;
 export const MAX_PROFITABILITY_INVOICE_LINES = 1000;
 export type ProfitabilityInvoice = {
@@ -13,6 +15,7 @@ export type ProfitabilityInvoice = {
 export type ProfitabilityAuditRequest = {
   eventId: string; dashboardKey: string; versionId: number; preview: boolean;
   invoice: ProfitabilityInvoice;
+  upload?: DashboardUsageUpload;
 };
 
 function fail(): never { throw new Error('Некорректная детализация'); }
@@ -47,10 +50,15 @@ export function parseProfitabilityInvoice(value: unknown): ProfitabilityInvoice 
     currency: invoice.currency, dealAmount, amountSource: invoice.amountSource as ProfitabilityInvoice['amountSource'], lines };
 }
 export function parseProfitabilityAuditRequest(value: unknown): ProfitabilityAuditRequest {
-  const input = object(value, ['eventId', 'dashboardKey', 'versionId', 'preview', 'invoice']);
+  const hasUpload = Boolean(value && typeof value === 'object' && Object.hasOwn(value, 'upload'));
+  const input = object(value, ['eventId', 'dashboardKey', 'versionId', 'preview', 'invoice', ...(hasUpload ? ['upload'] : [])]);
   if (typeof input.eventId !== 'string' || !/^[A-Za-z0-9_-]{16,80}$/.test(input.eventId)) return fail();
   if (typeof input.dashboardKey !== 'string' || !/^top:[1-9][0-9]{0,14}$/.test(input.dashboardKey)) return fail();
   if (!Number.isSafeInteger(input.versionId) || Number(input.versionId) < 1 || typeof input.preview !== 'boolean') return fail();
+  let upload: DashboardUsageUpload | undefined;
+  if (hasUpload) {
+    try { upload = parseDashboardUsageUpload(input.upload); } catch { return fail(); }
+  }
   return { eventId: input.eventId, dashboardKey: input.dashboardKey, versionId: Number(input.versionId), preview: input.preview,
-    invoice: parseProfitabilityInvoice(input.invoice) };
+    invoice: parseProfitabilityInvoice(input.invoice), ...(upload ? { upload } : {}) };
 }
