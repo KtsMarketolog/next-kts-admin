@@ -13,6 +13,7 @@ async function main() {
   const runtime = process.env.PLAYWRIGHT_MODULE_PATH ?? path.join(homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
   const playwright = await import(pathToFileURL(path.join(runtime, 'index.mjs')).href);
   const screenshots = await mkdtemp(path.join(tmpdir(), 'kts-usage-journal-ui-'));
+  console.log(`Journal UI screenshots: ${screenshots}`);
   let css = '';
   let styleIndex = 0;
   const globalCss = await readFile(path.join(root, 'src/app/globals.css'), 'utf8');
@@ -43,7 +44,7 @@ async function main() {
       plugin.onLoad({ filter: /\.module\.scss$/ }, (args) => {
         const contents = compile(args.path, { importers: [{ findFileUrl(url) {
           return url.startsWith('@/') ? pathToFileURL(path.join(root, 'src', url.slice(2))) : null;
-        } }] }).css;
+        } }] }).css.replace(/:global\(([^)]+)\)/g, '$1');
         const names = [...new Set([...contents.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map((match) => match[1]))];
         const prefix = `fixture${styleIndex++}_`;
         css += contents.replace(/\.([a-zA-Z_][\w-]*)/g, (_, name) => `.${prefix}${name}`);
@@ -64,6 +65,8 @@ async function main() {
     upload: { name: 'счёт-тест.xlsx', size: 2048 }, uploadType: null, durationSeconds: null };
   const requests: URL[] = [];
   let rejectNextSummary = false;
+  let delayNextSummary = false;
+  let releaseDelayedSummary: (() => void) | null = null;
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (['/', '/admin', '/admin/top', '/admin/dashboard-usage'].includes(url.pathname)) return void res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"><div id="root"></div><script src="/app.js"></script></html>');
@@ -80,14 +83,27 @@ async function main() {
       currency: 'EUR', dealAmount: 1250, amountSource: 'document', lines: [{ nomenclature: 'Тестовая позиция', quantity: 5 }] } });
     if (url.searchParams.get('view') === 'employees') {
       if (rejectNextSummary) { rejectNextSummary = false; return void json({ error: 'Тестовый временный сбой' }, 503); }
-      const employees = url.searchParams.has('after') ? [{ ...employee, actorKey: 'manager:3', actorName: 'Следующая страница' }]
-        : url.searchParams.has('search') ? [employee] : [employee, never];
-      return void json({ employees, nextCursor: url.searchParams.has('after') || url.searchParams.has('search') ? null : 'manager:1',
-        periodStart: '2026-09-13T10:00:00.000Z', generatedAt: stamp });
+      const employees = url.searchParams.has('after') ? [{ ...employee, actorKey: 'manager:101', actorName: 'Следующая страница сотрудников' }]
+        : [employee, ...(url.searchParams.has('search') ? [] : [never]),
+          ...Array.from({ length: url.searchParams.has('search') ? 49 : 48 }, (_, index) => ({ ...employee,
+            actorKey: `manager:${index + 3}`, actorName: `Тестовый сотрудник ${index + 3}` }))];
+      const body = { employees, nextCursor: url.searchParams.has('after') ? null : 'employee-page-2',
+        periodStart: '2026-09-13T10:00:00.000Z', generatedAt: stamp };
+      if (delayNextSummary) {
+        delayNextSummary = false;
+        releaseDelayedSummary = () => json({ ...body, employees: [{ ...employee, actorName: 'Устаревший ответ' }] });
+        return;
+      }
+      return void json(body);
     }
-    if (url.searchParams.get('view') === 'employee') return void json({ reports: [{ dashboardKey: 'top:10', dashboardTitle: 'Тестовый отчёт',
-      lastOpenedAt: stamp, lastUsedAt: stamp, openCount: 2, interactionCount: 3, uploadCount: 1, viewingSeconds: 125 }], nextCursor: null });
-    return void json({ events: [{ ...event, id: url.searchParams.has('before') ? '11' : '12', preview: url.searchParams.get('preview') === '1' }],
+    if (url.searchParams.get('view') === 'employee') return void json({ reports: [{
+      dashboardKey: url.searchParams.has('after') ? 'top:11' : 'top:10',
+      dashboardTitle: url.searchParams.has('after') ? 'Второй отчёт сотрудника' : 'Тестовый отчёт',
+      lastOpenedAt: stamp, lastUsedAt: stamp, openCount: 2, interactionCount: 3, uploadCount: 1, viewingSeconds: 125 }],
+      nextCursor: url.searchParams.has('after') ? null : 'reports-page-2' });
+    return void json({ events: [{ ...event, id: url.searchParams.has('before') ? '11' : '12',
+      dashboardTitle: url.searchParams.has('before') ? 'Отчёт второй страницы' : event.dashboardTitle,
+      action: url.searchParams.get('action') || event.action, preview: url.searchParams.get('preview') === '1' }],
       nextCursor: url.searchParams.has('before') ? null : '12' });
   });
   try {
@@ -95,15 +111,32 @@ async function main() {
     const address = server.address(); assert.ok(address && typeof address !== 'string');
     const origin = `http://127.0.0.1:${address.port}`;
     for (const engineName of ['chromium', 'webkit']) {
+      requests.length = 0; rejectNextSummary = false; delayNextSummary = false; releaseDelayedSummary = null;
       const browser = await playwright[engineName].launch({ headless: true });
       try {
         const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
         await context.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
         const page = await context.newPage(), errors: string[] = [];
+        page.setDefaultTimeout(10_000);
         page.on('pageerror', (error: Error) => errors.push(error.message));
         await page.goto(origin + '/admin/dashboard-usage');
         await page.getByRole('heading', { name: 'Журнал и сотрудники', exact: true }).waitFor();
         await page.evaluate(() => document.fonts.ready);
+        const activityTab = page.getByRole('tab', { name: 'Активность сотрудников', exact: true });
+        const eventsTab = page.getByRole('tab', { name: 'События', exact: true });
+        const summary = page.getByRole('tabpanel', { name: 'Активность сотрудников', exact: true });
+        const events = page.getByRole('tabpanel', { name: 'События', exact: true });
+        const employeeRequests = () => requests.filter(url => url.searchParams.get('view') === 'employee');
+        const summaryRequests = () => requests.filter(url => url.searchParams.get('view') === 'employees');
+        const eventRequests = () => requests.filter(url => url.pathname === '/api/admin/dashboard-usage' && !['employee', 'employees'].includes(url.searchParams.get('view') ?? ''));
+        const invoiceRequests = () => requests.filter(url => url.pathname.endsWith('/profitability'));
+        await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
+        assert.equal(await activityTab.getAttribute('aria-selected'), 'true');
+        assert.equal(eventRequests().length, 0, 'default activity view never eagerly fetches events');
+        assert.equal(employeeRequests().length, 0, 'employee reports are lazy');
+        assert.equal(invoiceRequests().length, 0, 'invoice data is never prefetched');
+        const help = page.locator('details').filter({ has: page.getByText('Как читать журнал', { exact: true }) });
+        assert.equal(await help.getAttribute('open'), null, 'help is collapsed initially');
         const journalNavigation = page.getByRole('navigation', { name: 'Навигация журнала' });
         for (const width of [1920, 1400, 1024, 800, 768, 600, 450, 375, 320]) {
           await page.setViewportSize({ width, height: 1000 });
@@ -122,9 +155,34 @@ async function main() {
           assert.ok(geometry.overflow <= 1, `${engineName} ${width}: horizontal page overflow`);
           await page.screenshot({ path: path.join(screenshots, `${engineName}-header-${width}.png`) });
         }
+        console.log(`${engineName}: default lazy activity tab and nine header/layout widths passed`);
         await page.setViewportSize({ width: 1400, height: 1000 });
+        await page.evaluate(() => scrollTo({ top: 600, behavior: 'instant' }));
+        const stickyTabs = await page.getByRole('tablist', { name: 'Разделы журнала' }).evaluate((element: Element) => ({
+          position: getComputedStyle(element).position, top: element.getBoundingClientRect().top,
+          headerBottom: document.querySelector('#root > header')!.getBoundingClientRect().bottom,
+          expectedTop: parseFloat(getComputedStyle(element).top),
+        }));
+        assert.equal(stickyTabs.position, 'sticky');
+        await page.screenshot({ path: path.join(screenshots, `${engineName}-sticky-tabs.png`) });
+        assert.ok(stickyTabs.top >= stickyTabs.headerBottom, `sticky tabs remain below the fixed site header: ${JSON.stringify(stickyTabs)}`);
+        assert.ok(Math.abs(stickyTabs.top - stickyTabs.expectedTop) <= 1, `sticky tab bar actually sticks: ${JSON.stringify(stickyTabs)}`);
+        await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' }));
+        const activityTable = summary.getByRole('region', { name: 'Таблица активности сотрудников', exact: true });
+        await activityTable.evaluate((element: HTMLElement) => { element.scrollTop = 250; });
+        const stickyHead = await activityTable.evaluate((element: HTMLElement) => ({
+          scrollTop: element.scrollTop, wrapperTop: element.getBoundingClientRect().top,
+          headTop: element.querySelector('thead th')!.getBoundingClientRect().top,
+          position: getComputedStyle(element.querySelector('thead th')!).position,
+        }));
+        assert.ok(stickyHead.scrollTop > 0);
+        assert.equal(stickyHead.position, 'sticky');
+        assert.ok(Math.abs(stickyHead.headTop - stickyHead.wrapperTop) <= 2, 'table header stays visible when its bounded result area scrolls');
+        await activityTable.evaluate((element: HTMLElement) => { element.scrollTop = 0; });
         await journalNavigation.getByRole('link', { name: 'В админку' }).click();
         await page.getByRole('heading', { name: 'Панель управления', exact: true }).waitFor();
+        assert.deepEqual(await page.evaluate(() => [getComputedStyle(document.documentElement).overflowX, getComputedStyle(document.body).overflowX]),
+          ['hidden', 'hidden'], 'journal-only sticky overflow adjustment must not affect the admin home');
         const journalCard = page.getByRole('link', { name: /Журнал и сотрудники/ });
         assert.equal(await journalCard.getAttribute('href'), '/admin/dashboard-usage');
         await page.screenshot({ path: path.join(screenshots, `${engineName}-admin-card.png`), fullPage: true });
@@ -134,55 +192,194 @@ async function main() {
         await page.getByRole('heading', { name: 'HTML-страницы и отчёты', exact: true }).waitFor();
         await page.goBack();
         await page.getByRole('heading', { name: 'Журнал и сотрудники', exact: true }).waitFor();
-        const summary = page.getByRole('region', { name: 'Последняя активность сотрудников' });
         await summary.getByRole('button', { name: never.actorName, exact: true }).waitFor();
-        assert.match(await summary.innerText(), /Просмотр: 2 мин 5 с/);
-        assert.match(await summary.innerText(), /Нет зафиксированного использования/);
-        await summary.getByRole('button', { name: 'Ещё 50 сотрудников' }).click();
-        await summary.getByRole('button', { name: 'Следующая страница' }).waitFor();
+        assert.match(await summary.innerText(), /2 мин 5 с/);
+        assert.equal(await summary.locator('tbody tr').count(), 50);
+        await page.screenshot({ path: path.join(screenshots, `${engineName}-desktop-activity.png`), fullPage: true });
+        const activityEmployeeButton = summary.getByRole('button', { name: employee.actorName, exact: true });
+        await activityEmployeeButton.click();
+        const activityEmployeeDialog = page.getByRole('dialog', { name: `Сотрудник: ${employee.actorName}`, exact: true });
+        await activityEmployeeDialog.getByRole('button', { name: `События: ${event.dashboardTitle}`, exact: true }).waitFor();
+        assert.equal(eventRequests().length, 0, 'employee report drawer does not eagerly load event history');
+        assert.equal(employeeRequests().length, 1);
+        await page.screenshot({ path: path.join(screenshots, `${engineName}-desktop-employee-drawer.png`) });
+        await activityEmployeeDialog.getByRole('button', { name: 'Закрыть подробности', exact: true }).click();
+        await activityEmployeeDialog.waitFor({ state: 'hidden' });
+        assert.ok(await activityEmployeeButton.evaluate((element: Element) => document.activeElement === element));
+        await summary.getByRole('button', { name: 'Далее', exact: true }).click();
+        await summary.getByRole('button', { name: 'Следующая страница сотрудников', exact: true }).waitFor();
+        assert.equal(await summary.locator('tbody tr').count(), 1, 'next page replaces rows instead of appending');
+        assert.match(await summary.innerText(), /Страница 2/);
+        assert.ok(await summary.getByRole('button', { name: 'Далее', exact: true }).isDisabled());
+        await summary.getByRole('button', { name: 'Назад', exact: true }).click();
+        await summary.getByRole('button', { name: never.actorName, exact: true }).waitFor();
+        assert.equal(await summary.locator('tbody tr').count(), 50);
         await summary.getByRole('searchbox', { name: 'Сотрудник' }).fill('Тестовый');
-        await summary.getByRole('button', { name: 'Найти', exact: true }).click();
-        await page.waitForFunction(() => !document.body.textContent?.includes('Следующая страница'));
+        await Promise.all([
+          page.waitForResponse((response: { url(): string }) => new URL(response.url()).searchParams.get('search') === 'Тестовый'),
+          summary.getByRole('button', { name: 'Найти', exact: true }).click(),
+        ]);
         assert.equal(await summary.getByRole('button', { name: never.actorName, exact: true }).count(), 0);
-        await summary.getByRole('button', { name: employee.actorName, exact: true }).click();
-        await page.getByRole('heading', { name: `События: ${employee.actorName}` }).waitFor();
-        await page.waitForFunction(() => {
-          const header = document.querySelector('#root > header')!.getBoundingClientRect();
-          const target = document.querySelector('#usage-events-heading')!.getBoundingClientRect();
-          return target.top >= header.bottom && target.bottom < innerHeight;
-        });
-        const reports = page.getByRole('region', { name: 'Отчёты сотрудника за последний месяц' });
-        await reports.getByRole('button', { name: 'Тестовый отчёт', exact: true }).click();
-        await page.waitForFunction(() => document.body.textContent?.includes('Фильтр: Тестовый сотрудник · top:10'));
-        assert.match(await reports.innerText(), /2 мин 5 с/);
-        await page.getByRole('button', { name: 'Детализация загруженного счёта', exact: true }).click();
-        await page.getByRole('heading', { name: 'Счёт: TEST-001' }).waitFor();
-        assert.match(await page.getByRole('region', { name: 'Детализация загруженного счёта' }).innerText(), /Тестовая позиция/);
-        assert.match(await page.locator('body').innerText(), /счёт-тест.xlsx · 2.0 КБ/);
-        await page.getByRole('checkbox', { name: 'Включить предпросмотры и архив' }).check();
-        await page.getByRole('cell', { name: 'Предпросмотр / архив', exact: true }).waitFor();
-        await page.getByRole('button', { name: 'Показать ещё 50', exact: true }).click();
-        await page.waitForFunction(() => [...document.querySelectorAll('button')].filter(b => b.textContent === 'Детализация загруженного счёта').length === 2);
+        await summary.getByRole('button', { name: 'Далее', exact: true }).click();
+        await summary.getByRole('button', { name: 'Следующая страница сотрудников', exact: true }).waitFor();
+        const beforeInactiveSummary = summaryRequests().length;
+        await eventsTab.click();
+        await events.getByRole('button', { name: /^Подробнее/ }).waitFor();
+        assert.equal(await eventsTab.getAttribute('aria-selected'), 'true');
+        assert.equal(summaryRequests().length, beforeInactiveSummary, 'inactive employee tab does not refetch');
+        assert.equal(employeeRequests().length, 1, 'switching tabs does not fetch employee reports again');
         await Promise.all([
           page.waitForResponse((response: { url(): string }) => new URL(response.url()).searchParams.get('action') === 'file_uploaded'),
-          page.getByRole('combobox', { name: 'Действие', exact: true }).selectOption('file_uploaded'),
+          events.getByRole('combobox', { name: 'Действие', exact: true }).selectOption('file_uploaded'),
         ]);
+        await events.getByRole('checkbox', { name: 'Включить предпросмотры и архив' }).check();
+        await events.getByText('Предпросмотр / архив', { exact: true }).waitFor();
+        await events.getByRole('button', { name: 'Далее', exact: true }).click();
+        await events.getByRole('button', { name: 'Отчёт второй страницы', exact: true }).waitFor();
+        assert.equal(await events.getByRole('button', { name: /^Подробнее/ }).count(), 1, 'event pagination remains bounded');
+        assert.match(await events.innerText(), /Страница 2/);
+        const beforeInactiveEvents = eventRequests().length;
+        await activityTab.click();
+        await summary.getByRole('button', { name: 'Следующая страница сотрудников', exact: true }).waitFor();
+        assert.equal(await summary.getByRole('searchbox', { name: 'Сотрудник' }).inputValue(), 'Тестовый');
+        assert.match(await summary.innerText(), /Страница 2/);
+        assert.equal(eventRequests().length, beforeInactiveEvents, 'inactive event tab does not refetch');
+        await eventsTab.click();
+        await events.getByRole('button', { name: 'Отчёт второй страницы', exact: true }).waitFor();
+        assert.equal(await events.getByRole('combobox', { name: 'Действие', exact: true }).inputValue(), 'file_uploaded');
+        assert.ok(await events.getByRole('checkbox', { name: 'Включить предпросмотры и архив' }).isChecked());
+        assert.match(await events.innerText(), /Страница 2/);
+        await events.getByRole('button', { name: 'Назад', exact: true }).click();
+        await events.getByRole('button', { name: event.dashboardTitle, exact: true }).waitFor();
+        assert.match(await events.innerText(), /Страница 1/);
+        console.log(`${engineName}: bounded pagination and search/filter/cursor preservation passed`);
+
+        const employeeButton = events.getByRole('button', { name: employee.actorName, exact: true });
+        const employeeRequestCount = employeeRequests().length;
+        await employeeButton.click();
+        const employeeDialog = page.getByRole('dialog', { name: `Сотрудник: ${employee.actorName}`, exact: true });
+        await employeeDialog.getByRole('button', { name: `События: ${event.dashboardTitle}`, exact: true }).waitFor();
+        assert.equal(await employeeDialog.evaluate((element: Element) => element.tagName), 'DIALOG');
+        assert.equal(employeeRequests().length, employeeRequestCount + 1, 'report details only load after an explicit employee click');
+        assert.match(await employeeDialog.innerText(), /2 мин 5 с/);
+        await employeeDialog.getByRole('button', { name: 'Далее', exact: true }).click();
+        await employeeDialog.getByRole('button', { name: 'События: Второй отчёт сотрудника', exact: true }).waitFor();
+        assert.equal(await employeeDialog.getByRole('button', { name: `События: ${event.dashboardTitle}`, exact: true }).count(), 0);
+        await employeeDialog.getByRole('button', { name: 'Назад', exact: true }).click();
+        await employeeDialog.getByRole('button', { name: `События: ${event.dashboardTitle}`, exact: true }).waitFor();
+        await page.keyboard.press('Escape');
+        await employeeDialog.waitFor({ state: 'hidden' });
+        assert.ok(await employeeButton.evaluate((element: Element) => document.activeElement === element), 'Escape restores focus to employee trigger');
+        await employeeButton.click();
+        await employeeDialog.getByRole('button', { name: 'Посмотреть события', exact: true }).click();
+        await employeeDialog.waitFor({ state: 'hidden' });
+        await page.waitForFunction(() => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent === 'События');
+        await events.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
+        assert.equal(eventRequests().at(-1)?.searchParams.get('actor'), employee.actorKey);
+        assert.equal(await events.getByRole('combobox', { name: 'Действие', exact: true }).inputValue(), '', 'employee drilldown shows all actions rather than inheriting an unrelated action filter');
+        assert.equal(await events.getByRole('checkbox', { name: 'Включить предпросмотры и архив' }).isChecked(), false, 'employee drilldown starts from published report events');
+        assert.equal(eventRequests().at(-1)?.searchParams.has('action'), false);
+        assert.equal(eventRequests().at(-1)?.searchParams.has('preview'), false);
+        await events.getByRole('button', { name: employee.actorName, exact: true }).click();
+        await employeeDialog.getByRole('button', { name: `События: ${event.dashboardTitle}`, exact: true }).click();
+        await employeeDialog.waitFor({ state: 'hidden' });
+        await events.getByRole('button', { name: /^Подробнее/ }).waitFor();
+        assert.equal(eventRequests().at(-1)?.searchParams.get('actor'), employee.actorKey);
+        assert.equal(eventRequests().at(-1)?.searchParams.get('dashboard'), event.dashboardKey);
+
+        const detailsButton = events.getByRole('button', { name: /^Подробнее/ });
+        assert.equal(invoiceRequests().length, 0);
+        await detailsButton.click();
+        const eventDialog = page.getByRole('dialog', { name: 'Подробности события', exact: true });
+        await eventDialog.waitFor();
+        assert.equal(await eventDialog.evaluate((element: Element) => element.tagName), 'DIALOG');
+        assert.match(await eventDialog.innerText(), /счёт-тест.xlsx/);
+        assert.match(await eventDialog.innerText(), /2.0 КБ/);
+        assert.equal(invoiceRequests().length, 0, 'opening event metadata must not fetch invoice contents');
+        await eventDialog.getByRole('button', { name: 'Детализация загруженного счёта', exact: true }).click();
+        await eventDialog.getByRole('heading', { name: 'Счёт: TEST-001', exact: true }).waitFor();
+        assert.match(await eventDialog.innerText(), /Тестовая позиция/);
+        assert.equal(invoiceRequests().length, 1);
+        await page.screenshot({ path: path.join(screenshots, `${engineName}-desktop-event-drawer.png`) });
+        await page.keyboard.press('Escape');
+        await eventDialog.waitFor({ state: 'hidden' });
+        assert.ok(await detailsButton.evaluate((element: Element) => document.activeElement === element), 'event dialog returns focus');
+        await detailsButton.click();
+        await eventDialog.waitFor();
+        assert.equal(invoiceRequests().length, 1, 'reopening metadata never implicitly fetches invoice');
+        await eventDialog.getByRole('button', { name: 'Закрыть подробности', exact: true }).click();
+        await eventDialog.waitFor({ state: 'hidden' });
+        await detailsButton.click();
+        await eventDialog.waitFor();
+        const dialogBox = await eventDialog.boundingBox(); assert.ok(dialogBox && dialogBox.x > 8);
+        await page.mouse.click(dialogBox.x / 2, Math.min(500, dialogBox.y + dialogBox.height / 2));
+        await eventDialog.waitFor({ state: 'hidden' });
+        assert.ok(await detailsButton.evaluate((element: Element) => document.activeElement === element), 'backdrop closes the dialog and restores focus');
+        await Promise.all([
+          page.waitForResponse((response: { url(): string }) => {
+            const url = new URL(response.url());
+            return url.pathname === '/api/admin/dashboard-usage' && !url.searchParams.has('actor') && url.searchParams.get('dashboard') === event.dashboardKey;
+          }),
+          events.getByRole('button', { name: 'Убрать фильтр сотрудника', exact: true }).click(),
+        ]);
+        await events.getByRole('button', { name: /^Подробнее/ }).waitFor();
+        assert.equal(await events.getByRole('button', { name: 'Убрать фильтр сотрудника', exact: true }).count(), 0);
+        await Promise.all([
+          page.waitForResponse((response: { url(): string }) => {
+            const url = new URL(response.url());
+            return url.pathname === '/api/admin/dashboard-usage' && !url.searchParams.has('dashboard') && !url.searchParams.has('view');
+          }),
+          events.getByRole('button', { name: 'Убрать фильтр дашборда', exact: true }).click(),
+        ]);
+        await events.getByRole('button', { name: event.dashboardTitle, exact: true }).click();
+        await events.getByRole('button', { name: 'Убрать фильтр дашборда', exact: true }).waitFor();
+        await events.getByRole('button', { name: 'Сбросить фильтры', exact: true }).click();
+        await events.getByRole('button', { name: /^Подробнее/ }).waitFor();
+        assert.equal(await events.getByRole('combobox', { name: 'Действие', exact: true }).inputValue(), '');
+        assert.equal(await events.getByRole('checkbox', { name: 'Включить предпросмотры и архив' }).isChecked(), false);
+        assert.equal(await events.getByRole('button', { name: 'Убрать фильтр дашборда', exact: true }).count(), 0);
+        console.log(`${engineName}: lazy employee/event/invoice dialogs, focus and filter chips passed`);
         await page.screenshot({ path: path.join(screenshots, `${engineName}-desktop.png`), fullPage: true });
+        await activityTab.click();
+        await summary.getByRole('button', { name: 'Следующая страница сотрудников', exact: true }).waitFor();
         rejectNextSummary = true;
         await summary.getByRole('button', { name: 'Обновить сводку' }).click();
         await summary.getByRole('alert').waitFor();
         await summary.getByRole('button', { name: 'Обновить сводку' }).click();
         await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
         assert.equal(await summary.getByRole('alert').count(), 0);
+        delayNextSummary = true;
+        await Promise.all([
+          page.waitForRequest((request: { url(): string }) => new URL(request.url()).searchParams.get('view') === 'employees'),
+          summary.getByRole('button', { name: 'Обновить сводку' }).click(),
+        ]);
+        for (let attempt = 0; attempt < 20 && !releaseDelayedSummary; attempt += 1) await page.waitForTimeout(10);
+        const releaseSummary = releaseDelayedSummary as (() => void) | null;
+        assert.ok(releaseSummary, 'fixture holds the in-flight summary response');
+        await eventsTab.click();
+        await events.getByRole('button', { name: /^Подробнее/ }).waitFor();
+        releaseSummary(); releaseDelayedSummary = null;
+        await activityTab.click();
+        await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
+        assert.equal(await page.getByText('Устаревший ответ', { exact: true }).count(), 0, 'aborted inactive-tab response cannot overwrite the active summary');
         await page.setViewportSize({ width: 375, height: 812 });
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Tables must scroll inside their wrappers, not overflow mobile viewport');
         await page.screenshot({ path: path.join(screenshots, `${engineName}-mobile.png`), fullPage: true });
+        await summary.getByRole('button', { name: employee.actorName, exact: true }).click();
+        await employeeDialog.getByRole('button', { name: `События: ${event.dashboardTitle}`, exact: true }).waitFor();
+        const mobileDrawer = await employeeDialog.boundingBox(); assert.ok(mobileDrawer);
+        assert.ok(mobileDrawer.x >= 0 && mobileDrawer.x + mobileDrawer.width <= 375, 'mobile drawer stays inside viewport');
+        assert.equal(await page.evaluate(() => document.body.style.overflow), 'hidden', 'modal locks background scroll');
+        await page.screenshot({ path: path.join(screenshots, `${engineName}-mobile-employee-drawer.png`) });
+        await page.keyboard.press('Escape');
+        await employeeDialog.waitFor({ state: 'hidden' });
+        assert.notEqual(await page.evaluate(() => document.body.style.overflow), 'hidden', 'closing restores background scroll');
         assert.deepEqual(errors, []);
         assert.ok(requests.some(url => url.searchParams.get('actor') === 'manager:1' && url.searchParams.get('dashboard') === 'top:10'));
         await context.close();
       } finally { await browser.close(); }
     }
-    console.log(`Journal real-header layout (320–1920px), home-card/back navigation, summary, drilldown, uploads, invoice detail, filters, pagination and recovery passed Chromium/WebKit. Screenshots: ${screenshots}`);
+    console.log(`Journal real-header layout (320–1920px), lazy tabs/drawers/invoice, bounded pagination, preserved state, dialog focus, abort/recovery and navigation passed Chromium/WebKit. Screenshots: ${screenshots}`);
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
 }
 void main().catch((error) => { console.error(error); process.exitCode = 1; });
