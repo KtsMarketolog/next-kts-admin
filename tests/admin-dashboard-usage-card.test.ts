@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
-import { createElement, type ReactNode } from 'react';
+import { createElement, useRef, useState, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as jsxRuntime from 'react/jsx-runtime';
 import ts from 'typescript';
@@ -109,4 +109,58 @@ test('admin home passes the shared journal permission, without broadening server
   const source = readFileSync('src/features/admin/dashboard/AdminDashboard.tsx', 'utf8');
   assert.equal(source.split('<h2>Журнал и сотрудники</h2>').length - 1, 1, 'One shared JSX card implementation');
   assert.equal(source.split('{canReviewUsage && <DashboardUsageCard />}').length - 1, 2, 'Both dashboard layouts use the same card');
+});
+
+test('journal return link uses the standard admin label and preserves ordinary navigation', () => {
+  const links: Array<Omit<LinkProps, 'children'> & { label: ReactNode }> = [];
+  function Link({ children, ...attributes }: LinkProps) {
+    links.push({ ...attributes, label: children });
+    return createElement('a', { href: attributes.href, className: attributes.className }, children);
+  }
+  const dependencies: Record<string, unknown> = {
+    react: { useRef, useState }, 'react/jsx-runtime': jsxRuntime, 'next/link': { default: Link },
+    './UsageActivityTab': { UsageActivityTab: () => null },
+    './UsageEventsTab': { UsageEventsTab: () => null },
+    './UsageDetailsDrawer': { UsageDetailsDrawer: () => null },
+    './usage-journal-shared': { firstPage: () => [''], emptyEventFilters: {} },
+    './dashboard-usage.module.scss': { default: new Proxy({}, { get: (_, name) => String(name) }) },
+  };
+  const code = ts.transpileModule(readFileSync('src/features/admin/dashboard-usage/DashboardUsageJournal.tsx', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  const exports: { DashboardUsageJournal?: typeof import('../src/features/admin/dashboard-usage/DashboardUsageJournal').DashboardUsageJournal } = {};
+  vm.runInNewContext(code, { exports, require: (name: string) => {
+    assert.ok(Object.hasOwn(dependencies, name), `Unexpected dependency: ${name}`);
+    return dependencies[name];
+  } });
+  const html = renderToStaticMarkup(createElement(exports.DashboardUsageJournal!));
+  const home = links.filter(link => link.href === '/admin');
+  assert.equal(home.length, 1);
+  assert.equal(home[0].label, 'Вернуться в панель управления');
+  assert.equal(home[0].className, 'backLink');
+  assert.equal(home[0].replace, undefined);
+  assert.equal(home[0].scroll, undefined);
+  assert.doesNotMatch(html, /← В админку/);
+  assert.ok(links.some(link => link.href === '/admin/top'), 'The separate report-catalog link remains available');
+});
+
+test('journal secondary controls match the existing AdminTopbar palette and button emphasis', () => {
+  const topbar = readFileSync('src/app/admin/AdminTopbar.tsx', 'utf8');
+  const adminForms = readFileSync('src/app/admin/styles/_forms.scss', 'utf8');
+  const journalStyles = readFileSync('src/features/admin/dashboard-usage/dashboard-usage.module.scss', 'utf8');
+  assert.match(topbar, /className=\{styles\.secondary\}/);
+  const secondary = adminForms.match(/\.secondary\s*\{([^{}]*)\}/)?.[1] ?? '';
+  const baseButton = adminForms.match(/\.page button\s*\{([^{}]*)/)?.[1] ?? '';
+  const backLink = journalStyles.match(/\.controls \.backLink\s*\{([^{}]*)/)?.[1] ?? '';
+  const controls = journalStyles.slice(journalStyles.indexOf('.controls {'), journalStyles.indexOf('.header {'));
+  const button = controls.match(/(?:^|\n)\s*button\s*\{([^{}]*)/)?.[1] ?? '';
+  const declaration = (block: string, property: string) => {
+    const value = block.match(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+);`))?.[1].replace(/\s*!important\s*$/, '').trim();
+    assert.ok(value, `Missing ${property} declaration`);
+    return value;
+  };
+  for (const block of [backLink, button]) {
+    for (const property of ['background', 'color']) assert.equal(declaration(block, property), declaration(secondary, property));
+    for (const property of ['font-weight', 'border']) assert.equal(declaration(block, property), declaration(baseButton, property));
+  }
 });

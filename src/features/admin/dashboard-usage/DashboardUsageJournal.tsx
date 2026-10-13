@@ -30,7 +30,7 @@ export function DashboardUsageJournal() {
         <div><p className={styles.eyebrow}>Панель управления</p><h1>Журнал и сотрудники</h1>
           <p className={styles.notice}>Обзор сотрудников и история использования дашбордов за последний месяц.</p></div>
         <nav className={styles.navigation} aria-label="Навигация журнала">
-          <Link className={styles.backLink} href="/admin">← В админку</Link>
+          <Link className={styles.backLink} href="/admin">Вернуться в панель управления</Link>
           <Link className={styles.backLink} href="/admin/top">К отчётам</Link>
         </nav>
       </header>

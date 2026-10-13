@@ -138,6 +138,15 @@ async function main() {
         const help = page.locator('details').filter({ has: page.getByText('Как читать журнал', { exact: true }) });
         assert.equal(await help.getAttribute('open'), null, 'help is collapsed initially');
         const journalNavigation = page.getByRole('navigation', { name: 'Навигация журнала' });
+        for (const control of [journalNavigation.getByRole('link', { name: 'Вернуться в панель управления', exact: true }),
+          journalNavigation.getByRole('link', { name: 'К отчётам', exact: true }), summary.getByRole('button', { name: 'Найти', exact: true })]) {
+          assert.deepEqual(await control.evaluate((element: Element) => {
+            const style = getComputedStyle(element);
+            return { background: style.backgroundColor, color: style.color, border: style.borderTopWidth, weight: style.fontWeight };
+          }), { background: 'rgb(233, 234, 242)', color: 'rgb(36, 38, 51)', border: '0px', weight: '700' },
+          'journal secondary controls match standard admin buttons');
+        }
+        assert.equal(await activityTab.evaluate((element: Element) => getComputedStyle(element).backgroundColor), 'rgb(38, 11, 134)', 'active tab keeps the standard admin primary color');
         for (const width of [1920, 1400, 1024, 800, 768, 600, 450, 375, 320]) {
           await page.setViewportSize({ width, height: 1000 });
           await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' }));
@@ -179,7 +188,7 @@ async function main() {
         assert.equal(stickyHead.position, 'sticky');
         assert.ok(Math.abs(stickyHead.headTop - stickyHead.wrapperTop) <= 2, 'table header stays visible when its bounded result area scrolls');
         await activityTable.evaluate((element: HTMLElement) => { element.scrollTop = 0; });
-        await journalNavigation.getByRole('link', { name: 'В админку' }).click();
+        await journalNavigation.getByRole('link', { name: 'Вернуться в панель управления' }).click();
         await page.getByRole('heading', { name: 'Панель управления', exact: true }).waitFor();
         assert.deepEqual(await page.evaluate(() => [getComputedStyle(document.documentElement).overflowX, getComputedStyle(document.body).overflowX]),
           ['hidden', 'hidden'], 'journal-only sticky overflow adjustment must not affect the admin home');
