@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { CURRENCY_RPC_CHANNEL, CURRENCY_RPC_MAX_BYTES, parseCurrencyRpcRequest } from '@/shared/lib/currencyDashboardRpc';
 import { createCurrencyDeviceBridge, isCurrencyDeviceMethod } from '@/shared/lib/currencyDashboardDeviceState';
+import { createCurrencyDashboardScheduler, createCurrencySchedulerWorker } from '@/shared/lib/currencyDashboardScheduler';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
 import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
 
@@ -22,8 +23,36 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
 
   useEffect(() => {
     let disposed = false;
+    let generation = 0;
+    let pageAway = false;
+    let scheduleTarget: Window | null = null;
     const pending = new Map<string, AbortController>();
     const completed = new Set<string>();
+    const iframe = frame.current;
+    const scheduler = createCurrencyDashboardScheduler({
+      createWorker: createCurrencySchedulerWorker,
+      setInterval: (callback, milliseconds) => window.setInterval(callback, milliseconds),
+      clearInterval: (timer) => window.clearInterval(timer),
+      tick: () => {
+        if (!disposed && !pageAway && scheduleTarget && frame.current?.contentWindow === scheduleTarget) {
+          scheduleTarget.postMessage({ channel: CURRENCY_RPC_CHANNEL, nonce, event: 'schedule:tick' }, '*');
+        }
+      },
+    });
+    const resetFrame = () => {
+      generation++;
+      scheduleTarget = null;
+      scheduler.stop();
+      for (const controller of pending.values()) controller.abort();
+      pending.clear();
+      completed.clear();
+    };
+    const pauseSchedule = () => { pageAway = true; scheduler.stop(); };
+    const resumeSchedule = () => {
+      pageAway = false;
+      if (scheduleTarget) { scheduler.start(); scheduler.tick(); }
+    };
+    const visibleSchedule = () => { if (!document.hidden && !pageAway && scheduleTarget) scheduler.tick(); };
     const deviceCommand = createCurrencyDeviceBridge(deviceScope, () => window.localStorage, () => {
       if (!window.isSecureContext || !('Notification' in window)) return null;
       return {
@@ -36,16 +65,18 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
       };
     });
     const receive = async (event: MessageEvent) => {
+      if (disposed) return;
       if (event.source !== frame.current?.contentWindow || event.origin !== 'null') return;
       const data = event.data;
       if (!data || data.channel !== CURRENCY_RPC_CHANNEL || data.nonce !== nonce
         || typeof data.id !== 'string' || !/^[a-zA-Z0-9:_-]{1,100}$/.test(data.id)) return;
       if (pending.has(data.id) || completed.has(data.id) || pending.size >= 16) return;
       const target = event.source as Window;
+      const requestGeneration = generation;
       const reply = (value: object) => {
         // The destination is an opaque-origin, sandboxed iframe; source and nonce
         // identify this exact instance. No credentials are sent into the frame.
-        if (!disposed && frame.current?.contentWindow === target) {
+        if (!disposed && generation === requestGeneration && frame.current?.contentWindow === target) {
           target.postMessage({ channel: CURRENCY_RPC_CHANNEL, nonce, id: data.id, ...value }, '*');
         }
       };
@@ -53,6 +84,15 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
       const timeout = setTimeout(() => controller.abort(), 60_000);
       pending.set(data.id, controller);
       try {
+        if (data.method === 'schedule:start') {
+          if (!data.params || typeof data.params !== 'object' || Array.isArray(data.params) || Reflect.ownKeys(data.params).length) {
+            throw new Error('Некорректные параметры расписания отчёта.');
+          }
+          scheduleTarget = target;
+          if (!pageAway) scheduler.start();
+          reply({ result: { started: true } });
+          return;
+        }
         if (isCurrencyDeviceMethod(data.method)) {
           reply({ result: await deviceCommand(data.method, data.params) });
           return;
@@ -69,6 +109,7 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
           headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal,
         });
         const result = await response.json();
+        if (disposed || generation !== requestGeneration) return;
         if (!response.ok) {
           if (response.status === 403 && result.code === 'CURRENCY_READ_ONLY') {
             setError('Доступен только просмотр. Нет прав на изменение общих данных дашборда.');
@@ -90,16 +131,26 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
           ? cause.message : 'Сервер не ответил. Проверьте соединение и повторите запрос.' } });
       } finally {
         clearTimeout(timeout);
-        pending.delete(data.id);
-        completed.add(data.id);
-        if (completed.size > 1000) completed.delete(completed.values().next().value!);
+        if (generation === requestGeneration) {
+          if (pending.get(data.id) === controller) pending.delete(data.id);
+          completed.add(data.id);
+          if (completed.size > 1000) completed.delete(completed.values().next().value!);
+        }
       }
     };
     window.addEventListener('message', receive);
+    window.addEventListener('pagehide', pauseSchedule);
+    window.addEventListener('pageshow', resumeSchedule);
+    document.addEventListener('visibilitychange', visibleSchedule);
+    iframe?.addEventListener('load', resetFrame);
     return () => {
       disposed = true;
       window.removeEventListener('message', receive);
-      for (const controller of pending.values()) controller.abort();
+      window.removeEventListener('pagehide', pauseSchedule);
+      window.removeEventListener('pageshow', resumeSchedule);
+      document.removeEventListener('visibilitychange', visibleSchedule);
+      iframe?.removeEventListener('load', resetFrame);
+      resetFrame();
     };
   }, [nonce, deviceScope, canManage]);
 

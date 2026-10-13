@@ -402,3 +402,149 @@ test('asset provenance keeps the author UI and methods in the reviewed deploymen
   const raw = readFileSync('assets/currency-dashboard/kursy_valyut_v21.html', 'utf8');
   for (const phrase of ['Методика и разработка — ФАМ', 'Jintian', 'СПС-холод', 'Хольт', 'Курс 1', 'Курс 2']) assert.ok(raw.includes(phrase), phrase);
 });
+
+test('worker ticks use elapsed time, catch up once after sleep and never overlap a pending job', async () => {
+  const context = createContext({});
+  runInContext(`
+    let now=0,release;const Date={now:()=>now},calls=[];
+    function setStatus(){}
+    ${variable('runningJobs')}
+    ${variable('scheduledJobs')}
+    ${fn('runJob')}
+    ${fn('checkScheduledJobs')}
+    const fast=async()=>{calls.push('fast');await new Promise(resolve=>{release=resolve;});};
+    const slow=async()=>{calls.push('slow');};
+    scheduledJobs=[{fn:fast,every:60000,lastStarted:0,onResume:true},{fn:slow,every:600000,lastStarted:0,onResume:false}];
+    scheduleReady=true;
+    now=59999;checkScheduledJobs();
+  `, context);
+  assert.deepEqual(plain(runInContext('calls', context)), []);
+  runInContext('now=60000;checkScheduledJobs();checkScheduledJobs()', context);
+  assert.deepEqual(plain(runInContext('calls', context)), ['fast']);
+  runInContext('now=3900000;checkScheduledJobs();checkScheduledJobs()', context);
+  assert.deepEqual(plain(runInContext('calls', context)), ['fast', 'slow']);
+  await runInContext('release()', context);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  runInContext('checkScheduledJobs();checkScheduledJobs()', context);
+  assert.deepEqual(plain(runInContext('calls', context)), ['fast', 'slow', 'fast']);
+  await runInContext('release()', context);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  runInContext('now+=500;checkScheduledJobs(true)', context);
+  assert.equal(runInContext('calls.length', context), 3, 'resume events in same second do not duplicate');
+  runInContext('now+=500;checkScheduledJobs(true)', context);
+  assert.equal(runInContext('calls.length', context), 4, 'visible resume checks live jobs, not every hourly task');
+  await runInContext('release()', context);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  runInContext('schedulePageHidden=true;now+=3900000;checkScheduledJobs(true)', context);
+  assert.equal(runInContext('calls.length', context), 4, 'pagehide suspends outgoing jobs');
+  runInContext('schedulePageHidden=false;checkScheduledJobs()', context);
+  assert.deepEqual(plain(runInContext('calls', context)), ['fast', 'slow', 'fast', 'fast', 'fast', 'slow']);
+});
+
+test('only authenticated parent ticks reach the fixed local job list', () => {
+  let listener: (event: unknown) => void = () => {};
+  let ticks = 0;
+  const parent = { postMessage() {} };
+  const context = createContext({ window: { parent, addEventListener(_event: string, callback: typeof listener) { listener = callback; } }, checkScheduledJobs() { ticks++; } });
+  runInContext(script.slice(0, script.indexOf('const CODES=')), context);
+  const data = { channel: 'kts-currency-v1', nonce, event: 'schedule:tick' };
+  listener({ source: {}, origin: 'https://example.test', data });
+  listener({ source: parent, origin: 'null', data });
+  listener({ source: parent, origin: 'https://example.test', data: { ...data, nonce: 'wrong' } });
+  listener({ source: parent, origin: 'https://example.test', data: { ...data, event: 'other' } });
+  assert.equal(ticks, 0);
+  listener({ source: parent, origin: 'https://example.test', data });
+  assert.equal(ticks, 1);
+});
+
+test('author audio keep-alive is opt-in, activated, singleton and cleaned when disabled or leaving', async () => {
+  const context = createContext({});
+  runInContext(`
+    const prefs={sound:false,voice:false},stats={created:0,started:0,stopped:0,disconnected:0};
+    let finishResume;
+    const document={getElementById:()=>({classList:{toggle(){}}})};
+    const window={AudioContext:class{
+      state='running';destination={};
+      constructor(){stats.created++;}
+      createOscillator(){return {frequency:{value:0},connect(){},start(){stats.started++;},stop(){stats.stopped++;},disconnect(){stats.disconnected++;}};}
+      createGain(){return {gain:{value:0},connect(){},disconnect(){stats.disconnected++;}};}
+      resume(){return new Promise(resolve=>{finishResume=()=>{this.state='running';resolve();};});}
+    }};
+    ${variable('audio')}
+    ${variable('keepAlive')}
+    ${fn('getAudio')}
+    ${fn('sndHint')}
+    ${fn('startKeepAlive')}
+    ${fn('stopKeepAlive')}
+    ${fn('resumeAudio')}
+  `, context);
+  await runInContext('resumeAudio()', context);
+  runInContext('prefs.sound=true;startKeepAlive()', context);
+  assert.equal(runInContext('stats.created', context), 0, 'off or no gesture does not create an audio context');
+  await runInContext('audioActivated=true;resumeAudio()', context);
+  runInContext('startKeepAlive()', context);
+  assert.equal(runInContext('stats.started', context), 1);
+  assert.equal(runInContext('keepAlive.oscillator.frequency.value', context), 40);
+  assert.equal(runInContext('keepAlive.gain.gain.value', context), 0.0008);
+  await runInContext('prefs.sound=false;prefs.voice=true;resumeAudio()', context);
+  assert.equal(runInContext('stats.stopped', context), 0, 'voice alone keeps opt-in audio running');
+  await runInContext('prefs.voice=false;resumeAudio()', context);
+  assert.equal(runInContext('stats.stopped', context), 1);
+  assert.equal(runInContext('stats.disconnected', context), 2);
+  runInContext('prefs.sound=true;audio.state="suspended"', context);
+  const pending = runInContext('resumeAudio()', context);
+  runInContext('audioPageHidden=true;finishResume()', context);
+  await pending;
+  assert.equal(runInContext('stats.started', context), 1, 'late resume cannot restart audio after pagehide');
+  await runInContext('audioPageHidden=false;resumeAudio()', context);
+  assert.equal(runInContext('stats.started', context), 2);
+  runInContext('audioPageHidden=true;startKeepAlive()', context);
+  assert.equal(runInContext('stats.stopped', context), 2);
+});
+
+test('late toggle confirmation cannot play sound or voice after pagehide', async () => {
+  for (const key of ['sound', 'voice']) {
+    const context = createContext({});
+    runInContext(`
+      let release,audioPageHidden=false;const prefs={sound:false,voice:false},button={setAttribute(){}};
+      const document={getElementById:()=>button},store={set(){}},window={speechSynthesis:true};
+      const speechSynthesis={cancel(){},getVoices:()=>[],speak(){throw new Error('Voice after leaving');}};
+      function SpeechSynthesisUtterance(text){this.text=text;}
+      function resumeAudio(){return new Promise(resolve=>{release=resolve;});}
+      function getAudio(){throw new Error('Chime after leaving');}
+      ${fn('chime')}
+      ${fn('say')}
+      ${fn('setTog')}
+      setTog('toggle','${key}');
+    `, context);
+    const pending = runInContext('button.onclick()', context);
+    runInContext('audioPageHidden=true;release()', context);
+    await pending;
+  }
+});
+
+test('frame fallback clock is bounded, disposed and replaced by the trusted host when available', async () => {
+  const context = createContext({});
+  runInContext(`
+    ${variable('scheduledJobs')}
+    ${fn('stopScheduleFallback')}
+    ${fn('startScheduleClock')}
+    let attempts=0,succeed=false,next=0;const timers=new Map();
+    function checkScheduledJobs(){}
+    function setInterval(callback,ms){if(ms!==1000)throw new Error('interval');timers.set(++next,callback);return next;}
+    function clearInterval(id){timers.delete(id);}
+    async function rpc(method){if(method!=='schedule:start')throw new Error('method');attempts++;if(!succeed)throw new Error('unavailable');return {started:true};}
+    scheduleReady=true;
+  `, context);
+  await runInContext('Promise.all([startScheduleClock(),startScheduleClock()])', context);
+  assert.equal(runInContext('attempts', context), 1);
+  assert.equal(runInContext('timers.size', context), 1);
+  await runInContext('startScheduleClock()', context);
+  assert.equal(runInContext('timers.size', context), 1);
+  runInContext('schedulePageHidden=true;stopScheduleFallback()', context);
+  await runInContext('startScheduleClock()', context);
+  assert.equal(runInContext('timers.size', context), 0);
+  await runInContext('schedulePageHidden=false;succeed=true;startScheduleClock()', context);
+  assert.equal(runInContext('scheduleHostStarted', context), true);
+  assert.equal(runInContext('timers.size', context), 0);
+});

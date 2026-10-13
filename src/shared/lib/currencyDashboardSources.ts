@@ -22,7 +22,7 @@ const CBR_IDS: Record<CurrencyRateCode, string> = { USD: 'R01235', EUR: 'R01239'
 const CBR_NAMES: Record<CurrencyRateCode, string> = { USD: 'Доллар США', EUR: 'Евро', CNY: 'Китайский юань', KZT: 'Казахстанский тенге' };
 const RATE_CODES = Object.keys(CBR_IDS) as CurrencyRateCode[];
 const SOURCE_TTL: Record<CurrencySourceKind, number> = {
-  'cbr-daily': 60 * 60_000, 'cbr-history': 6 * 60 * 60_000,
+  'cbr-daily': 10 * 60_000, 'cbr-history': 6 * 60 * 60_000,
   'moex-currency': 30_000, 'moex-futures': 30_000, 'moex-candles': 15 * 60_000,
   world: 60 * 60_000, copper: 60 * 60_000,
 };

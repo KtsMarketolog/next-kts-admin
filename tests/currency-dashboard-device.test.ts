@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import * as deviceHelpers from '../src/shared/lib/currencyDashboardDeviceState';
 import * as rpcHelpers from '../src/shared/lib/currencyDashboardRpc';
+import * as schedulerHelpers from '../src/shared/lib/currencyDashboardScheduler';
 import {
   createCurrencyDeviceBridge, createCurrencyDeviceState, currencyDashboardDeviceScope,
   isCurrencyDeviceMethod, validateCurrencyDeviceValues,
@@ -182,13 +183,14 @@ test('the real host only accepts local commands from its nonce-bound opaque ifra
   const modules: Record<string, unknown> = {
     'next/link': {},
     'react': {
-      useRef: () => ({ current: ++refs === 1 ? { contentWindow: frameWindow } : null }),
+      useRef: () => ({ current: ++refs === 1 ? { contentWindow: frameWindow, addEventListener() {}, removeEventListener() {} } : null }),
       useState: (value: unknown) => [value, () => {}],
       useEffect: (effect: () => () => void) => { cleanup = effect(); },
     },
     'react/jsx-runtime': { jsx: () => null, jsxs: () => null },
     '@/shared/lib/currencyDashboardRpc': rpcHelpers,
     '@/shared/lib/currencyDashboardDeviceState': deviceHelpers,
+    '@/shared/lib/currencyDashboardScheduler': schedulerHelpers,
     '@/features/admin/dashboard-usage/useDashboardUsage': { useDashboardUsage() {} },
     '@/features/admin/dashboard-access/DashboardAudienceEditor': {},
     './currency-dashboard.module.scss': { default: {} },
@@ -197,7 +199,8 @@ test('the real host only accepts local commands from its nonce-bound opaque ifra
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const exports: { CurrencyDashboard?: (props: object) => void } = {};
   runInNewContext(compiled, { exports, require: (name: string) => { assert.ok(name in modules, name); return modules[name]; },
-    window: { localStorage: storage, isSecureContext: false, addEventListener: (_name: string, callback: typeof receive) => { receive = callback; }, removeEventListener() {} },
+    window: { localStorage: storage, isSecureContext: false, addEventListener: (name: string, callback: typeof receive) => { if (name === 'message') receive = callback; }, removeEventListener() {}, setInterval, clearInterval },
+    document: { hidden: false, addEventListener() {}, removeEventListener() {} },
     AbortController, setTimeout, clearTimeout, TextEncoder, fetch: () => { fetches++; throw new Error('Local command reached network'); },
   });
   exports.CurrencyDashboard!({ nonce: 'test-device-nonce', deviceScope: 'user:7', canManage: false });

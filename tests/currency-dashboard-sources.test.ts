@@ -94,6 +94,52 @@ test('fresh persisted cache avoids requests; force refresh and concurrent calls 
   assert.deepEqual(a, b);
 });
 
+test('persisted CBR daily cache expires at ten minutes and concurrent readers share its refresh', async () => {
+  for (const age of [10 * 60_000 - 1, 10 * 60_000, 60 * 60_000 - 1]) {
+    const seed = { value: parseCurrencyCbrDaily(daily('29.09.2026')), fetchedAt: new Date(NOW.getTime() - age).toISOString() };
+    let requests = 0;
+    const { get, cache, writes } = client(async (url) => { requests++; return dailyResponse(url); }, seed);
+    const [first, second, third] = await Promise.all([get('cbr-daily'), get('cbr-daily'), get('cbr-daily')]);
+    const expired = age >= 10 * 60_000;
+    assert.equal(requests, expired ? 2 : 0, `cache age ${age}: one current/previous-rate refresh only when expired`);
+    assert.equal(writes.length, expired ? 1 : 0);
+    assert.equal(first.Date, expired ? '2026-09-30T00:00:00+03:00' : seed.value.Date);
+    assert.equal(first._currencySource.fetchedAt, expired ? NOW.toISOString() : seed.fetchedAt);
+    assert.equal(first._currencySource.stale, false);
+    assert.deepEqual(first, second);
+    assert.deepEqual(first, third);
+    assert.equal(cache.get('currency:cbr-daily')!.fetchedAt, first._currencySource.fetchedAt);
+    await get('cbr-daily');
+    assert.equal(requests, expired ? 2 : 0, 'the successful replacement remains cached');
+  }
+});
+
+test('CBR failure at the ten-minute expiry preserves the last good persisted rates and shared retry behavior', async () => {
+  const seed = { value: parseCurrencyCbrDaily(daily('29.09.2026')), fetchedAt: new Date(NOW.getTime() - 10 * 60_000).toISOString() };
+  let requests = 0, failed = true;
+  const { get, cache, writes } = client(async (url) => {
+    requests++;
+    if (failed) throw new Error('network down');
+    return dailyResponse(url);
+  }, seed);
+  const [first, second] = await Promise.all([get('cbr-daily'), get('cbr-daily')]);
+  assert.equal(requests, 1, 'concurrent readers share the failed refresh');
+  assert.deepEqual(first, second);
+  assert.equal(first._currencySource.stale, true);
+  assert.equal(first._currencySource.fetchedAt, seed.fetchedAt);
+  assert.equal(first.Date, seed.value.Date);
+  assert.deepEqual(cache.get('currency:cbr-daily'), seed);
+  assert.deepEqual(writes, []);
+  assert.equal((await get('cbr-daily'))._currencySource.stale, true);
+  assert.equal(requests, 1, 'failure cooldown still prevents repeated upstream requests');
+  failed = false;
+  const recovered = await get('cbr-daily', {}, { force: true });
+  assert.equal(requests, 3, 'recovery fetches current and previous effective rates');
+  assert.equal(recovered._currencySource.stale, false);
+  assert.equal(recovered._currencySource.fetchedAt, NOW.toISOString());
+  assert.equal(writes.length, 1);
+});
+
 test('CBR daily payload supplies true previous effective rates in the current nominal for all dashboard deltas', async () => {
   const { get } = client(async (url) => url.searchParams.has('date_req')
     ? new Response(daily('29.09.2026').replace('<Nominal>100</Nominal><Value>17,9876</Value>', '<Nominal>10</Nominal><Value>1,7500</Value>'))

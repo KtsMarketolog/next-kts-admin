@@ -476,6 +476,7 @@ function rpc(method,params={}){
 window.addEventListener('message',event=>{
   const m=event.data;
   if(event.source!==window.parent||event.origin!==KTS_CURRENCY_BOOTSTRAP.parentOrigin||!m||m.channel!==RPC_CHANNEL||m.nonce!==KTS_CURRENCY_BOOTSTRAP.nonce)return;
+  if(m.event==='schedule:tick'){checkScheduledJobs();return;}
   const p=rpcPending.get(m.id);if(!p)return;rpcPending.delete(m.id);clearTimeout(p.timer);
   if(m.error){const e=new Error(typeof m.error==='string'?m.error:m.error.message||'Не удалось выполнить запрос');e.code=m.error.code;e.status=m.error.status;p.reject(e);}else p.resolve(m.result);
 });
@@ -727,13 +728,41 @@ function renderTicker(){
 const prefs=Object.assign({sound:false,voice:false,notif:false},store.get("kts_prefs")||{});
 let audio=null;
 function getAudio(){if(!audio){try{audio=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}return audio;}
+let keepAlive=null,audioActivated=false,audioPageHidden=false;
+function stopKeepAlive(){
+  if(!keepAlive)return;
+  const {oscillator,gain}=keepAlive;keepAlive=null;
+  try{oscillator.stop();}catch(e){}
+  oscillator.disconnect();gain.disconnect();
+}
+function startKeepAlive(){
+  // Author's opt-in 40 Hz tone. It does not override browser freeze/sleep policy.
+  if(!(prefs.sound||prefs.voice)||!audioActivated||audioPageHidden){stopKeepAlive();return;}
+  const a=audio;if(!a||a.state!=="running"||keepAlive)return;
+  let oscillator,gain;
+  try{
+    oscillator=a.createOscillator();gain=a.createGain();
+    oscillator.frequency.value=40;gain.gain.value=0.0008;
+    oscillator.connect(gain);gain.connect(a.destination);oscillator.start();
+    keepAlive={oscillator,gain};
+  }catch(e){try{oscillator?.stop();}catch(e){}oscillator?.disconnect();gain?.disconnect();}
+}
+async function resumeAudio(){
+  if(!(prefs.sound||prefs.voice)||!audioActivated||audioPageHidden){stopKeepAlive();sndHint();return;}
+  const a=getAudio();if(!a){sndHint();return;}
+  a.onstatechange=()=>{startKeepAlive();sndHint();};
+  if(a.state!=="running")try{await a.resume();}catch(e){}
+  startKeepAlive();sndHint();
+}
 function chime(risk){
+  if(audioPageHidden||!prefs.sound)return;
   const a=getAudio();if(!a||a.state!=="running")return;
   const notes=risk?[660,520,420,660,520,420]:[523,659,784,523,659,784];
   notes.forEach((f,i)=>{const o=a.createOscillator(),g=a.createGain();o.type="sine";o.frequency.value=f;g.gain.value=0;o.connect(g);g.connect(a.destination);
     const t=a.currentTime+i*.24+(i>=3?.35:0);g.gain.linearRampToValueAtTime(.35,t+.03);g.gain.exponentialRampToValueAtTime(.001,t+.55);o.start(t);o.stop(t+.6);});
 }
 function say(text){
+  if(audioPageHidden||!prefs.voice)return;
   if(!("speechSynthesis"in window))return;
   const u=new SpeechSynthesisUtterance(text);u.lang="ru-RU";u.rate=.95;
   const v=speechSynthesis.getVoices().find(x=>/ru/i.test(x.lang));if(v)u.voice=v;
@@ -757,7 +786,7 @@ function presentAnnouncement(e,{speech=null,silent=false,title="Изменени
   showStrip(e);if(!silent)showBig(e,title);
   if(silent)return;
   if(prefs.sound)chime(e.risk);
-  if(prefs.voice)setTimeout(()=>say(speech||e.msg),prefs.sound?800:0);
+  if(prefs.voice)setTimeout(()=>{if(prefs.voice&&!audioPageHidden)say(speech||e.msg);},prefs.sound?800:0);
   sysNotify("Курсы валют",e.msg);
 }
 function announce(msg,options={}){
@@ -774,19 +803,34 @@ function renderLog(){
 }
 function applyMini(){const box=document.getElementById("alert");box.classList.toggle("mini",!!prefs.alertMini);document.getElementById("alertX").textContent=prefs.alertMini?"развернуть":"свернуть";}
 document.getElementById("alertX").onclick=()=>{prefs.alertMini=!prefs.alertMini;store.set("kts_prefs",prefs);applyMini();};
-function sndHint(){const a=getAudio();document.getElementById("sndHint").classList.toggle("show",!!(prefs.sound||prefs.voice)&&(!a||a.state!=="running"));}
-document.addEventListener("pointerdown",()=>{const a=getAudio();if(a&&a.state!=="running")a.resume().then(sndHint).catch(()=>{});if("speechSynthesis"in window)speechSynthesis.getVoices();},{passive:true});
-document.addEventListener("visibilitychange",()=>{const a=getAudio();if(a&&a.state!=="running")a.resume().catch(()=>{});});
+function sndHint(){document.getElementById("sndHint").classList.toggle("show",!!(prefs.sound||prefs.voice)&&(!audio||audio.state!=="running"));}
+function activateAudio(event){
+  if(!event.isTrusted)return;audioActivated=true;void resumeAudio();
+  if("speechSynthesis"in window)speechSynthesis.getVoices();
+}
+// Resume after the completed click: hiding the sound hint on pointerdown can
+// move the clicked control before pointerup and swallow the click in Safari.
+document.addEventListener("click",activateAudio,{passive:true});
+document.addEventListener("keydown",activateAudio,{passive:true});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)void resumeAudio();});
+window.addEventListener('pagehide',()=>{
+  audioPageHidden=true;stopKeepAlive();
+  if(audio?.state==='running')audio.suspend().catch(()=>{});
+  if('speechSynthesis'in window)speechSynthesis.cancel();
+});
+window.addEventListener('pageshow',()=>{audioPageHidden=false;void resumeAudio();});
 function setTog(id,key){
   const b=document.getElementById(id);b.setAttribute("aria-pressed",prefs[key]);
-  b.onclick=async()=>{prefs[key]=!prefs[key];
+  b.onclick=async event=>{prefs[key]=!prefs[key];
+    if(event?.isTrusted&&(key==='sound'||key==='voice'))audioActivated=true;
     if(key==='notif'&&prefs.notif){
       try{const result=await rpc('notification:permission');prefs.notif=result.permission==='granted';}
       catch(error){prefs.notif=false;}
       if(!prefs.notif)alert('Браузер не разрешил системные уведомления. Всплывающее окно внутри отчёта продолжит работать. Разрешите уведомления для сайта в настройках браузера.');
     }
     store.set("kts_prefs",prefs);b.setAttribute("aria-pressed",prefs[key]);
-    const a=getAudio();if(a&&a.state!=="running")await a.resume().catch(()=>{});sndHint();
+    if(!prefs.voice&&'speechSynthesis'in window)speechSynthesis.cancel();
+    await resumeAudio();
     if(prefs[key]&&key==="sound")chime(false);
     if(prefs[key]&&key==="voice")say("Голосовые сообщения включены");
   };
@@ -1254,7 +1298,43 @@ const tick=()=>document.getElementById("clock").textContent=new Date().toLocaleT
 
 const runningJobs=new Set();
 async function runJob(fn){if(runningJobs.has(fn))return;runningJobs.add(fn);try{await fn();}catch(error){setStatus();}finally{runningJobs.delete(fn);}}
+let scheduledJobs=[],scheduleReady=false,schedulePageHidden=false,scheduleFallback=null,scheduleStarting=false,scheduleHostStarted=false;
+function checkScheduledJobs(resume=false){
+  if(!scheduleReady||schedulePageHidden)return;
+  const now=Date.now();
+  for(const job of scheduledJobs){
+    const elapsed=now-job.lastStarted;
+    if(runningJobs.has(job.fn))continue;
+    if(elapsed<0||elapsed>=job.every||(resume&&job.onResume&&elapsed>=1000)){
+      // After sleep, run each overdue task once, never replay every missed tick.
+      job.lastStarted=now;void runJob(job.fn);
+    }
+  }
+}
+function stopScheduleFallback(){clearInterval(scheduleFallback);scheduleFallback=null;}
+async function startScheduleClock(){
+  if(!scheduleReady||schedulePageHidden||scheduleStarting||scheduleHostStarted)return;
+  scheduleStarting=true;
+  try{
+    const result=await rpc('schedule:start');
+    if(result?.started!==true)throw new Error('Фоновый таймер недоступен');
+    scheduleHostStarted=true;stopScheduleFallback();
+  }catch(error){
+    if(!schedulePageHidden&&scheduleFallback===null)scheduleFallback=setInterval(checkScheduledJobs,1000);
+  }finally{scheduleStarting=false;}
+}
+function resumeSchedule(){
+  if(document.hidden||schedulePageHidden)return;
+  checkScheduledJobs(true);void startScheduleClock();
+}
+document.addEventListener('visibilitychange',resumeSchedule);
+window.addEventListener('pagehide',()=>{schedulePageHidden=true;stopScheduleFallback();});
+window.addEventListener('pageshow',()=>{schedulePageHidden=false;resumeSchedule();});
 (async function init(){
+  // The host resets the old frame's RPC generation on load. Start this document's
+  // requests in the next task, after both child and parent load handlers finish.
+  if(document.readyState!=='complete')await new Promise(resolve=>window.addEventListener('load',resolve,{once:true}));
+  await new Promise(resolve=>setTimeout(resolve,0));
   document.getElementById('readOnlyStatus').hidden=CAN_MANAGE;setSharedBusy(false);
   await loadDeviceState();Object.assign(prefs,store.get('kts_prefs')||{});
   ['tSound|sound','tVoice|voice','tNotif|notif'].forEach(x=>{const [id,key]=x.split('|');document.getElementById(id).setAttribute('aria-pressed',!!prefs[key]);});
@@ -1263,12 +1343,13 @@ async function runJob(fn){if(runningJobs.has(fn))return;runningJobs.add(fn);try{
   await refreshBaselines();
   await refreshCbr();
   await Promise.all([loadHistory().catch(()=>{}),refreshMoex(),refreshWorld(),refreshCopper(),refreshFutures()]);
-  renderAll();refreshCandles();refreshMonthHistory();
+  renderAll();void runJob(refreshCandles);refreshMonthHistory();
   const reloadShared=async()=>{try{await loadShared();}catch(error){showSaveError(error);}};
   const history=async()=>{await loadHistory();renderAll();await refreshMonthHistory();};
-  [[refreshCbr,600],[refreshCopper,3600],[refreshFutures,60],[refreshCandles,600],[refreshMoex,60],[refreshWorld,3600],[refreshBaselines,60],[reloadShared,60],[history,3600]].forEach(([fn,every])=>setInterval(()=>runJob(fn),every*1000));
-  // Browser background throttling is expected; server cron keeps the shared 08:30 base.
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){runJob(refreshBaselines);runJob(refreshFutures);runJob(reloadShared);}});
+  const onResume=new Set([refreshCbr,refreshMoex,refreshFutures,refreshBaselines,reloadShared]);
+  scheduledJobs=[[refreshCbr,600],[refreshCopper,3600],[refreshFutures,60],[refreshCandles,600],[refreshMoex,60],[refreshWorld,3600],[refreshBaselines,60],[reloadShared,60],[history,3600]].map(([fn,every])=>({fn,every:every*1000,lastStarted:Date.now(),onResume:onResume.has(fn)}));
+  // Fixed Worker lives in the trusted host; the opaque iframe needs no new permissions.
+  scheduleReady=true;void startScheduleClock();
   setTimeout(()=>{if(!savingShared&&!dirtyForms.size)location.reload();},24*60*60*1000);
 })();
 </script>
