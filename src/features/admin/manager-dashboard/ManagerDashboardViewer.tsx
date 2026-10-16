@@ -9,21 +9,22 @@ import styles from './ManagerDashboard.module.scss';
 
 type ViewerOverview = Extract<ManagerDashboardOverview, { mode: 'view' }>;
 
-export function managerDashboardViewIdentity(overview: Pick<ViewerOverview, 'email' | 'bindingStatus' | 'audience'>) {
-  return JSON.stringify([overview.audience, overview.email, overview.bindingStatus]);
+export function managerDashboardViewIdentity(overview: Pick<ViewerOverview, 'email' | 'bindingStatus' | 'audience' | 'recipientKey'>) {
+  return JSON.stringify([overview.audience, overview.recipientKey ?? null, overview.email, overview.bindingStatus]);
 }
 
 type ViewerProps = {
   overview: ViewerOverview;
   loading: boolean;
+  own?: boolean;
   onReload: (report?: 'personal' | 'shared') => Promise<boolean>;
 };
 
-export function ManagerDashboardViewer({ overview, loading, onReload }: ViewerProps) {
+export function ManagerDashboardViewer({ overview, loading, onReload, own = false }: ViewerProps) {
   const personalSelection = useReportSelection(managerDashboardViewIdentity(overview));
   return (
     <div className={styles.stack}>
-      <PersonalDashboardViewer key={personalSelection.identity} overview={overview} loading={loading} onReload={onReload} selection={personalSelection} />
+      <PersonalDashboardViewer key={personalSelection.identity} overview={overview} loading={loading} onReload={onReload} selection={personalSelection} own={own} />
       <DashboardInstructions dashboardKey={`manager:${overview.audience}`} kind="personal-sales" />
       <DashboardDataHistory overview={overview} personalSelection={personalSelection} />
     </div>
@@ -55,7 +56,7 @@ function useReportSelection(identity: string) {
 
 type ReportSelection = ReturnType<typeof useReportSelection>;
 
-function PersonalDashboardViewer({ overview, loading, onReload, selection }: ViewerProps & { selection: ReportSelection }) {
+function PersonalDashboardViewer({ overview, loading, onReload, selection, own = false }: ViewerProps & { selection: ReportSelection }) {
   const { historicalId, revision } = selection;
   const hasBinding = overview.bindingStatus === 'matched';
   const history = hasBinding ? overview.history : [];
@@ -79,9 +80,9 @@ function PersonalDashboardViewer({ overview, loading, onReload, selection }: Vie
             : <span className={styles.badge} data-status="missing">Нужна привязка файла</span>}
         </div>
         {overview.bindingStatus === 'missing_email' ? (
-          <p className={styles.warning}>В профиле не указан email для назначения личного файла. {overview.htmlVersion ? 'Опубликованный HTML доступен ниже. ' : ''}Для автоматического получения снимков администратору нужно указать email менеджера.</p>
+          <p className={styles.warning}>В профиле не указан email для назначения личного файла. {overview.htmlVersion ? 'Опубликованный HTML доступен ниже. ' : ''}Для автоматического получения снимков администратору нужно указать email сотрудника.</p>
         ) : overview.bindingStatus === 'ambiguous_email' ? (
-          <p className={styles.warning}>Этот email указан у нескольких менеджеров. Личный файл не подставляется, пока администратор не устранит неоднозначную привязку. {overview.htmlVersion ? 'Опубликованный HTML доступен ниже.' : ''}</p>
+          <p className={styles.warning}>Этот email указан у нескольких сотрудников. Личный файл не подставляется, пока администратор не устранит неоднозначную привязку. {overview.htmlVersion ? 'Опубликованный HTML доступен ниже.' : ''}</p>
         ) : null}
         {selected ? (
           <>
@@ -110,7 +111,7 @@ function PersonalDashboardViewer({ overview, loading, onReload, selection }: Vie
             }}>{loading ? 'Обновляем…' : 'Перезагрузить отчёт'}</button>
           </div>
           {expired ? <p className={styles.warning}>Срок доступа к этому снимку истёк. HTML дашборда доступен, а для открытия личных данных нужен свежий файл.</p> : null}
-          <DashboardFrame audience={overview.audience} versionId={overview.htmlVersion.id} snapshotId={selected?.id} revision={revision} />
+          <DashboardFrame own={own} audience={overview.audience} versionId={overview.htmlVersion.id} snapshotId={selected?.id} revision={revision} />
         </section>
       )}
     </div>

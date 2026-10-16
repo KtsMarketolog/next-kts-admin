@@ -67,3 +67,19 @@ test('server upload routes instrument only after successful persistence; unchang
     if (path.endsWith('/snapshots/route.ts') || path.endsWith('/shared/json/route.ts')) assert.match(source, /result.status === 'imported'/);
   }
 });
+
+test('leader snapshot uploads are journaled as MR without confusing manager and admin IDs', async () => {
+  for (const role of ['admin', 'admintop', 'top']) {
+    const f = fixture(0, role);
+    assert.equal(await f.helper.recordPersonalSnapshotUploadUsage(session, { adminUserId: 4, snapshotId: 13, name: 'leader.ktsp', size: 50 }), true);
+    assert.equal(f.writes[0].dashboardKey, 'manager:development');
+    assert.equal(f.writes[0].events[0].upload.name, 'leader.ktsp');
+    assert.equal(await f.helper.recordPersonalSnapshotUploadUsage(session, { adminUserId: 4, managerId: 4, snapshotId: 13, name: 'leader.ktsp', size: 50 }), false);
+    assert.equal(f.writes.length, 1);
+  }
+  for (const role of ['purchaser', 'wholesale_admin', 'manager', 'support_manager']) {
+    const f = fixture(0, role);
+    assert.equal(await f.helper.recordPersonalSnapshotUploadUsage(session, { adminUserId: 4, snapshotId: 13, name: 'leader.ktsp', size: 50 }), false);
+    assert.equal(f.writes.length, 0);
+  }
+});

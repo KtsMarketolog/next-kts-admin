@@ -400,16 +400,16 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
                 </section>
 
                 <section id={`manager-dashboard-files-${audience}`} className={styles.panel} aria-label={`Личные файлы: ${label}`}>
-                  <div className={styles.sectionHeading}><div><h3>Личные файлы группы</h3><p>Показаны активные сотрудники с доступом к этому дашборду. Загружайте снимки вручную ниже. Файлы назначаются менеджерам по email получателя.</p></div><span className={styles.badge}>Менеджеров: {group.managers.length}</span></div>
+                  <div className={styles.sectionHeading}><div><h3>Личные файлы группы</h3><p>Показаны активные сотрудники с доступом к этому дашборду. Загружайте снимки вручную ниже. Файлы назначаются сотрудникам по email получателя.</p></div><span className={styles.badge}>Сотрудников: {group.managers.length}</span></div>
                   <div className={styles.tableScroll}>
                     <table className={`${styles.table} ${styles.groupTable}`}>
-                      <thead><tr><th scope="col">Менеджер / email для сопоставления</th><th scope="col">Личный снимок</th></tr></thead>
+                      <thead><tr><th scope="col">Сотрудник / email для сопоставления</th><th scope="col">Личный снимок</th></tr></thead>
                       <tbody>{group.managers.map((manager) => (
-                        <tr key={manager.id}>
+                        <tr key={`${manager.source ?? 'manager'}:${manager.id}`}>
                           <td><strong>{manager.name}</strong><small>{manager.email || 'Email не указан'}</small>{manager.isActive === false ? <small>Учётная запись отключена</small> : null}{manager.bindingStatus === 'ambiguous'
-                            ? <p className={styles.warning}>Email совпадает у нескольких менеджеров. Исправьте его в карточках, чтобы назначать файлы автоматически.</p>
+                            ? <p className={styles.warning}>Email совпадает у нескольких сотрудников. Исправьте его в карточках, чтобы назначать файлы автоматически.</p>
                             : manager.isActive !== false && (manager.bindingStatus === 'unknown' || !manager.email)
-                              ? <p className={styles.warning}>Для назначения файла нужен уникальный email в карточке менеджера.</p> : null}</td>
+                              ? <p className={styles.warning}>Для назначения файла нужен уникальный email в карточке сотрудника.</p> : null}</td>
                           <td><SnapshotStatus snapshot={manager.snapshot} status={manager.snapshotStatus} expectedIssuedAfter={personalOverview.expectedIssuedAfter} />{manager.snapshot ? <><small>{manager.snapshot.originalName}</small><small>Данные загружены: {formatDashboardTimestamp(manager.snapshot.receivedAt)}</small><small>Данные на: {formatDashboardDataDate(manager.snapshot.issued)} · доступ до {formatDashboardDate(manager.snapshot.expires)} (МСК)</small></> : null}</td>
                         </tr>
                       ))}</tbody>

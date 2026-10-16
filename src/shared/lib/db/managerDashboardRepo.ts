@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 
 import { getPersonalDashboardAudience, parsePersonalDashboardAudience, type PersonalDashboardAudience } from '../managerDashboardAudience';
+import { canReceiveLeaderPersonalSnapshot, type PersonalDashboardRecipient } from '../managerDashboardRecipients';
+export type { PersonalDashboardRecipient } from '../managerDashboardRecipients';
 import { isPersonalDashboardImportCursor, PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE } from '../managerDashboardImportPagination';
 import {
   getManagerEmailHash,
@@ -20,7 +22,8 @@ import { DASHBOARD_ACCESS_LOCK } from './dashboardAccessRepo';
 
 export type PersonalDashboardSnapshot = PersonalSnapshotMetadata & {
   id: number;
-  managerId: number;
+  managerId: number | null;
+  adminUserId: number | null;
   sourceKey: string;
   receivedAt: string;
   status: 'active' | 'previous' | 'archived';
@@ -28,6 +31,7 @@ export type PersonalDashboardSnapshot = PersonalSnapshotMetadata & {
 };
 export type PersonalDashboardStatus = {
   audience: PersonalDashboardAudience;
+  email: string;
   snapshot: PersonalDashboardSnapshot | null;
   history: PersonalDashboardSnapshot[];
   bindingStatus: 'matched' | 'missing_email' | 'ambiguous_email';
@@ -51,6 +55,7 @@ export type PersonalDashboardImportResult = {
   code: string;
   message: string;
   managerId: number | null;
+  adminUserId?: number | null;
   snapshotId: number | null;
 };
 export type ImportPersonalDashboardSnapshotInput = {
@@ -61,10 +66,12 @@ export type ImportPersonalDashboardSnapshotInput = {
   messageId?: string;
 };
 export type PersonalDashboardManagerBinding = { id: number; email: string; isActive: boolean; role: string | null };
+export type PersonalDashboardRecipientBinding = PersonalDashboardManagerBinding & { source: PersonalDashboardRecipient['source'] };
 
 type ManagerRow = { id: string; name: string; email: string; role: string | null; is_active: boolean };
+type RecipientRow = ManagerRow & { source: PersonalDashboardRecipient['source'] };
 type SnapshotRow = {
-  id: string; manager_id: string; original_name: string; file_size: string; sha256: string;
+  id: string; manager_id: string | null; admin_user_id: string | null; original_name: string; file_size: string; sha256: string;
   email_hash: string; person_name: string; person_role: string; issued: string; expires: string;
   source_key: string; received_at: string; active_snapshot_id: string | null; previous_snapshot_id: string | null;
 };
@@ -75,30 +82,42 @@ type HtmlRow = {
 type HtmlStateRow = { active_version_id: string | null; previous_version_id: string | null };
 type ImportRow = {
   id: string; original_name: string; status: PersonalDashboardImportStatus; code: string;
-  manager_id: string | null; snapshot_id: string | null;
+  manager_id: string | null; admin_user_id: string | null; snapshot_id: string | null;
 };
 type ImportJournalRow = ImportRow & { sender: string; message_id: string; received_at: string; issued: string | null };
 
 const IMPORT_MESSAGES: Record<PersonalDashboardImportStatus, string> = {
-  imported: 'Личный снимок сохранён и назначен менеджеру',
+  imported: 'Личный снимок сохранён и назначен сотруднику',
   duplicate: 'Этот снимок уже обработан',
-  unknown: 'Не найден активный менеджер по развитию или сопровождению с email этого снимка',
-  ambiguous: 'Email снимка соответствует нескольким менеджерам; требуется проверка',
+  unknown: 'Не найден активный МР, МС или руководитель (Админ, Админ ТОП, ТОП) с email этого снимка',
+  ambiguous: 'Email снимка соответствует нескольким сотрудникам; требуется проверка',
   stale: 'Более старый снимок не заменяет текущий',
   expired: 'Срок действия снимка истёк',
   conflict: 'За эту дату уже есть другой снимок; требуется проверка',
   invalid: 'Снимок не прошёл проверку формата или доставки',
   quota: 'Лимит хранения личных снимков достигнут; текущие данные сохранены',
 };
-const SNAPSHOT_SELECT = `s.id::text, s.manager_id::text, s.original_name, s.file_size::text, s.sha256,
+const SNAPSHOT_SELECT = `s.id::text, s.manager_id::text, s.admin_user_id::text, s.original_name, s.file_size::text, s.sha256,
   s.email_hash, s.person_name, s.person_role, s.issued::text, s.expires::text,
   s.source_key, s.received_at::text, st.active_snapshot_id::text, st.previous_snapshot_id::text`;
 const HTML_SELECT = `v.id::text, v.audience, v.original_name, v.file_size::text, v.sha256, v.created_at::text,
   v.uploaded_by, v.first_published_at::text`;
-const IMPORT_SELECT = `id::text, original_name, status, code, manager_id::text, snapshot_id::text`;
+const IMPORT_SELECT = `id::text, original_name, status, code, manager_id::text, admin_user_id::text, snapshot_id::text`;
+const SNAPSHOT_OWNER_JOIN = '(st.manager_id=s.manager_id or st.admin_user_id=s.admin_user_id)';
 
 function positiveId(id: number): void {
   if (!Number.isSafeInteger(id) || id < 1) throw new PersonalDashboardError('NOT_FOUND', 'Данные не найдены');
+}
+function checkedRecipient(value: number | PersonalDashboardRecipient): PersonalDashboardRecipient {
+  const recipient = typeof value === 'number' ? { source: 'manager' as const, id: value } : value;
+  if (!recipient || (recipient.source !== 'manager' && recipient.source !== 'admin')) {
+    throw new PersonalDashboardError('NOT_FOUND', 'Данные не найдены');
+  }
+  positiveId(recipient.id);
+  return recipient;
+}
+function ownerColumn(recipient: PersonalDashboardRecipient): 'manager_id' | 'admin_user_id' {
+  return recipient.source === 'manager' ? 'manager_id' : 'admin_user_id';
 }
 function checkedAudience(value: PersonalDashboardAudience): PersonalDashboardAudience {
   const audience = parsePersonalDashboardAudience(value);
@@ -123,7 +142,7 @@ function actor(value: string): string {
 }
 function mapSnapshot(row: SnapshotRow): PersonalDashboardSnapshot {
   return {
-    id: Number(row.id), managerId: Number(row.manager_id), originalName: row.original_name,
+    id: Number(row.id), managerId: idOrNull(row.manager_id), adminUserId: idOrNull(row.admin_user_id), originalName: row.original_name,
     fileSize: Number(row.file_size), sha256: row.sha256, emailHash: row.email_hash,
     name: row.person_name, role: row.person_role, issued: row.issued, expires: row.expires,
     sourceKey: row.source_key, receivedAt: row.received_at,
@@ -140,7 +159,7 @@ function mapHtml(row: HtmlRow, activeId: string | null): PersonalDashboardHtmlVe
 }
 function mapImport(row: ImportRow): PersonalDashboardImportResult {
   return { id: Number(row.id), originalName: row.original_name, status: row.status, code: row.code,
-    message: IMPORT_MESSAGES[row.status], managerId: idOrNull(row.manager_id), snapshotId: idOrNull(row.snapshot_id) };
+    message: IMPORT_MESSAGES[row.status], managerId: idOrNull(row.manager_id), adminUserId: idOrNull(row.admin_user_id), snapshotId: idOrNull(row.snapshot_id) };
 }
 
 /** Hashes are only routing metadata. These checks do not authenticate an attachment or authorize a caller. */
@@ -151,68 +170,89 @@ export function resolvePersonalDashboardManager(managers: PersonalDashboardManag
     : { status: matches.length ? 'ambiguous' as const : 'unknown' as const, managerId: null };
 }
 
-function bindings(rows: ManagerRow[]): PersonalDashboardManagerBinding[] {
-  return rows.map((row) => ({ id: Number(row.id), email: row.email, isActive: row.is_active, role: row.role }));
+/** Matches all eligible accounts, including hidden recipients, without conflating numeric ids. */
+export function resolvePersonalDashboardRecipient(recipients: PersonalDashboardRecipientBinding[], emailHash: string) {
+  const matches = recipients.filter((recipient) => recipient.isActive
+    && (recipient.source === 'admin' ? canReceiveLeaderPersonalSnapshot(recipient.role) : getPersonalDashboardAudience(recipient.role) !== null)
+    && recipient.email.trim() !== '' && getManagerEmailHash(recipient.email) === emailHash);
+  return matches.length === 1
+    ? { status: 'matched' as const, recipient: { source: matches[0].source, id: matches[0].id } }
+    : { status: matches.length ? 'ambiguous' as const : 'unknown' as const, recipient: null };
 }
-async function currentManagers(client: PoolClient): Promise<ManagerRow[]> {
+function bindings(rows: RecipientRow[]): PersonalDashboardRecipientBinding[] {
+  return rows.map((row) => ({ source: row.source, id: Number(row.id), email: row.email, isActive: row.is_active, role: row.role }));
+}
+async function currentRecipients(client: PoolClient): Promise<RecipientRow[]> {
   // Also prevent a new duplicate-email manager appearing between resolving the identity and reading
   // its bytes. This short table lock conflicts with writes, not with ordinary manager reads.
-  await client.query(`lock table wholesale_managers in share mode`);
+  await client.query(`lock table admin_users, wholesale_managers in share mode`);
   // SHARE freezes existing identity bindings while an import/read is in progress. Never use SQL btrim
   // for email normalization: the browser's ECMAScript trim includes Unicode whitespace.
-  const result = await client.query<ManagerRow>(`select id::text, name, email, role, is_active
-    from wholesale_managers order by id for share`);
-  return result.rows;
+  // Do not also take row locks: an account editor can already hold FOR UPDATE before requesting
+  // its write table lock. Plain reads see committed rows while SHARE prevents writes until commit.
+  const managers = await client.query<RecipientRow>(`select 'manager'::text as source,id::text,name,email,role,is_active
+    from wholesale_managers order by id`);
+  const admins = await client.query<RecipientRow>(`select 'admin'::text as source,id::text,name,email,role,is_active
+    from admin_users order by id`);
+  return [...managers.rows, ...admins.rows];
 }
-async function authorizeManagerAccount(client: PoolClient, managerId: number) {
-  positiveId(managerId);
-  const managers = await currentManagers(client);
-  const manager = managers.find((row) => Number(row.id) === managerId);
-  const audience = getPersonalDashboardAudience(manager?.role);
-  if (!manager?.is_active || !audience) {
+async function authorizeRecipientAccount(client: PoolClient, recipient: PersonalDashboardRecipient) {
+  const recipients = await currentRecipients(client);
+  const account = recipients.find((row) => row.source === recipient.source && Number(row.id) === recipient.id);
+  const audience = recipient.source === 'admin'
+    ? (canReceiveLeaderPersonalSnapshot(account?.role) ? 'development' as const : null)
+    : getPersonalDashboardAudience(account?.role);
+  if (!account?.is_active || !audience) {
     throw new PersonalDashboardError('NOT_FOUND', 'Личный дашборд недоступен');
   }
-  return { manager, managers, audience };
+  return { account, recipients, audience };
 }
-async function accountSnapshotBinding(client: PoolClient, managerId: number) {
-  const { manager, managers, audience } = await authorizeManagerAccount(client, managerId);
+async function accountSnapshotBinding(client: PoolClient, recipient: PersonalDashboardRecipient) {
+  const { account, recipients, audience } = await authorizeRecipientAccount(client, recipient);
   // Access to the group's shared published HTML requires a valid manager account,
   // not a working snapshot email. Snapshot identity is a separate, stricter condition.
-  if (!manager.email.trim()) return { audience, status: 'missing_email' as const, emailHash: null };
-  const emailHash = getManagerEmailHash(manager.email);
-  const binding = resolvePersonalDashboardManager(bindings(managers), emailHash);
-  if (binding.managerId !== managerId) return { audience, status: 'ambiguous_email' as const, emailHash: null };
-  return { audience, status: 'matched' as const, emailHash };
+  const email = account.email.trim().toLowerCase();
+  if (!email) return { audience, email, status: 'missing_email' as const, emailHash: null };
+  const emailHash = getManagerEmailHash(email);
+  const binding = resolvePersonalDashboardRecipient(bindings(recipients), emailHash);
+  if (binding.recipient?.source !== recipient.source || binding.recipient?.id !== recipient.id) {
+    return { audience, email, status: 'ambiguous_email' as const, emailHash: null };
+  }
+  return { audience, email, status: 'matched' as const, emailHash };
 }
-async function authorizeBinding(client: PoolClient, managerId: number) {
-  const binding = await accountSnapshotBinding(client, managerId);
-  if (binding.status === 'missing_email') throw new PersonalDashboardError('NOT_FOUND', 'Личный снимок недоступен без email менеджера');
-  if (binding.status === 'ambiguous_email') throw new PersonalDashboardError('AMBIGUOUS_EMAIL', 'Email менеджера не уникален; обратитесь к администратору');
-  return binding.emailHash;
+async function authorizeBinding(client: PoolClient, recipient: PersonalDashboardRecipient) {
+  const binding = await accountSnapshotBinding(client, recipient);
+  if (binding.status === 'missing_email') throw new PersonalDashboardError('NOT_FOUND', 'Личный снимок недоступен без email сотрудника');
+  if (binding.status === 'ambiguous_email') throw new PersonalDashboardError('AMBIGUOUS_EMAIL', 'Email сотрудника не уникален; обратитесь к администратору');
+  return binding;
 }
 
-/** Callers must obtain managerId from their verified session, never from a request parameter. */
-export async function getPersonalDashboardStatus(managerId: number): Promise<PersonalDashboardStatus> {
+/** Own-view callers obtain the namespaced recipient from their verified session, never a request parameter. */
+export async function getPersonalDashboardStatus(value: number | PersonalDashboardRecipient): Promise<PersonalDashboardStatus> {
+  const recipient = checkedRecipient(value);
+  const column = ownerColumn(recipient);
   await ensureSiteSchema();
   return withTransaction(async (client) => {
-    const binding = await accountSnapshotBinding(client, managerId);
-    if (binding.status !== 'matched') return { audience: binding.audience, snapshot: null, history: [], bindingStatus: binding.status };
+    const binding = await accountSnapshotBinding(client, recipient);
+    if (binding.status !== 'matched') return { audience: binding.audience, email: binding.email, snapshot: null, history: [], bindingStatus: binding.status };
     const result = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT}
-      from personal_dashboard_snapshots s left join personal_dashboard_snapshot_state st on st.manager_id=s.manager_id
-      where s.manager_id=$1 and s.email_hash=$2 order by s.issued desc, s.id desc limit 32`, [managerId, binding.emailHash]);
+      from personal_dashboard_snapshots s left join personal_dashboard_snapshot_state st on ${SNAPSHOT_OWNER_JOIN}
+      where s.${column}=$1 and s.email_hash=$2 order by s.issued desc, s.id desc limit 32`, [recipient.id, binding.emailHash]);
     const history = result.rows.map(mapSnapshot);
-    return { audience: binding.audience, snapshot: history.find((item) => item.status === 'active') ?? null, history, bindingStatus: 'matched' };
+    return { audience: binding.audience, email: binding.email, snapshot: history.find((item) => item.status === 'active') ?? null, history, bindingStatus: 'matched' };
   });
 }
 
-export async function getPersonalDashboardSnapshot(managerId: number, id?: number) {
+export async function getPersonalDashboardSnapshot(value: number | PersonalDashboardRecipient, id?: number) {
+  const recipient = checkedRecipient(value);
+  const column = ownerColumn(recipient);
   if (id !== undefined) positiveId(id);
   await ensureSiteSchema();
   return withTransaction(async (client) => {
-    const emailHash = await authorizeBinding(client, managerId);
+    const { emailHash, email } = await authorizeBinding(client, recipient);
     const result = await client.query<SnapshotRow & { encrypted_payload: Buffer }>(`select ${SNAPSHOT_SELECT}, s.encrypted_payload
-      from personal_dashboard_snapshots s join personal_dashboard_snapshot_state st on st.manager_id=s.manager_id
-      where s.manager_id=$1 and s.email_hash=$2 and s.id=coalesce($3::bigint,st.active_snapshot_id)`, [managerId, emailHash, id ?? null]);
+      from personal_dashboard_snapshots s join personal_dashboard_snapshot_state st on ${SNAPSHOT_OWNER_JOIN}
+      where s.${column}=$1 and s.email_hash=$2 and s.id=coalesce($3::bigint,st.active_snapshot_id)`, [recipient.id, emailHash, id ?? null]);
     const row = result.rows[0];
     if (!row) return null;
     if (row.expires < personalDashboardToday()) throw new PersonalDashboardError('EXPIRED', 'Срок действия снимка истёк; ожидается новый файл');
@@ -220,7 +260,7 @@ export async function getPersonalDashboardSnapshot(managerId: number, id?: numbe
       || createHash('sha256').update(row.encrypted_payload).digest('hex') !== row.sha256) {
       throw new PersonalDashboardError('SNAPSHOT_INTEGRITY', 'Не удалось проверить целостность снимка');
     }
-    return { ...mapSnapshot(row), bytes: row.encrypted_payload };
+    return { ...mapSnapshot(row), email, bytes: row.encrypted_payload };
   });
 }
 
@@ -238,22 +278,23 @@ async function personalReviewContext(client: PoolClient, viewer: PersonalDashboa
     for share of s,u`, [viewer.sessionId, viewer.adminUserId]);
   if (!authority.rowCount) throw new PersonalDashboardError('REVIEW_FORBIDDEN', 'Нет доступа к просмотру отчётов МР');
   // Access changes and recipient role/email changes cannot race the ensuing data read.
-  const all = await currentManagers(client);
+  const all = await currentRecipients(client);
   const grants = await client.query<{manager_id: string}>(`select manager_id::text from dashboard_effective_view_grants
     where key='manager:development' and manager_id is not null`);
   const granted = new Set(grants.rows.map((row) => row.manager_id));
-  const recipients = all.filter((manager) => manager.is_active && getPersonalDashboardAudience(manager.role) === 'development' && granted.has(manager.id));
+  const recipients = all.filter((manager) => manager.source === 'manager' && manager.is_active
+    && getPersonalDashboardAudience(manager.role) === 'development' && granted.has(manager.id));
   const selected = managerId === undefined ? null : recipients.find((manager) => Number(manager.id) === managerId);
   if (managerId !== undefined && !selected) throw new PersonalDashboardError('REVIEW_NOT_FOUND', 'Отчёт МР недоступен');
   return { recipients, all, selected };
 }
 
-function personalReviewBinding(manager: ManagerRow, all: ManagerRow[]) {
+function personalReviewBinding(manager: ManagerRow, all: RecipientRow[]) {
   const email = manager.email.trim().toLowerCase();
   const emailHash = email ? getManagerEmailHash(email) : null;
-  const binding = emailHash ? resolvePersonalDashboardManager(bindings(all), emailHash) : null;
+  const binding = emailHash ? resolvePersonalDashboardRecipient(bindings(all), emailHash) : null;
   const bindingStatus = !emailHash ? 'missing_email' as const
-    : binding?.managerId === Number(manager.id) ? 'matched' as const : 'ambiguous_email' as const;
+    : binding?.recipient?.source === 'manager' && binding.recipient.id === Number(manager.id) ? 'matched' as const : 'ambiguous_email' as const;
   return { email, emailHash, bindingStatus };
 }
 
@@ -422,16 +463,17 @@ async function existingImport(client: PoolClient, key: string) {
   return prior.rows[0] ? mapImport(prior.rows[0]) : null;
 }
 async function logImport(client: PoolClient, input: Omit<ImportPersonalDashboardSnapshotInput, 'bytes'>,
-  status: PersonalDashboardImportStatus, code: string, metadata: PersonalSnapshotMetadata | null, managerId: number | null = null, snapshotId: number | null = null) {
+  status: PersonalDashboardImportStatus, code: string, metadata: PersonalSnapshotMetadata | null, recipient: PersonalDashboardRecipient | null = null, snapshotId: number | null = null) {
   const result = await client.query<ImportRow>(`insert into personal_dashboard_imports
-    (source_key,original_name,sender,message_id,status,code,manager_id,snapshot_id,email_hash,sha256,issued)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    (source_key,original_name,sender,message_id,status,code,manager_id,snapshot_id,email_hash,sha256,issued,admin_user_id)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
     on conflict (source_key) do update set status=excluded.status,code=excluded.code,
-      manager_id=excluded.manager_id,snapshot_id=excluded.snapshot_id,email_hash=excluded.email_hash,
+      manager_id=excluded.manager_id,admin_user_id=excluded.admin_user_id,snapshot_id=excluded.snapshot_id,email_hash=excluded.email_hash,
       sha256=excluded.sha256,issued=excluded.issued,received_at=now()
     returning ${IMPORT_SELECT}`,
   [input.sourceKey, personalDashboardSafeFilename(input.filename), safeLogText(input.sender, 320), safeLogText(input.messageId, 512),
-    status, code, managerId, snapshotId, metadata?.emailHash ?? null, metadata?.sha256 ?? null, metadata?.issued ?? null]);
+    status, code, recipient?.source === 'manager' ? recipient.id : null, snapshotId,
+    metadata?.emailHash ?? null, metadata?.sha256 ?? null, metadata?.issued ?? null, recipient?.source === 'admin' ? recipient.id : null]);
   // A hard bound prevents malformed mail streams filling the DB with diagnostic metadata.
   // Snapshots retain their own source key and content digest even after old logs age out.
   await client.query(`delete from personal_dashboard_imports where id in
@@ -465,45 +507,46 @@ export async function importPersonalDashboardSnapshot(input: ImportPersonalDashb
     const retryable = prior && ['unknown', 'ambiguous', 'quota'].includes(prior.status);
     if (prior && !retryable) return { ...prior, status: prior.status === 'imported' ? 'duplicate' : prior.status, message: prior.status === 'imported' ? IMPORT_MESSAGES.duplicate : prior.message };
     if (!metadata) return logImport(client, input, 'invalid', invalidCode || 'INVALID_SNAPSHOT', null);
-    const managers = await currentManagers(client);
-    const binding = resolvePersonalDashboardManager(bindings(managers), metadata.emailHash);
+    const recipients = await currentRecipients(client);
+    const binding = resolvePersonalDashboardRecipient(bindings(recipients), metadata.emailHash);
     if (binding.status !== 'matched') {
       if (prior?.status === binding.status) return prior;
       return logImport(client, input, binding.status, binding.status === 'unknown' ? 'UNKNOWN_RECIPIENT' : 'AMBIGUOUS_RECIPIENT', metadata);
     }
-    const managerId = binding.managerId;
-    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`kts-personal-manager:${managerId}`]);
+    const recipient = binding.recipient;
+    const column = ownerColumn(recipient);
+    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`kts-personal-${recipient.source}:${recipient.id}`]);
     const today = personalDashboardToday();
-    if (metadata.expires < today) return logImport(client, input, 'expired', 'EXPIRED_SNAPSHOT', metadata, managerId);
-    if (metadata.issued > today) return logImport(client, input, 'invalid', 'FUTURE_SNAPSHOT', metadata, managerId);
+    if (metadata.expires < today) return logImport(client, input, 'expired', 'EXPIRED_SNAPSHOT', metadata, recipient);
+    if (metadata.issued > today) return logImport(client, input, 'invalid', 'FUTURE_SNAPSHOT', metadata, recipient);
     const current = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT}
-      from personal_dashboard_snapshots s left join personal_dashboard_snapshot_state st on st.manager_id=s.manager_id
-      where s.manager_id=$1 order by s.issued desc,s.id desc`, [managerId]);
+      from personal_dashboard_snapshots s left join personal_dashboard_snapshot_state st on ${SNAPSHOT_OWNER_JOIN}
+      where s.${column}=$1 order by s.issued desc,s.id desc`, [recipient.id]);
     const same = current.rows.find((row) => row.sha256 === metadata!.sha256);
-    if (same) return logImport(client, input, 'duplicate', 'DUPLICATE_CONTENT', metadata, managerId, Number(same.id));
+    if (same) return logImport(client, input, 'duplicate', 'DUPLICATE_CONTENT', metadata, recipient, Number(same.id));
     const latestBound = current.rows.find((row) => row.email_hash === metadata!.emailHash && row.id === row.active_snapshot_id);
-    if (latestBound && latestBound.issued > metadata.issued) return logImport(client, input, 'stale', 'STALE_SNAPSHOT', metadata, managerId);
-    if (latestBound && latestBound.issued === metadata.issued) return logImport(client, input, 'conflict', 'SAME_DAY_CONFLICT', metadata, managerId);
+    if (latestBound && latestBound.issued > metadata.issued) return logImport(client, input, 'stale', 'STALE_SNAPSHOT', metadata, recipient);
+    if (latestBound && latestBound.issued === metadata.issued) return logImport(client, input, 'conflict', 'SAME_DAY_CONFLICT', metadata, recipient);
     // The actual active snapshot becomes previous, even if its date/order/email binding changed.
     // Compute quota before any mutation, then prune only after the new active pointer is stored.
     const retained = current.rows.filter((row) => row.id === row.active_snapshot_id);
     if (retained.length + 1 > PERSONAL_DASHBOARD_MANAGER_MAX_VERSIONS
       || retained.reduce((sum, row) => sum + Number(row.file_size), 0) + metadata.fileSize > PERSONAL_DASHBOARD_MANAGER_MAX_BYTES) {
-      return logImport(client, input, 'quota', 'SNAPSHOT_QUOTA', metadata, managerId);
+      return logImport(client, input, 'quota', 'SNAPSHOT_QUOTA', metadata, recipient);
     }
     const created = await client.query<{ id: string }>(`insert into personal_dashboard_snapshots
-      (manager_id,original_name,encrypted_payload,file_size,sha256,email_hash,person_name,person_role,issued,expires,source_key)
+      (${column},original_name,encrypted_payload,file_size,sha256,email_hash,person_name,person_role,issued,expires,source_key)
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id::text`,
-    [managerId, metadata.originalName, input.bytes, metadata.fileSize, metadata.sha256, metadata.emailHash,
+    [recipient.id, metadata.originalName, input.bytes, metadata.fileSize, metadata.sha256, metadata.emailHash,
       metadata.name, metadata.role, metadata.issued, metadata.expires, key]);
     const snapshotId = Number(created.rows[0].id);
-    await client.query(`insert into personal_dashboard_snapshot_state (manager_id,active_snapshot_id) values ($1,$2)
-      on conflict (manager_id) do update set previous_snapshot_id=personal_dashboard_snapshot_state.active_snapshot_id,
-      active_snapshot_id=excluded.active_snapshot_id,updated_at=now()`, [managerId, snapshotId]);
+    await client.query(`insert into personal_dashboard_snapshot_state (${column},active_snapshot_id) values ($1,$2)
+      on conflict (${column}) do update set previous_snapshot_id=personal_dashboard_snapshot_state.active_snapshot_id,
+      active_snapshot_id=excluded.active_snapshot_id,updated_at=now()`, [recipient.id, snapshotId]);
     const retainedIds = new Set(retained.map((row) => row.id));
     const removeIds = current.rows.filter((row) => !retainedIds.has(row.id)).map((row) => row.id);
-    if (removeIds.length) await client.query(`delete from personal_dashboard_snapshots where manager_id=$1 and id=any($2::bigint[])`, [managerId, removeIds]);
-    return logImport(client, input, 'imported', 'IMPORTED', metadata, managerId, snapshotId);
+    if (removeIds.length) await client.query(`delete from personal_dashboard_snapshots where ${column}=$1 and id=any($2::bigint[])`, [recipient.id, removeIds]);
+    return logImport(client, input, 'imported', 'IMPORTED', metadata, recipient, snapshotId);
   });
 }
 
@@ -534,17 +577,16 @@ export async function listPersonalDashboardAdmin() {
   return withTransaction(async (client) => {
     const state = await client.query<HtmlStateRow & { audience: PersonalDashboardAudience }>(`select audience,active_version_id::text,previous_version_id::text from personal_dashboard_html_state order by id`);
     const versions = await client.query<HtmlRow>(`select ${HTML_SELECT} from personal_dashboard_html_versions v order by v.id desc`);
-    const managers = await client.query<ManagerRow & { has_dashboard_access: boolean }>(`select m.id::text,m.name,m.email,m.role,m.is_active,
-      exists(select 1 from dashboard_effective_view_grants g where g.manager_id=m.id
-        and g.key=case when m.role='support_manager' then 'manager:support' else 'manager:development' end) as has_dashboard_access
-      from wholesale_managers m
-      where coalesce(nullif(m.role,''),'manager') in ('manager','support_manager') order by m.is_active desc,m.name,m.id`);
+    const recipients = await currentRecipients(client);
+    const grants = await client.query<{manager_id: string; key: string}>(`select manager_id::text,key
+      from dashboard_effective_view_grants where manager_id is not null and key in ('manager:development','manager:support')`);
+    const managerGrants = new Set(grants.rows.map((row) => `${row.manager_id}:${row.key}`));
     const snapshots = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT} from personal_dashboard_snapshot_state st
-      join personal_dashboard_snapshots s on s.manager_id=st.manager_id and s.id=st.active_snapshot_id`);
+      join personal_dashboard_snapshots s on ${SNAPSHOT_OWNER_JOIN} and s.id=st.active_snapshot_id`);
     const importPage = await readPersonalDashboardImportPage(client);
     // Resolve email collisions against the whole group, including hidden accounts.
     // View grants only filter the administrator table, never snapshot import/ownership.
-    const managerBindings = bindings(managers.rows);
+    const recipientBindings = bindings(recipients);
     return {
       groups: (['development', 'support'] as const).map((audience) => {
         const groupState = state.rows.find((row) => row.audience === audience);
@@ -554,12 +596,18 @@ export async function listPersonalDashboardAdmin() {
           htmlVersions: versions.rows.filter((row) => row.audience === audience).map((row) => mapHtml(row, activeId)),
           activeHtmlVersionId: idOrNull(activeId),
           previousHtmlVersionId: idOrNull(groupState?.previous_version_id ?? null),
-          managers: managers.rows.filter((manager) => manager.is_active && manager.has_dashboard_access
-            && getPersonalDashboardAudience(manager.role) === audience).map((manager) => {
-            const binding = manager.email.trim() ? resolvePersonalDashboardManager(managerBindings, getManagerEmailHash(manager.email)) : null;
-            const snapshot = snapshots.rows.find((row) => row.manager_id === manager.id);
-            const matches = snapshot && binding?.managerId === Number(manager.id) && snapshot.email_hash === getManagerEmailHash(manager.email);
-            return { id: Number(manager.id), name: manager.name, email: manager.email, isActive: manager.is_active,
+          managers: recipients.filter((recipient) => recipient.is_active && (recipient.source === 'admin'
+            // These roles already have inherited/management MR access; do not change their grants.
+            ? audience === 'development' && canReceiveLeaderPersonalSnapshot(recipient.role)
+            : getPersonalDashboardAudience(recipient.role) === audience && managerGrants.has(`${recipient.id}:manager:${audience}`)))
+            .sort((left, right) => left.name.localeCompare(right.name, 'ru') || left.source.localeCompare(right.source) || Number(left.id) - Number(right.id))
+            .map((recipient) => {
+            const binding = recipient.email.trim() ? resolvePersonalDashboardRecipient(recipientBindings, getManagerEmailHash(recipient.email)) : null;
+            const snapshot = snapshots.rows.find((row) => recipient.source === 'manager' ? row.manager_id === recipient.id : row.admin_user_id === recipient.id);
+            const matches = snapshot && binding?.recipient?.source === recipient.source && binding.recipient.id === Number(recipient.id)
+              && snapshot.email_hash === getManagerEmailHash(recipient.email);
+            return { id: Number(recipient.id), source: recipient.source, key: `${recipient.source}:${recipient.id}`,
+              name: recipient.name, email: recipient.email, role: recipient.role, isActive: recipient.is_active,
               bindingStatus: binding?.status ?? 'unknown', snapshot: matches ? mapSnapshot(snapshot) : null };
           }),
         };

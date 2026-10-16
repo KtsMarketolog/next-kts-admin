@@ -20,7 +20,7 @@ type ReviewOverview = {
 };
 
 /** Separate reader: no management component, mutation callback or MS data. */
-export function ManagerDashboardReview() {
+export function ManagerDashboardReview({ canViewOwn = false }: { canViewOwn?: boolean }) {
   const router = useRouter();
   const [managerId, setManagerId] = useState<number | null>(null);
   const [overview, setOverview] = useState<ReviewOverview | null>(null);
@@ -81,6 +81,7 @@ export function ManagerDashboardReview() {
       <div className={adminStyles.topbar}>
         <div><p>Панель управления</p><h1>Дашборды МР</h1></div>
         <div className={adminStyles.topbarActions}>
+          {canViewOwn ? <Link className={styles.secondary} href="/admin/manager-dashboard?view=personal&audience=development">Мой личный отчёт</Link> : null}
           <Link className={styles.secondary} href="/admin/top">К списку отчётов</Link>
           <button className={styles.secondary} type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>{loading ? 'Обновляем…' : 'Обновить'}</button>
         </div>
@@ -117,7 +118,7 @@ function ReviewReport({ selected, htmlVersion, revision }: {
     <section className={styles.panel}>
       <div className={styles.sectionHeading}><div><h2>{selected.name || 'Личный отчёт МР'}</h2><p>{selected.email || 'Email не указан'}</p></div><SnapshotStatus snapshot={snapshot} /></div>
       {selected.bindingStatus === 'missing_email' ? <p className={styles.warning}>У менеджера не указан email для привязки личного снимка.</p>
-        : selected.bindingStatus === 'ambiguous_email' ? <p className={styles.warning}>Email указан у нескольких менеджеров. Личный снимок недоступен до уточнения привязки.</p> : null}
+        : selected.bindingStatus === 'ambiguous_email' ? <p className={styles.warning}>Email указан у нескольких сотрудников. Личный снимок недоступен до уточнения привязки.</p> : null}
       {snapshot ? <>
         <dl className={styles.metadata}>
           <div><dt>Файл</dt><dd>{snapshot.originalName}</dd></div>

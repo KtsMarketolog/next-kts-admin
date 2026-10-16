@@ -48,8 +48,8 @@ export async function POST(request: Request) {
       try {
         const result = await importPersonalDashboardSnapshot({filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), sourceKey});
         results.push(result);
-        if (result.status === 'imported' && result.managerId && result.snapshotId) {
-          await recordPersonalSnapshotUploadUsage(access.session, { managerId: result.managerId, snapshotId: result.snapshotId,
+        if (result.status === 'imported' && (result.managerId || result.adminUserId) && result.snapshotId) {
+          await recordPersonalSnapshotUploadUsage(access.session, { managerId: result.managerId ?? undefined, adminUserId: result.adminUserId ?? undefined, snapshotId: result.snapshotId,
             name: result.originalName, size: file.size });
         }
       } catch {

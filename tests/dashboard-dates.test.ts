@@ -14,14 +14,14 @@ import type { AdminSession } from '../src/shared/lib/adminAuth';
 
 function reportDatesHarness(bindingStatus = 'matched') {
   const calls: Array<{sql: string; params: unknown[]}> = [];
-  const personalIds: number[] = [];
+  const personalIds: Array<number | { source: 'admin'; id: number }> = [];
   const modules: Record<string, unknown> = {
     '../dashboardAccess': {getReportEntries}, './schema': {ensureSiteSchema: async () => {}},
     './client': {query: async (sql: string, params: unknown[] = []) => {
       calls.push({sql, params});
       return {rows: [{html_published_at: '2026-10-01T07:00:00Z', data_uploaded_at: null, data_as_of: null}]};
     }},
-    './managerDashboardRepo': {getPersonalDashboardStatus: async (managerId: number) => {
+    './managerDashboardRepo': {getPersonalDashboardStatus: async (managerId: number | { source: 'admin'; id: number }) => {
       personalIds.push(managerId);
       return {bindingStatus, snapshot: {receivedAt: '2026-10-07T05:30:00Z', issued: '2026-10-06'}};
     }},
@@ -114,4 +114,12 @@ test('a missing or ambiguous personal email binding hides retained private snaps
     assert.equal(dates.dataAsOf, null);
     assert.equal(dates.htmlPublishedAt, '2026-10-01T07:00:00Z');
   }
+});
+
+test('TOP catalog dates describe their own admin snapshot, never a same-ID manager', async () => {
+  const harness = reportDatesHarness();
+  const dates = await harness.read({ role: 'top', adminUserId: 71, managerId: 71, sessionId: 'synthetic' });
+  const mr = dates.find((entry) => entry.key === 'manager:development');
+  assert.equal(mr?.dataUploadedAt, '2026-10-07T05:30:00Z');
+  assert.deepEqual(harness.personalIds, [{ source: 'admin', id: 71 }]);
 });

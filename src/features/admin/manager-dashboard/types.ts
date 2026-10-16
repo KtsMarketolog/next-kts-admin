@@ -37,6 +37,7 @@ export type ManagerDashboardGroup = {
   previousHtmlVersionId: number | null;
   managers: Array<{
     id: number;
+    source?: 'manager' | 'admin';
     name: string;
     email: string;
     isActive?: boolean;
@@ -89,6 +90,7 @@ export type ManagerDashboardOverview = {
   expectedBy?: string | null;
 } | {
   mode: 'view';
+  recipientKey?: string;
   audience: PersonalDashboardAudience;
   supportShared?: ManagerDashboardSupportShared | null;
   bindingStatus: ManagerDashboardBindingStatus;

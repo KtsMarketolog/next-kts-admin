@@ -5,6 +5,7 @@ import test from 'node:test';
 import ts from 'typescript';
 
 import * as audience from '../src/shared/lib/managerDashboardAudience';
+import * as recipients from '../src/shared/lib/managerDashboardRecipients';
 import * as domain from '../src/shared/lib/managerDashboardDomain';
 import * as pagination from '../src/shared/lib/managerDashboardImportPagination';
 import * as security from '../src/shared/lib/managerDashboardSecurity';
@@ -25,7 +26,7 @@ function compile<T>(filename: string, modules: Record<string, unknown>): T {
 function journalRow(id: string) {
   return {
     id, original_name: `synthetic-${id}.ktsp`, status: 'imported', code: 'IMPORTED',
-    manager_id: '42', snapshot_id: '7', sender: 'synthetic@example.test', message_id: 'synthetic',
+    manager_id: '42', admin_user_id: null, snapshot_id: '7', sender: 'synthetic@example.test', message_id: 'synthetic',
     received_at: '2026-09-15 12:00:00+03', issued: '2026-09-15',
   };
 }
@@ -38,6 +39,7 @@ function repository(ids: string[]) {
   const client = {
     query: async (text: string, params: unknown[] = []) => {
       queries.push({ text, params });
+      if (text === 'lock table admin_users, wholesale_managers in share mode') return { rows: [] };
       assert.match(text.trim(), /^select\b/i, 'pagination must not mutate imports or retention');
       if (!text.includes('from personal_dashboard_imports')) return { rows: [] };
       assert.match(text, /order by journal\.id desc limit 6\s*$/i,
@@ -60,6 +62,7 @@ function repository(ids: string[]) {
     '../src/shared/lib/db/managerDashboardRepo.ts', {
       'node:crypto': crypto,
       '../managerDashboardAudience': audience,
+      '../managerDashboardRecipients': recipients,
       '../managerDashboardDomain': domain,
       '../managerDashboardImportPagination': pagination,
       './dashboardAccessRepo': { DASHBOARD_ACCESS_LOCK: 'kts:dashboard-view-grants' },

@@ -97,7 +97,7 @@ test('missing email leaves published HTML available without a misleading recipie
 test('ambiguous binding hides any retained snapshot metadata/history and keeps the HTML frame', () => {
   const html = render({ ...base, bindingStatus: 'ambiguous_email', snapshot, history: [snapshot] });
   assert.equal(frameUrl(html).searchParams.has('snapshot'), false);
-  assert.match(html, /у нескольких менеджеров/);
+  assert.match(html, /у нескольких сотрудников/);
   assert.doesNotMatch(html, /synthetic-manager\.ktsp|manager-dashboard-history|Файл для/);
 });
 
@@ -123,6 +123,8 @@ test('viewer identity changes when audience/role, binding or recipient changes, 
   assert.notEqual(managerDashboardViewIdentity({ ...base, bindingStatus: 'ambiguous_email' }), initial);
   assert.notEqual(managerDashboardViewIdentity({ ...base, email: 'other.manager@example.test' }), initial);
   assert.notEqual(managerDashboardViewIdentity({ ...base, audience: 'support' }), initial);
+  assert.notEqual(managerDashboardViewIdentity({ ...base, recipientKey:'admin:7' }), managerDashboardViewIdentity({ ...base, recipientKey:'admin:8' }));
+  assert.notEqual(managerDashboardViewIdentity({ ...base, recipientKey:'admin:7' }), managerDashboardViewIdentity({ ...base, recipientKey:'manager:7' }));
   const nextData: View = { ...base, snapshot, htmlVersion: { id: 10, audience: 'development', originalName: 'new-dashboard.html' } };
   assert.equal(managerDashboardViewIdentity(nextData), initial);
 });
@@ -149,6 +151,27 @@ test('frame defaults legacy callers to development and scopes support previews e
   assert.match(support, /version=29/);
 });
 
+test('leader own viewer uses the isolated own frame and retains personal history, binding guards and sandbox', () => {
+  for (const bindingStatus of ['matched', 'missing_email', 'ambiguous_email'] as const) {
+    const html = renderToStaticMarkup(createElement(ManagerDashboardViewer, {
+      own:true, loading:false, onReload:async () => true,
+      overview:{ ...base, bindingStatus, snapshot, history:[snapshot, { ...snapshot, id:16, originalName:'previous.ktsp' }] },
+    }));
+    const match = html.match(/<iframe[^>]+src="([^"]+)"/);
+    assert.ok(match);
+    const url = new URL(match[1].replaceAll('&amp;', '&'), 'https://example.test');
+    assert.equal(url.pathname, '/api/admin/manager-dashboard/own/frame');
+    assert.equal(url.searchParams.get('audience'), 'development');
+    assert.equal(url.searchParams.get('version'), '9');
+    assert.equal(url.searchParams.has('manager'), false);
+    assert.equal(url.searchParams.has('preview'), false);
+    assert.equal(url.searchParams.has('snapshot'), bindingStatus === 'matched');
+    assert.equal(html.includes('previous.ktsp'), bindingStatus === 'matched');
+    assert.match(html, /sandbox="allow-scripts allow-same-origin"/);
+    assert.doesNotMatch(html, /\/review\/|type="file"/);
+  }
+});
+
 type Manage = Extract<ManagerDashboardOverview, { mode: 'manage' }>;
 function managementOverview(): Manage {
   return {
@@ -165,7 +188,7 @@ function managementOverview(): Manage {
   };
 }
 
-type Element = { type: unknown; props: Record<string, unknown> };
+type Element = { type: unknown; key?: string | null; props: Record<string, unknown> };
 const audienceEditorModule = { DashboardAudienceEditor() {} };
 function elements(node: unknown): Element[] {
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -409,7 +432,21 @@ test('an empty personal recipient list explains the access filter without implyi
   const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview, busy: false, mutate: async () => null }));
   assert.equal((html.match(/Нет активных сотрудников с доступом к этому дашборду\./g) ?? []).length, 2);
   assert.doesNotMatch(html, /В этой группе менеджеры ещё не добавлены/);
-  assert.equal((html.match(/Менеджеров: 0/g) ?? []).length, 2);
+  assert.equal((html.match(/Сотрудников: 0/g) ?? []).length, 2);
+});
+
+test('manager and administrator recipients with identical numeric IDs retain distinct row identities', () => {
+  const overview = managementOverview();
+  overview.groups[0].managers = [
+    { id:7, source:'manager', name:'Тестовый менеджер', email:'manager@example.test', snapshot:null },
+    { id:7, source:'admin', name:'Тестовый руководитель', email:'leader@example.test', snapshot },
+  ];
+  const view = management({ overview, audience:'development' });
+  const panel = view.find('section', props => props.id === 'manager-dashboard-files-development');
+  const rows = elements(panel).filter(node => node.type === 'tr' && node.key);
+  assert.deepEqual(rows.map(node => node.key), ['manager:7', 'admin:7']);
+  assert.match(text(panel), /Сотрудников:\s+2/);
+  assert.match(text(panel), /Тестовый руководитель/);
 });
 
 test('separate personal and route-planner pages keep their own history below the report for KTSP and HTML-bound JSON', () => {

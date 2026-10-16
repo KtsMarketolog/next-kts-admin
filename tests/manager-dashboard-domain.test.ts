@@ -11,7 +11,7 @@ import {
   personalDashboardToday,
   PersonalDashboardError,
 } from '../src/shared/lib/managerDashboardDomain';
-import { resolvePersonalDashboardManager } from '../src/shared/lib/db/managerDashboardRepo';
+import { resolvePersonalDashboardManager, resolvePersonalDashboardRecipient } from '../src/shared/lib/db/managerDashboardRepo';
 
 function fixture(overrides: Record<string, unknown> = {}) {
   return {
@@ -52,6 +52,24 @@ test('personal recipient matching requires one active manager of either group an
   assert.equal(resolvePersonalDashboardManager([one, { ...one, id: 2, role: 'support_manager' }], hash).status, 'ambiguous');
   assert.equal(resolvePersonalDashboardManager([one, { ...one, id: 2, isActive: false }], hash).managerId, 1);
   assert.equal(resolvePersonalDashboardManager([{ ...one, email: '' }], getManagerEmailHash('')).status, 'unknown');
+});
+test('personal recipient matching isolates account sources and rejects cross-source email collisions', () => {
+  const manager = {source:'manager' as const,id:1,email:'manager@example.test',isActive:true,role:'manager'};
+  const leader = {source:'admin' as const,id:1,email:'\u00a0LEADER@EXAMPLE.TEST\u00a0',isActive:true,role:'top'};
+  const hash = getManagerEmailHash('leader@example.test');
+  for (const role of ['admin','admintop','top']) {
+    assert.deepEqual(resolvePersonalDashboardRecipient([manager,{...leader,role}],hash),
+      {status:'matched',recipient:{source:'admin',id:1}});
+  }
+  for (const role of ['purchaser','wholesale_admin','manager','support_manager','',null]) {
+    assert.equal(resolvePersonalDashboardRecipient([{...leader,role}],hash).status,'unknown');
+  }
+  assert.equal(resolvePersonalDashboardRecipient([{...leader,isActive:false}],hash).status,'unknown');
+  assert.equal(resolvePersonalDashboardRecipient([{...leader,email:''}],hash).status,'unknown');
+  assert.equal(resolvePersonalDashboardRecipient([leader,{...manager,email:'leader@example.test'}],hash).status,'ambiguous');
+  assert.equal(resolvePersonalDashboardRecipient([leader,{...leader,id:2}],hash).status,'ambiguous');
+  assert.deepEqual(resolvePersonalDashboardRecipient([manager,leader],getManagerEmailHash(manager.email)),
+    {status:'matched',recipient:{source:'manager',id:1}});
 });
 test('mixed snapshot batch assigns by email rather than filename or the audience currently shown to an admin', () => {
   const managers = [

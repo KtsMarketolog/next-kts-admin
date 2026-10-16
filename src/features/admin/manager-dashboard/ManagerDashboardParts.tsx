@@ -56,7 +56,7 @@ const IMPORT_STATUS_LABELS: Record<string, string> = {
   outdated: 'Более старый файл',
   stale: 'Более старый файл',
   failed: 'Ошибка',
-  unknown: 'Менеджер не найден',
+  unknown: 'Получатель не найден',
   ambiguous: 'Неоднозначный получатель',
   expired: 'Срок доступа истёк',
   conflict: 'Нужна проверка',
@@ -83,7 +83,7 @@ export function ImportResults({ results, title }: { results: ManagerDashboardImp
 }
 
 export function DashboardFrame({
-  versionId, snapshotId, preview = false, revision = 0, audience = 'development', reviewManagerId,
+  versionId, snapshotId, preview = false, revision = 0, audience = 'development', reviewManagerId, own = false,
 }: {
   versionId: number;
   snapshotId?: number;
@@ -91,6 +91,7 @@ export function DashboardFrame({
   revision?: number;
   audience?: PersonalDashboardAudience;
   reviewManagerId?: number;
+  own?: boolean;
 }) {
   const [downloadStatus, setDownloadStatus] = useState('');
   const frameRef = useTopDashboardDownloadBridge(setDownloadStatus);
@@ -106,8 +107,8 @@ export function DashboardFrame({
         ref={frameRef}
         className={styles.frame}
         key={params.toString()}
-        src={`/api/admin/manager-dashboard/${reviewManagerId ? 'review/' : ''}frame?${params.toString()}`}
-        title={preview ? 'Предпросмотр HTML личного дашборда' : 'Личный дашборд менеджера'}
+        src={`/api/admin/manager-dashboard/${own ? 'own/' : reviewManagerId ? 'review/' : ''}frame?${params.toString()}`}
+        title={preview ? 'Предпросмотр HTML личного дашборда' : own ? 'Мой личный дашборд МР' : 'Личный дашборд менеджера'}
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="same-origin"
         allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"

@@ -14,6 +14,7 @@ import { applyDashboardUsageMigration, applyDashboardUsageRetentionMigration } f
 import { applyDashboardDatesMigration } from './dashboardDatesMigration';
 import { applyDashboardProfitabilityAuditMigration } from './dashboardProfitabilityAuditMigration';
 import { applyDashboardUsageDetailsMigration } from './dashboardUsageDetailsMigration';
+import { applyPersonalDashboardRecipientMigration } from './managerDashboardRecipientMigration';
 
 type SchemaMigration = {
   id: string;
@@ -850,6 +851,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610090001_dashboard_profitability_audit', description: 'Dedicated invoice audit details and 20 MiB TOP HTML support', apply: applyDashboardProfitabilityAuditMigration},
   {id: '202610120001_employee_password_vault', description: 'Encrypted, hash-bound employee password display copies; preserve all login hashes and business data', apply: applyEmployeePasswordMigration},
   {id: '202610140001_dashboard_usage_details', description: 'Reviewed upload metadata and visible report time, preserving existing journal and business data', apply: applyDashboardUsageDetailsMigration},
+  {id: '202610160001_personal_dashboard_leader_recipients', description: 'Add separately owned leader personal snapshots without modifying existing manager data', apply: applyPersonalDashboardRecipientMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

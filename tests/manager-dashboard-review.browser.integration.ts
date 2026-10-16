@@ -49,7 +49,7 @@ const fixtureEntry = `
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {ManagerDashboardReview} from './src/features/admin/manager-dashboard/ManagerDashboardReview';
-createRoot(document.getElementById('root')).render(<ManagerDashboardReview />);
+createRoot(document.getElementById('root')).render(<ManagerDashboardReview canViewOwn />);
 `;
 // The real wrapper delivers a synthetic file to this opaque document. No real report or password is used.
 const content = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><style>
@@ -160,6 +160,7 @@ async function main() {
             await page.goto(origin);
             const selection = page.getByLabel('Менеджер', { exact: true });
             await selection.locator('option[value="1"]').waitFor({ state: 'attached' });
+            assert.equal(await page.getByRole('link', { name:'Мой личный отчёт', exact:true }).getAttribute('href'), '/admin/manager-dashboard?view=personal&audience=development');
             assert.equal(await selection.isDisabled(), false);
             assert.equal(await page.locator('iframe').count(), 0);
             assert.equal(await selection.locator('option').count(), 3);

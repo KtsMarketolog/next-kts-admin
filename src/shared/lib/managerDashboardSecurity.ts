@@ -7,6 +7,12 @@ export function canReviewPersonalDevelopmentDashboards(session: AdminSession | n
   return hasDashboardInheritedViewRight(session, 'manager:development');
 }
 
+/** A leader's own snapshot is separate from both management and team review. */
+export function canViewOwnPersonalDevelopmentDashboard(session: AdminSession | null | undefined): session is AdminSession & { adminUserId: number; sessionId: string } {
+  return Boolean(session?.sessionId && Number.isSafeInteger(session.adminUserId) && Number(session.adminUserId) > 0
+    && ['admin', 'admintop', 'top'].includes(session.role));
+}
+
 export function personalDashboardMode(session: AdminSession | null): 'manage' | 'view' | null {
   // Do not accept the legacy signed-cookie fallback: persisted sessions recheck
   // activity, current roles and revocation on every request.

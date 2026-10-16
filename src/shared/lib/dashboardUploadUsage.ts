@@ -29,17 +29,22 @@ export async function recordDashboardUploadUsage(session: AdminSession, input: {
 
 /** Resolve the recipient's group from the account, never from an uploaded filename. */
 export async function recordPersonalSnapshotUploadUsage(session: AdminSession, input: {
-  managerId: number; snapshotId: number; name: string; size: number;
+  managerId?: number; adminUserId?: number; snapshotId: number; name: string; size: number;
 }): Promise<boolean> {
   try {
+    const isLeader = input.adminUserId !== undefined;
+    const id = isLeader ? input.adminUserId : input.managerId;
+    if (!Number.isSafeInteger(id) || Number(id) < 1 || (isLeader && input.managerId !== undefined)) return false;
     const result = await withTransaction(async (client) => {
       await client.query("set local statement_timeout='3s'");
       await client.query("set local lock_timeout='1s'");
-      return client.query<{ role: string }>('select coalesce(nullif(role,\'\'),\'manager\') as role from wholesale_managers where id=$1', [input.managerId]);
+      return client.query<{ role: string }>(isLeader
+        ? 'select role from admin_users where id=$1 and is_active'
+        : 'select coalesce(nullif(role,\'\'),\'manager\') as role from wholesale_managers where id=$1', [id]);
     });
     const role = result.rows[0]?.role;
-    if (role !== 'manager' && role !== 'support_manager') return false;
-    return await recordDashboardUploadUsage(session, { dashboardKey: role === 'manager' ? 'manager:development' : 'manager:support',
+    if (isLeader ? !['admin', 'admintop', 'top'].includes(role) : role !== 'manager' && role !== 'support_manager') return false;
+    return await recordDashboardUploadUsage(session, { dashboardKey: role === 'support_manager' ? 'manager:support' : 'manager:development',
       versionId: null, resourceKey: `personal-snapshot:${input.snapshotId}`, name: input.name, size: input.size, type: 'personal' });
   } catch {
     console.error('DASHBOARD_UPLOAD_USAGE_WRITE_FAILED');

@@ -5,7 +5,7 @@ import { ManagerDashboardReview } from '@/features/admin/manager-dashboard/Manag
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { canAssignDashboardAccess } from '@/shared/lib/dashboardPermissions';
 import { getPersonalDashboardAudience, parsePersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
-import { canReviewPersonalDevelopmentDashboards, personalDashboardMode } from '@/shared/lib/managerDashboardSecurity';
+import { canReviewPersonalDevelopmentDashboards, canViewOwnPersonalDevelopmentDashboard, personalDashboardMode } from '@/shared/lib/managerDashboardSecurity';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,15 +13,20 @@ export default async function ManagerDashboardPage({ searchParams }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const session = await getAdminSession();
-  if (canReviewPersonalDevelopmentDashboards(session)) {
-    const query = await searchParams;
+  const query = await searchParams;
+  const canViewOwn = canViewOwnPersonalDevelopmentDashboard(session);
+  const canReviewTeam = canReviewPersonalDevelopmentDashboards(session);
+  if (canViewOwn && (query.view === 'personal' || canReviewTeam && query.view !== 'team')) {
+    if (query.audience !== undefined && query.audience !== 'development') redirect('/admin/manager-dashboard?view=personal&audience=development');
+    return <ManagerDashboard mode="view" audience="development" own ownReturn={canReviewTeam ? 'team' : 'manage'} />;
+  }
+  if (canReviewTeam) {
     if (query.audience !== undefined && query.audience !== 'development') redirect('/admin/manager-dashboard?audience=development');
-    return <ManagerDashboardReview />;
+    return <ManagerDashboardReview canViewOwn={canViewOwn} />;
   }
   const mode = personalDashboardMode(session);
   if (!mode) redirect('/admin');
 
-  const query = await searchParams;
   const requestedAudience = parsePersonalDashboardAudience(query.audience);
   // The URL selects an administrator's presentation, never a manager's access.
   const audience = mode === 'view' ? getPersonalDashboardAudience(session!.role) : requestedAudience;
@@ -29,5 +34,5 @@ export default async function ManagerDashboardPage({ searchParams }: {
     redirect(mode === 'view' && audience ? `/admin/manager-dashboard?audience=${audience}` : '/admin/manager-dashboard');
   }
 
-  return <ManagerDashboard mode={mode} audience={audience} canAssignAccess={canAssignDashboardAccess(session)} />;
+  return <ManagerDashboard mode={mode} audience={audience} canAssignAccess={canAssignDashboardAccess(session)} canViewOwn={canViewOwn} />;
 }

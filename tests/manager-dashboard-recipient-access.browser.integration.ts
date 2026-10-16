@@ -192,7 +192,7 @@ async function main() {
               const save = editor.getByRole('button', { name: 'Сохранить доступы', exact: true });
               await first.waitFor();
               assert.equal(await panel.locator('tbody tr').count(), 2);
-              assert.match(await panel.innerText(), /Менеджеров: 2/);
+              assert.match(await panel.innerText(), /Сотрудников: 2/);
               assert.doesNotMatch(await panel.innerText(), /Неактивный тестовый|другой группы/);
               assert.equal(await editor.getByRole('checkbox', { name: /Неактивный тестовый/ }).count(), 1, 'access editor retains inactive accounts');
               assert.equal(await editor.getByRole('checkbox', { name: /другой группы/ }).isDisabled(), true);
@@ -206,7 +206,7 @@ async function main() {
               await editor.getByRole('status').filter({ hasText: /^Доступы сохранены\.$/ }).waitFor();
               assert.equal(state.overviewReads, initialReads + 1, 'successful save reloads overview');
               assert.equal(await panel.locator('tbody tr').count(), 1);
-              assert.match(await panel.innerText(), /Менеджеров: 1/);
+              assert.match(await panel.innerText(), /Сотрудников: 1/);
               assert.doesNotMatch(await panel.innerText(), /Первый тестовый|первый_сохранённый/);
               assert.equal(await first.count(), 1, 'excluded employee remains available to re-enable in the editor');
               assert.equal(await first.isChecked(), false);
@@ -216,7 +216,7 @@ async function main() {
               await save.click();
               await editor.getByRole('status').filter({ hasText: /^Доступы сохранены\.$/ }).waitFor();
               assert.equal(await panel.locator('tbody tr').count(), 2);
-              assert.match(await panel.innerText(), /Менеджеров: 2/);
+              assert.match(await panel.innerText(), /Сотрудников: 2/);
               assert.match(await panel.innerText(), /первый_сохранённый_снимок.ktsp/);
               assert.deepEqual(state.employees.map(employee => employee.snapshot), storedSnapshots, 'revocation and return never mutate stored snapshots');
 
@@ -228,7 +228,7 @@ async function main() {
               assert.equal(state.failedSaves, 1);
               assert.equal(state.overviewReads, readsBeforeFailure, 'failed PUT never reloads the recipient overview');
               assert.equal(await panel.locator('tbody tr').count(), 2);
-              assert.match(await panel.innerText(), /Менеджеров: 2/);
+              assert.match(await panel.innerText(), /Сотрудников: 2/);
               assert.equal(state.employees[1].checked, true);
 
               state.failOverviewOnce = true;
@@ -239,7 +239,7 @@ async function main() {
               assert.equal(await second.isChecked(), false);
               await page.getByRole('alert').filter({ hasText: 'Тестовый отказ обновления списка.' }).waitFor();
               await page.getByRole('button', { name: 'Обновить', exact: true }).click();
-              await panel.getByText('Менеджеров: 1', { exact: true }).waitFor();
+              await panel.getByText('Сотрудников: 1', { exact: true }).waitFor();
               assert.equal(await panel.locator('tbody tr').count(), 1);
               assert.doesNotMatch(await panel.innerText(), /Второй тестовый/);
 
@@ -247,7 +247,7 @@ async function main() {
               await save.click();
               await editor.getByRole('status').filter({ hasText: /^Доступы сохранены\.$/ }).waitFor();
               assert.equal(await panel.locator('tbody tr').count(), 0);
-              assert.match(await panel.innerText(), /Менеджеров: 0/);
+              assert.match(await panel.innerText(), /Сотрудников: 0/);
               assert.match(await panel.innerText(), /нет активных сотрудников с доступом/i, 'empty state explains access filtering, not employee deletion');
               assert.equal(await first.count(), 1);
               assert.equal(await second.count(), 1);

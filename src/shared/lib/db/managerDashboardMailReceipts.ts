@@ -1,4 +1,4 @@
-import { resolvePersonalDashboardManager, type PersonalDashboardManagerBinding } from './managerDashboardRepo';
+import { resolvePersonalDashboardRecipient, type PersonalDashboardRecipientBinding } from './managerDashboardRepo';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
@@ -15,16 +15,18 @@ export async function getPersonalDashboardMailReceipt(key: string): Promise<{ ma
      where transport_key=$1 and completed_at > now()-interval '30 days'`, [key]);
   const row = receipt.rows[0];
   if (!row) return null;
-  const managers = await query<{ id: string; email: string; role: string; is_active: boolean }>(
-    `select id::text,email,role,is_active from wholesale_managers
-     where is_active=true and coalesce(nullif(role,''),'manager') in ('manager','support_manager')`);
-  const bindings: PersonalDashboardManagerBinding[] = managers.rows.map((manager) => ({
-    id: Number(manager.id), email: manager.email, role: manager.role, isActive: manager.is_active,
+  const accounts = await query<{ source: 'manager' | 'admin'; id: string; email: string; role: string; is_active: boolean }>(
+    `select 'manager'::text as source,id::text,email,role,is_active from wholesale_managers
+     where is_active=true and coalesce(nullif(role,''),'manager') in ('manager','support_manager')
+     union all select 'admin'::text as source,id::text,email,role,is_active from admin_users
+     where is_active=true and role in ('admin','admintop','top')`);
+  const bindings: PersonalDashboardRecipientBinding[] = accounts.rows.map((account) => ({
+    source: account.source,id: Number(account.id), email: account.email, role: account.role, isActive: account.is_active,
   }));
   // Do not hide an import from retry after recipient bindings become ambiguous/change.
-  const resolved = resolvePersonalDashboardManager(bindings, row.email_hash);
-  return resolved.status === 'matched' && resolved.managerId === Number(row.manager_id)
-    ? { managerId: resolved.managerId } : null;
+  const resolved = resolvePersonalDashboardRecipient(bindings, row.email_hash);
+  return resolved.status === 'matched' && resolved.recipient.source === 'manager' && resolved.recipient.id === Number(row.manager_id)
+    ? { managerId: resolved.recipient.id } : null;
 }
 
 export async function recordPersonalDashboardMailReceipt(key: string, sourceKey: string) {

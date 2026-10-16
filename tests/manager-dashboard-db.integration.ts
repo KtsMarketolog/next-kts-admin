@@ -13,6 +13,7 @@ import test from 'node:test';
 
 import { query, withTransaction } from '../src/shared/lib/db/client';
 import { applyPersonalDashboardAudienceMigration } from '../src/shared/lib/db/migrations';
+import { applyPersonalDashboardRecipientMigration } from '../src/shared/lib/db/managerDashboardRecipientMigration';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import {
   activatePersonalDashboardHtml, createPersonalDashboardHtml, deletePersonalDashboardHtml, getPersonalDashboardHtml,
@@ -522,7 +523,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.ok(published, 'The previous test published a shared HTML version');
       const noSnapshot = await manager('empty-dashboard');
       assert.deepEqual(await getPersonalDashboardStatus(noSnapshot.id), {
-        audience: 'development', snapshot: null, history: [], bindingStatus: 'matched',
+        audience: 'development', email: noSnapshot.email, snapshot: null, history: [], bindingStatus: 'matched',
       });
       assert.equal((await getPersonalDashboardHtml())?.id, published.id);
       assert.equal(await getPersonalDashboardSnapshot(noSnapshot.id), null);
@@ -534,7 +535,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       for (const blankEmail of ['', ' \t\u00a0\n']) {
         await query(`update wholesale_managers set email=$2 where id=$1`, [owner.id, blankEmail]);
         assert.deepEqual(await getPersonalDashboardStatus(owner.id), {
-          audience: 'development', snapshot: null, history: [], bindingStatus: 'missing_email',
+          audience: 'development', email: '', snapshot: null, history: [], bindingStatus: 'missing_email',
         });
         assert.equal((await getPersonalDashboardHtml())?.id, published.id);
         await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'NOT_FOUND' });
@@ -545,7 +546,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       const duplicate = await manager('binding-overview-duplicate', 'manager', true, owner.email.toUpperCase());
       for (const recipient of [owner, duplicate]) {
         assert.deepEqual(await getPersonalDashboardStatus(recipient.id), {
-          audience: 'development', snapshot: null, history: [], bindingStatus: 'ambiguous_email',
+          audience: 'development', email: recipient.email.trim().toLowerCase(), snapshot: null, history: [], bindingStatus: 'ambiguous_email',
         });
         assert.equal((await getPersonalDashboardHtml())?.id, published.id);
         await assert.rejects(() => getPersonalDashboardSnapshot(recipient.id, snapshotId), { code: 'AMBIGUOUS_EMAIL' });
@@ -560,7 +561,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       await assert.rejects(() => getPersonalDashboardStatus(duplicate.id), { code: 'NOT_FOUND' });
       await query(`update wholesale_managers set email='',role='support_manager' where id=$1`, [owner.id]);
       assert.deepEqual(await getPersonalDashboardStatus(owner.id), {
-        audience: 'support', snapshot: null, history: [], bindingStatus: 'missing_email',
+        audience: 'support', email: '', snapshot: null, history: [], bindingStatus: 'missing_email',
       });
       await assert.rejects(() => getPersonalDashboardSnapshot(owner.id, snapshotId), { code: 'NOT_FOUND' });
     });
@@ -1154,6 +1155,153 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         else process.env.TOP_DASHBOARD_DATA_DIR = previousDirectory;
         await rm(storageDirectory, {recursive: true, force: true});
       }
+    });
+    await t.test('leader ownership migration preserves legacy payloads, pointers and imports', async () => {
+      await withTransaction(async (client) => {
+        await client.query(`
+          create temp table admin_users (id bigint primary key) on commit drop;
+          create temp table wholesale_managers (id bigint primary key) on commit drop;
+          create temp table personal_dashboard_snapshots (
+            id bigint primary key,manager_id bigint not null references wholesale_managers(id),
+            sha256 text not null,issued date not null,encrypted_payload bytea not null,
+            unique(manager_id,id),unique(manager_id,sha256)
+          ) on commit drop;
+          create temp table personal_dashboard_snapshot_state (
+            manager_id bigint primary key references wholesale_managers(id),active_snapshot_id bigint,previous_snapshot_id bigint,
+            foreign key(manager_id,active_snapshot_id) references personal_dashboard_snapshots(manager_id,id) deferrable initially deferred,
+            foreign key(manager_id,previous_snapshot_id) references personal_dashboard_snapshots(manager_id,id) deferrable initially deferred
+          ) on commit drop;
+          create temp table personal_dashboard_imports (id bigint primary key,manager_id bigint,snapshot_id bigint,code text) on commit drop;
+          insert into wholesale_managers values(7);
+          insert into admin_users values(7);
+          insert into personal_dashboard_snapshots values(90,7,'previous','2026-10-10',decode('010203','hex')),(91,7,'active','2026-10-11',decode('040506','hex'));
+          insert into personal_dashboard_snapshot_state values(7,91,90);
+          insert into personal_dashboard_imports values(1,7,91,'IMPORTED');
+          -- Production legacy rows are committed before the migration transaction starts.
+          -- Validate this same-transaction fixture's deferred keys before altering its schema.
+          set constraints all immediate;
+        `);
+        const before = (await client.query(`select s.id,s.manager_id,s.sha256,s.issued,s.encrypted_payload,st.active_snapshot_id,st.previous_snapshot_id
+          from personal_dashboard_snapshots s join personal_dashboard_snapshot_state st on st.manager_id=s.manager_id order by s.id`)).rows;
+        await applyPersonalDashboardRecipientMigration(client);
+        assert.deepEqual((await client.query(`select s.id,s.manager_id,s.sha256,s.issued,s.encrypted_payload,st.active_snapshot_id,st.previous_snapshot_id
+          from personal_dashboard_snapshots s join personal_dashboard_snapshot_state st on st.manager_id=s.manager_id order by s.id`)).rows, before);
+        assert.deepEqual((await client.query(`select id,manager_id,snapshot_id,code,admin_user_id from personal_dashboard_imports`)).rows,
+          [{id:'1',manager_id:'7',snapshot_id:'91',code:'IMPORTED',admin_user_id:null}]);
+        await client.query(`insert into personal_dashboard_snapshots(id,admin_user_id,sha256,issued,encrypted_payload)
+          values(92,7,'active','2026-10-11',decode('070809','hex'));
+          insert into personal_dashboard_snapshot_state(admin_user_id,active_snapshot_id) values(7,92)`);
+        assert.equal((await client.query(`select count(*)::int as count from personal_dashboard_snapshot_state`)).rows[0].count,2);
+      });
+    });
+
+    await t.test('leaders own MR snapshots without changing roles, manager data or TOP team review', async () => {
+      const legacy = await manager('leader-id-collision');
+      const legacyImport = await importFile(bytes(legacy.email));
+      const legacyRows = (await query('select * from personal_dashboard_snapshots where manager_id=$1',[legacy.id])).rows;
+      const legacyState = (await query('select * from personal_dashboard_snapshot_state where manager_id=$1',[legacy.id])).rows;
+      const suffix = randomUUID();
+      const email = `leader-${suffix}@example.test`;
+      // Explicit collision proves that a numeric id alone never crosses account sources.
+      await query(`insert into admin_users(id,login,email,name,role,is_active) values($1,$2,$3,$4,'top',true)`,
+        [legacy.id,`leader-${suffix}`,email,'Synthetic direction leader']);
+      const recipient = {source:'admin' as const,id:legacy.id};
+      const assertLegacy = async () => {
+        assert.deepEqual((await query('select * from personal_dashboard_snapshots where manager_id=$1',[legacy.id])).rows,legacyRows);
+        assert.deepEqual((await query('select * from personal_dashboard_snapshot_state where manager_id=$1',[legacy.id])).rows,legacyState);
+      };
+      const initial = await importFile(bytes(email,-2));
+      assert.equal(initial.status,'imported');
+      assert.equal(initial.managerId,null);
+      assert.equal(initial.adminUserId,recipient.id);
+      assert.equal((await getPersonalDashboardStatus(recipient)).snapshot?.id,initial.snapshotId);
+      assert.equal((await getPersonalDashboardStatus(recipient)).email,email);
+      assert.equal((await getPersonalDashboardSnapshot(recipient))?.email,email);
+      assert.equal(await getPersonalDashboardSnapshot(legacy.id,initial.snapshotId!),null);
+      assert.equal(await getPersonalDashboardSnapshot(recipient,legacyImport.snapshotId!),null);
+      const second = await importFile(bytes(email,-1));
+      const third = await importFile(bytes(email));
+      assert.equal(third.status,'imported');
+      assert.deepEqual((await getPersonalDashboardStatus(recipient)).history.map((row)=>row.id),[third.snapshotId,second.snapshotId]);
+      assert.equal(await getPersonalDashboardSnapshot(recipient,initial.snapshotId!),null);
+      assert.equal((await importFile(bytes(email))).status,'duplicate');
+      assert.equal((await importFile(bytes(email,-1,7))).status,'stale');
+      assert.equal((await importFile(bytes(email,0,8))).status,'conflict');
+      await assertLegacy();
+      const group = (await listPersonalDashboardAdmin()).groups.find((row)=>row.audience==='development')!;
+      assert.equal(group.managers.find((row)=>row.key===`admin:${legacy.id}`)?.snapshot?.id,third.snapshotId);
+      assert.equal(group.managers.find((row)=>row.key===`manager:${legacy.id}`)?.snapshot?.id,legacyImport.snapshotId);
+      assert.equal((await listPersonalDashboardAdmin()).groups.find((row)=>row.audience==='support')!.managers.some((row)=>row.source==='admin'),false);
+      for (const role of ['admin','admintop','top']) {
+        await query('update admin_users set role=$2 where id=$1',[recipient.id,role]);
+        assert.equal((await getPersonalDashboardStatus(recipient)).audience,'development');
+        assert.equal((await getPersonalDashboardSnapshot(recipient))?.adminUserId,recipient.id);
+      }
+      for (const role of ['purchaser','wholesale_admin']) {
+        await query('update admin_users set role=$2 where id=$1',[recipient.id,role]);
+        await assert.rejects(getPersonalDashboardSnapshot(recipient),{code:'NOT_FOUND'});
+        await assert.rejects(getPersonalDashboardStatus(recipient),{code:'NOT_FOUND'});
+        assert.equal((await importFile(bytes(email))).status,'unknown');
+      }
+      await query("update admin_users set role='top',is_active=false where id=$1",[recipient.id]);
+      await assert.rejects(getPersonalDashboardStatus(recipient),{code:'NOT_FOUND'});
+      assert.equal((await importFile(bytes(email))).status,'unknown');
+      await query('update admin_users set is_active=true where id=$1',[recipient.id]);
+      assert.equal((await getPersonalDashboardSnapshot(recipient))?.id,third.snapshotId);
+
+      const duplicate = await manager('leader-duplicate-email','support_manager',true,`\u00a0${email.toUpperCase()}\u00a0`,false);
+      const retryKey = randomUUID();
+      assert.equal((await importFile(bytes(email),retryKey)).status,'ambiguous');
+      assert.equal((await getPersonalDashboardStatus(recipient)).bindingStatus,'ambiguous_email');
+      assert.equal((await getPersonalDashboardStatus(duplicate.id)).bindingStatus,'ambiguous_email');
+      await assert.rejects(getPersonalDashboardSnapshot(recipient),{code:'AMBIGUOUS_EMAIL'});
+      await assert.rejects(getPersonalDashboardSnapshot(duplicate.id),{code:'AMBIGUOUS_EMAIL'});
+      const ambiguous = (await listPersonalDashboardAdmin()).groups[0].managers.find((row)=>row.key===`admin:${recipient.id}`);
+      assert.equal(ambiguous?.snapshot,null);
+      assert.equal(ambiguous?.bindingStatus,'ambiguous');
+      await query('update wholesale_managers set is_active=false where id=$1',[duplicate.id]);
+      assert.equal((await importFile(bytes(email),retryKey)).status,'duplicate');
+      await query('update admin_users set email=$2 where id=$1',[recipient.id,`new-${email}`]);
+      assert.equal(await getPersonalDashboardSnapshot(recipient,third.snapshotId!),null);
+      await query('update admin_users set email=$2 where id=$1',[recipient.id,email]);
+      assert.equal((await getPersonalDashboardSnapshot(recipient))?.id,third.snapshotId);
+
+      // DB constraints themselves prevent cross-source/cross-owner pointers, even outside the repository.
+      await assert.rejects(query('update personal_dashboard_snapshot_state set active_snapshot_id=$2 where admin_user_id=$1',[recipient.id,legacyImport.snapshotId]),{code:'23503'});
+      await assert.rejects(query('update personal_dashboard_snapshot_state set manager_id=$1 where admin_user_id=$1',[recipient.id]),{code:'23514'});
+      await assert.rejects(query('update personal_dashboard_snapshots set manager_id=$1 where admin_user_id=$1',[recipient.id]),{code:'23514'});
+      await assertLegacy();
+      const sessionId = randomUUID();
+      await query(`insert into admin_sessions(id,session_hash,admin_user_id,role,expires_at) values($1,$2,$3,'top',now()+interval '1 hour')`,[sessionId,randomUUID(),recipient.id]);
+      const viewer = {adminUserId:recipient.id,sessionId};
+      const overview = await getPersonalDashboardReviewOverview(viewer);
+      assert.equal(overview.managers.find((row)=>row.id===legacy.id)?.email,legacy.email);
+      assert.equal(await getPersonalDashboardReviewSnapshot(viewer,legacy.id,third.snapshotId!),null);
+      assert.equal((await query('select role from admin_users where id=$1',[recipient.id])).rows[0].role,'top');
+
+      // An employee editor may own a row lock before asking for a write table lock.
+      // Identity reads use the existing committed value without waiting on that row lock.
+      for (const [table, id, subject] of [
+        ['admin_users',recipient.id,recipient], ['wholesale_managers',legacy.id,legacy.id],
+      ] as const) {
+        await withTransaction(async (client) => {
+          await client.query(`select id from ${table} where id=$1 for update`,[id]);
+          const read = getPersonalDashboardStatus(subject);
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const result = await Promise.race([read, new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null),2000); })]);
+            assert.ok(result,'A recipient read must not block on an account editor row lock');
+            await client.query(`update ${table} set name=name where id=$1`,[id]);
+          } finally {
+            clearTimeout(timeout);
+            void read.catch(() => {});
+          }
+        });
+      }
+      await query('delete from admin_users where id=$1',[recipient.id]);
+      assert.equal((await query('select id from personal_dashboard_snapshots where admin_user_id=$1',[recipient.id])).rowCount,0);
+      assert.equal((await query('select admin_user_id from personal_dashboard_imports where id=$1',[third.id])).rows[0].admin_user_id,null);
+      await assertLegacy();
     });
   } finally {
     await globalThis.__ktsPgPool?.end();

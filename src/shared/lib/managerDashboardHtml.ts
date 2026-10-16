@@ -10,7 +10,7 @@ const MARKER = 'kts-personal-dashboard-v1';
 
 const EMPTY_STATE_MESSAGES = {
   missing_email: 'HTML дашборда доступен. Для автоматической привязки личного снимка администратору нужно указать email в вашей карточке.',
-  ambiguous_email: 'HTML дашборда доступен. Этот email указан у нескольких менеджеров; администратору нужно уточнить привязку личных снимков.',
+  ambiguous_email: 'HTML дашборда доступен. Этот email указан у нескольких сотрудников; администратору нужно уточнить привязку личных снимков.',
   no_snapshot: 'HTML дашборда доступен. Личный снимок ещё не загружен; данные появятся после его получения.',
   expired: 'HTML дашборда доступен. Срок действия выбранного снимка истёк; нужен актуальный личный снимок.',
 } as const;
@@ -175,6 +175,11 @@ export function buildPersonalDashboardFrame(input: DashboardFrameInput) {
   return buildDashboardFrame(input, 'personal');
 }
 
+/** Self-only API namespace: no recipient identity is ever accepted from the browser. */
+export function buildPersonalDashboardOwnFrame(input: Omit<DashboardFrameInput, 'preview' | 'audience'>) {
+  return buildDashboardFrame({ ...input, preview: false, audience: 'development' }, 'personal', undefined, true);
+}
+
 export function buildPersonalDashboardReviewFrame(input: Omit<DashboardFrameInput, 'preview' | 'audience'> & { managerId: number }) {
   if (!Number.isSafeInteger(input.managerId) || input.managerId < 1) throw new Error('Invalid review recipient');
   return buildDashboardFrame({ ...input, preview: false, audience: 'development' }, 'personal', input.managerId);
@@ -184,14 +189,14 @@ export function buildSupportSharedDashboardFrame(input: Omit<DashboardFrameInput
   return buildDashboardFrame(input, 'support_shared');
 }
 
-function buildDashboardFrame(input: DashboardFrameInput, scope: DashboardScope, reviewManagerId?: number) {
+function buildDashboardFrame(input: DashboardFrameInput, scope: DashboardScope, reviewManagerId?: number, own = false) {
   const shared = scope === 'support_shared';
   const title = shared ? 'Общий дашборд сопровождения' : 'Личный дашборд продаж';
   const query = new URLSearchParams({version: String(input.versionId)});
   if (reviewManagerId) query.set('manager', String(reviewManagerId));
   else if (!shared) query.set('audience', input.audience ?? 'development');
   if (input.preview) query.set('preview', '1');
-  const base = reviewManagerId ? '/api/admin/manager-dashboard/review/' : shared ? '/api/admin/manager-dashboard/shared/' : '/api/admin/manager-dashboard/';
+  const base = own ? '/api/admin/manager-dashboard/own/' : reviewManagerId ? '/api/admin/manager-dashboard/review/' : shared ? '/api/admin/manager-dashboard/shared/' : '/api/admin/manager-dashboard/';
   const contentPath = base + 'content?' + query.toString();
   const dataQuery = new URLSearchParams();
   if (reviewManagerId) dataQuery.set('manager', String(reviewManagerId));

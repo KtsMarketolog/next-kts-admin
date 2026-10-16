@@ -30,12 +30,22 @@ async function readResponse(response: Response) {
   return data;
 }
 
-export function ManagerDashboard(props: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null; section?: 'personal' | 'shared'; canAssignAccess?: boolean }) {
-  return props.section === 'shared' ? <RoutePlannerDashboard mode={props.mode} canAssignAccess={props.canAssignAccess} /> : <PersonalManagerDashboard {...props} />;
+type PersonalDashboardProps = {
+  mode: 'manage' | 'view';
+  audience?: PersonalDashboardAudience | null;
+  canAssignAccess?: boolean;
+  canViewOwn?: boolean;
+  own?: boolean;
+  ownReturn?: 'team' | 'manage';
+};
+
+export function ManagerDashboard(props: PersonalDashboardProps & { section?: 'personal' | 'shared' }) {
+  return props.section === 'shared' ? <RoutePlannerDashboard mode={props.mode} canAssignAccess={props.canAssignAccess} /> : <PersonalManagerDashboard key={props.own ? 'own' : 'manager'} {...props} />;
 }
 
-function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = false }: { mode: 'manage' | 'view'; audience?: PersonalDashboardAudience | null; canAssignAccess?: boolean }) {
+function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = false, canViewOwn = false, own = false, ownReturn = 'manage' }: PersonalDashboardProps) {
   const router = useRouter();
+  const apiPath = own ? `${API_PATH}/own` : API_PATH;
   const [overview, setOverview] = useState<ManagerDashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -49,7 +59,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
     const revision = ++requestRevision.current;
     setLoading(true);
     try {
-      const response = await fetch(API_PATH, { cache: 'no-store', credentials: 'same-origin' });
+      const response = await fetch(apiPath, { cache: 'no-store', credentials: 'same-origin' });
       if (response.status === 401 || response.status === 403) {
         setOverview(null);
         router.replace('/admin');
@@ -63,7 +73,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
     } finally {
       if (revision === requestRevision.current) setLoading(false);
     }
-  }, [mode, router]);
+  }, [apiPath, mode, router]);
 
   useEffect(() => {
     void load().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Не удалось загрузить дашборд.'));
@@ -79,7 +89,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
       if (checking || document.visibilityState === 'hidden') return;
       checking = true;
       try {
-        const response = await fetch(API_PATH, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
+        const response = await fetch(apiPath, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
         if (disposed) return;
         if (response.status === 401 || response.status === 403) {
           setOverview(null);
@@ -113,7 +123,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [overview, router]);
+  }, [apiPath, overview, router]);
 
   async function refresh() {
     setError('');
@@ -127,7 +137,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
   }
 
   async function mutate(path: string, init: RequestInit, successMessage: string): Promise<ManagerDashboardMutationResult | null> {
-    if (busyRef.current) return null;
+    if (own || busyRef.current) return null;
     busyRef.current = true;
     setBusy(true);
     setError('');
@@ -156,8 +166,10 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
   return (
     <main className={`${adminStyles.page} ${styles.dashboardPage}`}>
       <div className={adminStyles.topbar}>
-        <div><p>Панель управления</p><h1>{displayedAudience ? MANAGER_DASHBOARD_TITLES[displayedAudience] : mode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h1></div>
+        <div><p>Панель управления</p><h1>{own ? 'Мой личный дашборд МР' : displayedAudience ? MANAGER_DASHBOARD_TITLES[displayedAudience] : mode === 'manage' ? 'Дашборды менеджеров' : 'Личный дашборд'}</h1></div>
         <div className={adminStyles.topbarActions}>
+          {own ? <Link className={styles.secondary} href={ownReturn === 'team' ? '/admin/manager-dashboard?view=team&audience=development' : '/admin/manager-dashboard?audience=development'}>{ownReturn === 'team' ? 'Отчёты менеджеров МР' : 'Управление дашбордами МР'}</Link>
+            : canViewOwn ? <Link className={styles.secondary} href="/admin/manager-dashboard?view=personal&audience=development">Мой личный отчёт</Link> : null}
           <Link className={styles.secondary} href="/admin/top">К списку отчётов</Link>
           <button className={styles.secondary} type="button" disabled={loading || busy} onClick={() => void refresh()}>{loading ? 'Обновляем…' : 'Обновить'}</button>
         </div>
@@ -170,12 +182,12 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
       </div> : null}
       {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}
       {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем дашборд…</p></section> : null}
-      {overview?.mode === 'manage' ? <ManagerDashboardManagement key={audience ?? 'all'} audience={audience} overview={overview} canAssignAccess={canAssignAccess} busy={busy || loading} mutate={mutate} onReload={refresh} onAccessDenied={() => {
+      {!own && overview?.mode === 'manage' ? <ManagerDashboardManagement key={audience ?? 'all'} audience={audience} overview={overview} canAssignAccess={canAssignAccess} busy={busy || loading} mutate={mutate} onReload={refresh} onAccessDenied={() => {
         requestRevision.current += 1;
         setOverview(null);
         router.replace('/admin');
       }} /> : null}
-      {overview?.mode === 'view' ? <ManagerDashboardViewer key={overview.audience} overview={overview} loading={loading} onReload={refresh} /> : null}
+      {overview?.mode === 'view' ? <ManagerDashboardViewer key={`${own ? 'own' : 'manager'}:${overview.audience}`} own={own} overview={overview} loading={loading} onReload={refresh} /> : null}
     </main>
   );
 }

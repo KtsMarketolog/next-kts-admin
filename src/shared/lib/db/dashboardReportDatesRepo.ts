@@ -53,8 +53,9 @@ export async function getDashboardReportDates(session: AdminSession): Promise<Da
         order by snapshot.received_at desc limit 1
       ) latest on true where state.audience=$1`, [audience, canSeeGroup, audience === 'development' ? 'manager' : 'support_manager']);
     const row = result.rows[0];
-    if (!canSeeGroup && managerId) {
-      const personal = await getPersonalDashboardStatus(managerId);
+    const leaderId = key === 'manager:development' && session.role === 'top' ? session.adminUserId : null;
+    if (!canSeeGroup && (managerId || leaderId)) {
+      const personal = await getPersonalDashboardStatus(leaderId ? { source: 'admin', id: leaderId } : managerId!);
       const snapshot = personal.bindingStatus === 'matched' ? personal.snapshot : null;
       return { ...empty, dataUploadedAt: snapshot?.receivedAt ?? null, dataAsOf: snapshot?.issued ?? null, htmlPublishedAt: row?.html_published_at ?? null };
     }

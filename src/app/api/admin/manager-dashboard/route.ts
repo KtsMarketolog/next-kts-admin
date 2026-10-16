@@ -23,7 +23,7 @@ export async function GET() {
     }
     const status = await getPersonalDashboardStatus(access.manager!.id);
     const html = await getPersonalDashboardHtml(undefined, false, status.audience);
-    return personalJson({mode: 'view', ...status, ...freshness(status.snapshot),
+    return personalJson({mode: 'view', ...status, recipientKey: `manager:${access.manager!.id}`, ...freshness(status.snapshot),
       email: access.manager!.email.trim().toLowerCase(), htmlVersion: html ? {id: html.id, originalName: html.originalName, audience: html.audience, firstPublishedAt: html.firstPublishedAt} : null});
   } catch (error) { return personalApiError(error); }
 }
