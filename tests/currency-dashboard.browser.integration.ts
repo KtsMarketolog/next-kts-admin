@@ -59,6 +59,11 @@ function source(kind: unknown, params: Record<string, unknown>, stale: boolean, 
       ]).map(([code, current, nominal, previous]) => [code, { CharCode: code, Name: code, Value: current, Nominal: nominal, Previous: previous }])),
     }; break;
     case 'cbr-history': value = { data: historicalRates }; break;
+    case 'cbr-base-history': value = { data: Object.fromEntries([2022, 2023, 2024, 2025, 2026].flatMap((year) =>
+      Array.from({ length: year === 2026 ? 9 : 12 }, (_, index) => [
+        `${year}-${String(index + 1).padStart(2, '0')}-01`,
+        { USD: 80 + year - 2022 + index / 10, EUR: 90 + index / 10, CNY: 11 + index / 10, KZT: 0.18 + index / 1000 },
+      ]))), miss: [], sourceThrough: '2026-09-30' }; break;
     case 'moex-currency': value = { marketdata: {
       columns: ['SECID', 'LAST', 'LASTTOPREVPRICE', 'UPDATETIME'],
       data: [['CNYRUB_TOM', 12.55, 0.5, '12:00:00'], ['KZTRUB_TOM', 18.6, 0.4, '12:00:00']],
@@ -329,9 +334,9 @@ finally{window.__fixtureActiveRequests[key]--;}});
         assert.equal(successfulWrites, 2);
 
         await second.report.locator('[data-page="pgSum"]').click();
-        await second.report.locator('#summaryMonth').fill('2026-01');
-        await second.report.locator('#summaryMonth').dispatchEvent('change');
-        await second.frame.waitForFunction(() => document.querySelector('#sumCnt')?.textContent?.includes('2026-01'));
+        await second.report.locator('#sumMonth').fill('2026-01');
+        await second.report.locator('#sumMonth').dispatchEvent('change');
+        await second.frame.waitForFunction(() => document.querySelector('#sumTable')?.textContent?.includes('30.01.2026'));
         const januaryDates = await second.report.locator('#sumTable tr td:first-child').allTextContents();
         assert.deepEqual(januaryDates, ['30.01.2026', '13.01.2026', '01.01.2026'], 'Historical January observations remain accessible, without inventing missing days');
         for (const format of ['Csv', 'Xlsx']) {
@@ -350,7 +355,8 @@ finally{window.__fixtureActiveRequests[key]--;}});
             const workbook = XLSX.read(bytes, { type: 'buffer' });
             const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
             assert.deepEqual(rows.slice(1, 4).map(row => row[0]), januaryDates);
-            assert.equal(JSON.stringify(rows).includes('.09.2026'), false, 'Excel is restricted to the selected month');
+            assert.equal(rows.some(row => typeof row[0] === 'string' && /^\d{2}\.09\.2026$/.test(row[0])), false,
+              'Excel data is restricted to the selected month; the author footer may show the export date');
           }
         }
         await second.page.screenshot({ path: path.join(output, `${engineName}-january.png`) });
@@ -390,8 +396,8 @@ finally{window.__fixtureActiveRequests[key]--;}});
         assert.equal(await viewer.report.locator('#cpsForm input').first().isDisabled(), true, 'Restoring preferences never unlocks shared editing');
         await viewer.report.locator('#reloadShared').click();
         await viewer.report.locator('[data-page="pgSum"]').click();
-        await viewer.report.locator('#summaryMonth').fill('2026-01');
-        await viewer.report.locator('#summaryMonth').dispatchEvent('change');
+        await viewer.report.locator('#sumMonth').fill('2026-01');
+        await viewer.report.locator('#sumMonth').dispatchEvent('change');
         assert.deepEqual(await viewer.report.locator('#sumTable tr td:first-child').allTextContents(), januaryDates);
         const viewerDownloadEvent = viewer.page.waitForEvent('download');
         await viewer.report.locator('#btnCsv').click();
@@ -629,6 +635,36 @@ finally{window.__fixtureActiveRequests[key]--;}});
         await waitUntil(async () => (await activeAudio()).length === 1, 'A real gesture activates a restored voice preference');
         await audioLifecycle.report.locator('#tVoice').click();
         assert.equal((await activeAudio()).length, 0);
+
+        const extended = await createPage('?account=v25-extensions');
+        await extended.report.locator('[data-page="pgBase"]').click();
+        await extended.frame.waitForFunction(() => (document.querySelector('#baseCnt')?.textContent ?? '').includes('дат из архива ЦБ')
+          && !!document.querySelector('#baseTable td'));
+        const weight = extended.report.locator('#wForm [name="2026_USD"]');
+        await weight.fill('23,5');
+        // A routine source refresh must preserve an administrator's unsaved draft.
+        await extended.frame.evaluate('renderAll();renderAuthorExtras()');
+        assert.equal(await weight.inputValue(), '23,5');
+        const oldRevision = envelope.revision;
+        await extended.report.locator('#wForm button[type="submit"]').click();
+        await waitUntil(async () => envelope.revision === oldRevision + 1, 'V25 purchase weights are saved through server CAS');
+        assert.equal(envelope.current?.data.kts_weights?.['2026']?.USD, 23.5);
+        const forecastDetails = extended.report.locator('details').filter({ has: extended.report.locator('#f27Form') });
+        if (!(await forecastDetails.getAttribute('open'))) await forecastDetails.locator('summary').click();
+        const forecastText = 'Fixture Bank | 16.10.2026 | 92 | 95 | 14 | 12';
+        await extended.report.locator('#f27Form textarea').fill(forecastText);
+        await extended.report.locator('#f27Form button[type="submit"]').click();
+        await waitUntil(async () => envelope.revision === oldRevision + 2, 'V25 forecast is saved through server CAS');
+        assert.deepEqual(envelope.current?.data.kts_f27?.rows, [forecastText]);
+        await reloadPage(extended);
+        await extended.report.locator('[data-page="pgBase"]').click();
+        await extended.frame.waitForFunction(() => document.querySelector('#wForm input[name="2026_USD"]')?.getAttribute('value') === '23.5');
+        assert.match(await extended.report.locator('#f27Form textarea').inputValue(), /Fixture Bank/);
+        await extended.report.locator('[data-page="pgSum"]').click();
+        await extended.report.locator('#sumMonth').fill('2022-01');
+        await extended.report.locator('#sumMonth').dispatchEvent('change');
+        await extended.frame.waitForFunction(() => document.querySelector('#sumTable')?.textContent?.includes('01.01.2022'));
+        await extended.context.close();
 
         const isolation = await first.frame.evaluate(async () => {
           let parentBlocked = false, cookiesBlocked = false, storageBlocked = false, fetchBlocked = false, externalFetchBlocked = false;

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createCurrencySourceClient, CurrencySourceError, currencyMoscowDate, parseCurrencyCbrDaily,
-  parseCurrencyCbrHistory, parseCurrencyCopperTable, parseCurrencyIssTable, validCurrencyDate,
+  parseCurrencyCbrHistory, parseCurrencyCopperTable, parseCurrencyIssTable, sampleCurrencyBaseHistory, validCurrencyDate,
+  type CurrencyHistory,
 } from '../src/shared/lib/currencyDashboardSources';
 
 const NOW = new Date('2026-09-30T05:30:10Z');
@@ -191,6 +192,83 @@ test('an empty or partial CBR archive cannot overwrite the complete persisted ar
   empty = true;
   assert.equal((await get('cbr-history', {}, { force: true }))._currencySource.stale, true);
   assert.deepEqual(cache.get('currency:cbr-history'), persisted);
+});
+
+test('V25 base sampling preserves author monthly dates, forward holiday window and per-unit KZT', () => {
+  const row = { USD: [80, 1], EUR: [90, 1], CNY: [120, 10], KZT: [18, 100] } satisfies CurrencyHistory[string];
+  const sampled = sampleCurrencyBaseHistory({
+    '2022-01-02': row, '2022-01-14': row, '2022-01-20': row,
+    '2026-09-22': row, '2026-10-01': row,
+  }, '2026-10-01');
+  assert.deepEqual(sampled.data['2022-01-01'], { USD: 80, EUR: 90, CNY: 12, KZT: 0.18 });
+  assert.equal(sampled.data['2022-01-10'], undefined, 'four-day limit is not expanded silently');
+  assert.ok(sampled.miss.includes('2022-01-10'));
+  assert.ok(sampled.data['2022-01-20']);
+  assert.ok(sampled.data['2026-09-20']);
+  assert.ok(sampled.data['2026-10-01']);
+  assert.equal(sampled.data['2026-10-10'], undefined);
+  assert.ok(!sampled.miss.includes('2026-10-10'));
+  const currentWindow = sampleCurrencyBaseHistory({}, '2026-10-01');
+  assert.ok(!currentWindow.miss.includes('2026-10-01'), 'a current incomplete retry window is not stored as missing');
+});
+
+test('V25 base archive since 2022 uses four fixed shared requests without changing the main 2026 history', async () => {
+  const urls: URL[] = [];
+  const { get, cache } = client(async (url) => {
+    urls.push(url);
+    if (url.pathname.endsWith('XML_daily.asp')) return new Response(daily('31.12.2025'));
+    const nominal = url.searchParams.get('VAL_NM_RQ') === 'R01335' ? 100 : 1;
+    if (url.searchParams.get('date_req1') === '01/01/2022') {
+      assert.equal(url.origin + url.pathname, 'https://www.cbr.ru/scripts/XML_dynamic.asp');
+      assert.equal(url.searchParams.get('date_req2'), '30/09/2026');
+      return new Response(history(nominal).replace('02.01.2026', '11.01.2022').replace('30.09.2026', '22.09.2026'));
+    }
+    assert.equal(url.searchParams.get('date_req1'), '01/01/2026');
+    return new Response(history(nominal));
+  });
+  const [a, b] = await Promise.all([get('cbr-base-history'), get('cbr-base-history')]);
+  assert.deepEqual(a, b);
+  assert.equal(urls.length, 4);
+  assert.equal(a.sourceThrough, '2026-09-22');
+  assert.deepEqual(Object.keys(a.data as object), ['2022-01-10', '2026-09-20']);
+  assert.equal((a.data as Record<string, { KZT: number }>)['2022-01-10'].KZT, 0.855);
+  await get('cbr-base-history');
+  assert.equal(urls.length, 4);
+  await assert.rejects(get('cbr-base-history', { from: '2020-01-01' }), { code: 'INVALID_CURRENCY_SOURCE_PARAMS' });
+  await assert.rejects(get('cbr-base-history', { url: 'http://127.0.0.1/' }), { code: 'INVALID_CURRENCY_SOURCE_PARAMS' });
+  const main = await get('cbr-history');
+  assert.equal(urls.length, 9);
+  assert.deepEqual(Object.keys(main.data as object), ['2026-01-02', '2026-09-30', '2026-01-01']);
+  assert.ok(cache.has('currency:cbr-history'));
+  assert.ok(cache.has('currency:cbr-base-history'));
+});
+
+test('V25 base archive keeps last good cache on partial, regressed and failed responses', async () => {
+  let state: 'complete' | 'partial' | 'short' | 'regressed' | 'failure' = 'complete';
+  const { get, cache, writes } = client(async (url) => {
+    if (state === 'failure') throw new Error('network down');
+    const nominal = url.searchParams.get('VAL_NM_RQ') === 'R01335' ? 100 : 1;
+    const xml = history(nominal).replace('02.01.2026', '11.01.2022').replace('30.09.2026', '22.09.2026');
+    return new Response(state === 'partial' && url.searchParams.get('VAL_NM_RQ') === 'R01235'
+      ? xml.replace(/<Record Date="22\.09\.2026">.*?<\/Record>/, '')
+      : state === 'short' ? xml.replace(/<Record Date="11\.01\.2022">.*?<\/Record>/, '')
+        : state === 'regressed' ? xml.replace('22.09.2026', '21.08.2026') : xml);
+  });
+  const complete = await get('cbr-base-history');
+  state = 'short';
+  const shortened = await get('cbr-base-history', {}, { force: true });
+  assert.equal(shortened._currencySource.stale, false);
+  assert.deepEqual(shortened.data, complete.data, 'previously verified historical samples are not discarded');
+  assert.ok(!(shortened.miss as string[]).includes('2022-01-10'));
+  const stored = structuredClone(cache.get('currency:cbr-base-history'));
+  const count = writes.length;
+  for (state of ['partial', 'regressed', 'failure'] as const) {
+    const fallback = await get('cbr-base-history', {}, { force: true });
+    assert.equal(fallback._currencySource.stale, true);
+    assert.deepEqual(fallback.data, complete.data);
+    assert.deepEqual(cache.get('currency:cbr-base-history'), stored);
+    assert.equal(writes.length, count);
+  }
 });
 
 test('oversized and redirect/error responses cannot replace cache', async () => {

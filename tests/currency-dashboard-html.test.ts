@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import ts from 'typescript';
-import { buildCurrencyDashboardContentSecurityPolicy, renderCurrencyDashboardHtml } from '../src/shared/lib/currencyDashboardHtml';
+import { buildCurrencyDashboardContentSecurityPolicy, renderCurrencyDashboardHtml as renderHtml } from '../src/shared/lib/currencyDashboardHtml';
+
+// Keep the reviewed V21 integration covered as an independently usable rollback.
+// V25 and future author versions have their own adapter/parity test suite.
+const legacyHtml = readFileSync('assets/currency-dashboard/kursy_valyut_v21.html', 'utf8');
+const renderCurrencyDashboardHtml = (nonce: string, origin: string, canManage = false) => renderHtml(nonce, origin, canManage, legacyHtml);
 
 const nonce = '01234567-89ab-4cde-8fab-0123456789ab';
 const html = renderCurrencyDashboardHtml(nonce, 'https://example.test', true);

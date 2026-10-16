@@ -1,0 +1,67 @@
+.root {
+  margin-top: 24px;
+  padding: 24px;
+  min-width: 0;
+  border: 1px solid #d7d2ed;
+  border-top: 4px solid #2a108d;
+  border-radius: 12px;
+  background: #fff;
+  color: #292b38;
+  font-size: 14px;
+
+  h2, h3, p { margin: 0; }
+  h2 { margin-top: 4px; font-size: 22px; }
+  h3 { font-size: 17px; }
+  button {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 10px 14px;
+    background: #ececf4;
+    color: #292b38;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: normal;
+    &:hover:not(:disabled) { background: #dfdcea; }
+    &:focus-visible { outline: 2px solid #5531af; outline-offset: 3px; }
+    &:disabled { opacity: .55; cursor: not-allowed; }
+  }
+  button.primary { background: #2a108d; color: #fff; &:hover:not(:disabled) { background: #3c22a0; } }
+}
+.heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.eyebrow { color: #6d6386; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.description { margin-top: 12px !important; max-width: 1000px; line-height: 1.65; color: #62677b; }
+.current { margin-top: 16px !important; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; overflow-wrap: anywhere; }
+.current > span:last-child:not(:first-child) { font-size: 12px; color: #62677b; }
+.badge, .activeBadge { padding: 5px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; background: #f0eef8; color: #655985; white-space: nowrap; }
+.activeBadge { color: #277053; background: #e5f5ec; }
+.upload { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.file { display: flex; flex-direction: column; gap: 7px; flex: 1 1 340px; min-width: 0; max-width: 620px;
+  input { font: inherit; width: 100%; min-width: 0; border: 1px solid #d6d9e6; border-radius: 8px; padding: 8px; background: #fff; color: #3b3650; }
+  input::file-selector-button { border: 0; border-radius: 5px; padding: 6px 10px; background: #ececf4; color: #292b38; font: inherit; cursor: pointer; margin-right: 10px; }
+  input:focus-visible { outline: 2px solid #5531af; outline-offset: 3px; }
+}
+.hint { margin-top: 10px !important; color: #6c7184; font-size: 12px; line-height: 1.6; }
+.error, .notice { margin-top: 16px !important; padding: 12px 14px; border-radius: 8px; line-height: 1.6; overflow-wrap: anywhere; }
+.error { color: #972c27; background: #fff0ee; border: 1px solid #f2d4cf; }
+.notice { color: #285940; background: #edf8f1; border: 1px solid #cfe9d9; }
+.preview { margin-top: 24px; padding: 16px; border: 1px solid #d7d2ed; border-radius: 10px; background: #faf9ff; min-width: 0; }
+.preview .heading > div { flex: 1 1 350px; min-width: 0; overflow-wrap: anywhere; }
+.previewFrame { margin-top: 16px; min-width: 0; }
+.publish { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; margin-top: 16px; }
+.confirm { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; cursor: pointer; input { flex-shrink: 0; margin: 3px 0 0; accent-color: #2a108d; width: 17px; height: 17px; } }
+.history { margin-top: 24px; border-top: 1px solid #e4e1ef; padding-top: 20px; }
+.versions { list-style: none; padding: 0; margin: 14px 0;
+  li { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 0; border-bottom: 1px solid #eceaf3; }
+}
+.versionInfo { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow-wrap: anywhere; span { color: #6c7184; font-size: 12px; line-height: 1.5; } }
+.rollback { border: 1px solid #e8d8ae; border-radius: 8px; padding: 14px; margin-top: 14px; background: #fffbf0; line-height: 1.6; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+@media (max-width: 700px) {
+  .root { padding: 16px 12px; margin-top: 16px; h2 { font-size: 20px; } }
+  .upload > button { flex: 1 1 auto; }
+  .preview { padding: 12px 8px; }
+  .versions li { gap: 8px; }
+  .versionInfo { flex-basis: 100%; }
+  .publish button { width: 100%; }
+}

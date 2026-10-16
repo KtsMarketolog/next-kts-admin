@@ -89,6 +89,7 @@ test('08:30 server job captures both assets once with premium, forced fresh fetc
   assert.equal(job.saved[0].COPPER?.premium, 250);
   assert.equal(job.saved[0].COPPER?.capturedAt, TIME.toISOString());
   assert.equal(job.calls.find((call) => call.kind === 'moex-futures')?.force, true);
+  assert.equal(job.calls.filter((call) => call.kind === 'cbr-base-history').length, 1, 'shared V25 archive is warmed independently of page views');
   assert.equal(job.releases, 1);
   const again = await job.run();
   assert.equal(again.baseline.status, 'already-captured');

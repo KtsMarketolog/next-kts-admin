@@ -1,12 +1,14 @@
 import { readCurrencyCache, writeCurrencyCache } from './db/currencyDashboardRepo';
 
 export const CURRENCY_HISTORY_START = '2026-01-01';
-export const CURRENCY_SOURCE_KINDS = ['cbr-daily', 'cbr-history', 'moex-currency', 'moex-futures', 'moex-candles', 'world', 'copper'] as const;
+export const CURRENCY_BASE_HISTORY_START = '2022-01-01';
+export const CURRENCY_SOURCE_KINDS = ['cbr-daily', 'cbr-history', 'cbr-base-history', 'moex-currency', 'moex-futures', 'moex-candles', 'world', 'copper'] as const;
 export type CurrencySourceKind = typeof CURRENCY_SOURCE_KINDS[number];
 export type CurrencySourceMetadata = { fetchedAt: string; stale: boolean; error?: string; delayMinutes?: number };
 export type CurrencySourceResult = Record<string, unknown> & { _currencySource: CurrencySourceMetadata };
 export type CurrencyRateCode = 'USD' | 'EUR' | 'CNY' | 'KZT';
 export type CurrencyHistory = Record<string, Partial<Record<CurrencyRateCode, [number, number]>>>;
+export type CurrencyBaseHistory = Record<string, Record<CurrencyRateCode, number>>;
 export type IssTable = { columns: string[]; data: unknown[][] };
 export type CopperRow = { date: string; cash: number; m3: number };
 
@@ -22,7 +24,7 @@ const CBR_IDS: Record<CurrencyRateCode, string> = { USD: 'R01235', EUR: 'R01239'
 const CBR_NAMES: Record<CurrencyRateCode, string> = { USD: 'Доллар США', EUR: 'Евро', CNY: 'Китайский юань', KZT: 'Казахстанский тенге' };
 const RATE_CODES = Object.keys(CBR_IDS) as CurrencyRateCode[];
 const SOURCE_TTL: Record<CurrencySourceKind, number> = {
-  'cbr-daily': 10 * 60_000, 'cbr-history': 6 * 60 * 60_000,
+  'cbr-daily': 10 * 60_000, 'cbr-history': 6 * 60 * 60_000, 'cbr-base-history': 6 * 60 * 60_000,
   'moex-currency': 30_000, 'moex-futures': 30_000, 'moex-candles': 15 * 60_000,
   world: 60 * 60_000, copper: 60 * 60_000,
 };
@@ -106,6 +108,35 @@ export function parseCurrencyCbrHistory(xml: string): Record<string, [number, nu
     data[date] = [positive(record.match(/<Value>([^<]+)<\/Value>/)?.[1]), nominal];
   }
   return data;
+}
+
+/** V25 samples three dates each month, looking forward at most three days on holidays.
+ * Keep this archive separate from the daily 2026 series used by the author's forecasts.
+ */
+export function sampleCurrencyBaseHistory(history: CurrencyHistory, today: string) {
+  const data: CurrencyBaseHistory = {};
+  const miss: string[] = [];
+  for (let year = Number(CURRENCY_BASE_HISTORY_START.slice(0, 4)); year <= Number(today.slice(0, 4)); year++) {
+    for (let month = 1; month <= 12; month++) {
+      for (const day of [1, 10, 20]) {
+        const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (key > today) continue;
+        let completeWindow = true;
+        for (let offset = 0; offset < 4; offset++) {
+          const date = new Date(Date.parse(`${key}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10);
+          if (date > today) { completeWindow = false; break; }
+          const values = history[date];
+          if (!values) continue;
+          if (RATE_CODES.some((code) => !values[code])) throw new Error('Incomplete CBR base history across currencies');
+          data[key] = Object.fromEntries(RATE_CODES.map((code) => [code, values[code]![0] / values[code]![1]])) as Record<CurrencyRateCode, number>;
+          break;
+        }
+        // Do not permanently mark a current sample as missing before its four-day window ends.
+        if (!data[key] && completeWindow) miss.push(key);
+      }
+    }
+  }
+  return { data, miss };
 }
 
 export function parseCurrencyCopperTable(html: string): CopperRow[] {
@@ -237,6 +268,32 @@ async function loadSource(kind: CurrencySourceKind, params: Record<string, unkno
     if (oldLast && newLast && newLast < oldLast) throw new Error('CBR history response regressed');
     // A provider may shorten an archive response. Never discard already verified history.
     return { data: { ...old, ...data } };
+  }
+  if (kind === 'cbr-base-history') {
+    const end = currencyMoscowDate(now);
+    const history: CurrencyHistory = {};
+    // Four bounded range requests replace hundreds of per-day requests in each browser.
+    await Promise.all(RATE_CODES.map(async (code) => {
+      const url = new URL('https://www.cbr.ru/scripts/XML_dynamic.asp');
+      url.searchParams.set('date_req1', cbrDate(CURRENCY_BASE_HISTORY_START));
+      url.searchParams.set('date_req2', cbrDate(end));
+      url.searchParams.set('VAL_NM_RQ', CBR_IDS[code]);
+      const values = parseCurrencyCbrHistory(await fetchText(url, deps));
+      if (!Object.keys(values).length) throw new Error('Empty CBR base history for currency');
+      for (const [date, value] of Object.entries(values)) {
+        if (date >= CURRENCY_BASE_HISTORY_START && date <= end) (history[date] ??= {})[code] = value;
+      }
+    }));
+    if (Object.values(history).some((day) => RATE_CODES.some((code) => !day[code]))) throw new Error('Incomplete CBR base history across currencies');
+    const sourceThrough = Object.keys(history).sort().at(-1);
+    const oldValue = object(cached?.value) ? cached.value : {};
+    if (!sourceThrough || (typeof oldValue.sourceThrough === 'string' && sourceThrough < oldValue.sourceThrough)) throw new Error('CBR base history response regressed');
+    const sampled = sampleCurrencyBaseHistory(history, end);
+    if (!Object.keys(sampled.data).length) throw new Error('Empty sampled CBR base history');
+    // A shortened upstream archive must not erase previously verified sample dates.
+    const old = object(oldValue.data) ? oldValue.data : {};
+    const data = { ...old, ...sampled.data };
+    return { data, miss: sampled.miss.filter((date) => !(date in data)), sourceThrough };
   }
   if (kind === 'moex-currency') {
     const data = await fetchJson(issUrl('engines/currency/markets/selt/boards/CETS/securities.json', {

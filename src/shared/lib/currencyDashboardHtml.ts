@@ -1,20 +1,22 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { dashboardUsageAdapterScript } from './dashboardUsageBridge';
+import { getBuiltinCurrencyDashboardHtmlSeed, prepareCurrencyDashboardHtml } from './currencyDashboardHtmlUpload';
 
-/** Reviewed application asset, never administrator-supplied executable HTML. */
-export function renderCurrencyDashboardHtml(nonce: string, parentOrigin: string, canManage = false): string {
+/** Author code executes only in the isolated frame; the trusted parent owns data and permissions. */
+export function renderCurrencyDashboardHtml(nonce: string, parentOrigin: string, canManage = false,
+  rawHtml?: string, options: { trackUsage?: boolean } = {}): string {
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(nonce)) throw new Error('Invalid currency bridge nonce');
   const origin = new URL(parentOrigin);
   if (!['https:', 'http:'].includes(origin.protocol) || origin.origin !== parentOrigin) {
     throw new Error('Invalid currency bridge origin');
   }
-  const html = readFileSync(path.join(process.cwd(), 'assets/currency-dashboard/kursy_valyut_v21.html'), 'utf8');
+  const html = prepareCurrencyDashboardHtml(rawHtml ?? getBuiltinCurrencyDashboardHtmlSeed().current.htmlContent);
   const marker = '__KTS_CURRENCY_BOOTSTRAP__';
   if (html.split(marker).length !== 2) throw new Error('Invalid currency dashboard asset');
   const configuration = JSON.stringify({ nonce, parentOrigin, canManage }).replace(/</g, '\\u003c');
-  return html.replace(marker, () => configuration).replace(/<\/script\s*>/i, (tag) => `\n${dashboardUsageAdapterScript()}\n${tag}`);
+  const rendered = html.replace(marker, () => configuration);
+  return options.trackUsage === false ? rendered
+    : rendered.replace(/<\/script\s*>/i, (tag) => `\n${dashboardUsageAdapterScript()}\n${tag}`);
 }
 
 export function buildCurrencyDashboardContentSecurityPolicy(html: string): string {

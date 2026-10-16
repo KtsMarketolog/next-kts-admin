@@ -82,6 +82,16 @@ function harness(relative: string, session: AdminSession | null) {
   const calls: string[] = [];
   const callArguments: Array<{ name: string; args: unknown[] }> = [];
   const framePermissions: boolean[] = [];
+  const frameRenderInputs: Array<{ rawHtml: string; trackUsage: boolean }> = [];
+  let missingHtml = false;
+  let corruptHtml = false;
+  class CurrencyHtmlError extends Error { readonly status = 409; }
+  const selectedHtml = (name: string, rawHtml: string, versionId?: number) => {
+    calls.push(name);
+    if (versionId) callArguments.push({ name, args: [versionId] });
+    if (corruptHtml) throw new CurrencyHtmlError('HTML integrity check failed');
+    return missingHtml ? null : { htmlContent: rawHtml, version: { id: versionId ?? 2 } };
+  };
   const infrastructure = new Proxy({}, { get: (_target, key) => {
     if (String(key).endsWith('Error')) return class extends Error {};
     return async (...args: unknown[]) => {
@@ -106,11 +116,18 @@ function harness(relative: string, session: AdminSession | null) {
       },
     },
     '@/shared/lib/db/currencyDashboardRepo': infrastructure,
+    '@/shared/lib/currencyDashboardHtmlUpload': { getBuiltinCurrencyDashboardHtmlSeed: () => ({ current: {} }) },
+    '@/shared/lib/db/currencyDashboardHtmlRepo': {
+      CurrencyHtmlError,
+      ensureCurrencyDashboardHtmlSeed: async () => { calls.push('htmlSeed'); },
+      getPublishedCurrencyDashboardHtml: async () => selectedHtml('htmlPublished', '<html>published</html>'),
+      getCurrencyDashboardHtmlVersion: async (id: number) => selectedHtml('htmlDraft', '<html>draft</html>', id),
+    },
     '@/shared/lib/db/securityAuditRepo': infrastructure,
     '@/shared/lib/originProtection': { enforceSameOriginRequest },
     '@/shared/lib/currencyDashboardHtml': {
-      renderCurrencyDashboardHtml: (_nonce: string, _origin: string, canManage: boolean) => {
-        calls.push('html'); framePermissions.push(canManage); return '<html></html>';
+      renderCurrencyDashboardHtml: (_nonce: string, _origin: string, canManage: boolean, rawHtml: string, options: { trackUsage: boolean }) => {
+        calls.push('html'); framePermissions.push(canManage); frameRenderInputs.push({ rawHtml, trackUsage: options.trackUsage }); return '<html></html>';
       },
       buildCurrencyDashboardContentSecurityPolicy: () => "connect-src 'none'",
     },
@@ -122,7 +139,8 @@ function harness(relative: string, session: AdminSession | null) {
     if (!(name in modules)) throw new Error(`Unexpected module ${name}`);
     return modules[name];
   }, Response, Request, URL, console });
-  return { exports, calls, callArguments, framePermissions };
+  return { exports, calls, callArguments, framePermissions, frameRenderInputs,
+    missingHtml: () => { missingHtml = true; }, corruptHtml: () => { corruptHtml = true; } };
 }
 
 test('actual API and HTML route reject unauthorized roles before data reads or source requests', async () => {
@@ -237,7 +255,60 @@ test('frame is only rendered with a same-origin parent and bounded nonce', async
   const valid = await h.exports.GET(new Request('https://example.test/frame?nonce=01234567-89ab-4cde-8fab-0123456789ab', { headers: { Referer: 'https://example.test/admin' } }));
   assert.equal(valid.status, 200);
   assert.equal(valid.headers.get('Content-Security-Policy'), "connect-src 'none'");
-  assert.deepEqual(h.calls, ['html']);
+  assert.deepEqual(h.calls, ['htmlSeed', 'htmlPublished', 'html']);
+  assert.deepEqual(h.frameRenderInputs, [{ rawHtml: '<html>published</html>', trackUsage: true }]);
+});
+
+test('currency HTML drafts require management before database reads and are always read-only with no usage tracking', async () => {
+  const make = (query = '') => new Request(`https://example.test/frame?nonce=01234567-89ab-4cde-8fab-0123456789ab&previewVersion=3${query}`, {
+    headers: { Referer: 'https://example.test/admin' },
+  });
+  for (const role of ['top', 'manager', 'support_manager', 'purchaser'] as const) {
+    const h = harness('frame/route.ts', { role, sessionId: 'x', adminUserId: 4, managerId: 9, dashboardAccess: ['currency-rates'] });
+    const response = await h.exports.GET(make());
+    assert.equal(response.status, 403); assert.deepEqual(h.calls, []);
+    assert.match(response.headers.get('Cache-Control')!, /no-store/);
+  }
+  for (const role of ['admin', 'admintop', 'top', 'manager', 'support_manager'] as const) {
+    const h = harness('frame/route.ts', { role, sessionId: 'x', adminUserId: 4, managerId: 9, canManageTopDashboard: true });
+    assert.equal((await h.exports.GET(make('&readOnly=0'))).status, 200);
+    assert.deepEqual(h.calls, ['htmlSeed', 'htmlDraft', 'html']);
+    assert.deepEqual(h.framePermissions, [false]);
+    assert.deepEqual(h.frameRenderInputs, [{ rawHtml: '<html>draft</html>', trackUsage: false }]);
+    assert.deepEqual(h.callArguments.find(({ name }) => name === 'htmlDraft')?.args, [3]);
+  }
+});
+
+test('currency HTML frame rejects duplicate, malformed and unknown selectors without database access', async () => {
+  const nonce = '01234567-89ab-4cde-8fab-0123456789ab';
+  for (const query of [`nonce=${nonce}&nonce=${nonce}`, `nonce=${nonce}&previewVersion=0`, `nonce=${nonce}&previewVersion=-1`,
+    `nonce=${nonce}&previewVersion=1&previewVersion=2`, `nonce=${nonce}&previewVersion=9007199254740992`,
+    `nonce=${nonce}&previewVersion=1.5`, `nonce=${nonce}&readOnly=evil`, `nonce=${nonce}&html=<script>`]) {
+    const h = harness('frame/route.ts', { role: 'admin', sessionId: 'x' });
+    const response = await h.exports.GET(new Request(`https://example.test/frame?${query}`, { headers: { Referer: 'https://example.test/admin' } }));
+    assert.equal(response.status, 400); assert.deepEqual(h.calls, []);
+  }
+  const crossOrigin = harness('frame/route.ts', { role: 'admin', sessionId: 'x' });
+  const forbidden = await crossOrigin.exports.GET(new Request(`https://example.test/frame?nonce=${nonce}`, { headers: { Referer: 'https://evil.test/' } }));
+  assert.equal(forbidden.status, 403); assert.deepEqual(crossOrigin.calls, []);
+  assert.match(forbidden.headers.get('Cache-Control')!, /no-store/);
+});
+
+test('currency HTML missing or corrupt versions fail closed instead of executing unverified code', async () => {
+  for (const preview of [false, true]) {
+    const request = () => new Request(`https://example.test/frame?nonce=01234567-89ab-4cde-8fab-0123456789ab${preview ? '&previewVersion=3' : ''}`, {
+      headers: { Referer: 'https://example.test/admin' },
+    });
+    const missing = harness('frame/route.ts', { role: 'admin', sessionId: 'x' }); missing.missingHtml();
+    const absent = await missing.exports.GET(request());
+    assert.equal(absent.status, preview ? 404 : 503);
+    assert.match(absent.headers.get('Cache-Control')!, /no-store/);
+    assert.equal(missing.calls.includes('html'), false);
+    const corrupt = harness('frame/route.ts', { role: 'admin', sessionId: 'x' }); corrupt.corruptHtml();
+    const invalid = await corrupt.exports.GET(request());
+    assert.equal(invalid.status, 409);
+    assert.equal(corrupt.calls.includes('html'), false);
+  }
 });
 
 test('actual RPC dispatch separates kind from the closed source parameter schema', async () => {

@@ -1,25 +1,41 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 import { CURRENCY_RPC_CHANNEL, CURRENCY_RPC_MAX_BYTES, parseCurrencyRpcRequest } from '@/shared/lib/currencyDashboardRpc';
 import { createCurrencyDeviceBridge, isCurrencyDeviceMethod } from '@/shared/lib/currencyDashboardDeviceState';
 import { createCurrencyDashboardScheduler, createCurrencySchedulerWorker } from '@/shared/lib/currencyDashboardScheduler';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
 import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
+import { CurrencyHtmlManagement } from './CurrencyHtmlManagement';
 
 import styles from './currency-dashboard.module.scss';
 
-const SOURCE_LABELS: Record<string, string> = { 'cbr-daily':'Курсы ЦБ', 'cbr-history':'История ЦБ', 'moex-currency':'Валюты Мосбиржи', 'moex-futures':'Фьючерсы Мосбиржи', world:'Мировые курсы', copper:'Медь LME' };
+const SOURCE_LABELS: Record<string, string> = { 'cbr-daily':'Курсы ЦБ', 'cbr-history':'История ЦБ', 'cbr-base-history':'История ЦБ с 2022 года', 'moex-currency':'Валюты Мосбиржи', 'moex-futures':'Фьючерсы Мосбиржи', world:'Мировые курсы', copper:'Медь LME' };
 const dateFormat = new Intl.DateTimeFormat('ru-RU', {dateStyle:'short', timeStyle:'short', timeZone:'Europe/Moscow'});
 
-export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = false, canAssignAccess = false }: { nonce: string; deviceScope: string | null; canManage: boolean; embedded?: boolean; canAssignAccess?: boolean }) {
+function CurrencyPublishedUsage({ iframeRef }: { iframeRef: RefObject<HTMLIFrameElement | null> }) {
+  useDashboardUsage({ dashboardKey:'currency-rates', iframeRef, opaque:true });
+  return null;
+}
+
+/** Mounted only after an administrator explicitly opens a draft in this client UI. */
+function CurrencyHtmlPreview({ versionId }: { versionId: number }) {
+  const [nonce] = useState(() => crypto.randomUUID());
+  return <CurrencyDashboard nonce={nonce} deviceScope={null} canManage={false} embedded previewVersion={versionId} />;
+}
+
+export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = false, canAssignAccess = false, previewVersion }: { nonce: string; deviceScope: string | null; canManage: boolean; embedded?: boolean; canAssignAccess?: boolean; previewVersion?: number }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const container = useRef<HTMLElement>(null);
   const [error, setError] = useState('');
   const [sources, setSources] = useState<Record<string, {fetchedAt: string; stale: boolean}>>({});
-  useDashboardUsage({dashboardKey:'currency-rates', iframeRef:frame, opaque:true});
+  const [publication, setPublication] = useState<{ base: string; nonce: string } | null>(null);
+  const frameNonce = publication?.base === nonce ? publication.nonce : nonce;
+  const isPreview = previewVersion !== undefined;
+  const embeddedView = embedded || isPreview;
+  const readOnly = !canManage || embeddedView;
 
   useEffect(() => {
     let disposed = false;
@@ -35,7 +51,7 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
       clearInterval: (timer) => window.clearInterval(timer),
       tick: () => {
         if (!disposed && !pageAway && scheduleTarget && frame.current?.contentWindow === scheduleTarget) {
-          scheduleTarget.postMessage({ channel: CURRENCY_RPC_CHANNEL, nonce, event: 'schedule:tick' }, '*');
+          scheduleTarget.postMessage({ channel: CURRENCY_RPC_CHANNEL, nonce: frameNonce, event: 'schedule:tick' }, '*');
         }
       },
     });
@@ -53,7 +69,8 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
       if (scheduleTarget) { scheduler.start(); scheduler.tick(); }
     };
     const visibleSchedule = () => { if (!document.hidden && !pageAway && scheduleTarget) scheduler.tick(); };
-    const deviceCommand = createCurrencyDeviceBridge(deviceScope, () => window.localStorage, () => {
+    const deviceCommand = createCurrencyDeviceBridge(isPreview ? null : deviceScope, () => isPreview ? null : window.localStorage, () => {
+      if (isPreview) return null;
       if (!window.isSecureContext || !('Notification' in window)) return null;
       return {
         permission: () => Notification.permission,
@@ -68,7 +85,7 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
       if (disposed) return;
       if (event.source !== frame.current?.contentWindow || event.origin !== 'null') return;
       const data = event.data;
-      if (!data || data.channel !== CURRENCY_RPC_CHANNEL || data.nonce !== nonce
+      if (!data || data.channel !== CURRENCY_RPC_CHANNEL || data.nonce !== frameNonce
         || typeof data.id !== 'string' || !/^[a-zA-Z0-9:_-]{1,100}$/.test(data.id)) return;
       if (pending.has(data.id) || completed.has(data.id) || pending.size >= 16) return;
       const target = event.source as Window;
@@ -77,7 +94,7 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
         // The destination is an opaque-origin, sandboxed iframe; source and nonce
         // identify this exact instance. No credentials are sent into the frame.
         if (!disposed && generation === requestGeneration && frame.current?.contentWindow === target) {
-          target.postMessage({ channel: CURRENCY_RPC_CHANNEL, nonce, id: data.id, ...value }, '*');
+          target.postMessage({ channel: CURRENCY_RPC_CHANNEL, nonce: frameNonce, id: data.id, ...value }, '*');
         }
       };
       const controller = new AbortController();
@@ -98,7 +115,7 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
           return;
         }
         const payload = parseCurrencyRpcRequest(data);
-        if (!canManage && (payload.method === 'snapshot:save' || payload.method === 'snapshot:rollback')) {
+        if ((isPreview || readOnly) && (payload.method === 'snapshot:save' || payload.method === 'snapshot:rollback')) {
           reply({error:{message:'На этом экране доступен только просмотр.', status:403, code:'CURRENCY_READ_ONLY'}});
           return;
         }
@@ -152,7 +169,7 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
       iframe?.removeEventListener('load', resetFrame);
       resetFrame();
     };
-  }, [nonce, deviceScope, canManage]);
+  }, [frameNonce, deviceScope, isPreview, previewVersion, readOnly]);
 
   const fullScreen = async () => {
     try {
@@ -162,31 +179,41 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
   };
 
   return (
-    <section className={embedded ? styles.embedded : styles.root} ref={container}>
-      {!embedded && <div className={styles.toolbar}>
-        <div><h1>Курсы валют и медь</h1><p>Общие данные для сотрудников с доступом · авторский дашборд V21{!canManage && ' · только просмотр'}</p></div>
+    <section className={embeddedView ? styles.embedded : styles.root} ref={container}>
+      {!isPreview && <CurrencyPublishedUsage key={frameNonce} iframeRef={frame} />}
+      {!embeddedView && <div className={styles.toolbar}>
+        <div><h1>Курсы валют и медь</h1><p>Общие данные для сотрудников с доступом · авторский HTML-дашборд{readOnly && ' · только просмотр'}</p></div>
         <nav aria-label="Навигация отчёта">
           <Link href="/admin/top">К списку отчётов</Link>
           <button type="button" onClick={fullScreen}>На весь экран</button>
         </nav>
       </div>}
-      {!embedded && Object.keys(sources).length > 0 ? <details className={styles.sourceDates}>
+      {!embeddedView && Object.keys(sources).length > 0 ? <details className={styles.sourceDates}>
         <summary>Последние успешные проверки источников, МСК</summary>
         <p>Время получения данных не означает время изменения котировки. Дата действия курса и задержка источника показаны внутри отчёта.</p>
         <ul>{Object.entries(sources).map(([kind, source]) => <li key={kind}>{SOURCE_LABELS[kind]}: {dateFormat.format(new Date(source.fetchedAt))} МСК{source.stale ? ' — показана сохранённая версия, источник недоступен' : ''}</li>)}</ul>
       </details> : null}
       {error && <p className={styles.error} role="alert">{error} <Link href="/admin">Открыть кабинет</Link></p>}
       <iframe
+        key={`${frameNonce}:${previewVersion ?? 'published'}`}
         ref={frame}
-        title="Курсы валют и медь — интерактивный дашборд"
-        src={`/api/admin/currency-dashboard/frame?nonce=${encodeURIComponent(nonce)}${embedded ? '&readOnly=1' : ''}`}
+        title={isPreview ? 'Предпросмотр HTML — курсы валют и медь' : 'Курсы валют и медь — интерактивный дашборд'}
+        src={`/api/admin/currency-dashboard/frame?nonce=${encodeURIComponent(frameNonce)}${readOnly ? '&readOnly=1' : ''}${isPreview ? `&previewVersion=${previewVersion}` : ''}`}
         sandbox="allow-scripts allow-downloads allow-modals allow-forms"
         allow="fullscreen; autoplay"
         allowFullScreen
         referrerPolicy="same-origin"
         className={styles.frame}
       />
-      {!embedded && canAssignAccess ? <DashboardAudienceEditor dashboardKey="currency-rates" /> : null}
+      {!embeddedView && canManage ? <CurrencyHtmlManagement
+        onPublished={() => {
+          setSources({});
+          setError('');
+          setPublication({ base: nonce, nonce: crypto.randomUUID() });
+        }}
+        renderPreview={(versionId) => <CurrencyHtmlPreview key={versionId} versionId={versionId} />}
+      /> : null}
+      {!embeddedView && canAssignAccess ? <DashboardAudienceEditor dashboardKey="currency-rates" /> : null}
     </section>
   );
 }

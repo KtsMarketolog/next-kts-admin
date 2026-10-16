@@ -3,12 +3,15 @@ export const CURRENCY_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024;
 export const CURRENCY_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 
 export type CurrencySnapshotData = {
+  [key: string]: unknown;
   kts_cpsRates?: { eur: number; cny: number; usd: number | null; from: string; to: string };
   kts_an?: { upd: string; rows: string[] };
   kts_cu?: { prem: number; rows: { date: string; price: number }[]; lmci: number | null; lmciDate: string | null };
   kts_log?: { t: string; msg: string; risk: boolean }[];
+  kts_weights?: Record<string, { USD: number; EUR: number; CNY: number; KZT: number; rev: number | null }>;
+  kts_f27?: { upd: string; rows: string[] };
 };
-export type CurrencySnapshot = { at: string; version: 'V21'; data: CurrencySnapshotData };
+export type CurrencySnapshot = { at: string; version: `V${number}`; data: CurrencySnapshotData };
 export type StoredCurrencySnapshot = CurrencySnapshot & { savedAt: string; actor: string };
 export type CurrencySnapshotState = { revision: number; current: StoredCurrencySnapshot | null; previous: StoredCurrencySnapshot | null };
 export type CurrencyBaseline = {
@@ -116,13 +119,37 @@ function list(value: unknown, maximum: number, path: string): unknown[] {
   return value;
 }
 
+/** Later author's versions can add manual sections without overwriting server or device state. */
+export function isCurrencyManualSnapshotKey(key: string): boolean {
+  return /^kts_[A-Za-z0-9_]{1,80}$/.test(key) &&
+    !/^kts_(?:base(?:Hist)?|moexHist|cbrHist(?:_.*)?|prefs|seen|meta|gs|device.*|auth.*|session.*)$/i.test(key);
+}
+
+function validateAdditionalManualData(value: unknown, path: string): void {
+  if (typeof value === 'string') { text(value, path, CURRENCY_SNAPSHOT_MAX_BYTES, true); return; }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    text(key, path, 200, true);
+    validateAdditionalManualData(child, `${path}.${key}`);
+  }
+}
+
 export function validateCurrencySnapshot(value: unknown): CurrencySnapshot {
   validateCurrencyJson(value, CURRENCY_SNAPSHOT_MAX_BYTES);
   const root = record(value, ['at', 'version', 'data'], 'Снимок');
   const at = validateCurrencyTimestamp(root.at, 'Время снимка');
-  if (root.version !== 'V21') invalid('Версия снимка', 'поддерживается только V21');
-  const source = record(root.data, ['kts_cpsRates', 'kts_an', 'kts_cu', 'kts_log'], 'Данные снимка');
+  // V25 itself still exports the historical V16 marker. Validate structure, not a single version label.
+  if (typeof root.version !== 'string' || !/^V[1-9]\d{0,3}$/.test(root.version)) invalid('Версия снимка', 'ожидается номер версии V1–V9999');
+  if (!root.data || typeof root.data !== 'object' || Array.isArray(root.data)) invalid('Данные снимка', 'ожидается объект');
+  const source = root.data as Record<string, unknown>;
   const data: CurrencySnapshotData = {};
+  for (const [key, field] of Object.entries(source)) {
+    if (!isCurrencyManualSnapshotKey(key)) invalid('Данные снимка', 'поля серверных источников и настроек устройства нельзя сохранять как ручные данные');
+    if (!['kts_cpsRates', 'kts_an', 'kts_cu', 'kts_log', 'kts_weights', 'kts_f27'].includes(key)) {
+      validateAdditionalManualData(field, key);
+      data[key] = structuredClone(field);
+    }
+  }
   if ('kts_cpsRates' in source) {
     const r = record(source.kts_cpsRates, ['eur', 'cny', 'usd', 'from', 'to'], 'Внутренние курсы');
     const from = validateCurrencyDate(r.from, 'Начало действия курса');
@@ -162,7 +189,30 @@ export function validateCurrencySnapshot(value: unknown): CurrencySnapshot {
       return { t: validateCurrencyTimestamp(entry.t, 'Время записи журнала'), msg: text(entry.msg, 'Сообщение журнала'), risk: entry.risk === true };
     });
   }
-  return { at, version: 'V21', data };
+  if ('kts_weights' in source) {
+    if (!source.kts_weights || typeof source.kts_weights !== 'object' || Array.isArray(source.kts_weights)) invalid('Структура закупок', 'ожидается объект по годам');
+    data.kts_weights = {};
+    for (const [year, row] of Object.entries(source.kts_weights)) {
+      if (!/^(?:20\d\d|2100)$/.test(year) || Number(year) < 2022) invalid('Год структуры закупок', 'ожидается год от 2022 до 2100');
+      const r = record(row, ['USD', 'EUR', 'CNY', 'KZT', 'rev'], `Структура закупок ${year}`);
+      data.kts_weights[year] = {
+        USD: amount(r.USD, `Доля USD ${year}`, true, 100), EUR: amount(r.EUR, `Доля EUR ${year}`, true, 100),
+        CNY: amount(r.CNY, `Доля CNY ${year}`, true, 100), KZT: amount(r.KZT, `Доля KZT ${year}`, true, 100),
+        rev: r.rev == null ? null : amount(r.rev, `Выручка ${year}`, true, 1_000_000_000_000),
+      };
+    }
+  }
+  if ('kts_f27' in source) {
+    const r = record(source.kts_f27, ['upd', 'rows'], 'Прогноз 2027');
+    data.kts_f27 = { upd: russianDate(r.upd, 'Дата сводки 2027'), rows: list(r.rows, 1000, 'Прогноз 2027').map((row, i) => {
+      const line = text(row, `Прогноз 2027 ${i + 1}`, 2000);
+      const parts = line.split('|').map((part) => part.trim());
+      if (parts.length !== 6 || !parts[0]) invalid(`Прогноз 2027 ${i + 1}`, 'нужны источник, дата, USD 2026, USD 2027, ставка 2026 и ставка 2027 через |');
+      if (parts[1] && parts[1] !== '—') russianDate(parts[1], `Дата прогноза 2027 ${i + 1}`);
+      return parts.join(' | ');
+    }) };
+  }
+  return { at, version: root.version as CurrencySnapshot['version'], data };
 }
 
 export function validateCurrencyActor(value: unknown): string {

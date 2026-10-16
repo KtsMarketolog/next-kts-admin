@@ -1,4 +1,5 @@
 import {
+  isCurrencyManualSnapshotKey,
   validateCurrencyActor, validateCurrencyBaselineDay, validateCurrencyCacheKey,
   validateCurrencyDate, validateCurrencyJson, validateCurrencyRevision, validateCurrencySnapshot, validateCurrencyTimestamp,
   type CurrencyBaseline, type CurrencyBaselineDay, type CurrencyBaselines, type CurrencySnapshotState, type StoredCurrencySnapshot,
@@ -45,7 +46,19 @@ async function changeSnapshot(expectedRevision: number, actor: string, change: (
 
 export async function writeCurrencySnapshot(snapshot: unknown, expectedRevision: number, actor: string): Promise<CurrencySnapshotState> {
   const validated = validateCurrencySnapshot(snapshot);
-  return changeSnapshot(expectedRevision, actor, (_state, now) => ({ ...validated, at: now, savedAt: now, actor }));
+  return changeSnapshot(expectedRevision, actor, (state, now) => {
+    // Already-open V21 clients and an HTML rollback only know these four original
+    // sections. Their next successful save must not erase sections introduced by
+    // a later HTML version. Preserve absent extensions under the same CAS lock;
+    // explicit incoming extension values still replace their previous contents.
+    // Core sections retain the existing snapshot-import replacement semantics.
+    const originalKeys = new Set(['kts_cpsRates', 'kts_an', 'kts_cu', 'kts_log']);
+    const retained = Object.fromEntries(Object.entries(state.current?.data ?? {}).filter(([key]) => (
+      isCurrencyManualSnapshotKey(key) && !originalKeys.has(key) && !(key in validated.data)
+    )));
+    const merged = validateCurrencySnapshot({ ...validated, data: { ...retained, ...validated.data } });
+    return { ...merged, at: now, savedAt: now, actor };
+  });
 }
 
 export async function rollbackCurrencySnapshot(expectedRevision: number, actor: string): Promise<CurrencySnapshotState> {

@@ -122,7 +122,7 @@ export function createCurrencyDashboardJob(deps: JobDependencies) {
         }
       };
       // Do not make baseline capture wait for the first historical CBR import.
-      const background = Promise.all((['cbr-daily', 'cbr-history', 'copper', 'moex-currency', 'world'] as const).map((kind) => readSource(kind)));
+      const background = Promise.all((['cbr-daily', 'cbr-history', 'cbr-base-history', 'copper', 'moex-currency', 'world'] as const).map((kind) => readSource(kind)));
       const futures = await readSource('moex-futures', captureWindow && (!current.COPPER || !current.BR));
       const capturedAt = deps.now();
       if (current.COPPER && current.BR) {

@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   CURRENCY_SNAPSHOT_MAX_BYTES, CurrencyDashboardValidationError, validateCurrencyBaselineDay,
   validateCurrencyCacheKey, validateCurrencyDate, validateCurrencyJson, validateCurrencyRevision,
-  validateCurrencySnapshot, validateCurrencyTimestamp, type CurrencySnapshot,
+  validateCurrencySnapshot, validateCurrencyTimestamp, isCurrencyManualSnapshotKey, type CurrencySnapshot,
 } from '../src/shared/lib/currencyDashboardModel';
 
 function snapshot(): CurrencySnapshot {
@@ -28,7 +28,7 @@ test('currency manual contract rejects unknown and server-owned fields at every 
   const cases = [
     { ...snapshot(), actor: 'admin:1' },
     { ...snapshot(), savedAt: '2026-09-30T08:00:00Z' },
-    { ...snapshot(), version: 'V16' },
+    { ...snapshot(), version: 'other' },
     { ...snapshot(), data: { ...snapshot().data, kts_base: {} } },
     { ...snapshot(), data: { ...snapshot().data, kts_prefs: {} } },
     { ...snapshot(), data: { ...snapshot().data, kts_cu: { ...snapshot().data.kts_cu, auto: [] } } },
@@ -37,6 +37,56 @@ test('currency manual contract rejects unknown and server-owned fields at every 
     { ...snapshot(), data: { kts_log: [{ t: snapshot().at, msg: 'test', risk: false, extra: 1 }] } },
   ];
   for (const value of cases) assert.throws(() => validateCurrencySnapshot(value), CurrencyDashboardValidationError);
+});
+
+test('currency snapshots accept original V25 V16 export marker, V21, V25 and future numbered versions', () => {
+  for (const version of ['V16', 'V21', 'V25', 'V31', 'V9999']) {
+    assert.equal(validateCurrencySnapshot({ ...snapshot(), version }).version, version);
+  }
+  for (const version of ['V0', 'V01', 'V10000', '<V25>', 25, '', 'v25']) {
+    assert.throws(() => validateCurrencySnapshot({ ...snapshot(), version }), CurrencyDashboardValidationError);
+  }
+});
+
+test('V25 purchase structure and 2027 forecast retain author values and missing estimates', () => {
+  const value = { ...snapshot(), version: 'V16', data: { ...snapshot().data,
+    kts_weights: {
+      '2022': { USD: 35, EUR: 35, CNY: 25, KZT: 0, rev: null },
+      '2026': { USD: 30.5, EUR: 20.25, CNY: 49.25, KZT: 0, rev: 1234567.89 },
+      '2027': { USD: 0, EUR: 0, CNY: 0, KZT: 0, rev: 0 },
+    },
+    kts_f27: { upd: '14.10.2026', rows: [
+      'Минэкономразвития, проект прогноза | 24.09.2026 | 79,5 | 87,4 |  | ',
+      'ЦБ РФ, базовый сценарий | 06.10.2026 |  |  |  | 11,5',
+    ] },
+  } };
+  const validated = validateCurrencySnapshot(value);
+  assert.deepEqual(validated.data.kts_weights, value.data.kts_weights);
+  assert.deepEqual(validated.data.kts_f27, value.data.kts_f27);
+  assert.equal(validated.version, 'V16');
+  for (const update of [{ USD: -1 }, { EUR: NaN }, { CNY: '25' }, { KZT: 101 }, { rev: -1 }]) {
+    assert.throws(() => validateCurrencySnapshot({ ...value, data: { kts_weights: { '2022': { ...value.data.kts_weights['2022'], ...update } } } }), CurrencyDashboardValidationError);
+  }
+  for (const year of ['2021', '2101', 'x2022', '02022']) {
+    assert.throws(() => validateCurrencySnapshot({ ...value, data: { kts_weights: { [year]: value.data.kts_weights['2022'] } } }), CurrencyDashboardValidationError);
+  }
+  for (const rows of [['Bank | 31.02.2026 | 85 | 90 | | '], ['Bank | 14.10.2026 | 85'], ['<svg> | 14.10.2026 | 85 | 90 | | ']]) {
+    assert.throws(() => validateCurrencySnapshot({ ...value, data: { kts_f27: { upd: '14.10.2026', rows } } }), CurrencyDashboardValidationError);
+  }
+});
+
+test('future safe manual sections are preserved, never silently discarded or allowed to replace server/device fields', () => {
+  const extra = { title: 'Дополнительный прогноз', options: [null, true, 2.5], nested: { enabled: false, comment: '' } };
+  const validated = validateCurrencySnapshot({ ...snapshot(), data: { ...snapshot().data, kts_futureForecast: extra } });
+  assert.deepEqual(validated.data.kts_futureForecast, extra);
+  assert.notEqual(validated.data.kts_futureForecast, extra, 'the retained JSON is not an externally mutable reference');
+  for (const key of ['kts_base', 'kts_baseHist', 'kts_moexHist', 'kts_cbrHist_v2', 'kts_cbrHist_v30', 'kts_prefs', 'kts_seen', 'kts_meta', 'kts_gs', 'kts_authToken', 'kts_session', 'kts_devicePrefs', 'actor', 'url']) {
+    assert.equal(isCurrencyManualSnapshotKey(key), false, key);
+    assert.throws(() => validateCurrencySnapshot({ ...snapshot(), data: { [key]: {} } }), CurrencyDashboardValidationError);
+  }
+  for (const unsafe of [{ html: '<img onerror=alert(1)>' }, { nested: { field: 'bad\u0000value' } }, { '<svg>': true }, JSON.parse('{"__proto__":{"x":1}}')]) {
+    assert.throws(() => validateCurrencySnapshot({ ...snapshot(), data: { kts_futureForecast: unsafe } }), CurrencyDashboardValidationError);
+  }
 });
 
 test('currency manual amounts reject non-finite, negative, coerced and implausibly large numbers', () => {

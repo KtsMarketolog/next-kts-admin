@@ -62,7 +62,9 @@ function harness() {
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const output = { exports: {} as Repo };
   runInNewContext(compiled, { module: output, exports: output.exports, require(id: string) {
-    if (id === '../currencyDashboardModel') return model;
+    // Repository-created JSON objects live in the VM realm. Normalize only that
+    // boundary; the model's own tests cover prototype and non-JSON rejection.
+    if (id === '../currencyDashboardModel') return { ...model, validateCurrencySnapshot: (value: unknown) => model.validateCurrencySnapshot(structuredClone(value)) };
     if (id === './client') return { query, withTransaction };
     if (id === './schema') return { ensureSiteSchema: async () => {} };
     throw new Error(`Unexpected dependency ${id}`);
@@ -131,6 +133,30 @@ test('currency repository validation failures and transaction errors preserve cu
   failWrites();
   await assert.rejects(repo.writeCurrencySnapshot(snapshot(2), 1, 'admin:1'), /synthetic/);
   assert.equal(JSON.stringify(await repo.readCurrencySnapshot()), before);
+});
+
+test('older HTML saves retain absent V25 and future manual sections without merging explicit rollback', async () => {
+  const { repo } = harness();
+  const weights = { '2026': { USD: 30, EUR: 30, CNY: 30, KZT: 5, rev: 500 } };
+  const forecasts = { upd: '16.10.2026', rows: ['Источник | 16.10.2026 | 90 | 95 | 10 | 9'] };
+  const first = await repo.writeCurrencySnapshot({ ...snapshot(1), version: 'V25', data: {
+    ...snapshot(1).data, kts_weights: weights, kts_f27: forecasts, kts_future: { saved: ['preserve me'] },
+  } }, 0, 'admin:1');
+  const olderClient = await repo.writeCurrencySnapshot(snapshot(2), 1, 'admin:2');
+  assert.equal(olderClient.current!.version, 'V21');
+  assert.deepEqual(olderClient.current!.data.kts_weights, first.current!.data.kts_weights);
+  assert.deepEqual(olderClient.current!.data.kts_f27, first.current!.data.kts_f27);
+  assert.deepEqual(olderClient.current!.data.kts_future, first.current!.data.kts_future);
+  assert.equal(olderClient.current!.data.kts_cu!.prem, 2);
+  const updated = await repo.writeCurrencySnapshot({ ...snapshot(3), version: 'V25', data: {
+    kts_f27: { ...forecasts, rows: [] }, kts_future: { saved: ['explicit replacement'] },
+  } }, 2, 'admin:1');
+  assert.equal(updated.current!.data.kts_cu, undefined, 'legacy core snapshot-import replacement remains unchanged');
+  assert.deepEqual(updated.current!.data.kts_weights, first.current!.data.kts_weights);
+  assert.deepEqual(updated.current!.data.kts_future, { saved: ['explicit replacement'] });
+  const rolled = await repo.rollbackCurrencySnapshot(3, 'admin:1');
+  assert.deepEqual(rolled.current!.data, olderClient.current!.data);
+  assert.deepEqual(rolled.previous!.data, updated.current!.data);
 });
 
 test('currency source cache rejects older writes and is not touched by manual snapshot retention', async () => {

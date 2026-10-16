@@ -174,12 +174,13 @@ test('missing or failing browser notification APIs return unsupported without th
   }
 });
 
-test('the real host only accepts local commands from its nonce-bound opaque iframe, without server fetch', async () => {
+for (const preview of [false, true]) test(`the real ${preview ? 'preview' : 'published'} host isolates its nonce-bound local commands without server fetch`, async () => {
   const { storage, rows } = fixture();
   const replies: { result?: unknown; error?: unknown }[] = [];
   const frameWindow = { postMessage: (value: { result?: unknown; error?: unknown }) => { replies.push(value); } };
   let receive: (event: unknown) => Promise<void> = async () => {}, cleanup: (() => void) | undefined;
   let refs = 0, fetches = 0;
+  const renderedTypes: unknown[] = [];
   const modules: Record<string, unknown> = {
     'next/link': {},
     'react': {
@@ -187,12 +188,13 @@ test('the real host only accepts local commands from its nonce-bound opaque ifra
       useState: (value: unknown) => [value, () => {}],
       useEffect: (effect: () => () => void) => { cleanup = effect(); },
     },
-    'react/jsx-runtime': { jsx: () => null, jsxs: () => null },
+    'react/jsx-runtime': { jsx: (type: unknown) => { renderedTypes.push(type); return null; }, jsxs: () => null },
     '@/shared/lib/currencyDashboardRpc': rpcHelpers,
     '@/shared/lib/currencyDashboardDeviceState': deviceHelpers,
     '@/shared/lib/currencyDashboardScheduler': schedulerHelpers,
     '@/features/admin/dashboard-usage/useDashboardUsage': { useDashboardUsage() {} },
     '@/features/admin/dashboard-access/DashboardAudienceEditor': {},
+    './CurrencyHtmlManagement': {},
     './currency-dashboard.module.scss': { default: {} },
   };
   const source = readFileSync('src/features/admin/currency-dashboard/CurrencyDashboard.tsx', 'utf8');
@@ -203,7 +205,7 @@ test('the real host only accepts local commands from its nonce-bound opaque ifra
     document: { hidden: false, addEventListener() {}, removeEventListener() {} },
     AbortController, setTimeout, clearTimeout, TextEncoder, fetch: () => { fetches++; throw new Error('Local command reached network'); },
   });
-  exports.CurrencyDashboard!({ nonce: 'test-device-nonce', deviceScope: 'user:7', canManage: false });
+  exports.CurrencyDashboard!({ nonce: 'test-device-nonce', deviceScope: 'user:7', canManage: preview, ...(preview ? { previewVersion: 3 } : {}) });
   const message = (id: string, method: string, params = {}) => ({ channel: 'kts-currency-v1', nonce: 'test-device-nonce', id, method, params });
   try {
     const write = message('1', 'device:set', { key: 'kts_prefs', value: { sound: true } });
@@ -212,13 +214,22 @@ test('the real host only accepts local commands from its nonce-bound opaque ifra
     await receive({ source: frameWindow, origin: 'null', data: { ...write, nonce: 'forged' } });
     assert.equal(replies.length, 0); assert.equal(rows.size, 0);
     await receive({ source: frameWindow, origin: 'null', data: write });
-    assert.equal(rows.size, 1);
+    assert.equal(rows.size, preview ? 0 : 1, 'preview must never touch persisted device settings');
     await receive({ source: frameWindow, origin: 'null', data: message('2', 'device:get') });
-    assert.deepEqual(replies[1].result, { values: { kts_prefs: { sound: true } }, persistent: true });
+    assert.deepEqual(replies[1].result, { values: { kts_prefs: { sound: true } }, persistent: !preview });
     await receive({ source: frameWindow, origin: 'null', data: message('3', 'device:set', { key: 'session', value: 'secret' }) });
     assert.ok(replies[2].error);
     await receive({ source: frameWindow, origin: 'null', data: write });
     assert.equal(replies.length, 3, 'duplicate request id does not run again');
+    assert.equal(renderedTypes.some((type) => typeof type === 'function' && type.name === 'CurrencyPublishedUsage'), !preview, 'preview does not mount usage telemetry');
+    if (preview) {
+      for (const method of ['snapshot:save', 'snapshot:rollback']) {
+        await receive({ source: frameWindow, origin: 'null', data: message(method, method, { expectedRevision: 1 }) });
+        assert.deepEqual(JSON.parse(JSON.stringify(replies.at(-1)?.error)), { message: 'На этом экране доступен только просмотр.', status: 403, code: 'CURRENCY_READ_ONLY' });
+      }
+      await receive({ source: frameWindow, origin: 'null', data: message('notification', 'notification:permission') });
+      assert.deepEqual(replies.at(-1)?.result, { permission: 'unsupported' });
+    }
     assert.equal(fetches, 0);
   } finally { cleanup?.(); }
 });

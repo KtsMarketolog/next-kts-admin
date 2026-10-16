@@ -15,6 +15,7 @@ import { applyDashboardDatesMigration } from './dashboardDatesMigration';
 import { applyDashboardProfitabilityAuditMigration } from './dashboardProfitabilityAuditMigration';
 import { applyDashboardUsageDetailsMigration } from './dashboardUsageDetailsMigration';
 import { applyPersonalDashboardRecipientMigration } from './managerDashboardRecipientMigration';
+import { applyCurrencyDashboardHtmlMigration } from './currencyDashboardHtmlMigration';
 
 type SchemaMigration = {
   id: string;
@@ -852,6 +853,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610120001_employee_password_vault', description: 'Encrypted, hash-bound employee password display copies; preserve all login hashes and business data', apply: applyEmployeePasswordMigration},
   {id: '202610140001_dashboard_usage_details', description: 'Reviewed upload metadata and visible report time, preserving existing journal and business data', apply: applyDashboardUsageDetailsMigration},
   {id: '202610160001_personal_dashboard_leader_recipients', description: 'Add separately owned leader personal snapshots without modifying existing manager data', apply: applyPersonalDashboardRecipientMigration},
+  {id: '202610160002_currency_dashboard_html_versions', description: 'Isolated immutable currency HTML drafts and atomic publication with rollback', apply: applyCurrencyDashboardHtmlMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

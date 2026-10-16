@@ -112,6 +112,7 @@ function hostHarness() {
     } },
     '@/features/admin/dashboard-usage/useDashboardUsage': { useDashboardUsage() {} },
     '@/features/admin/dashboard-access/DashboardAudienceEditor': {},
+    './CurrencyHtmlManagement': {},
     './currency-dashboard.module.scss': { default: {} },
   };
   const source = readFileSync('src/features/admin/currency-dashboard/CurrencyDashboard.tsx', 'utf8');
