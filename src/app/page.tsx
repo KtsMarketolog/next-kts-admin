@@ -21,8 +21,8 @@ export const revalidate = 600;
 
 async function getHomeSlides() {
   try {
-    const slides = await getHeroSlides({ activeOnly: true });
-    if (slides.length) return slides;
+    // An empty active list is intentional (all slides deleted or disabled).
+    return await getHeroSlides({ activeOnly: true });
   } catch {
     // Fall back to static slides when the database is unavailable during ISR/build.
   }

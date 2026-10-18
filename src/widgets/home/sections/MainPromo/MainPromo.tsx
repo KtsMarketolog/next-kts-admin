@@ -65,7 +65,7 @@ function getCriticalSlides(initialSlides?: HeroSlide[]): CriticalSlide[] {
     ? initialSlides.filter((slide) => typeof slide.imageUrl === "string" && slide.imageUrl)
     : [];
 
-  const slides = managedSlides.length
+  const slides = Array.isArray(initialSlides)
     ? managedSlides
     : DEFAULT_HERO_SLIDES.map((slide, index) => ({ ...slide, id: index + 1 }));
 

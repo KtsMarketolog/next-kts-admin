@@ -6,5 +6,6 @@ export function prepareSlides(initialSlides?: HeroSlide[]): Slide[] {
     ? initialSlides.filter((slide) => typeof slide.imageUrl === "string" && slide.imageUrl)
     : [];
 
-  return managedSlides.length ? managedSlides.map((slide) => mapManagedSlide(slide)) : fallbackSlides;
+  // An explicitly empty list must stay empty, including after hydration.
+  return Array.isArray(initialSlides) ? managedSlides.map((slide) => mapManagedSlide(slide)) : fallbackSlides;
 }

@@ -1,6 +1,6 @@
 import { query, withTransaction } from './client';
 import { applySchemaMigrations } from './migrations';
-import { seedBrandPortfolio, seedGroupCompanies, seedHeroSlides, seedNewsItems, seedSiteSettings } from './schemaSeeds';
+import { seedSiteSettings } from './schemaSeeds';
 
 declare global {
   var __ktsSiteSchemaReady: Promise<void> | undefined;
@@ -790,9 +790,7 @@ async function ensureSiteSchemaInternal() {
   await query(`create index if not exists rate_limit_buckets_reset_idx on rate_limit_buckets(reset_at)`);
 
   await seedSiteSettings();
-  await seedHeroSlides();
-  await seedNewsItems();
-  await seedBrandPortfolio();
-  await seedGroupCompanies();
+  // Empty content is an intentional state, not evidence of a new installation.
+  // Demo content is provisioned only by the explicit initial-content CLI.
   await applySchemaMigrations();
 }
