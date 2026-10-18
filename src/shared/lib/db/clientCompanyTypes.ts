@@ -19,7 +19,6 @@ export type ClientCompany = {
   clientLogin: string;
   clientUserId: number | null;
   passwordChangedAt: string;
-  displayPassword: string;
   chatUnreadCount: number;
   isActive: boolean;
   archivedAt: string | null;

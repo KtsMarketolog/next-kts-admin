@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
+import { scryptSync } from 'node:crypto';
+import { decryptClientPassword } from '../src/shared/lib/clientPasswordVault';
 
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import { query, withTransaction } from '../src/shared/lib/db/client';
@@ -32,6 +34,10 @@ function workbook(rows: unknown[][]) {
 }
 
 const admin: AdminSession = { role: 'admin' };
+function syntheticHash(password: string) {
+  const salt = 'c'.repeat(32);
+  return `scrypt:${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
+}
 type FaultTable = 'wholesale_price_lists' | 'client_sessions' | 'stock_import_logs' | 'wholesale_products' | 'stock_import_mail_receipts';
 
 async function withWriteFault(table: FaultTable, operation: 'insert' | 'update', run: () => Promise<void>) {
@@ -68,7 +74,7 @@ test('client and stock business saves are atomic in isolated PostgreSQL', { time
     const originalInput: ClientCompanyInput = {
       title: 'Synthetic atomic client', inn: '', kpp: '', contactName: '', email: 'atomic-client@example.test',
       phone: '+0 synthetic', address: '', note: 'Original note', managerId: managerA, supportManagerId: supportA,
-      requireTwoFactor: false, isActive: true, passwordHash: 'synthetic-old-hash', displayPassword: 'synthetic-old-password',
+      requireTwoFactor: false, isActive: true, passwordHash: syntheticHash('synthetic-old-password'), displayPassword: 'synthetic-old-password',
     };
     let company = await createClientCompany(originalInput, admin);
     assert.ok(company.clientUserId);
@@ -103,7 +109,7 @@ test('client and stock business saves are atomic in isolated PostgreSQL', { time
     const proposed: ClientCompanyInput = {
       expectedUpdatedAt: company.updatedAt,
       ...originalInput, title: 'Synthetic changed client', note: 'Changed note', phone: '+1 synthetic',
-      managerId: managerB, supportManagerId: supportB, passwordHash: 'synthetic-new-hash', displayPassword: 'synthetic-new-password',
+      managerId: managerB, supportManagerId: supportB, passwordHash: syntheticHash('synthetic-new-password'), displayPassword: 'synthetic-new-password',
     };
 
     await t.test('price assignment failure rolls back company, password, sessions and every price field', async () => {
@@ -140,7 +146,8 @@ test('client and stock business saves are atomic in isolated PostgreSQL', { time
       const after = await clientState();
       assert.equal(after.company.note, proposed.note);
       assert.equal(after.users[0].password_hash, proposed.passwordHash);
-      assert.equal(after.users[0].display_password, proposed.displayPassword);
+      assert.equal(after.users[0].display_password, '');
+      assert.equal(decryptClientPassword(after.users[0].password_ciphertext, after.users[0].password_hash), proposed.displayPassword);
       assert.ok(after.sessions.every((row: { revoked_at: string | null }) => row.revoked_at));
       assert.equal(after.prices[0].manager_id, managerB);
       assert.equal(after.prices[0].support_manager_id, supportB);

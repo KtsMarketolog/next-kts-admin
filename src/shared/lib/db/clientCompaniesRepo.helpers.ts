@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 
 import type { AdminSession } from '../adminAuth';
+import { encryptClientPassword, resolveClientPasswordCiphertext } from '../clientPasswordVault';
 import {
   getWholesalePriceWorkflowStatusLabel,
   normalizeWholesalePriceWorkflowStatus,
@@ -28,7 +29,6 @@ export type ClientCompanyRow = {
   client_login: string | null;
   client_user_id: string | null;
   password_changed_at: string | null;
-  display_password: string | null;
   chat_unread_count: string;
   is_active: boolean;
   archived_at: string | null;
@@ -72,7 +72,6 @@ export function mapClientCompany(row: ClientCompanyRow): ClientCompany {
     clientLogin: row.client_login ?? '',
     clientUserId: row.client_user_id ? Number(row.client_user_id) : null,
     passwordChangedAt: row.password_changed_at ?? '',
-    displayPassword: row.display_password ?? '',
     chatUnreadCount: Number(row.chat_unread_count ?? 0),
     isActive: row.is_active,
     archivedAt: row.archived_at ?? null,
@@ -110,18 +109,26 @@ export async function upsertPrimaryClientUser(
   const login = normalizeClientLogin(input.email);
   if (!login) return;
 
-  const existing = await db.query<{ id: string }>(
-    `select id::text
+  const existing = await db.query<{ id: string; password_hash: string; password_ciphertext: string | null; display_password: string | null }>(
+    `select id::text, password_hash, password_ciphertext, display_password
      from client_users
      where company_id = $1
      order by created_at asc, id asc
-     limit 1`,
+     limit 1 for update`,
     [companyId],
   );
   const existingId = existing.rows[0]?.id ? Number(existing.rows[0].id) : null;
   const name = input.title;
   const passwordHash = input.passwordHash || null;
-  const displayPassword = input.displayPassword || null;
+  const existingUser = existing.rows[0];
+  const passwordCiphertext = passwordHash
+    ? (input.displayPassword ? encryptClientPassword(input.displayPassword, passwordHash) : null)
+    : existingUser ? await resolveClientPasswordCiphertext({
+      passwordHash: existingUser.password_hash,
+      previousCiphertext: existingUser.password_ciphertext,
+      legacyPassword: existingUser.display_password,
+      preserveOpaqueOnKeyFailure: true,
+    }) : null;
 
   if (existingId) {
     await db.query(
@@ -131,21 +138,22 @@ export async function upsertPrimaryClientUser(
            login = $3,
            phone = $4,
            password_hash = case when $5::text is null then password_hash else $5 end,
-           display_password = case when $5::text is null then display_password else coalesce($6::text, '') end,
+           password_ciphertext = $6,
+           display_password = '',
            password_changed_at = case when $5::text is null then password_changed_at else now() end,
            is_active = $7,
            updated_at = now()
        where id = $1`,
-      [existingId, name, login, input.phone, passwordHash, displayPassword, input.isActive],
+      [existingId, name, login, input.phone, passwordHash, passwordCiphertext, input.isActive],
     );
     return;
   }
 
   if (!passwordHash) return;
   await db.query(
-    `insert into client_users (company_id, name, email, phone, login, password_hash, display_password, is_active, password_changed_at)
-     values ($1, $2, $3, $4, $3, $5, coalesce($6::text, ''), $7, now())`,
-    [companyId, name, login, input.phone, passwordHash, displayPassword, input.isActive],
+    `insert into client_users (company_id, name, email, phone, login, password_hash, password_ciphertext, display_password, is_active, password_changed_at)
+     values ($1, $2, $3, $4, $3, $5, $6, '', $7, now())`,
+    [companyId, name, login, input.phone, passwordHash, passwordCiphertext, input.isActive],
   );
 }
 

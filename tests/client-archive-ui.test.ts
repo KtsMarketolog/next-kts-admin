@@ -1,14 +1,21 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { archiveClientConfirmation, clientMatchesScope, mergeClientDrafts, readClientDeletionPreview, toDraft, type ClientCompany } from '../src/features/admin/clients/AdminClientsModel';
+import { archiveClientConfirmation, clientMatchesScope, mergeClientDrafts, readClientDeletionPreview, toDraft, withoutClientCredentials, type ClientCompany } from '../src/features/admin/clients/AdminClientsModel';
 
 const company = (id: number, archivedAt: string | null = null): ClientCompany => ({
   id, title: `Synthetic ${id}`, email: `${id}@example.invalid`, phone: '', note: '',
   managerId: null, managerName: '', supportManagerId: null, supportManagerName: '',
   requireTwoFactor: false, userCount: 1, clientLogin: `${id}@example.invalid`, clientUserId: id,
-  passwordChangedAt: '', displayPassword: '', chatUnreadCount: 0, isActive: !archivedAt,
+  passwordChangedAt: '', chatUnreadCount: 0, isActive: !archivedAt,
   archivedAt, createdAt: '2026-10-18T00:00:00Z', updatedAt: '2026-10-18T00:00:00Z',
+});
+
+test('client state discards unexpected credentials from list and mutation DTOs without changing safe fields', () => {
+  const safe = company(1);
+  const unexpected = { ...safe, password: 'Synthetic123', displayPassword: 'Synthetic123', display_password: 'Synthetic123', passwordHash: 'synthetic-hash', password_hash: 'synthetic-hash', passwordCiphertext: 'synthetic-ciphertext', password_ciphertext: 'synthetic-ciphertext' };
+  assert.deepEqual(withoutClientCredentials(unexpected), safe);
+  assert.equal(unexpected.password, 'Synthetic123', 'does not mutate caller input');
 });
 
 test('archive confirmation spells out retained data, access closure and public-link exception', () => {

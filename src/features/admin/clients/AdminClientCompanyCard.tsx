@@ -1,6 +1,8 @@
 import Link from 'next/link';
 
 import styles from '@/app/admin/admin.module.scss';
+import { EmployeePasswordField } from '../shared/EmployeePasswordField';
+import passwordStyles from './ClientPasswordField.module.scss';
 
 import { AdminClientManagerSelect } from './AdminClientManagerSelect';
 import type { ClientCompany, ClientDraft, Manager } from './AdminClientsModel';
@@ -8,7 +10,6 @@ import type { ClientCompany, ClientDraft, Manager } from './AdminClientsModel';
 type AdminClientCompanyCardProps = {
   company: ClientCompany;
   currentDraft: ClientDraft;
-  displayPassword: string;
   passwordIsEdited: boolean;
   passwordDraft: string;
   developmentManagers: Manager[];
@@ -18,7 +19,6 @@ type AdminClientCompanyCardProps = {
   isSaved: boolean;
   canPermanentlyDelete: boolean;
   onDraftChange: (id: number, patch: Partial<ClientDraft>) => void;
-  onCopyPassword: (password?: string) => void;
   onToggleExpanded: (id: number) => void;
   onTogglePasswordEdit: (id: number) => void;
   onPasswordDraftChange: (id: number, value: string) => void;
@@ -31,7 +31,6 @@ type AdminClientCompanyCardProps = {
 export function AdminClientCompanyCard({
   company,
   currentDraft,
-  displayPassword,
   passwordIsEdited,
   passwordDraft,
   developmentManagers,
@@ -41,7 +40,6 @@ export function AdminClientCompanyCard({
   isSaved,
   canPermanentlyDelete,
   onDraftChange,
-  onCopyPassword,
   onToggleExpanded,
   onTogglePasswordEdit,
   onPasswordDraftChange,
@@ -111,30 +109,14 @@ export function AdminClientCompanyCard({
               <span>Телефон</span>
               <input value={currentDraft.phone} onChange={(event) => onDraftChange(company.id, { phone: event.target.value })} />
             </label>
-            <label className={styles.clientWideField}>
+            <div className={`${styles.clientWideField} ${passwordStyles.field}`}>
               <span>Пароль</span>
-              <div className={styles.userPasswordCopyField}>
-                <input
-                  className={styles.userPasswordCopyInput}
-                  type="text"
-                  autoComplete="new-password"
-                  spellCheck={false}
-                  readOnly
-                  placeholder="Пароль не сохранён"
-                  value={displayPassword}
-                  onClick={() => onCopyPassword(displayPassword)}
-                />
-                <button
-                  className={styles.userPasswordCopyButton}
-                  type="button"
-                  disabled={!displayPassword}
-                  title="Скопировать пароль"
-                  onClick={() => onCopyPassword(displayPassword)}
-                >
-                  Скопировать
-                </button>
-              </div>
-              {!displayPassword && !passwordIsEdited ? (
+              {company.clientUserId ? <EmployeePasswordField
+                endpoint={`/api/admin/clients/${company.id}/password`}
+                disabled={busy || passwordIsEdited}
+                resetKey={company}
+              /> : null}
+              {!company.clientUserId && !passwordIsEdited ? (
                 <small className={styles.passwordPolicyHint}>Нажмите «Задать пароль», чтобы клиент мог войти в кабинет.</small>
               ) : null}
               {passwordIsEdited && (
@@ -143,6 +125,7 @@ export function AdminClientCompanyCard({
                     className={styles.userPasswordEditInput}
                     type="password"
                     autoComplete="new-password"
+                    aria-label="Новый пароль клиента"
                     placeholder="Введите новый пароль"
                     value={passwordDraft}
                     onChange={(event) => onPasswordDraftChange(company.id, event.target.value)}
@@ -150,7 +133,7 @@ export function AdminClientCompanyCard({
                   <small className={styles.passwordPolicyHint}>Минимум 10 символов, обязательно буквы и цифры</small>
                 </>
               )}
-            </label>
+            </div>
             <label>
               <span>Менеджер</span>
               <AdminClientManagerSelect
@@ -192,7 +175,7 @@ export function AdminClientCompanyCard({
               Перейти
             </Link>
             <button className={styles.secondary} type="button" disabled={busy} onClick={() => onTogglePasswordEdit(company.id)}>
-              {passwordIsEdited ? 'Отменить пароль' : displayPassword ? 'Изменить пароль' : 'Задать пароль'}
+              {passwordIsEdited ? 'Отменить пароль' : company.clientUserId ? 'Изменить пароль' : 'Задать пароль'}
             </button>
             <button className={isSaved ? styles.savedButton : ''} disabled={busy} onClick={() => onSave(company.id)}>
               {isSaved ? 'Сохранено' : 'Сохранить'}

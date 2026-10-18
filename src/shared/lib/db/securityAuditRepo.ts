@@ -14,6 +14,7 @@ export type SecurityEventType =
   | 'two_factor_failed'
   | 'password_changed'
   | 'employee_password_viewed'
+  | 'client_password_viewed'
   | 'admin_user_created'
   | 'admin_user_updated'
   | 'admin_user_deleted'

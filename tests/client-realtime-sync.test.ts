@@ -6,7 +6,7 @@ import ts from 'typescript';
 
 import { mergeClientChatMessages } from '../src/shared/lib/clientChatState';
 import type { startClientRealtimeSync } from '../src/shared/lib/clientRealtimeSync';
-import { clientMatchesScope, emptyDraft, mergeClientDrafts, readApiError, readApiErrorFallback, toDraft, type ClientCompany, type ClientDraft } from '../src/features/admin/clients/AdminClientsModel';
+import { clientMatchesScope, emptyDraft, mergeClientDrafts, readApiError, readApiErrorFallback, toDraft, withoutClientCredentials, type ClientCompany, type ClientDraft } from '../src/features/admin/clients/AdminClientsModel';
 import type { ClientCompanyOption, PriceEditor } from '../src/features/admin/wholesale/AdminWholesaleTypes';
 
 // Run the actual browser helper with isolated events/timers: no HTTP, real timers or server.
@@ -214,7 +214,7 @@ test('clients mount starts one initial GET and background refresh preserves draf
   let managerLoads = 0;
   const loadClients = executeCallback<(preserve?: boolean, signal?: AbortSignal) => Promise<void>>(declaration.initializer.arguments[0], parsed.source, {
     request: (_url: string, options: { signal?: AbortSignal }) => new Promise((resolve) => { requests.push({ resolve, signal: options.signal }); }),
-    companiesRef, mutationRef, dataGeneration, toDraft, readApiError, clientMatchesScope, mergeClientDrafts,
+    companiesRef, mutationRef, dataGeneration, toDraft, readApiError, clientMatchesScope, mergeClientDrafts, withoutClientCredentials,
     companyBaselines: { current: new Map<number, ClientCompany>() },
     scope: 'active', scopeRef: { current: 'active' }, loadSequence: { current: 0 },
     isActive: () => true, setLoading: () => {}, setCanPermanentlyDelete: () => {},

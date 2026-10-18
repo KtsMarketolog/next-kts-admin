@@ -7,6 +7,7 @@ import {
 } from '../topDashboardLimits';
 import { query, withTransaction } from './client';
 import { applyEmployeePasswordMigration } from './employeePasswordMigration';
+import { applyClientPasswordMigration } from './clientPasswordMigration';
 import { applyCurrencyDashboardMigration } from './currencyDashboardMigration';
 import { applyDashboardAccessMigration } from './dashboardAccessMigration';
 import { applyDashboardAudiencePolicyMigration } from './dashboardAudiencePolicyMigration';
@@ -858,6 +859,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610160002_currency_dashboard_html_versions', description: 'Isolated immutable currency HTML drafts and atomic publication with rollback', apply: applyCurrencyDashboardHtmlMigration},
   {id: '202610180001_record_write_versions', description: 'Optimistic record versions for employees and price lists, preserving existing data', apply: applyRecordVersionMigration},
   {id: '202610180002_client_archive', description: 'Reversible customer archive and explicit document cleanup receipts without removing existing data', apply: applyClientArchiveMigration},
+  {id: '202610190001_client_password_vault', description: 'Encrypt hash-bound client password display copies without changing login credentials or business data', apply: applyClientPasswordMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

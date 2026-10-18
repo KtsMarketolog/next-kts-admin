@@ -21,6 +21,7 @@ import { createStoredClientSession, getStoredClientSession } from '../src/shared
 import { getClientCompanyDeletionPreview, purgeArchivedClientCompany } from '../src/shared/lib/db/clientArchivePurgeRepo';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import { lockPriceListCompany } from '../src/shared/lib/db/wholesaleAdminRepo/priceListCompanyWrite';
+import { scryptSync } from 'node:crypto';
 
 function guard() {
   assert.equal(process.env.KTS_CLIENT_ARCHIVE_TEST, '1');
@@ -39,12 +40,15 @@ function guard() {
 
 const admin: AdminSession = { role: 'admin' };
 let sequence = 0;
+const syntheticPassword = 'SyntheticArchivePassword123!';
+const syntheticSalt = 'd'.repeat(32);
+const syntheticHash = `scrypt:${syntheticSalt}:${scryptSync(syntheticPassword, syntheticSalt, 64).toString('hex')}`;
 function input(): ClientCompanyInput {
   return {
     title: `Synthetic archive client ${++sequence}`, inn: '', kpp: '', contactName: '',
     email: `archive-${sequence}@example.test`, phone: '', address: '', note: 'Preserve this note',
     managerId: null, supportManagerId: null, requireTwoFactor: false, isActive: true,
-    passwordHash: 'synthetic-password-hash', displayPassword: 'synthetic-password',
+    passwordHash: syntheticHash, displayPassword: syntheticPassword,
   };
 }
 

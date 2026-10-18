@@ -107,13 +107,14 @@ function harness(audience: 'admin' | 'client', options: DownloadOptions = {}) {
   );
   const helpers = load<typeof import('../src/shared/lib/db/clientCompaniesRepo.helpers')>(
     'src/shared/lib/db/clientCompaniesRepo.helpers.ts', {
-      './client': client, '../wholesalePriceWorkflowStatus': {},
+      './client': client, '../wholesalePriceWorkflowStatus': {}, '../clientPasswordVault': {},
     },
   );
   const companies = load<typeof import('../src/shared/lib/db/clientCompaniesRepo')>(
     'src/shared/lib/db/clientCompaniesRepo.ts', {
       './client': client, './schema': schema, './clientCompaniesRepo.helpers': helpers,
       './clientCompanyPriceListAssignments': {}, './clientSessionsRepo': {},
+      '../clientPasswordVault': {},
     },
   );
   const documents = load<typeof import('../src/shared/lib/db/clientDocumentsRepo')>(

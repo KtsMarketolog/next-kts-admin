@@ -104,6 +104,7 @@ test('shared migration only creates new report tables and does not migrate or co
     '../topDashboardLimits': limits, './client': {},
     './currencyDashboardMigration': { applyCurrencyDashboardMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './employeePasswordMigration': { applyEmployeePasswordMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './clientPasswordMigration': { applyClientPasswordMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardAccessMigration': { applyDashboardAccessMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardUsageMigration': { applyDashboardUsageMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardDatesMigration': { applyDashboardDatesMigration: async () => { throw new Error('Unrelated migration must not run'); } },

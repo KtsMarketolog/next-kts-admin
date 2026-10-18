@@ -15,6 +15,7 @@ import type { ClientCompanyPriceList, ClientDocument, ClientPriceRequest } from 
 import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 import { ADMIN_UNKNOWN_OUTCOME, ADMIN_UPLOAD_TIMEOUT_MS } from '../shared/adminRequest';
 import { useAdminRequestScope } from '../shared/useAdminRequestScope';
+import { withoutClientCredentials } from './AdminClientsModel';
 
 function isSavedDocument(value: unknown, clientId: number): value is ClientDocument {
   if (!value || typeof value !== 'object') return false;
@@ -81,7 +82,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
             .then((data) => {
               if (signal.aborted || !Array.isArray(data?.companies)) return;
               const nextClient = (data.companies as ClientCompany[]).find((company) => company.id === clientId);
-              if (nextClient) setClient(nextClient);
+              if (nextClient) setClient(withoutClientCredentials(nextClient));
             }),
         ]);
       },
@@ -126,7 +127,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
       const nextClient = companies.find((company) => company.id === clientId) ?? null;
       if (!nextClient) throw new Error('Клиент не найден');
       if (!cancelled) {
-        setClient(nextClient);
+        setClient(withoutClientCredentials(nextClient));
         setPriceLists(Array.isArray(priceListData.priceLists) ? priceListData.priceLists : []);
         setPriceRequests(Array.isArray(priceRequestData.requests) ? priceRequestData.requests : []);
         setDocuments(Array.isArray(documentsData.documents) ? documentsData.documents : []);

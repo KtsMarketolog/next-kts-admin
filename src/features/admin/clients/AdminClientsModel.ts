@@ -13,13 +13,21 @@ export type ClientCompany = {
   clientLogin: string;
   clientUserId: number | null;
   passwordChangedAt: string;
-  displayPassword: string;
   chatUnreadCount: number;
   isActive: boolean;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+const CLIENT_CREDENTIAL_FIELDS = ['password', 'displayPassword', 'passwordHash', 'passwordCiphertext', 'display_password', 'password_hash', 'password_ciphertext'] as const;
+
+/** List/save responses must never become another browser-side password store. */
+export function withoutClientCredentials<T extends object>(company: T): Omit<T, typeof CLIENT_CREDENTIAL_FIELDS[number]> {
+  const safe = { ...company } as T & Partial<Record<typeof CLIENT_CREDENTIAL_FIELDS[number], unknown>>;
+  for (const key of CLIENT_CREDENTIAL_FIELDS) delete safe[key];
+  return safe;
+}
 
 export type Manager = {
   id: number;

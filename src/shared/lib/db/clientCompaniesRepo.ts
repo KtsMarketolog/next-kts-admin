@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 
 import type { AdminSession } from '../adminAuth';
+import { encryptClientPassword } from '../clientPasswordVault';
 import { query, withTransaction } from './client';
 import { writeClientCompanyPriceListAssignments } from './clientCompanyPriceListAssignments';
 import { revokeClientUserSessions } from './clientSessionsRepo';
@@ -132,7 +133,6 @@ export async function getClientCompanies(session: AdminSession, scope: 'active' 
        coalesce(primary_user.login, '') as client_login,
        primary_user.id::text as client_user_id,
        primary_user.password_changed_at::text as password_changed_at,
-       coalesce(primary_user.display_password, '') as display_password,
        (
          select count(*)::text
          from client_chat_messages ccm
@@ -150,7 +150,7 @@ export async function getClientCompanies(session: AdminSession, scope: 'active' 
      left join wholesale_managers support on support.id = cc.support_manager_id
      left join client_users cu on cu.company_id = cc.id
      left join lateral (
-       select id, login, password_changed_at, display_password
+       select id, login, password_changed_at
        from client_users
        where company_id = cc.id
        order by created_at asc, id asc
@@ -158,7 +158,7 @@ export async function getClientCompanies(session: AdminSession, scope: 'active' 
      ) primary_user on true
      where ($1::boolean = true or cc.manager_id = $2 or cc.support_manager_id = $2)
        and ($3::text = 'all' or ($3 = 'archived' and cc.archived_at is not null) or ($3 = 'active' and cc.archived_at is null))
-     group by cc.id, manager.name, support.name, primary_user.id, primary_user.login, primary_user.password_changed_at, primary_user.display_password
+     group by cc.id, manager.name, support.name, primary_user.id, primary_user.login, primary_user.password_changed_at
      order by cc.is_active desc, cc.title asc, cc.created_at desc`,
     [canSeeAllClients(session), session.managerId ?? 0, scope],
   );
@@ -196,7 +196,6 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
          ''::text as client_login,
          null::text as client_user_id,
          null::text as password_changed_at,
-         ''::text as display_password,
          '0'::text as chat_unread_count,
          is_active,
          archived_at::text,
@@ -224,14 +223,12 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
       login: string | null;
       id: string | null;
       password_changed_at: string | null;
-      display_password: string | null;
     }>(
       `select
          count(*)::text as count,
          (select login from client_users where company_id = $1 order by created_at asc, id asc limit 1) as login,
          (select id::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as id,
-         (select password_changed_at::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as password_changed_at,
-         (select display_password from client_users where company_id = $1 order by created_at asc, id asc limit 1) as display_password
+         (select password_changed_at::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as password_changed_at
        from client_users
        where company_id = $1`,
       [companyId],
@@ -242,7 +239,6 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
       clientLogin: primaryUser.rows[0]?.login ?? '',
       clientUserId: primaryUser.rows[0]?.id ? Number(primaryUser.rows[0].id) : null,
       passwordChangedAt: primaryUser.rows[0]?.password_changed_at ?? '',
-      displayPassword: primaryUser.rows[0]?.display_password ?? '',
     };
   }, { trackCommitOutcome: true });
 }
@@ -299,7 +295,6 @@ export async function updateClientCompany(
          coalesce((select login from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1), '') as client_login,
          (select id::text from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1) as client_user_id,
          (select password_changed_at::text from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1) as password_changed_at,
-         coalesce((select display_password from client_users where company_id = client_companies.id order by created_at asc, id asc limit 1), '') as display_password,
          (
            select count(*)::text
            from client_chat_messages ccm
@@ -335,14 +330,12 @@ export async function updateClientCompany(
       login: string | null;
       id: string | null;
       password_changed_at: string | null;
-      display_password: string | null;
     }>(
       `select
          count(*)::text as count,
          (select login from client_users where company_id = $1 order by created_at asc, id asc limit 1) as login,
          (select id::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as id,
-         (select password_changed_at::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as password_changed_at,
-         (select display_password from client_users where company_id = $1 order by created_at asc, id asc limit 1) as display_password
+         (select password_changed_at::text from client_users where company_id = $1 order by created_at asc, id asc limit 1) as password_changed_at
        from client_users
        where company_id = $1`,
       [id],
@@ -353,7 +346,6 @@ export async function updateClientCompany(
       clientLogin: userCount.rows[0]?.login ?? '',
       clientUserId: userCount.rows[0]?.id ? Number(userCount.rows[0].id) : null,
       passwordChangedAt: userCount.rows[0]?.password_changed_at ?? '',
-      displayPassword: userCount.rows[0]?.display_password ?? '',
     };
     await writeClientCompanyPriceListAssignments(client, id, assignments);
     if (input.passwordHash && company.clientUserId) {
@@ -426,7 +418,6 @@ async function changeClientArchiveState(id: number, session: AdminSession, expec
          coalesce(primary_user.login, '') as client_login,
          primary_user.id::text as client_user_id,
          primary_user.password_changed_at::text as password_changed_at,
-         coalesce(primary_user.display_password, '') as display_password,
          (
            select count(*)::text
            from client_chat_messages ccm
@@ -444,14 +435,14 @@ async function changeClientArchiveState(id: number, session: AdminSession, expec
        left join wholesale_managers support on support.id = cc.support_manager_id
        left join client_users cu on cu.company_id = cc.id
        left join lateral (
-         select id, login, password_changed_at, display_password
+         select id, login, password_changed_at
          from client_users
          where company_id = cc.id
          order by created_at asc, id asc
          limit 1
        ) primary_user on true
        where cc.id = $1
-       group by cc.id, manager.name, support.name, primary_user.id, primary_user.login, primary_user.password_changed_at, primary_user.display_password
+       group by cc.id, manager.name, support.name, primary_user.id, primary_user.login, primary_user.password_changed_at
        limit 1`,
       [id],
     );
@@ -620,6 +611,7 @@ export async function getClientUserPasswordHash(clientUserId: number) {
 
 export async function updateClientUserPassword(clientUserId: number, passwordHash: string, displayPassword = '') {
   await ensureSiteSchema();
+  const ciphertext = displayPassword ? encryptClientPassword(displayPassword, passwordHash) : null;
   await withTransaction(async (client) => {
     const company = await client.query(`select cc.id from client_companies cc
       join client_users cu on cu.company_id = cc.id
@@ -629,11 +621,12 @@ export async function updateClientUserPassword(clientUserId: number, passwordHas
     await client.query(
     `update client_users
      set password_hash = $2,
-         display_password = $3,
+         password_ciphertext = $3,
+         display_password = '',
          password_changed_at = now(),
          updated_at = now()
      where id = $1`,
-    [clientUserId, passwordHash, displayPassword],
+    [clientUserId, passwordHash, ciphertext],
     );
   }, { trackCommitOutcome: true });
 }

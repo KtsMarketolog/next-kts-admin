@@ -20,6 +20,7 @@ import {
   readApiError,
   readApiErrorFallback,
   toDraft,
+  withoutClientCredentials,
   type AdminClientsSectionProps,
   type ClientCompany,
   type ClientDraft,
@@ -79,7 +80,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       if (signal?.aborted || generation !== dataGeneration.current || sequence !== loadSequence.current || scope !== scopeRef.current) return;
       if (!Array.isArray(data.companies)) throw new Error('Получен неполный список клиентов. Обновите список.');
       setCanPermanentlyDelete(data.canPermanentlyDelete === true);
-      const nextCompanies = (data.companies as ClientCompany[]).filter((company) => clientMatchesScope(company, scope));
+      const nextCompanies = (data.companies as ClientCompany[]).map(withoutClientCredentials).filter((company) => clientMatchesScope(company, scope));
       const previousCompanies = new Map(companyBaselines.current);
       for (const company of nextCompanies) companyBaselines.current.set(company.id, company);
       companiesRef.current = nextCompanies;
@@ -121,16 +122,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       return false;
     }
     return true;
-  };
-
-  const copyClientPassword = async (password?: string) => {
-    if (!password) return;
-    try {
-      await navigator.clipboard.writeText(password);
-      showStatus('Пароль скопирован');
-    } catch {
-      showStatus('Не удалось скопировать пароль');
-    }
   };
 
   const updateCompanyDraft = (id: number, patch: Partial<ClientDraft>) => {
@@ -441,7 +432,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
             key={company.id}
             company={company}
             currentDraft={companyDrafts[company.id] ?? toDraft(company)}
-            displayPassword={company.displayPassword || ''}
             passwordIsEdited={Boolean(clientPasswordEditIds[company.id])}
             passwordDraft={clientPasswordDrafts[company.id] || ''}
             developmentManagers={developmentManagers}
@@ -451,7 +441,6 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
             isSaved={savedCompanyId === company.id}
             canPermanentlyDelete={canPermanentlyDelete}
             onDraftChange={updateCompanyDraft}
-            onCopyPassword={copyClientPassword}
             onToggleExpanded={toggleCompanyExpanded}
             onTogglePasswordEdit={toggleClientPasswordEdit}
             onPasswordDraftChange={(id, value) => setClientPasswordDrafts((current) => ({ ...current, [id]: value }))}

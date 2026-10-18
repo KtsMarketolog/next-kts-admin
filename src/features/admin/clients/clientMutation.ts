@@ -1,4 +1,4 @@
-import type { ClientCompany } from './AdminClientsModel';
+import { withoutClientCredentials, type ClientCompany } from './AdminClientsModel';
 import { adminRequest, AdminRequestError } from '../shared/adminRequest';
 
 const unknownOutcome = 'Не удалось подтвердить результат операции. Обновите данные перед повторной попыткой.';
@@ -21,5 +21,5 @@ export async function submitClientMutation(url: string, init: RequestInit, reque
         ? [warning.message] : []
     )) : [];
   if (!data) warnings.push('Ответ с обновлёнными данными не получен. Обновите список перед дальнейшим редактированием.');
-  return { company: data?.company as ClientCompany | undefined, warnings };
+  return { company: data?.company ? withoutClientCredentials(data.company as ClientCompany) : undefined, warnings };
 }

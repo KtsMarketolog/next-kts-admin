@@ -12,13 +12,14 @@ const fixture = `
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {AdminClientsSection} from './src/features/admin/clients/AdminClientsSection';
-window.calls=[];window.mode='ok';window.failRefresh=false;window.holdRead=false;window.aborts=0;
+window.calls=[];window.mode='ok';window.failRefresh=false;window.holdRead=false;window.aborts=0;window.password='OriginalSynthetic123';
 const normalTimeout=window.setTimeout.bind(window);window.setTimeout=(fn,ms,...args)=>normalTimeout(fn,window.fastTimeout&&ms===20000?80:ms,...args);
-window.companies=[{id:13,title:'Synthetic company',email:'synthetic@example.invalid',phone:'',note:'Original note',managerId:21,managerName:'Manager',supportManagerId:22,supportManagerName:'Support',requireTwoFactor:false,userCount:1,clientLogin:'synthetic@example.invalid',clientUserId:31,passwordChangedAt:'2026-10-01T00:00:00Z',displayPassword:'OriginalSynthetic123',chatUnreadCount:0,isActive:true,createdAt:'2026-10-01T00:00:00Z',updatedAt:'2026-10-01T00:00:00Z'}];
+window.companies=[{id:13,title:'Synthetic company',email:'synthetic@example.invalid',phone:'',note:'Original note',managerId:21,managerName:'Manager',supportManagerId:22,supportManagerName:'Support',requireTwoFactor:false,userCount:1,clientLogin:'synthetic@example.invalid',clientUserId:31,passwordChangedAt:'2026-10-01T00:00:00Z',chatUnreadCount:0,isActive:true,createdAt:'2026-10-01T00:00:00Z',updatedAt:'2026-10-01T00:00:00Z'}];
 window.EventSource=class {addEventListener(){}close(){}};
 window.fetch=async(url,init={})=>{
  const method=init.method||'GET';const body=init.body?JSON.parse(init.body):null;
  window.calls.push({url,method,body});
+ if(url.endsWith('/password'))return Response.json({password:window.password});
  if(method==='GET'){
   if(url.includes('/wholesale/managers'))return Response.json({managers:[{id:21,name:'Manager',role:'manager',isActive:true},{id:22,name:'Support',role:'support_manager',isActive:true}]});
   if(window.failRefresh)throw new TypeError('Synthetic refresh failure');
@@ -32,8 +33,9 @@ window.fetch=async(url,init={})=>{
  if(window.mode==='rollback')return Response.json({saved:false,error:'Компания не сохранена: синтетическая ошибка транзакции'},{status:400});
  if(window.mode==='unknown')return Response.json({saved:null,code:'COMMIT_OUTCOME_UNKNOWN',error:'Не удалось подтвердить результат сохранения. Обновите данные перед повторной попыткой.'},{status:503});
  let company;
- if(method==='POST'){company={...window.companies[0],...body,id:14,displayPassword:body.password};window.companies.push(company);}
- if(method==='PUT'){company={...window.companies[0],...body,displayPassword:body.password||window.companies[0].displayPassword};window.companies[0]=company;}
+ const {password,...safe}=body||{};
+ if(method==='POST'){company={...window.companies[0],...safe,id:14};window.password=password;window.companies.push(company);}
+ if(method==='PUT'){company={...window.companies[0],...safe};if(password)window.password=password;window.companies[0]=company;}
  if(method==='DELETE'){company={...window.companies[0],isActive:false,archivedAt:'2026-10-18T12:00:00Z'};window.companies=[];}
  const warnings=window.mode==='warning'?[{code:'CLIENT_UPDATE_AUDIT_UNAVAILABLE',message:'Данные сохранены, запись журнала требует повторения.'}]:[];
  if(window.mode==='reload-failure')window.failRefresh=true;
@@ -130,18 +132,22 @@ async function main() {
             assert.equal(await card.locator('textarea').inputValue(), 'New synthetic note');
             if (['warning', 'reload-failure', 'busy', 'late-read'].includes(scenario)) {
               await card.getByRole('button', { name: 'Изменить пароль', exact: true }).waitFor();
+              assert.equal(await card.getByLabel('Текущий пароль', { exact: true }).inputValue(), '••••••••', 'save response must not reveal the password');
+              await card.getByRole('button', { name: 'Показать пароль', exact: true }).click();
+              await page.waitForFunction('document.querySelector("article input[readonly]")?.value==="ChangedSynthetic123"');
               assert.equal(await card.locator('input[readonly]').inputValue(), 'ChangedSynthetic123');
               if (scenario === 'late-read') {
                 await page.evaluate('window.finishRead()');
                 await page.waitForTimeout(50);
-                assert.equal(await card.locator('input[readonly]').inputValue(), 'ChangedSynthetic123', 'A late pre-save GET cannot restore the old password display');
+                assert.equal(await card.locator('input[readonly]').inputValue(), 'ChangedSynthetic123', 'A late pre-save GET cannot restore an old password or replace the confirmed password view');
                 assert.equal(await card.locator('textarea').inputValue(), 'New synthetic note');
               }
               if (scenario === 'warning') await page.getByText(/журнала требует повторения/).waitFor();
               assert.doesNotMatch(await page.locator('.status').innerText(), /Не удалось сохранить компанию|не сохранен/);
             } else {
               assert.equal(await card.getByPlaceholder('Введите новый пароль').inputValue(), 'ChangedSynthetic123');
-              assert.equal(await card.locator('input[readonly]').inputValue(), 'OriginalSynthetic123');
+              assert.equal(await card.locator('input[readonly]').inputValue(), '••••••••', 'failed saves keep the current password masked while the new-password draft remains');
+              assert.equal(await card.getByRole('button', { name: 'Показать пароль', exact: true }).isDisabled(), true);
               if (scenario === 'rollback') await page.getByText(/синтетическая ошибка транзакции/).waitFor();
               else await page.getByText(/подтвердить|могло сохраниться/).first().waitFor();
             }
