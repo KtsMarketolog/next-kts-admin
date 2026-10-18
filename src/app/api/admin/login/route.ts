@@ -11,11 +11,11 @@ import { getAdminUserByLogin, getWholesaleManagerByLogin, recordWholesaleManager
 import { deliverTwoFactorCode, twoFactorDeliveryFailure } from '@/shared/lib/twoFactorDelivery';
 import { isEmailTwoFactorOutageActive } from '@/shared/lib/emailTwoFactorOutage';
 import { LOGIN_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie, type SessionCookieState } from '@/shared/lib/publicSession';
-import { checkDbRateLimit, getClientIp, resetDbRateLimit } from '@/shared/lib/rateLimit';
+import { checkDbRateLimit, resetDbRateLimit } from '@/shared/lib/rateLimit';
+import { getLoginSourceIp } from '@/shared/lib/loginSource';
 
 const LOGIN_LIMIT = 8;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const GLOBAL_LOGIN_LIMIT = 250;
 
 function withSessionCookie(response: Response, sessionCookie: SessionCookieState) {
   applySessionCookie(response.headers, sessionCookie);
@@ -27,7 +27,7 @@ function tooManyAttempts(retryAfter: number, sessionCookie: SessionCookieState) 
     { error: 'Too many login attempts' },
     {
       status: 429,
-      headers: { 'Retry-After': String(retryAfter) },
+      headers: { 'Retry-After': String(retryAfter), 'Cache-Control': 'no-store' },
     },
   ), sessionCookie);
 }
@@ -196,7 +196,8 @@ async function startTwoFactor(input: {
 }
 
 async function login(request: Request) {
-  const ip = getClientIp(request);
+  const ip = getLoginSourceIp(request);
+  if (!ip) throw new Error('Trusted login source unavailable');
   const loginSession = getOrCreateSessionCookie(request, LOGIN_SESSION_COOKIE);
 
   const body = await request.json().catch(() => ({}));
@@ -204,11 +205,13 @@ async function login(request: Request) {
   const password = typeof body.password === 'string' ? body.password : '';
   const twoFactorChallengeId = typeof body.twoFactorChallengeId === 'string' ? body.twoFactorChallengeId : '';
   const twoFactorCode = typeof body.twoFactorCode === 'string' ? body.twoFactorCode.trim() : '';
-  const rateLimitKey = `login:${login || 'empty'}:session:${loginSession.sessionId}`;
-  const [loginRateLimit, globalRateLimit] = await Promise.all([
-    checkDbRateLimit(rateLimitKey, LOGIN_LIMIT, LOGIN_WINDOW_MS),
-    checkDbRateLimit('login:global', GLOBAL_LOGIN_LIMIT, LOGIN_WINDOW_MS),
-  ]);
+  const isTwoFactorAttempt = Boolean(twoFactorChallengeId || twoFactorCode);
+  // Cookie rotation must not reset password guesses. OTP requests do not send a
+  // login, so keep their session binding instead of pooling all office OTPs.
+  const rateLimitKey = isTwoFactorAttempt
+    ? `login:source:${ip}:otp:${loginSession.sessionId}`
+    : `login:source:${ip}:login:${login || 'empty'}`;
+  const loginRateLimit = await checkDbRateLimit(rateLimitKey, LOGIN_LIMIT, LOGIN_WINDOW_MS);
 
   if (!loginRateLimit.allowed) {
     await recordSecurityEvent({
@@ -218,25 +221,14 @@ async function login(request: Request) {
       ip,
       userAgent: request.headers.get('user-agent'),
       referer: request.headers.get('referer'),
-      metadata: { scope: 'login_session' },
+      metadata: { scope: isTwoFactorAttempt ? 'source_otp_session' : 'source_login' },
     });
     return tooManyAttempts(loginRateLimit.retryAfter, loginSession);
   }
 
-  if (!globalRateLimit.allowed) {
-    await recordSecurityEvent({
-      eventType: 'login_rate_limited',
-      actorType: 'system',
-      login,
-      ip,
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer'),
-      metadata: { scope: 'global' },
-    });
-    return tooManyAttempts(globalRateLimit.retryAfter, loginSession);
-  }
-
-  if (twoFactorChallengeId || twoFactorCode) {
+  // No shared site/office quota: mistakes on one identity must not prevent a
+  // colleague behind the same NAT from authenticating with their own identity.
+  if (isTwoFactorAttempt) {
     const actor = await consumeTwoFactorChallenge({
       challengeId: twoFactorChallengeId,
       loginSessionId: loginSession.sessionId,
@@ -302,8 +294,70 @@ async function login(request: Request) {
     return withSessionCookie(Response.json({ ok: true, role: adminUser.role }), loginSession);
   }
 
+  const manager = login ? await getWholesaleManagerByLogin(login) : null;
+  if (manager?.isActive && manager.passwordHash && verifyPassword(password, manager.passwordHash)) {
+    await resetDbRateLimit(rateLimitKey);
+    if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
+      const response = await startTwoFactor({
+        login: manager.login,
+        actorType: 'manager',
+        role: manager.role,
+        email: manager.email,
+        managerId: manager.id,
+        loginSessionId: loginSession.sessionId,
+        request,
+        ip,
+      });
+      return withSessionCookie(response, loginSession);
+    }
+
+    await createEmployeeSession(
+      { role: manager.role, managerId: manager.id },
+      { ip, userAgent: request.headers.get('user-agent') },
+    );
+    await recordWholesaleManagerLogin(manager.id, {
+      ip,
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      actorType: 'manager',
+    }).catch((error) => {
+      console.error('Failed to record manager login', error);
+    });
+    await recordSecurityEvent({
+      eventType: 'login_success',
+      actorType: 'manager',
+      managerId: manager.id,
+      login: manager.login,
+      ip,
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      metadata: { role: manager.role, twoFactor: false },
+    });
+    return withSessionCookie(Response.json({ ok: true, role: manager.role }), loginSession);
+  }
+
+  // The environment administrator password accepts any supplied login. Give
+  // this one credential its own quota so username rotation cannot bypass it.
+  // Check it only AFTER normal accounts: exhaustion must not lock the office,
+  // and a valid manager password must never elevate to the legacy admin role.
+  const legacyRateLimitKey = `login:legacy-admin:source:${ip}`;
+  const legacyRateLimit = await checkDbRateLimit(legacyRateLimitKey, LOGIN_LIMIT, LOGIN_WINDOW_MS);
+  if (!legacyRateLimit.allowed) {
+    await recordSecurityEvent({
+      eventType: 'login_rate_limited',
+      actorType: 'system',
+      login,
+      ip,
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      metadata: { scope: 'legacy_admin_source' },
+    });
+    return tooManyAttempts(legacyRateLimit.retryAfter, loginSession);
+  }
+
   if (validateAdminPassword(password)) {
     await resetDbRateLimit(rateLimitKey);
+    await resetDbRateLimit(legacyRateLimitKey);
     if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
       const response = await startTwoFactor({
         login: login || 'env-admin',
@@ -341,57 +395,15 @@ async function login(request: Request) {
     return withSessionCookie(Response.json({ ok: true, role: 'admin' }), loginSession);
   }
 
-  const manager = login ? await getWholesaleManagerByLogin(login) : null;
-  if (!manager?.isActive || !manager.passwordHash || !verifyPassword(password, manager.passwordHash)) {
-    await recordSecurityEvent({
-      eventType: 'login_failed',
-      actorType: 'system',
-      login,
-      ip,
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer'),
-    });
-    return withSessionCookie(Response.json({ error: 'Invalid password' }, { status: 401 }), loginSession);
-  }
-
-  await resetDbRateLimit(rateLimitKey);
-  if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
-    const response = await startTwoFactor({
-      login: manager.login,
-      actorType: 'manager',
-      role: manager.role,
-      email: manager.email,
-      managerId: manager.id,
-      loginSessionId: loginSession.sessionId,
-      request,
-      ip,
-    });
-    return withSessionCookie(response, loginSession);
-  }
-
-  await createEmployeeSession(
-    { role: manager.role, managerId: manager.id },
-    { ip, userAgent: request.headers.get('user-agent') },
-  );
-  await recordWholesaleManagerLogin(manager.id, {
-    ip,
-    userAgent: request.headers.get('user-agent'),
-    referer: request.headers.get('referer'),
-    actorType: 'manager',
-  }).catch((error) => {
-    console.error('Failed to record manager login', error);
-  });
   await recordSecurityEvent({
-    eventType: 'login_success',
-    actorType: 'manager',
-    managerId: manager.id,
-    login: manager.login,
+    eventType: 'login_failed',
+    actorType: 'system',
+    login,
     ip,
     userAgent: request.headers.get('user-agent'),
     referer: request.headers.get('referer'),
-    metadata: { role: manager.role, twoFactor: false },
   });
-  return withSessionCookie(Response.json({ ok: true, role: manager.role }), loginSession);
+  return withSessionCookie(Response.json({ error: 'Invalid password' }, { status: 401 }), loginSession);
 }
 
 export async function POST(request: Request) {

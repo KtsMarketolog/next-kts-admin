@@ -80,7 +80,8 @@ function harness(kind: RouteKind, options: {
     },
     '@/shared/lib/db': {
       getAdminUserByLogin: async () => options.employee === 'manager' || options.employee === 'env' ? null : lookup(),
-      getWholesaleManagerByLogin: lookup, getClientUserByLogin: lookup,
+      getWholesaleManagerByLogin: async () => options.employee === 'manager' ? lookup() : null,
+      getClientUserByLogin: lookup,
       recordWholesaleManagerLogin: async () => {}, trackAnalyticsEvent: async () => {}, recordClientUserLogin: async () => {},
     },
     '@/shared/lib/twoFactorDelivery': delivery,
@@ -95,6 +96,7 @@ function harness(kind: RouteKind, options: {
       getOrCreateSessionCookie: () => ({ sessionId: 'synthetic-login-session' }),
       applySessionCookie: (headers: Headers) => { headers.set('Set-Cookie', 'synthetic-login-cookie'); },
     },
+    '@/shared/lib/loginSource': { getLoginSourceIp: () => '192.0.2.10' },
     '@/shared/lib/rateLimit': {
       checkDbRateLimit: async () => ({ allowed: true }), getClientIp: () => 'synthetic-ip', resetDbRateLimit: async () => {},
     },
