@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 
 import type { AdminSession } from '../adminAuth';
 import { encryptClientPassword } from '../clientPasswordVault';
+import { loginCredentialProof, LoginCredentialsChangedError } from '../loginCredentialProof';
 import { query, withTransaction } from './client';
 import { writeClientCompanyPriceListAssignments } from './clientCompanyPriceListAssignments';
 import { revokeClientUserSessions } from './clientSessionsRepo';
@@ -609,25 +610,33 @@ export async function getClientUserPasswordHash(clientUserId: number) {
   return result.rows[0]?.password_hash ?? '';
 }
 
-export async function updateClientUserPassword(clientUserId: number, passwordHash: string, displayPassword = '') {
+export async function updateClientUserPassword(clientUserId: number, passwordHash: string, displayPassword = '', expectedPasswordHash?: string) {
   await ensureSiteSchema();
   const ciphertext = displayPassword ? encryptClientPassword(displayPassword, passwordHash) : null;
-  await withTransaction(async (client) => {
+  return withTransaction(async (client) => {
     const company = await client.query(`select cc.id from client_companies cc
       join client_users cu on cu.company_id = cc.id
       where cu.id = $1 and cu.is_active = true and cc.is_active = true and cc.archived_at is null
       for update of cc`, [clientUserId]);
     if (!company.rows[0]) throw new Error('Клиент недоступен');
-    await client.query(
+    const changed = await client.query<{ id: string; login: string; email: string; password_hash: string; password_changed_at: string }>(
     `update client_users
      set password_hash = $2,
          password_ciphertext = $3,
          display_password = '',
-         password_changed_at = now(),
+         password_changed_at = clock_timestamp(),
          updated_at = now()
-     where id = $1`,
-    [clientUserId, passwordHash, ciphertext],
+     where id = $1 and ($4::text is null or (password_hash = $4 and is_active = true))
+     returning id::text, login, email, password_hash, password_changed_at::text`,
+    [clientUserId, passwordHash, ciphertext, expectedPasswordHash ?? null],
     );
+    const row = changed.rows[0];
+    if (!row) throw new LoginCredentialsChangedError();
+    // Keep credential replacement and revocation atomic, including sessions
+    // created while this transaction was waiting for the company lock.
+    await revokeClientUserSessions(clientUserId, client);
+    return loginCredentialProof('client', 'client', { id: Number(row.id), login: row.login, email: row.email,
+      passwordHash: row.password_hash, passwordChangedAt: row.password_changed_at });
   }, { trackCommitOutcome: true });
 }
 

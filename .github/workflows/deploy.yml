@@ -85,6 +85,9 @@ jobs:
           test -x "$KTS_TEST_PG_BIN/initdb"
           export KTS_TEST_PG_BIN
           bash scripts/test-client-password-postgres.sh
+          bash scripts/test-employee-identifiers-postgres.sh
+          bash scripts/test-login-credentials-postgres.sh
+          bash scripts/test-price-request-outbox-postgres.sh
           node --import tsx tests/dashboard-usage-cron.http.integration.ts
           node --test ops/backup/tests/*.test.cjs
           npx tsc --noEmit --incremental false
@@ -116,12 +119,16 @@ jobs:
           cp scripts/verify-production-seo.mjs deploy-artifact/scripts/verify-production-seo.mjs
           cp scripts/verify-client-document-privacy.mjs deploy-artifact/scripts/verify-client-document-privacy.mjs
           cp scripts/dashboard-usage-prune.mjs deploy-artifact/scripts/dashboard-usage-prune.mjs
+          cp scripts/price-request-mail-drain.mjs deploy-artifact/scripts/price-request-mail-drain.mjs
           # Ship the explicit single-file cleanup tool; never execute it during deploy.
           node -e 'require("esbuild").buildSync({entryPoints:["scripts/client-document-cleanup.ts"],bundle:true,platform:"node",format:"cjs",target:"node24",external:["pg"],outfile:"deploy-artifact/scripts/client-document-cleanup.cjs"})'
           test -f deploy-artifact/node_modules/pg/package.json
           mkdir -p deploy-artifact/ops/dashboard-usage
           cp ops/dashboard-usage/install.mjs ops/dashboard-usage/kts-dashboard-usage.service \
             ops/dashboard-usage/kts-dashboard-usage.timer deploy-artifact/ops/dashboard-usage/
+          mkdir -p deploy-artifact/ops/price-request-mail
+          cp ops/price-request-mail/install.mjs ops/price-request-mail/kts-price-request-mail.service \
+            ops/price-request-mail/kts-price-request-mail.timer deploy-artifact/ops/price-request-mail/
           mkdir -p deploy-artifact/ops/client-documents
           cp ops/client-documents/protect-storage.mjs deploy-artifact/ops/client-documents/
           printf '%s\n' "$RELEASE_ID" > deploy-artifact/.release-id
@@ -366,6 +373,7 @@ jobs:
             exit 1
           fi
           node "$RELEASE/ops/dashboard-usage/install.mjs" --app-env "$BASE/.env.local" --dry-run
+          node "$RELEASE/ops/price-request-mail/install.mjs" --app-env "$BASE/.env.local" --dry-run
 
           mkdir -p "$RELEASE/public"
           if [ -d "$RELEASE/public/$FIRMWARE_PUBLIC_PATH" ]; then
@@ -417,6 +425,7 @@ jobs:
           # Configure the independent scheduler before the application reads env.
           # The installer never enables a timer; first deletion is after readiness.
           node "$RELEASE/ops/dashboard-usage/install.mjs" --app-env "$BASE/.env.local" --apply
+          node "$RELEASE/ops/price-request-mail/install.mjs" --app-env "$BASE/.env.local" --apply
           # Rolling code back never rolls a migrated database schema back.
           pm2 delete kts-next-admin-canary >/dev/null 2>&1 || true
           KTS_PM2_CANARY=1 KTS_PM2_PORT=3001 \
@@ -496,6 +505,14 @@ jobs:
           fi
 
           CURRENT_REAL="$(readlink -f "$CURRENT" || true)"
+          # Email availability is not a deployment gate: the endpoint durably
+          # reschedules failed deliveries. A missing scheduler IS an ops failure.
+          if ! (systemctl --user start kts-price-request-mail.service &&
+            systemctl --user enable --now kts-price-request-mail.timer &&
+            systemctl --user is-active --quiet kts-price-request-mail.timer); then
+            echo 'Release is active, but price request notification scheduler activation failed. Requests remain saved; inspect the user service journal.'
+            exit 1
+          fi
           PREVIOUS_REAL="$(readlink -f "$PREVIOUS" || true)"
           for RELEASE_CANDIDATE in "$RELEASES"/*; do
             [ -d "$RELEASE_CANDIDATE" ] || continue

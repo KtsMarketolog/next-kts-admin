@@ -7,6 +7,7 @@ import * as access from '../src/shared/lib/dashboardAccess';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 import * as userManagement from '../src/shared/lib/accessUserManagement';
 import * as versions from '../src/shared/lib/recordVersion';
+import * as identifierConflicts from '../src/shared/lib/employeeIdentifierConflict';
 
 type Route = {
   GET(): Promise<Response>;
@@ -28,6 +29,7 @@ function routes(authorized = true) {
     '@/shared/lib/dashboardAccess': access,
     '@/shared/lib/accessUserManagement': userManagement,
     '@/shared/lib/recordVersion': versions,
+    '@/shared/lib/employeeIdentifierConflict': identifierConflicts,
     '@/shared/lib/db/dashboardAccessRepo':{dashboardGrantOptionsVersion:()=> 'a'.repeat(64),getDashboardGrantOptions:async()=>{reads++;return [...access.DASHBOARD_REPORT_OPTIONS,{key:'top:7',title:'Аналитика продаж'},{key:'top:12',title:'Новый отчёт'}];}},
     '@/shared/lib/db': {
       getAccessUsers: async () => {reads++; return [user];},

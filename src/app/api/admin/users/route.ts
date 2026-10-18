@@ -1,6 +1,7 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireDashboardAccessManagementSession } from '@/shared/lib/adminAuth';
 import { hashEmployeePassword } from '@/shared/lib/employeePasswordHash';
+import { EmployeeIdentifierConflictError } from '@/shared/lib/employeeIdentifierConflict';
 import { AccessUserManagementError, assertAccessUserManagementAllowed, DashboardOptionsConflictError } from '@/shared/lib/accessUserManagement';
 import { createAccessUser, getAccessUsers, type AccessUserRole } from '@/shared/lib/db';
 import { parseDashboardAccess } from '@/shared/lib/dashboardAccess';
@@ -115,6 +116,7 @@ export async function POST(request: Request) {
 
     return Response.json({ user });
   } catch (error) {
+    if (error instanceof EmployeeIdentifierConflictError) return Response.json({ error: error.message, code: error.code }, { status: 409 });
     if (error instanceof AccessUserManagementError) return badRequest(error.message, 403);
     if (error instanceof DashboardOptionsConflictError) return badRequest(error.message, 409);
     return badRequest(error instanceof Error ? error.message : 'Не удалось добавить пользователя');

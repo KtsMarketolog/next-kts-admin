@@ -1,0 +1,13 @@
+[Unit]
+Description=KTS durable price request email notifications
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/kts-price-request-mail.env
+ExecStart=/usr/bin/node %h/.local/lib/kts-price-request-mail/drain.mjs
+TimeoutStartSec=80
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

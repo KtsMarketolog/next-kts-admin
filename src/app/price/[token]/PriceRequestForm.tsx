@@ -23,6 +23,7 @@ import {
   trackPriceEvent,
 } from './PriceRequestForm.helpers';
 import type { ExchangeRates, ExchangeRateStatus, PublicPriceVariant, RubConversionRequest } from './PriceRequestForm.helpers';
+import { confirmPriceRequestOperation, preparePriceRequestOperation, type PriceRequestOperation } from './PriceRequestOperation';
 import styles from './PricePage.module.scss';
 
 type PriceRequestFormProps = {
@@ -125,6 +126,7 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
   const requestStartedRef = useRef(false);
   const submittedRef = useRef(false);
   const submittingRef = useRef(false);
+  const operationRef = useRef<PriceRequestOperation | null>(null);
   const selectionRef = useRef({ selectedItems: 0, totalQuantity: 0 });
 
   const selectedItems = useMemo(
@@ -371,10 +373,17 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
               itemIds: convertedItemIds,
             }
           : null;
+      let operationStorage: Storage | null = null;
+      try { operationStorage = window.sessionStorage; } catch { /* Disabled browser storage. */ }
+      const operation = await preparePriceRequestOperation(operationRef.current,
+        { items: selectedItems, comment: comment.trim(), rubConversion }, token, operationStorage);
+      operationRef.current = operation;
       const response = await fetch(`/api/price/${encodeURIComponent(token)}/request`, {
         method: 'POST',
+        signal: AbortSignal.timeout(45_000),
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: selectedItems, comment: comment.trim(), rubConversion }),
+        body: JSON.stringify(operation.body),
       });
 
       if (!response.ok) {
@@ -383,19 +392,26 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
           setStatus(`Слишком много заявок. Попробуйте через ${formatRetryAfter(retryAfter)}.`);
         } else if (response.status === 400 && (await response.json().catch(() => ({}))).error === 'INVALID_ITEMS') {
           setStatus('Состав прайса изменился: некоторые выбранные товары больше недоступны. Обновите страницу и проверьте выбранные позиции.');
+        } else if (response.status === 409) {
+          setStatus('Содержание заявки изменилось при повторной отправке. Проверьте состав заявки перед новой отправкой.');
         } else {
-          setStatus('Не удалось отправить заявку. Проверьте интернет и попробуйте еще раз.');
+          setStatus('Сохранение заявки пока не подтверждено. Повторите отправку — та же заявка не будет создана дважды.');
         }
         return;
       }
 
+      const receipt = await response.json();
+      if (receipt?.saved !== true || typeof receipt.requestId !== 'string') throw new Error('Missing request receipt');
+
+      operationRef.current = null;
+      confirmPriceRequestOperation(token, operationStorage);
       setQuantities({});
       setComment('');
       submittedRef.current = true;
       requestStartedRef.current = false;
-      setStatus('Заявка отправлена');
+      setStatus(`Заявка №${receipt.requestId} сохранена. Уведомление менеджеру поставлено в очередь.`);
     } catch {
-      setStatus('Не удалось отправить заявку. Проверьте интернет и попробуйте еще раз.');
+      setStatus('Сохранение заявки пока не подтверждено. Проверьте интернет и повторите отправку — та же заявка не будет создана дважды.');
     } finally {
       submittingRef.current = false;
       setBusy(false);
@@ -460,7 +476,7 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
                     type="button"
                     className={styles.conversionButton}
                     onClick={() => toggleRubConversion(group.title)}
-                    disabled={isRubConversionActive && exchangeRateStatus === 'loading'}
+                    disabled={busy || (isRubConversionActive && exchangeRateStatus === 'loading')}
                   >
                     {isRubConversionActive ? 'Скрыть пересчет в рубли' : 'Пересчитать в рубли по сегодняшнему курсу'}
                   </button>
@@ -538,6 +554,7 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
                                     className={styles.quantityButton}
                                     onClick={() => changeQuantity(variant.priceItemId, Math.max(0, currentQuantity - 1), product.title)}
                                     aria-label="Уменьшить количество"
+                                    disabled={busy}
                                   >
                                     -1
                                   </button>
@@ -552,12 +569,14 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
                                     onChange={(event) => changeQuantity(variant.priceItemId, normalizeQuantityInput(event.target.value), product.title)}
                                     onFocus={(event) => event.currentTarget.select()}
                                     aria-label={`Количество для ${product.title}`}
+                                    disabled={busy}
                                   />
                                   <button
                                     type="button"
                                     className={styles.quantityButton}
                                     onClick={() => changeQuantity(variant.priceItemId, Math.min(999, currentQuantity + 1), product.title)}
                                     aria-label="Увеличить количество"
+                                    disabled={busy}
                                   >
                                     +1
                                   </button>
@@ -590,6 +609,7 @@ export function PriceRequestForm({ token, categories, showRetailPrices }: PriceR
             rows={2}
             value={comment}
             maxLength={1000}
+            disabled={busy}
             placeholder="Например: условия доставки, сроки, уточнения по заказу"
             onChange={(event) => {
               setComment(event.target.value);

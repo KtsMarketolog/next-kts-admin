@@ -2,6 +2,7 @@ import { query, withTransaction } from '../client';
 import { ensureSiteSchema } from '../schema';
 import { revokeManagerSessions } from '../adminSessionsRepo';
 import { resolveEmployeePasswordCiphertext } from '../../employeePasswordVault';
+import { rethrowEmployeeIdentifierConflict } from '../../employeeIdentifierConflict';
 import { assertRecordRevision } from '../../recordVersion';
 import {
   normalizeLogin,
@@ -109,9 +110,10 @@ export async function getWholesaleManagerByLogin(login: string): Promise<Wholesa
   }>(
     `select id::text, login, email, coalesce(nullif(role, ''), 'manager') as role, can_access_top_dashboard, can_manage_top_dashboard, password_hash, is_active, password_changed_at::text
      from wholesale_managers
-     where login = $1 or lower(email) = $1
+     where kts_employee_identifier($1) <> '' and
+       (kts_employee_identifier(login) = kts_employee_identifier($1) or kts_employee_identifier(email) = kts_employee_identifier($1))
      limit 1`,
-    [normalizeLogin(login)],
+    [login],
   );
   const row = result.rows[0];
   if (!row) return null;
@@ -211,7 +213,7 @@ export async function createWholesaleManager(input: {
       ],
     );
     return Number(result.rows[0].id);
-  });
+  }).catch(rethrowEmployeeIdentifierConflict);
 }
 
 export async function updateWholesaleManager(
@@ -289,7 +291,7 @@ export async function updateWholesaleManager(
       await revokeManagerSessions(id, client);
     }
     return { revision: updated.rows[0].revision };
-  });
+  }).catch(rethrowEmployeeIdentifierConflict);
 }
 
 export async function deleteWholesaleManager(id: number) {

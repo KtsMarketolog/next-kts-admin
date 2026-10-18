@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry pending KTS request notifications every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=5s
+Unit=kts-price-request-mail.service
+
+[Install]
+WantedBy=timers.target

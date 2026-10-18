@@ -1,6 +1,7 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
 import { hashEmployeePassword } from '@/shared/lib/employeePasswordHash';
+import { EmployeeIdentifierConflictError } from '@/shared/lib/employeeIdentifierConflict';
 import {
   deleteWholesaleManager,
   getWholesaleManagerById,
@@ -106,6 +107,7 @@ export async function PUT(request: Request, context: Context) {
       revokeSessions,
     });
   } catch (error) {
+    if (error instanceof EmployeeIdentifierConflictError) return Response.json({ error: error.message, code: error.code }, { status: 409 });
     if (error instanceof RecordVersionConflictError) return Response.json({ error: error.message, code: error.code }, { status: 409 });
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить менеджера' }, { status: 400 });
   }

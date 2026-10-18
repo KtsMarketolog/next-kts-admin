@@ -13,6 +13,7 @@ import { isEmailTwoFactorOutageActive } from '@/shared/lib/emailTwoFactorOutage'
 import { LOGIN_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie, type SessionCookieState } from '@/shared/lib/publicSession';
 import { checkDbRateLimit, resetDbRateLimit } from '@/shared/lib/rateLimit';
 import { getLoginSourceIp } from '@/shared/lib/loginSource';
+import { environmentLoginCredentialProof, loginCredentialProof, LoginCredentialsChangedError } from '@/shared/lib/loginCredentialProof';
 
 const LOGIN_LIMIT = 8;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -81,7 +82,7 @@ async function finishLogin(input: {
     }
     await createEmployeeSession(
       { role: actor.role, managerId: actor.managerId },
-      { ip, userAgent },
+      { ip, userAgent, credentialProof: actor.credentialProof },
     );
     await recordWholesaleManagerLogin(actor.managerId, {
       ip,
@@ -121,6 +122,7 @@ async function finishLogin(input: {
   }
 
   await createAdminSession(actor.role, {
+    credentialProof: actor.credentialProof,
     adminUserId: actor.adminUserId,
     ip,
     userAgent,
@@ -157,6 +159,7 @@ async function startTwoFactor(input: {
   managerId?: number | null;
   request: Request;
   ip: string;
+  credentialProof: string;
 }) {
   const email = twoFactorRecipient(input.email);
   if (!email) {
@@ -172,6 +175,7 @@ async function startTwoFactor(input: {
     managerId: input.managerId,
     loginSessionId: input.loginSessionId,
     code,
+    credentialProof: input.credentialProof,
   });
   const delivered = await deliverTwoFactorCode({ email, code, challengeId, loginSessionId: input.loginSessionId });
   if (!delivered) return twoFactorDeliveryFailure();
@@ -202,6 +206,9 @@ async function login(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const login = typeof body.login === 'string' ? body.login.trim().toLowerCase().slice(0, 160) : '';
+  // PostgreSQL owns identifier normalization. JS lowercasing can expand Unicode
+  // characters (e.g. dotted I) into a different, valid employee identifier.
+  const lookupLogin = typeof body.login === 'string' ? body.login.trim().slice(0, 160) : '';
   const password = typeof body.password === 'string' ? body.password : '';
   const twoFactorChallengeId = typeof body.twoFactorChallengeId === 'string' ? body.twoFactorChallengeId : '';
   const twoFactorCode = typeof body.twoFactorCode === 'string' ? body.twoFactorCode.trim() : '';
@@ -250,14 +257,16 @@ async function login(request: Request) {
     return withSessionCookie(response, loginSession);
   }
 
-  const adminUser = login ? await getAdminUserByLogin(login) : null;
+  const adminUser = lookupLogin ? await getAdminUserByLogin(lookupLogin) : null;
   if (adminUser?.isActive && adminUser.passwordHash && verifyPassword(password, adminUser.passwordHash)) {
+    const credentialProof = loginCredentialProof('admin', adminUser.role, adminUser);
     await resetDbRateLimit(rateLimitKey);
     if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
       const response = await startTwoFactor({
         login: adminUser.login,
         actorType: 'admin',
         role: adminUser.role,
+        credentialProof,
         email: adminUser.email,
         adminUserId: adminUser.id,
         loginSessionId: loginSession.sessionId,
@@ -268,6 +277,7 @@ async function login(request: Request) {
     }
 
     await createAdminSession(adminUser.role, {
+      credentialProof,
       adminUserId: adminUser.id,
       ip,
       userAgent: request.headers.get('user-agent'),
@@ -294,14 +304,16 @@ async function login(request: Request) {
     return withSessionCookie(Response.json({ ok: true, role: adminUser.role }), loginSession);
   }
 
-  const manager = login ? await getWholesaleManagerByLogin(login) : null;
+  const manager = lookupLogin ? await getWholesaleManagerByLogin(lookupLogin) : null;
   if (manager?.isActive && manager.passwordHash && verifyPassword(password, manager.passwordHash)) {
+    const credentialProof = loginCredentialProof('manager', manager.role, manager);
     await resetDbRateLimit(rateLimitKey);
     if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
       const response = await startTwoFactor({
         login: manager.login,
         actorType: 'manager',
         role: manager.role,
+        credentialProof,
         email: manager.email,
         managerId: manager.id,
         loginSessionId: loginSession.sessionId,
@@ -313,7 +325,7 @@ async function login(request: Request) {
 
     await createEmployeeSession(
       { role: manager.role, managerId: manager.id },
-      { ip, userAgent: request.headers.get('user-agent') },
+      { ip, userAgent: request.headers.get('user-agent'), credentialProof },
     );
     await recordWholesaleManagerLogin(manager.id, {
       ip,
@@ -356,6 +368,7 @@ async function login(request: Request) {
   }
 
   if (validateAdminPassword(password)) {
+    const credentialProof = environmentLoginCredentialProof(password);
     await resetDbRateLimit(rateLimitKey);
     await resetDbRateLimit(legacyRateLimitKey);
     if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
@@ -363,6 +376,7 @@ async function login(request: Request) {
         login: login || 'env-admin',
         actorType: 'admin',
         role: 'admin',
+        credentialProof,
         email: process.env.ADMIN_2FA_EMAIL || '',
         loginSessionId: loginSession.sessionId,
         request,
@@ -372,6 +386,7 @@ async function login(request: Request) {
     }
 
     await createAdminSession('admin', {
+      credentialProof,
       ip,
       userAgent: request.headers.get('user-agent'),
     });
@@ -409,7 +424,10 @@ async function login(request: Request) {
 export async function POST(request: Request) {
   try {
     return await login(request);
-  } catch {
+  } catch (error) {
+    if (error instanceof LoginCredentialsChangedError) {
+      return Response.json({ error: 'Credentials changed. Sign in again.' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+    }
     console.error('EMPLOYEE_LOGIN_UNAVAILABLE');
     return Response.json(
       { error: 'Login temporarily unavailable', code: 'LOGIN_UNAVAILABLE' },

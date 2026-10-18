@@ -4,6 +4,8 @@ import type { PoolClient } from 'pg';
 import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
+import { lockVerifiedLoginCredential } from './loginCredentialsRepo';
+import { LoginCredentialsChangedError } from '../loginCredentialProof';
 
 export type StoredClientSession = {
   sessionId: string;
@@ -26,7 +28,19 @@ function hashSessionToken(token: string) {
   return hashSensitiveValue(`client-session:${token}`);
 }
 
-export async function createStoredClientSession(input: CreateClientSessionInput) {
+/** Internal trusted factory retained for provisioning/tests, never a login entry point. */
+export async function createTrustedClientSession(input: CreateClientSessionInput) {
+  return insertClientSession(input);
+}
+
+export const createStoredClientSession = createTrustedClientSession;
+
+export async function createVerifiedStoredClientSession(input: CreateClientSessionInput & { credentialProof: string }) {
+  if (!input.credentialProof) throw new LoginCredentialsChangedError();
+  return insertClientSession(input, input.credentialProof);
+}
+
+async function insertClientSession(input: CreateClientSessionInput, credentialProof?: string) {
   await ensureSiteSchema();
   const token = randomBytes(32).toString('base64url');
   const sessionId = randomUUID();
@@ -34,6 +48,9 @@ export async function createStoredClientSession(input: CreateClientSessionInput)
   const expiresAt = new Date(Date.now() + maxAgeSeconds * 1000);
 
   await withTransaction(async (client) => {
+    if (credentialProof !== undefined) {
+      await lockVerifiedLoginCredential(client, { actorType: 'client', role: 'client', clientUserId: input.clientUserId, credentialProof });
+    }
     // Serialize session creation with archive/restore. A login that checked the
     // password before archiving must not create a usable session afterwards.
     const company = await client.query<{ id: string }>(
@@ -84,6 +101,7 @@ export async function getStoredClientSession(token: string): Promise<StoredClien
     user_is_active: boolean;
     company_is_active: boolean;
     password_changed_at: string | null;
+    password_is_current: boolean;
   }>(
     `select
        s.id::text,
@@ -93,7 +111,8 @@ export async function getStoredClientSession(token: string): Promise<StoredClien
        s.expires_at::text,
        cu.is_active as user_is_active,
        (cc.is_active and cc.archived_at is null) as company_is_active,
-       cu.password_changed_at::text
+       cu.password_changed_at::text,
+       coalesce(cu.password_changed_at <= s.created_at, true) as password_is_current
      from client_sessions s
      join client_users cu on cu.id = s.client_user_id
      join client_companies cc on cc.id = cu.company_id
@@ -107,8 +126,7 @@ export async function getStoredClientSession(token: string): Promise<StoredClien
   const row = result.rows[0];
   if (!row) return null;
 
-  const createdAtMs = new Date(row.created_at).getTime();
-  if (row.password_changed_at && createdAtMs < new Date(row.password_changed_at).getTime()) {
+  if (row.password_is_current === false) {
     await revokeStoredClientSession(token);
     return null;
   }

@@ -15,6 +15,7 @@ import { createStoredAdminSession, getStoredAdminSession } from '../src/shared/l
 import { createTopDashboardBlock } from '../src/shared/lib/db/topDashboardBlocksRepo';
 import { consumeTwoFactorChallenge, createTwoFactorChallenge } from '../src/shared/lib/db/twoFactorRepo';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
+import { loginCredentialProof } from '../src/shared/lib/loginCredentialProof';
 import {
   activateSupportSharedDashboardHtml, createSupportSharedDashboardHtml,
   getSupportSharedDashboardHtml, getSupportSharedDashboardJsonSnapshot,
@@ -128,8 +129,10 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
     await t.test('purchaser two-factor challenge retains its persisted identity', async () => {
       const user = await createAccessUser(input());
       const loginSessionId = randomUUID();
+      const current = await getAdminUserByLogin(user.login);
+      assert.ok(current);
       const challengeId = await createTwoFactorChallenge({ login: user.login, actorType: 'admin', role: 'purchaser',
-        adminUserId: user.numericId, loginSessionId, code: '123456' });
+        adminUserId: user.numericId, loginSessionId, code: '123456', credentialProof: loginCredentialProof('admin', 'purchaser', current) });
       const challenge = await consumeTwoFactorChallenge({ challengeId, loginSessionId, code: '123456' });
       assert.equal(challenge?.actorType, 'admin');
       assert.equal(challenge?.role, 'purchaser');

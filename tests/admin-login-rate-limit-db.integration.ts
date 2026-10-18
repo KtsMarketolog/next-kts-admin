@@ -44,6 +44,9 @@ function worker(pool: Pool, options: { failDatabase?: boolean } = {}) {
   let legacyAttempts = 0;
   let otpAttempts = 0;
   let sessions = 0;
+  const proofs = load('src/shared/lib/loginCredentialProof.ts', {
+    crypto, './authSecret': { getAdminSessionSecret: () => syntheticSecret },
+  }, errors);
   // Real limiter implementation and SQL, with only connection/schema ownership
   // replaced. Each worker has its own VM and fallback memory, sharing PostgreSQL.
   const limiter = load('src/shared/lib/rateLimit.ts', {
@@ -58,6 +61,7 @@ function worker(pool: Pool, options: { failDatabase?: boolean } = {}) {
   const publicSession = load('src/shared/lib/publicSession.ts', { crypto }, errors);
   const loginSource = load('src/shared/lib/loginSource.ts', { 'node:net': net }, errors);
   const route = load<{ POST: (request: Request) => Promise<Response> }>('src/app/api/admin/login/route.ts', {
+    '@/shared/lib/loginCredentialProof': proofs,
     '@/shared/lib/adminAuth': {
       createAdminSession: async () => { sessions++; },
       createEmployeeSession: async () => { sessions++; },

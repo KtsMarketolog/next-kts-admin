@@ -3,8 +3,9 @@ import type { PoolClient } from 'pg';
 
 import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { parseDashboardAccess } from '../dashboardAccess';
-import { query } from './client';
+import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
+import { lockVerifiedLoginCredential } from './loginCredentialsRepo';
 
 export type StoredAdminSessionRole = 'admin' | 'wholesale_admin' | 'manager' | 'support_manager' | 'top' | 'admintop' | 'purchaser';
 
@@ -54,14 +55,32 @@ function isStoredManagerRole(role: StoredAdminSessionRole) {
   return role === 'manager' || role === 'support_manager';
 }
 
-export async function createStoredAdminSession(input: CreateAdminSessionInput) {
+/** Internal trusted provisioning/test factory. Login handlers must use the verified variant. */
+export async function createTrustedAdminSession(input: CreateAdminSessionInput) {
+  return insertAdminSession(input);
+}
+
+/** Compatibility for trusted callers; never imported by authentication entry points. */
+export const createStoredAdminSession = createTrustedAdminSession;
+
+export async function createVerifiedStoredAdminSession(input: CreateAdminSessionInput & { credentialProof: string }) {
   await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    await lockVerifiedLoginCredential(client, {
+      ...input, actorType: isStoredManagerRole(input.role) ? 'manager' : 'admin',
+    });
+    return insertAdminSession(input, client);
+  });
+}
+
+async function insertAdminSession(input: CreateAdminSessionInput, client?: Pick<PoolClient, 'query'>) {
+  if (!client) await ensureSiteSchema();
   const token = randomBytes(32).toString('base64url');
   const sessionId = randomUUID();
   const maxAgeSeconds = input.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS;
   const expiresAt = new Date(Date.now() + maxAgeSeconds * 1000);
 
-  await query(
+  await (client ?? { query }).query(
     `insert into admin_sessions (
        id, session_hash, role, admin_user_id, manager_id, ip_hash, user_agent, expires_at
      )
@@ -102,6 +121,7 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
     manager_can_manage_top_dashboard: boolean | null;
     admin_password_changed_at: string | null;
     manager_password_changed_at: string | null;
+    password_is_current: boolean;
   }>(
     `select
        s.id::text,
@@ -122,7 +142,8 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
        wm.can_access_top_dashboard as manager_can_access_top_dashboard,
        wm.can_manage_top_dashboard as manager_can_manage_top_dashboard,
        au.password_changed_at::text as admin_password_changed_at,
-       wm.password_changed_at::text as manager_password_changed_at
+       wm.password_changed_at::text as manager_password_changed_at,
+       coalesce(case when s.role in ('manager', 'support_manager') then wm.password_changed_at else au.password_changed_at end <= s.created_at, true) as password_is_current
      from admin_sessions s
      left join admin_users au on au.id = s.admin_user_id
      left join wholesale_managers wm on wm.id = s.manager_id
@@ -137,9 +158,8 @@ export async function getStoredAdminSession(token: string): Promise<StoredAdminS
   const role = normalizeRole(row?.role ?? '');
   if (!row || !role) return null;
 
-  const createdAtMs = new Date(row.created_at).getTime();
-  const passwordChangedAt = isStoredManagerRole(role) ? row.manager_password_changed_at : row.admin_password_changed_at;
-  if (passwordChangedAt && createdAtMs < new Date(passwordChangedAt).getTime()) {
+  // Compare inside PostgreSQL: Date truncates sub-millisecond credential changes.
+  if (row.password_is_current === false) {
     await revokeStoredAdminSession(token);
     return null;
   }

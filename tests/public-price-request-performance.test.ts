@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 import ts from 'typescript';
+import * as crypto from 'node:crypto';
 
 type Route = {
   POST: (request: Request, context: { params: Promise<{ token: string }> }) => Promise<Response>;
@@ -27,7 +28,7 @@ function plain<T>(value: T): T {
 
 function harness(options: {
   denied?: 'session' | 'global'; missing?: boolean; items?: Item[];
-  mailFailure?: boolean; historyFailure?: boolean; analyticsFailure?: boolean;
+  historyFailure?: boolean; analyticsFailure?: boolean;
 } = {}) {
   const order: string[] = [];
   const itemCalls: Array<{ token: string; ids: number[] }> = [];
@@ -38,6 +39,8 @@ function harness(options: {
   const measured: string[] = [];
   const statuses: number[] = [];
   const errors: unknown[][] = [];
+  const operations = new Map<string, { digest: string; requestId: string }>();
+  class PriceRequestConflictError extends Error {}
   const metadata = {
     id: 18, token: 'active-price', title: 'Согласованный прайс', clientName: 'Тестовый клиент',
     clientCompanyId: 31, managerId: 7, supportManagerId: 8,
@@ -46,11 +49,25 @@ function harness(options: {
   };
   const forbidden = () => { throw new Error('Full price assembly and analog matching are forbidden in request processing'); };
   const dependencies: Record<string, unknown> = {
-    nodemailer: { createTransport: () => ({ sendMail: async (mail: Record<string, string>) => {
-      order.push('mail');
-      if (options.mailFailure) throw new Error('Synthetic mail failure');
-      mails.push(plain(mail));
-    } }) },
+    'node:crypto': crypto,
+    '@/shared/lib/db/priceRequestOutboxRepo': {
+      PriceRequestConflictError,
+      findPriceRequestOperation: async (_priceId: number, id: string, digest: string) => {
+        order.push('receipt');
+        const existing = operations.get(id);
+        if (existing && existing.digest !== digest) throw new PriceRequestConflictError();
+        return existing ? { requestId: existing.requestId, duplicate: true } : null;
+      },
+      savePriceRequestOperation: async (input: Record<string, unknown>, id: string, digest: string, mail: { recipients: string[]; subject: string; html: string; text: string }) => {
+        order.push('save');
+        if (options.historyFailure) throw new Error('Synthetic history failure');
+        histories.push(plain(input));
+        mails.push({ ...plain(mail), to: mail.recipients.join(', ') } as unknown as Record<string, string>);
+        const requestId = String(histories.length);
+        operations.set(id, { digest, requestId });
+        return { requestId, duplicate: false };
+      },
+    },
     '@/shared/lib/db': {
       getPublicWholesalePriceList: forbidden,
       buildPriceListAnalogLinks: forbidden,
@@ -62,11 +79,6 @@ function harness(options: {
         order.push('items');
         itemCalls.push({ token, ids: plain(ids) });
         return [...(options.items ?? fixtureItems)].filter((item) => ids.includes(item.id)).reverse();
-      },
-      createClientPriceRequest: async (input: Record<string, unknown>) => {
-        order.push('history');
-        if (options.historyFailure) throw new Error('Synthetic history failure');
-        histories.push(plain(input));
       },
       trackAnalyticsEvent: async (input: Record<string, unknown>) => {
         order.push('analytics');
@@ -114,7 +126,8 @@ function harness(options: {
     run: (body: unknown = { items: [{ id: 11, quantity: 2 }] }, headers: HeadersInit = {}, raw = false) => route.POST(
       new Request('https://example.test/api/price/active-price/request', {
         method: 'POST', headers: { 'user-agent': 'Synthetic test', referer: 'https://example.test/price/active-price', ...headers },
-        body: raw ? String(body) : JSON.stringify(body),
+        body: raw ? String(body) : JSON.stringify(body && typeof body === 'object'
+          ? { operationId: crypto.randomUUID(), ...body } : body),
       }), { params: Promise.resolve({ token: 'active-price' }) },
     ),
   };
@@ -190,8 +203,8 @@ test('selected-item optimization preserves quantities, currency formulas, recipi
     rubConversion: { date: '18.10.2026', rates: { EUR: 100.2, CNY: 12.34 }, itemIds: [11, 13] },
   });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true });
-  assert.deepEqual(h.order, ['access:active-price', 'session', 'global', 'items', 'mail', 'history', 'analytics']);
+  assert.deepEqual(await response.json(), { ok: true, saved: true, requestId: '1' });
+  assert.deepEqual(h.order, ['access:active-price', 'session', 'global', 'receipt', 'items', 'save', 'analytics']);
   assert.deepEqual(h.rates, [
     { key: 'public_price_request:token:active-price:session:synthetic-session', limit: 10, window: 600000 },
     { key: 'public_price_request:global', limit: 300, window: 600000 },
@@ -231,7 +244,7 @@ test('selected-item optimization preserves quantities, currency formulas, recipi
   assert.equal(audit.totalQuantity, 6);
   assert.equal(audit.itemCount, 3);
   assert.equal(audit.hasComment, true);
-  assert.deepEqual(h.measured, ['access', 'session_limit', 'global_limit', 'body', 'items', 'pricing', 'delivery', 'history', 'analytics']);
+  assert.deepEqual(h.measured, ['access', 'session_limit', 'global_limit', 'body', 'receipt', 'items', 'pricing', 'save', 'analytics']);
   assert.deepEqual(h.statuses, [200]);
 });
 
@@ -268,17 +281,62 @@ test('access revoked between requests is honored before loading selected items o
   assert.equal(h.mails.length, 1);
 });
 
-test('mail failure does not create successful history or analytics; existing partial-failure handling is preserved', async () => {
-  const failed = harness({ mailFailure: true });
-  assert.equal((await failed.run()).status, 500);
-  assert.equal(failed.histories.length + failed.events.length, 0);
-  assert.deepEqual(failed.statuses, [500]);
+test('SMTP is absent from submission; failed atomic save is not reported as success, analytics failure cannot undo saved request', async () => {
   const historyFailed = harness({ historyFailure: true });
-  assert.equal((await historyFailed.run()).status, 200);
-  assert.equal(historyFailed.mails.length, 1);
-  assert.equal(historyFailed.events.length, 1);
+  assert.equal((await historyFailed.run()).status, 503);
+  assert.equal(historyFailed.mails.length + historyFailed.histories.length + historyFailed.events.length, 0);
   const auditFailed = harness({ analyticsFailure: true });
   assert.equal((await auditFailed.run()).status, 200);
   assert.equal(auditFailed.mails.length, 1);
   assert.equal(auditFailed.histories.length, 1);
+});
+
+test('replay returns original receipt without repricing and changed content conflicts', async () => {
+  const h = harness();
+  const body = { operationId: crypto.randomUUID(), items: [{ id: 11, quantity: 2 }], comment: 'Saved' };
+  const first = await (await h.run(body)).json();
+  h.metadata.title = 'Changed catalogue';
+  assert.deepEqual(await (await h.run(body)).json(), first);
+  assert.equal(h.itemCalls.length, 1);
+  assert.equal(h.histories.length, 1);
+  assert.equal(h.events.length, 1);
+  const conflict = await h.run({ ...body, comment: 'Different' });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error, 'OPERATION_CONFLICT');
+  assert.equal(h.itemCalls.length, 1);
+  assert.equal(h.histories.length, 1);
+});
+
+test('reload retry with a newer automatic rate/date returns original receipt and leaves saved amounts unchanged', async () => {
+  const h = harness();
+  const body = { operationId: crypto.randomUUID(), items: [{ id: 11, quantity: 2 }], comment: 'Saved',
+    rubConversion: { date: '19.10.2026', rates: { EUR: 100, CNY: 12 }, itemIds: [11] } };
+  const first = await (await h.run(body)).json();
+  const original = plain(h.histories[0]);
+  const retry = await h.run({ ...body, rubConversion: { ...body.rubConversion, date: '20.10.2026', rates: { EUR: 105, CNY: 13 } } });
+  assert.equal(retry.status, 200);
+  assert.deepEqual(await retry.json(), first);
+  assert.equal(h.histories.length, 1);
+  assert.deepEqual(h.histories[0], original);
+  assert.equal(h.itemCalls.length, 1);
+  assert.equal(h.mails.length, 1);
+  for (const changed of [
+    { ...body, comment: 'Edited' },
+    { ...body, items: [{ id: 11, quantity: 3 }] },
+    { ...body, rubConversion: null },
+  ]) assert.equal((await h.run(changed)).status, 409);
+});
+
+test('requests without a client company are saved too; malformed operation identifiers fail before pricing', async () => {
+  const h = harness();
+  Object.assign(h.metadata, { clientCompanyId: null });
+  assert.equal((await h.run()).status, 200);
+  assert.equal(h.histories[0].companyId, null);
+  for (const operationId of ['', 'invalid', undefined, '123']) {
+    const invalid = harness();
+    const response = await invalid.run({ operationId, items: [{ id: 11, quantity: 1 }] });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'OPERATION_ID_REQUIRED');
+    assert.equal(invalid.itemCalls.length + invalid.histories.length, 0);
+  }
 });

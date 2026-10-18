@@ -2,13 +2,13 @@ import { createClientSession, requireClientSession } from '@/shared/lib/clientAu
 import { hashPassword, verifyPassword } from '@/shared/lib/adminAuth';
 import {
   getClientUserPasswordHash,
-  revokeClientUserSessions,
   updateClientUserPassword,
 } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { LoginCredentialsChangedError } from '@/shared/lib/loginCredentialProof';
 
 export async function PUT(request: Request) {
   const { denied, session } = await requireClientSession();
@@ -30,9 +30,15 @@ export async function PUT(request: Request) {
     return Response.json({ error: passwordPolicy.error || 'Пароль не подходит' }, { status: 400 });
   }
 
-  await updateClientUserPassword(session.clientUserId, hashPassword(nextPassword), nextPassword);
-  await revokeClientUserSessions(session.clientUserId);
+  let credentialProof: string;
+  try {
+    credentialProof = await updateClientUserPassword(session.clientUserId, hashPassword(nextPassword), nextPassword, currentHash);
+  } catch (error) {
+    if (error instanceof LoginCredentialsChangedError) return Response.json({ error: 'Пароль уже изменён. Войдите заново.' }, { status: 409 });
+    throw error;
+  }
   await createClientSession(session.clientUserId, {
+    credentialProof,
     ip: getClientIp(request),
     userAgent: request.headers.get('user-agent'),
   });

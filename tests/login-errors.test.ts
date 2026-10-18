@@ -26,6 +26,7 @@ function harness(kind: RouteKind, options: {
   invalidPassword?: boolean; smtpFails?: boolean; invalidationFails?: boolean;
   databaseFails?: boolean; twoFactor?: boolean; missingEmail?: boolean; validCode?: boolean;
   employee?: 'admin' | 'manager' | 'env';
+  credentialsChanged?: boolean;
   outage?: { start: string; end: string; now: string };
 } = {}) {
   const messages: unknown[][] = [];
@@ -43,6 +44,7 @@ function harness(kind: RouteKind, options: {
   // A client without a usable address is a malformed stored account, not a password failure.
   if (kind === 'client' && options.missingEmail) account.login = 'synthetic-no-email';
   const actor = {
+    credentialProof: '1'.repeat(64),
     challengeId: 'challenge-a', createdAt: new Date().toISOString(), login: account.login,
     actorType: kind === 'client' ? 'client' : options.employee === 'manager' ? 'manager' : 'admin',
     role: kind === 'client' ? 'client' : account.role,
@@ -65,16 +67,29 @@ function harness(kind: RouteKind, options: {
     if (options.databaseFails) throw new Error(privateMessage);
     return account;
   };
+  const proofs = load<typeof import('../src/shared/lib/loginCredentialProof')>('src/shared/lib/loginCredentialProof.ts', {
+    crypto, './authSecret': { getAdminSessionSecret: () => 'synthetic-login-proof-secret' },
+  });
+  const requireProof = (input: { credentialProof: string }) => {
+    assert.match(input.credentialProof, /^[a-f0-9]{64}$/, 'every real login path must pass a verified snapshot proof');
+    if (options.validCode) assert.equal(input.credentialProof, actor.credentialProof, 'OTP keeps its original credential proof');
+    if (options.credentialsChanged) throw new proofs.LoginCredentialsChangedError();
+  };
+  const createSession = async (_identity: unknown, input: { credentialProof: string }) => {
+    requireProof(input);
+    sessions++;
+  };
   const modules = {
+    '@/shared/lib/loginCredentialProof': proofs,
     '@/shared/lib/adminAuth': {
-      createAdminSession: async () => { sessions++; }, createEmployeeSession: async () => { sessions++; },
+      createAdminSession: createSession, createEmployeeSession: createSession,
       verifyPassword: () => !options.invalidPassword,
       validateAdminPassword: () => options.employee === 'env' && !options.invalidPassword,
     },
-    '@/shared/lib/clientAuth': { createClientSession: async () => { sessions++; } },
+    '@/shared/lib/clientAuth': { createClientSession: createSession },
     '@/shared/lib/db/securityAuditRepo': { recordSecurityEvent: async (event: Record<string, unknown>) => { events.push(event); } },
     '@/shared/lib/db/twoFactorRepo': {
-      createTwoFactorChallenge: async () => { challenges++; return 'challenge-a'; },
+      createTwoFactorChallenge: async (input: { credentialProof: string }) => { requireProof(input); challenges++; return 'challenge-a'; },
       consumeTwoFactorChallenge: async () => options.validCode ? actor : null,
       generateTwoFactorCode: () => '123456', isTwoFactorEnabled: () => options.twoFactor !== false,
     },
@@ -112,6 +127,24 @@ function harness(kind: RouteKind, options: {
     counts: () => ({ challenges, sessions, sent }),
   };
 }
+
+test('changed credentials fail closed for direct login, challenge creation and OTP completion without secret disclosure', async () => {
+  for (const kind of ['admin', 'client'] as const) {
+    for (const employee of (kind === 'admin' ? ['admin', 'manager', 'env'] : ['admin']) as Array<'admin' | 'manager' | 'env'>) {
+      for (const flow of ['direct', 'challenge', 'otp'] as const) {
+        // Environment-admin OTP fixture needs no account ID; the environment
+        // branch itself is covered by direct/challenge and real PostgreSQL tests.
+        if (employee === 'env' && flow === 'otp') continue;
+        const h = harness(kind, { employee, credentialsChanged: true, twoFactor: flow !== 'direct', validCode: flow === 'otp' });
+        const response = await h.post(flow === 'otp' ? { twoFactorChallengeId: 'challenge-a', twoFactorCode: '123456' } : undefined);
+        assert.equal(response.status, 401, `${kind}/${employee}/${flow}`);
+        assert.equal(response.headers.get('Cache-Control'), 'no-store');
+        assert.deepEqual(h.counts(), { challenges: 0, sessions: 0, sent: 0 });
+        assert.doesNotMatch(JSON.stringify([await response.json(), h.messages]), /synthetic|123456|[a-f0-9]{64}/);
+      }
+    }
+  }
+});
 
 for (const kind of ['admin', 'client'] as const) {
   test(`${kind}: SMTP failure returns safe 503, cancels only its challenge, and never logs in`, async () => {
@@ -243,6 +276,7 @@ test('failed challenge invalidation is restricted to the challenge and browser l
     '../securityHash': { hashSensitiveValue: () => 'synthetic-hash', safeHeaderValue: (value: string) => value.trim() },
     './schema': { ensureSiteSchema: async () => {} },
     './client': { query: async (sql: string, args: unknown[]) => { queries.push({ sql, args }); } },
+    './loginCredentialsRepo': { lockVerifiedLoginCredential: () => assert.fail('Invalidation does not issue credentials') },
   });
   await repo.invalidateTwoFactorChallenge('challenge-a', 'session-a');
   assert.equal(queries.length, 1);

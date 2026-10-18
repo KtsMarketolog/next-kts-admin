@@ -228,14 +228,14 @@ test('TOP management audit attribution distinguishes Admin TOP from the main adm
 });
 
 test('TOP sessions without a positive user id are rejected before persistence', async () => {
-  await assert.rejects(createAdminSession('top'), /requires an admin user id/i);
-  await assert.rejects(createAdminSession('admintop'), /requires an admin user id/i);
+  await assert.rejects(createAdminSession('top', { credentialProof: 'not-a-verified-credential' }), /requires an admin user id/i);
+  await assert.rejects(createAdminSession('admintop', { credentialProof: 'not-a-verified-credential' }), /requires an admin user id/i);
   await assert.rejects(
-    createAdminSession('top', { adminUserId: -1 }),
+    createAdminSession('top', { adminUserId: -1, credentialProof: 'not-a-verified-credential' }),
     /requires an admin user/i,
   );
   await assert.rejects(
-    createAdminSession('admintop', { adminUserId: -1 }),
+    createAdminSession('admintop', { adminUserId: -1, credentialProof: 'not-a-verified-credential' }),
     /requires an admin user/i,
   );
 });

@@ -1,4 +1,5 @@
 import type { AdminSession } from '../adminAuth';
+import type { PoolClient } from 'pg';
 import { query } from './client';
 import { assertClientCompanyVisible } from './clientCompaniesRepo';
 import { ensureSiteSchema } from './schema';
@@ -23,7 +24,7 @@ export type ClientPriceRequestItem = {
 
 export type ClientPriceRequest = {
   id: number;
-  companyId: number;
+  companyId: number | null;
   priceListId: number | null;
   token: string;
   priceTitle: string;
@@ -38,10 +39,11 @@ export type ClientPriceRequest = {
   convertedBreakdownLabel: string;
   items: ClientPriceRequestItem[];
   createdAt: string;
+  mailStatus?: 'pending' | 'retrying' | 'sent' | null;
 };
 
 export type ClientPriceRequestInput = {
-  companyId: number;
+  companyId: number | null;
   priceListId: number | null;
   token: string;
   priceTitle: string;
@@ -59,7 +61,7 @@ export type ClientPriceRequestInput = {
 
 type ClientPriceRequestRow = {
   id: string;
-  company_id: string;
+  company_id: string | null;
   price_list_id: string | null;
   token: string;
   price_title: string;
@@ -74,6 +76,7 @@ type ClientPriceRequestRow = {
   converted_breakdown_label: string;
   items_json: unknown;
   created_at: string;
+  mail_status?: 'pending' | 'retrying' | 'sent' | null;
 };
 
 function parseItemsJson(value: unknown): ClientPriceRequestItem[] {
@@ -91,7 +94,7 @@ function parseItemsJson(value: unknown): ClientPriceRequestItem[] {
 function mapClientPriceRequest(row: ClientPriceRequestRow): ClientPriceRequest {
   return {
     id: Number(row.id),
-    companyId: Number(row.company_id),
+    companyId: row.company_id === null ? null : Number(row.company_id),
     priceListId: row.price_list_id ? Number(row.price_list_id) : null,
     token: row.token,
     priceTitle: row.price_title,
@@ -106,6 +109,7 @@ function mapClientPriceRequest(row: ClientPriceRequestRow): ClientPriceRequest {
     convertedBreakdownLabel: row.converted_breakdown_label,
     items: parseItemsJson(row.items_json),
     createdAt: row.created_at,
+    mailStatus: row.mail_status ?? null,
   };
 }
 
@@ -125,13 +129,20 @@ const REQUEST_SELECT = `
   rub_conversion_info,
   converted_breakdown_label,
   items_json,
-  created_at::text
+  created_at::text,
+  case
+    when exists (select 1 from price_request_mail_outbox o where o.request_id=client_price_requests.id and o.state<>'sent' and o.last_error is not null) then 'retrying'
+    when exists (select 1 from price_request_mail_outbox o where o.request_id=client_price_requests.id and o.state<>'sent') then 'pending'
+    when exists (select 1 from price_request_mail_outbox o where o.request_id=client_price_requests.id) then 'sent'
+    else null
+  end as mail_status
 `;
 
-export async function createClientPriceRequest(input: ClientPriceRequestInput): Promise<ClientPriceRequest> {
-  await ensureSiteSchema();
+export async function createClientPriceRequest(input: ClientPriceRequestInput, transaction?: PoolClient): Promise<ClientPriceRequest> {
+  if (!transaction) await ensureSiteSchema();
 
-  const result = await query<ClientPriceRequestRow>(
+  const execute = transaction ? transaction.query.bind(transaction) : query;
+  const result = await execute<ClientPriceRequestRow>(
     `insert into client_price_requests (
        company_id,
        price_list_id,
@@ -182,7 +193,7 @@ export async function getClientPriceRequestsForAdmin(
     `select ${REQUEST_SELECT}
      from client_price_requests
      where company_id = $1
-     order by created_at desc, id desc`,
+     order by client_price_requests.created_at desc, client_price_requests.id desc`,
     [companyId],
   );
 
@@ -196,9 +207,22 @@ export async function getClientPriceRequestsForClient(companyId: number): Promis
     `select ${REQUEST_SELECT}
      from client_price_requests
      where company_id = $1
-     order by created_at desc, id desc`,
+     order by client_price_requests.created_at desc, client_price_requests.id desc`,
     [companyId],
   );
 
   return result.rows.map(mapClientPriceRequest);
+}
+
+/** Management-only inbox also includes requests from prices without a linked client company. */
+export async function getPriceRequestInbox(session: AdminSession, before: string | null, pendingOnly: boolean) {
+  if (session.role !== 'admin' && session.role !== 'wholesale_admin') throw new Error('Forbidden');
+  if (before !== null && !/^[1-9][0-9]{0,17}$/.test(before)) throw new Error('Invalid request cursor');
+  await ensureSiteSchema();
+  const result = await query<ClientPriceRequestRow>(`select ${REQUEST_SELECT} from client_price_requests
+    where ($1::bigint is null or client_price_requests.id<$1::bigint)
+      and (not $2::boolean or exists (select 1 from price_request_mail_outbox o where o.request_id=client_price_requests.id and o.state<>'sent'))
+    order by client_price_requests.id desc limit 26`, [before, pendingOnly]);
+  return { requests: result.rows.slice(0, 25).map(mapClientPriceRequest),
+    nextCursor: result.rows.length > 25 ? result.rows[24].id : null };
 }

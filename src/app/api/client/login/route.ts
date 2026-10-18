@@ -12,6 +12,7 @@ import { isEmailTwoFactorOutageActive } from '@/shared/lib/emailTwoFactorOutage'
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { LOGIN_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie, type SessionCookieState } from '@/shared/lib/publicSession';
 import { checkDbRateLimit, getClientIp, resetDbRateLimit } from '@/shared/lib/rateLimit';
+import { loginCredentialProof, LoginCredentialsChangedError } from '@/shared/lib/loginCredentialProof';
 
 const LOGIN_LIMIT = 8;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -32,6 +33,7 @@ async function finishClientLogin(input: {
   clientUserId: number;
   request: Request;
   ip: string;
+  credentialProof: string;
 }) {
   const { login, clientUserId, request, ip } = input;
   const user = await getClientUserByLogin(login);
@@ -40,6 +42,7 @@ async function finishClientLogin(input: {
   }
 
   await createClientSession(user.id, {
+    credentialProof: input.credentialProof,
     ip,
     userAgent: request.headers.get('user-agent'),
   });
@@ -113,6 +116,7 @@ async function login(request: Request) {
     const response = await finishClientLogin({
       login: actor.login,
       clientUserId: actor.clientUserId,
+      credentialProof: actor.credentialProof,
       request,
       ip,
     });
@@ -132,6 +136,7 @@ async function login(request: Request) {
     return withSessionCookie(Response.json({ error: 'Invalid password' }, { status: 401 }), loginSession);
   }
 
+  const credentialProof = loginCredentialProof('client', 'client', user);
   await resetDbRateLimit(rateLimitKey);
 
   if (user.requireTwoFactor && !isEmailTwoFactorOutageActive()) {
@@ -148,6 +153,7 @@ async function login(request: Request) {
       clientUserId: user.id,
       loginSessionId: loginSession.sessionId,
       code,
+      credentialProof,
     });
     const delivered = await deliverTwoFactorCode({ email, code, challengeId, loginSessionId: loginSession.sessionId });
     if (!delivered) return withSessionCookie(twoFactorDeliveryFailure(), loginSession);
@@ -175,6 +181,7 @@ async function login(request: Request) {
   }
 
   await createClientSession(user.id, {
+    credentialProof,
     ip,
     userAgent: request.headers.get('user-agent'),
   });
@@ -197,7 +204,10 @@ async function login(request: Request) {
 export async function POST(request: Request) {
   try {
     return await login(request);
-  } catch {
+  } catch (error) {
+    if (error instanceof LoginCredentialsChangedError) {
+      return Response.json({ error: 'Credentials changed. Sign in again.' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+    }
     console.error('CLIENT_LOGIN_UNAVAILABLE');
     return Response.json(
       { error: 'Login temporarily unavailable', code: 'LOGIN_UNAVAILABLE' },

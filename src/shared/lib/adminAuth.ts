@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 
 import { getAdminSessionSecret } from './authSecret';
-import { createStoredAdminSession, getStoredAdminSession, revokeStoredAdminSession } from './db/adminSessionsRepo';
+import { createVerifiedStoredAdminSession, getStoredAdminSession, revokeStoredAdminSession } from './db/adminSessionsRepo';
 import { canAssignDashboardAccess, hasDashboardIdentity } from './dashboardPermissions';
 
 const COOKIE_NAME = 'kts_admin_session';
@@ -24,6 +24,7 @@ export type AdminSession = {
 };
 
 type CreateSessionOptions = {
+  credentialProof: string;
   adminUserId?: number | null;
   ip?: string | null;
   userAgent?: string | null;
@@ -109,7 +110,7 @@ function sign(value: string) {
 
 export async function createAdminSession(
   role: AdminUserSessionRole = 'admin',
-  options: CreateSessionOptions = {},
+  options: CreateSessionOptions,
 ) {
   if ((role === 'top' || role === 'admintop' || role === 'purchaser') && !options.adminUserId) {
     throw new Error('TOP session requires an admin user id');
@@ -117,7 +118,7 @@ export async function createAdminSession(
   return createEmployeeSession({ role, adminUserId: options.adminUserId ?? undefined }, options);
 }
 
-export async function createEmployeeSession(session: AdminSession, options: CreateSessionOptions = {}) {
+export async function createEmployeeSession(session: AdminSession, options: CreateSessionOptions) {
   const adminUserId = session.adminUserId ?? options.adminUserId ?? null;
   if (
     (session.role === 'top' || session.role === 'admintop' || session.role === 'purchaser')
@@ -126,12 +127,13 @@ export async function createEmployeeSession(session: AdminSession, options: Crea
     throw new Error('Top session requires an admin user');
   }
 
-  const storedSession = await createStoredAdminSession({
+  const storedSession = await createVerifiedStoredAdminSession({
     role: session.role,
     adminUserId,
     managerId: session.managerId ?? null,
     ip: options.ip,
     userAgent: options.userAgent,
+    credentialProof: options.credentialProof,
   });
   const jar = await cookies();
   jar.set(COOKIE_NAME, storedSession.token, {

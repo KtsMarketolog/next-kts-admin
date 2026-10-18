@@ -1,6 +1,7 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee, requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
 import { hashEmployeePassword } from '@/shared/lib/employeePasswordHash';
+import { EmployeeIdentifierConflictError } from '@/shared/lib/employeeIdentifierConflict';
 import { createWholesaleManager, getWholesaleManagers } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
@@ -69,6 +70,7 @@ export async function POST(request: Request) {
       canManageTopDashboard,
     });
   } catch (error) {
+    if (error instanceof EmployeeIdentifierConflictError) return Response.json({ error: error.message, code: error.code }, { status: 409 });
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось добавить менеджера' }, { status: 400 });
   }
 

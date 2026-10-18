@@ -4,6 +4,7 @@ import test from 'node:test';
 import ts from 'typescript';
 
 import * as versions from '../src/shared/lib/recordVersion';
+import * as identifierConflicts from '../src/shared/lib/employeeIdentifierConflict';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 
 function route() {
@@ -15,6 +16,7 @@ function route() {
     '@/shared/lib/adminSecurity': { enforceAdminActionRateLimit: async () => null },
     '@/shared/lib/employeePasswordHash': { hashEmployeePassword: async () => { hashes++; return 'synthetic-hash'; } },
     '@/shared/lib/recordVersion': versions,
+    '@/shared/lib/employeeIdentifierConflict': identifierConflicts,
     '@/shared/lib/db': {
       getWholesaleManagerById: async () => ({ id: 42, revision: '2', isActive: false, canAccessTopDashboard: false, canManageTopDashboard: false }),
       updateWholesaleManager: async (_id: number, input: Record<string, unknown>) => {

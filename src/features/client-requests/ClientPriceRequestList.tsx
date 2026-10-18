@@ -7,6 +7,7 @@ type ClientPriceRequestListProps = {
   emptyText: string;
   emptyTitle: string;
   requests: ClientPriceRequest[];
+  showClient?: boolean;
 };
 
 function formatDate(value: string | null | undefined) {
@@ -79,7 +80,7 @@ function NoPriceRow({ quantity }: { quantity: number }) {
   );
 }
 
-export function ClientPriceRequestList({ emptyText, emptyTitle, requests }: ClientPriceRequestListProps) {
+export function ClientPriceRequestList({ emptyText, emptyTitle, requests, showClient = false }: ClientPriceRequestListProps) {
   if (requests.length === 0) {
     return (
       <div className={styles.emptyState}>
@@ -95,8 +96,14 @@ export function ClientPriceRequestList({ emptyText, emptyTitle, requests }: Clie
         <details className={styles.requestCard} key={request.id}>
           <summary className={styles.requestSummary}>
             <div className={styles.requestSummaryTitle}>
-              <span>Заявка от {formatDate(request.createdAt)}</span>
+              <span>Заявка №{request.id} от {formatDate(request.createdAt)}</span>
               <h3>{request.priceTitle || 'Прайс без названия'}</h3>
+              {showClient ? <p>Клиент: {request.clientName || 'Не указан'}{request.companyId === null ? ' · без привязки к компании' : ''}</p> : null}
+              {request.mailStatus ? <span>{request.mailStatus === 'sent'
+                ? 'Уведомления приняты почтовым сервером'
+                : request.mailStatus === 'retrying'
+                  ? 'Заявка сохранена. Почта временно недоступна — отправка будет повторена.'
+                  : 'Заявка сохранена. Уведомления ожидают отправки.'}</span> : null}
             </div>
             <dl className={styles.requestSummaryMeta}>
               <div>

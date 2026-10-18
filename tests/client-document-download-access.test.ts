@@ -52,6 +52,7 @@ function harness(audience: 'admin' | 'client', options: DownloadOptions = {}) {
     if (sql.includes('from client_sessions s') || sql.includes('from admin_sessions s')) {
       assert.match(sql, /s\.revoked_at is null/);
       assert.match(sql, /s\.expires_at > now\(\)/);
+      assert.match(sql, /password_changed_at[\s\S]*<= s\.created_at, true\) as password_is_current/);
       if (options.revoked) return { rows: [] };
       const timestamps = { created_at: '2026-01-01T00:00:00Z', expires_at: '2030-01-01T00:00:00Z' };
       const passwordChanged = options.passwordChanged ? '2026-01-02T00:00:00Z' : null;
@@ -60,13 +61,14 @@ function harness(audience: 'admin' | 'client', options: DownloadOptions = {}) {
         return { rows: [{ ...timestamps, id: 'synthetic-session', client_user_id: '31',
           company_id: String(options.clientCompanyId ?? 13), user_is_active: options.userActive !== false,
           company_is_active: options.companyActive !== false && !options.archived,
-          password_changed_at: passwordChanged }] };
+          password_changed_at: passwordChanged, password_is_current: !options.passwordChanged }] };
       }
       return { rows: [{ ...timestamps, id: 'synthetic-session', role,
         admin_user_id: managerRole ? null : '1', manager_id: managerRole ? String(options.managerId ?? 21) : null,
         admin_is_active: options.userActive !== false, admin_role: role,
         manager_is_active: options.userActive !== false, manager_role: role,
         admin_password_changed_at: passwordChanged, manager_password_changed_at: passwordChanged,
+        password_is_current: !options.passwordChanged,
         dashboard_access: [], admin_can_manage_top_dashboard: true,
         manager_can_access_top_dashboard: true, manager_can_manage_top_dashboard: true }] };
     }
@@ -94,6 +96,8 @@ function harness(audience: 'admin' | 'client', options: DownloadOptions = {}) {
     `src/shared/lib/db/${audience === 'client' ? 'clientSessionsRepo' : 'adminSessionsRepo'}.ts`, {
       crypto, '../securityHash': securityHash, '../dashboardAccess': { parseDashboardAccess: () => [] },
       './client': client, './schema': schema,
+      './loginCredentialsRepo': { lockVerifiedLoginCredential: () => assert.fail('Document downloads never issue sessions') },
+      '../loginCredentialProof': {},
     },
   );
   const cookies = async () => ({ get: () => options.cookie === false ? undefined
@@ -115,6 +119,7 @@ function harness(audience: 'admin' | 'client', options: DownloadOptions = {}) {
       './client': client, './schema': schema, './clientCompaniesRepo.helpers': helpers,
       './clientCompanyPriceListAssignments': {}, './clientSessionsRepo': {},
       '../clientPasswordVault': {},
+      '../loginCredentialProof': {},
     },
   );
   const documents = load<typeof import('../src/shared/lib/db/clientDocumentsRepo')>(

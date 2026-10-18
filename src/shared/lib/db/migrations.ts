@@ -19,6 +19,9 @@ import { applyPersonalDashboardRecipientMigration } from './managerDashboardReci
 import { applyCurrencyDashboardHtmlMigration } from './currencyDashboardHtmlMigration';
 import { applyRecordVersionMigration } from './recordVersionMigration';
 import { applyClientArchiveMigration } from './clientArchiveMigration';
+import { applyEmployeeIdentifierMigration } from './employeeIdentifierMigration';
+import { applyPriceRequestOutboxMigration } from './priceRequestOutboxMigration';
+import { applyLoginCredentialMigration } from './loginCredentialMigration';
 
 type SchemaMigration = {
   id: string;
@@ -860,6 +863,9 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610180001_record_write_versions', description: 'Optimistic record versions for employees and price lists, preserving existing data', apply: applyRecordVersionMigration},
   {id: '202610180002_client_archive', description: 'Reversible customer archive and explicit document cleanup receipts without removing existing data', apply: applyClientArchiveMigration},
   {id: '202610190001_client_password_vault', description: 'Encrypt hash-bound client password display copies without changing login credentials or business data', apply: applyClientPasswordMigration},
+  {id: '202610190002_employee_login_identifiers', description: 'Reserve normalized employee login and email identifiers across employee roles without changing accounts', apply: applyEmployeeIdentifierMigration},
+  {id: '202610190003_price_request_outbox', description: 'Durable idempotent price request receipts and transactional email notification queue', apply: applyPriceRequestOutboxMigration},
+  {id: '202610190004_verified_login_credentials', description: 'Bind one-time email challenges to verified login credentials', apply: applyLoginCredentialMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

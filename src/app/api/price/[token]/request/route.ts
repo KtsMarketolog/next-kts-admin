@@ -1,11 +1,11 @@
-import nodemailer from 'nodemailer';
+import { createHash } from 'node:crypto';
 
 import {
-  createClientPriceRequest,
   getPublicWholesalePriceListMetadata,
   getPublicWholesaleRequestItems,
   trackAnalyticsEvent,
 } from '@/shared/lib/db';
+import { findPriceRequestOperation, PriceRequestConflictError, savePriceRequestOperation } from '@/shared/lib/db/priceRequestOutboxRepo';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
 import { createPricePerformanceTrace } from '@/shared/lib/pricePerformance';
@@ -61,6 +61,7 @@ function getHeaderIp(headersList: Headers) {
 
 function jsonWithSession(body: unknown, init: ResponseInit, session: ReturnType<typeof getOrCreateSessionCookie>) {
   const response = Response.json(body, init);
+  response.headers.set('Cache-Control', 'private, no-store');
   applySessionCookie(response.headers, session);
   return response;
 }
@@ -210,12 +211,6 @@ function formatConvertedBreakdown(values: ConvertedCurrencyTotal[]) {
   return values.map((value) => `${formatAmount(value.amount, value.currency)} → ${formatConvertedRubAmount(value.rubAmount)}`).join('; ');
 }
 
-function requireEnv(name: string) {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is not configured`);
-  return value;
-}
-
 function splitRecipients(value: string) {
   return value
     .split(/[;,]/)
@@ -288,6 +283,18 @@ async function submitRequest(request: Request, context: Context, trace: ReturnTy
   }
   const requestedItemIds = new Set(requestedItems.map((item) => item.id));
   const rubConversion = normalizeRubConversion(bodyRecord?.rubConversion, requestedItemIds);
+  const operationId = typeof bodyRecord?.operationId === 'string' ? bodyRecord.operationId.toLowerCase() : '';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(operationId)) {
+    return jsonWithSession({ ok: false, error: 'OPERATION_ID_REQUIRED' }, { status: 400 }, publicSession);
+  }
+  const digest = createHash('sha256').update(JSON.stringify({
+    items: [...requestedItems].sort((a, b) => a.id - b.id), comment,
+    // Polling a newer rate/date after a lost response is not another customer order.
+    // The first transaction keeps its original prices/rate snapshot; retries never replace it.
+    conversionItems: [...(rubConversion?.itemIds ?? [])].sort((a, b) => a - b),
+  })).digest('hex');
+  const previous = await trace.measure('receipt', () => findPriceRequestOperation(priceList.id, operationId, digest));
+  if (previous) return jsonWithSession({ ok: true, saved: true, requestId: previous.requestId }, {}, publicSession);
 
   const itemIds = requestedItems.map((item) => item.id);
   const dbItems = await trace.measure('items', () => getPublicWholesaleRequestItems(priceList.token, itemIds));
@@ -364,17 +371,7 @@ async function submitRequest(request: Request, context: Context, trace: ReturnTy
   const commentHtml = comment ? escapeHtml(comment).replaceAll('\n', '<br>') : '';
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT || 465),
-      secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : true,
-      auth: {
-        user: requireEnv('SMTP_USER'),
-        pass: requireEnv('SMTP_PASSWORD'),
-      },
-    });
-    const mailFrom = process.env.SMTP_FROM || `"KTS" <${requireEnv('SMTP_USER')}>`;
-    const mailTo = priceRequestRecipients([priceList.managerEmail, priceList.supportManagerEmail]).join(', ');
+    const recipients = priceRequestRecipients([priceList.managerEmail, priceList.supportManagerEmail]);
     const subject = `Заявка из индивидуального прайса: ${priceList.title || 'Без названия'}`;
     const rubHeaders = hasConvertedRubValues ? '<th>Цена RUB</th><th>Сумма RUB</th>' : '';
     const itemRows = rows
@@ -401,9 +398,8 @@ async function submitRequest(request: Request, context: Context, trace: ReturnTy
       })
       .join('');
 
-    await trace.measure('delivery', () => transporter.sendMail({
-      from: mailFrom,
-      to: mailTo,
+    const mail = {
+      recipients,
       subject,
       html: `
         <h2>${escapeHtml(subject)}</h2>
@@ -447,13 +443,10 @@ async function submitRequest(request: Request, context: Context, trace: ReturnTy
         `\n\nИтого позиций: ${totalQuantity}\nИтого сумма: ${totalPriceLabel}\n` +
         (hasConvertedRubValues ? `Итого в рублях по пересчету: ${formatConvertedRubAmount(totalConvertedRub)}\n` : '') +
         (convertedBreakdownLabel ? `В пересчет вошло: ${convertedBreakdownLabel}\n` : ''),
-    }));
+    };
 
-    const clientCompanyId = priceList.clientCompanyId;
-    if (clientCompanyId) {
-      try {
-        await trace.measure('history', () => createClientPriceRequest({
-          companyId: clientCompanyId,
+    const saved = await trace.measure('save', () => savePriceRequestOperation({
+          companyId: priceList.clientCompanyId,
           priceListId: priceList.id,
           token: priceList.token,
           priceTitle: priceList.title,
@@ -481,13 +474,9 @@ async function submitRequest(request: Request, context: Context, trace: ReturnTy
               convertedRubLineTotal: price.convertedRubLineTotal,
             })),
           })),
-        }));
-      } catch (historyError) {
-        console.error('PUBLIC_PRICE_REQUEST_HISTORY_FAILED', historyError);
-      }
-    }
+        }, operationId, digest, mail));
 
-    try {
+    if (!saved.duplicate) try {
       await trace.measure('analytics', () => trackAnalyticsEvent({
         eventType: 'public_price_request_sent',
         actorType: 'client',
@@ -526,14 +515,15 @@ async function submitRequest(request: Request, context: Context, trace: ReturnTy
           })),
         },
       }));
-    } catch (analyticsError) {
-      console.error('PUBLIC_PRICE_REQUEST_ANALYTICS_FAILED', analyticsError);
+    } catch {
+      console.error('PUBLIC_PRICE_REQUEST_ANALYTICS_FAILED');
     }
 
-    return jsonWithSession({ ok: true }, {}, publicSession);
+    return jsonWithSession({ ok: true, saved: true, requestId: saved.requestId }, {}, publicSession);
   } catch (error) {
-    console.error('PUBLIC_PRICE_REQUEST_FAILED', error);
-    return jsonWithSession({ ok: false, error: 'MAIL_FAILED' }, { status: 500 }, publicSession);
+    if (error instanceof PriceRequestConflictError) throw error;
+    console.error('PUBLIC_PRICE_REQUEST_SAVE_FAILED');
+    return jsonWithSession({ ok: false, error: 'SAVE_NOT_CONFIRMED' }, { status: 503 }, publicSession);
   }
 }
 
@@ -545,7 +535,10 @@ export async function POST(request: Request, context: Context) {
     response.headers.set('Server-Timing', trace.header());
     return response;
   } catch (error) {
-    trace.finish(500);
-    throw error;
+    const status = error instanceof PriceRequestConflictError ? 409 : 503;
+    trace.finish(status);
+    if (status !== 409) console.error('PUBLIC_PRICE_REQUEST_SAVE_FAILED');
+    return Response.json({ ok: false, error: status === 409 ? 'OPERATION_CONFLICT' : 'SAVE_NOT_CONFIRMED' },
+      { status, headers: { 'Cache-Control': 'private, no-store' } });
   }
 }

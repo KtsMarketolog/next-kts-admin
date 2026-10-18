@@ -8,6 +8,7 @@ import { canAssignDashboardAccess } from '../src/shared/lib/dashboardPermissions
 import * as management from '../src/shared/lib/accessUserManagement';
 import * as dashboards from '../src/shared/lib/dashboardAccess';
 import * as versions from '../src/shared/lib/recordVersion';
+import * as identifierConflicts from '../src/shared/lib/employeeIdentifierConflict';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 import { roleOptionsForTab, USER_TABS } from '../src/features/admin/users/AdminUsersConfig';
 import { defaultDashboardAccess, readDashboardOptions } from '../src/features/admin/users/AdminUsersDashboardAccess';
@@ -62,6 +63,7 @@ function api(session: AdminSession | null) {
     '@/shared/lib/employeePasswordHash': { hashEmployeePassword: async () => 'hash-not-for-response' },
     '@/shared/lib/accessUserManagement': management,
     '@/shared/lib/recordVersion': versions,
+    '@/shared/lib/employeeIdentifierConflict': identifierConflicts,
     '@/shared/lib/adminSecurity': { enforceAdminActionRateLimit: async () => null },
     '@/shared/lib/dashboardAccess': dashboards,
     '@/shared/lib/db/dashboardAccessRepo': { getDashboardGrantOptions: async () => [{ key: 'top:7', title: 'Shared' }], dashboardGrantOptionsVersion: () => 'a'.repeat(64) },

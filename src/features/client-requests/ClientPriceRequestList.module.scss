@@ -301,6 +301,57 @@
 }
 
 @media (max-width: 1100px) {
+  .requestList,
+  .requestDetails,
+  .requestHeader { gap: 14px; }
+
+  .requestSummary,
+  .requestDetails { padding: 16px; }
+
+  .requestCard { border-radius: 12px; }
+
+  .requestSummaryTitle {
+    span { font-size: 11px; line-height: 1.45; }
+    h3 { font-size: 18px; margin-top: 6px; }
+    p { font-size: 14px; margin: 8px 0; overflow-wrap: anywhere; }
+  }
+
+  .requestSummaryMeta,
+  .requestMeta {
+    gap: 8px;
+    div { gap: 4px; padding: 10px; border-radius: 8px; }
+    dt { font-size: 11px; }
+    dd { font-size: 14px; overflow-wrap: anywhere; }
+  }
+
+  .summaryToggle,
+  .requestLink { font-size: 13px; min-height: 40px; padding: 0 14px; border-radius: 8px; }
+
+  .requestComment {
+    gap: 6px; padding: 12px;
+    span { font-size: 11px; }
+    p { font-size: 14px; overflow-wrap: anywhere; }
+  }
+
+  .requestItems,
+  .requestPrices { gap: 8px; }
+  .requestItem { padding: 12px; gap: 12px; border-radius: 8px; }
+  .requestItemTitle {
+    gap: 4px;
+    h4 { font-size: 16px; }
+    p { font-size: 13px; }
+  }
+  .requestPriceRow {
+    padding: 10px; gap: 8px;
+    span { font-size: 11px; }
+    strong { font-size: 14px; margin-top: 3px; }
+  }
+  .emptyState {
+    padding: 20px; min-height: 150px; gap: 8px;
+    h3 { font-size: 20px; }
+    p { font-size: 14px; }
+  }
+
   .requestSummary {
     grid-template-columns: 1fr;
   }

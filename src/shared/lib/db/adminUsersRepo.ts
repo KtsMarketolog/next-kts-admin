@@ -4,6 +4,7 @@ import { parseDashboardAccess } from '../dashboardAccess';
 import { AccessUserProfileForbiddenError, assertAccessUserManagementAllowed, assertDelegatedAccessOnly, DashboardOptionsConflictError } from '../accessUserManagement';
 import type { AdminSessionRole } from '../adminAuth';
 import { resolveEmployeePasswordCiphertext } from '../employeePasswordVault';
+import { rethrowEmployeeIdentifierConflict } from '../employeeIdentifierConflict';
 import { assertRecordRevision, RecordVersionConflictError } from '../recordVersion';
 import { revokeAdminUserSessions, revokeManagerSessions } from './adminSessionsRepo';
 import { query, withTransaction } from './client';
@@ -207,38 +208,6 @@ async function saveDashboardAccess(
   return saveDashboardGrants(client,{source:isManagerAccessRole(role)?'manager':'admin',numericId:userId,role},value ?? previous?.dashboardAccess);
 }
 
-async function assertLoginAvailable(
-  login: string,
-  exclude?: { source: AccessUserSource; numericId: number },
-  client?: Pick<PoolClient, 'query'>,
-) {
-  const db = client ?? { query };
-  const normalizedLogin = normalizeLogin(login);
-  const adminResult = await db.query<{ id: string }>(
-    `select id::text
-     from admin_users
-     where login = $1
-       and ($2::text <> 'admin' or id <> $3::bigint)
-     limit 1`,
-    [normalizedLogin, exclude?.source ?? '', exclude?.numericId ?? 0],
-  );
-  if (adminResult.rows.length > 0) {
-    throw new Error('Пользователь с таким логином уже есть');
-  }
-
-  const managerResult = await db.query<{ id: string }>(
-    `select id::text
-     from wholesale_managers
-     where login = $1
-       and ($2::text <> 'manager' or id <> $3::bigint)
-     limit 1`,
-    [normalizedLogin, exclude?.source ?? '', exclude?.numericId ?? 0],
-  );
-  if (managerResult.rows.length > 0) {
-    throw new Error('Пользователь с таким логином уже есть');
-  }
-}
-
 async function countActiveSiteAdmins(client?: Pick<PoolClient, 'query'>) {
   const db = client ?? { query };
   const result = await db.query<{ count: string }>(
@@ -296,9 +265,10 @@ export async function getAdminUserByLogin(login: string): Promise<AdminUserAuth 
     `select id::text, login, name, email, password_hash, is_active, role,
             can_manage_top_dashboard, password_changed_at::text
      from admin_users
-     where login = $1 or lower(email) = $1
+     where kts_employee_identifier($1) <> '' and
+       (kts_employee_identifier(login) = kts_employee_identifier($1) or kts_employee_identifier(email) = kts_employee_identifier($1))
      limit 1`,
-    [normalizeLogin(login)],
+    [login],
   );
 
   const row = result.rows[0];
@@ -390,7 +360,6 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
       const currentOptions = await getDashboardGrantOptions(client);
       if (input.dashboardOptionsVersion !== dashboardGrantOptionsVersion(currentOptions)) throw new DashboardOptionsConflictError();
     }
-    await assertLoginAvailable(input.login, undefined, client);
     const passwordCiphertext = await resolveEmployeePasswordCiphertext({ password: input.password, passwordHash: input.passwordHash });
 
     if (isManagerAccessRole(input.role)) {
@@ -456,7 +425,7 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
     user.dashboardAccess = await saveDashboardAccess(client, user.numericId, user.role, input.dashboardAccess);
     user.dashboardAccessVersion=dashboardAccessVersion(user.dashboardAccess);
     return user;
-  });
+  }).catch(rethrowEmployeeIdentifierConflict);
 }
 
 export async function updateAccessUser(
@@ -504,7 +473,6 @@ export async function updateAccessUser(
       if (!existingRow) throw new Error('Пользователь не найден');
       assertAccessUserManagementAllowed(actorRole, existingRow.role, input.role);
       assertRecordRevision(input.expectedRevision, existingRow.revision);
-      if (actorRole === 'admin') await assertLoginAvailable(input.login, parsed, client);
       const previous = mapAccessUser(existingRow, currentAdminUserId);
       previous.dashboardAccess = await getDashboardGrants(client,'admin',previous.numericId);
       if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new RecordVersionConflictError();
@@ -671,7 +639,6 @@ export async function updateAccessUser(
     if (!existingRow) throw new Error('Пользователь не найден');
     assertAccessUserManagementAllowed(actorRole, existingRow.role, input.role);
     assertRecordRevision(input.expectedRevision, existingRow.revision);
-    if (actorRole === 'admin') await assertLoginAvailable(input.login, parsed, client);
     const previous = mapAccessUser(existingRow, currentAdminUserId);
     previous.dashboardAccess=await getDashboardGrants(client,'manager',previous.numericId);
     if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new RecordVersionConflictError();
@@ -803,7 +770,7 @@ export async function updateAccessUser(
       permissionsChanged: dashboardAccessVersion(previous.dashboardAccess)!==user.dashboardAccessVersion,
       passwordChanged: Boolean(input.passwordHash),
     });
-  });
+  }).catch(rethrowEmployeeIdentifierConflict);
 }
 
 export async function deleteAccessUser(id: string, currentAdminUserId?: number | null, actorRole: AdminSessionRole = 'admin'): Promise<AccessUser> {

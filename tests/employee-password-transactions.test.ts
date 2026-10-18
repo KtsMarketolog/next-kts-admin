@@ -8,6 +8,7 @@ import * as management from '../src/shared/lib/accessUserManagement';
 import * as dashboardAccess from '../src/shared/lib/dashboardAccess';
 import { hashEmployeePassword } from '../src/shared/lib/employeePasswordHash';
 import * as vault from '../src/shared/lib/employeePasswordVault';
+import * as identifierConflicts from '../src/shared/lib/employeeIdentifierConflict';
 import * as versions from '../src/shared/lib/recordVersion';
 
 type CentralRepo = typeof import('../src/shared/lib/db/adminUsersRepo');
@@ -141,10 +142,12 @@ function harness(source: Source = 'manager', overrides: Partial<Row> = {}) {
   const schema = { ensureSiteSchema: async () => { assert.equal(inTransaction, false, 'transaction revocation must not initialize schema via another connection'); } };
   const sessions = load<SessionRepo>('src/shared/lib/db/adminSessionsRepo.ts', {
     crypto, '../securityHash': {}, '../dashboardAccess': dashboardAccess, './client': transport, './schema': schema,
+    './loginCredentialsRepo': { lockVerifiedLoginCredential: async () => { throw new Error('Login verification is not used for credential writes'); } },
   });
   const central = load<CentralRepo>('src/shared/lib/db/adminUsersRepo.ts', {
     '../dashboardAccess': dashboardAccess, '../accessUserManagement': management, '../employeePasswordVault': vault,
     '../recordVersion': versions,
+    '../employeeIdentifierConflict': identifierConflicts,
     './adminSessionsRepo': sessions, './client': transport, './schema': schema,
     './dashboardAccessRepo': {
       DASHBOARD_ACCESS_LOCK: 'synthetic-lock', dashboardAccessVersion: (keys: string[]) => JSON.stringify(keys),
@@ -158,6 +161,7 @@ function harness(source: Source = 'manager', overrides: Partial<Row> = {}) {
   const managers = load<ManagerRepo>('src/shared/lib/db/wholesaleAdminRepo/managerRepo.ts', {
     '../client': transport, '../schema': schema, '../adminSessionsRepo': sessions, '../../employeePasswordVault': vault,
     '../../recordVersion': versions,
+    '../../employeeIdentifierConflict': identifierConflicts,
     './managerHelpers': { normalizeLogin: (login: string) => login.trim().toLowerCase(), normalizeManagerRole: (role?: string) => role || 'manager', normalizeWholesaleSupportManagerId: async () => null },
   });
   const input = { name: original.name, login: original.login, email: original.email, role: original.role as 'top' | 'manager',

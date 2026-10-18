@@ -414,9 +414,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             <p>Индивидуальные прайсы</p>
             <h2>Администратор</h2>
           </div>
-          <button className={styles.secondary} onClick={onBack}>
-            Вернуться в панель управления
-          </button>
+          <div className={styles.actions}>
+            <button className={styles.secondary} onClick={() => router.push('/admin/wholesale/requests')}>Заявки из прайсов</button>
+            <button className={styles.secondary} onClick={onBack}>Вернуться в панель управления</button>
+          </div>
         </div>
 
         {status ? <p className={styles.status}>{status}</p> : null}

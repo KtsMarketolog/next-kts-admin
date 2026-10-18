@@ -1,6 +1,7 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireDashboardAccessManagementSession } from '@/shared/lib/adminAuth';
 import { hashEmployeePassword } from '@/shared/lib/employeePasswordHash';
+import { EmployeeIdentifierConflictError } from '@/shared/lib/employeeIdentifierConflict';
 import { AccessUserManagementError, AccessUserProfileForbiddenError } from '@/shared/lib/accessUserManagement';
 import { parseDashboardAccess } from '@/shared/lib/dashboardAccess';
 import {
@@ -146,6 +147,7 @@ export async function PUT(request: Request, context: Context) {
 
     return Response.json({ user: result.user });
   } catch (error) {
+    if (error instanceof EmployeeIdentifierConflictError) return Response.json({ error: error.message, code: error.code }, { status: 409 });
     if (error instanceof RecordVersionConflictError) return Response.json({ error: error.message, code: error.code }, { status: 409 });
     if (error instanceof AccessUserManagementError || error instanceof AccessUserProfileForbiddenError) return badRequest(error.message, 403);
     return badRequest(error instanceof Error ? error.message : 'Не удалось сохранить пользователя');

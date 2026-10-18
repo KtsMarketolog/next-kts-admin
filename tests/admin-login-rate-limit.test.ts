@@ -42,6 +42,7 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
   const sessions: string[] = [];
   const events: Array<Record<string, unknown>> = [];
   let lookups = 0;
+  const lookupInputs: string[] = [];
   let consumedChallenges = 0;
   let legacyPasswordChecks = 0;
   const account = (login: string, role: 'admin' | 'manager') => ({
@@ -51,7 +52,11 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
     passwordHash: role === 'manager' && options.managerPasswordIsLegacy ? 'synthetic-manager-legacy-hash' : 'synthetic-hash',
     passwordChangedAt: null,
   });
+  const proofs = load<typeof import('../src/shared/lib/loginCredentialProof')>('src/shared/lib/loginCredentialProof.ts', {
+    crypto, './authSecret': { getAdminSessionSecret: () => 'synthetic-login-proof-secret' },
+  });
   const modules: Record<string, unknown> = {
+    '@/shared/lib/loginCredentialProof': proofs,
     '@/shared/lib/adminAuth': {
       createAdminSession: async (role: string) => { sessions.push(role); },
       createEmployeeSession: async (actor: { role: string }) => { sessions.push(actor.role); },
@@ -84,10 +89,12 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
     '@/shared/lib/db': {
       getAdminUserByLogin: async (login: string) => {
         lookups++;
+        lookupInputs.push(login);
         return login === 'admin@example.test' || /^office-\d+@example\.test$/.test(login) ? account(login, 'admin') : null;
       },
       getWholesaleManagerByLogin: async (login: string) => {
         lookups++;
+        lookupInputs.push(login);
         return login === 'manager@example.test' ? account(login, 'manager') : null;
       },
       recordWholesaleManagerLogin: async () => {},
@@ -114,7 +121,7 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
   };
   const route = load<{ POST: (request: Request) => Promise<Response> }>('src/app/api/admin/login/route.ts', modules);
   return {
-    calls, resets, sessions, events,
+    calls, resets, sessions, events, lookupInputs,
     advance: (ms: number) => { now += ms; },
     counts: () => ({ lookups, consumedChallenges, legacyPasswordChecks }),
     post: (input: {
@@ -140,6 +147,15 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
     },
   };
 }
+
+test('employee lookup preserves Unicode identifier while the rate key keeps its existing lowercase policy', async () => {
+  const h = harness();
+  const input = '\u00a0İ-employee@example.test\u3000';
+  assert.equal((await h.post({ login: input })).status, 401);
+  assert.deepEqual(h.lookupInputs, [input.trim(), input.trim()]);
+  assert.notEqual(h.lookupInputs[0], input.trim().toLowerCase(), 'JS dotted-I expansion must not select another identifier');
+  assert.equal(h.calls[0].key, `login:source:192.0.2.10:login:${input.trim().toLowerCase()}`);
+});
 
 test('repeated blocked employee logins cannot exhaust access for another source', async () => {
   const h = harness();

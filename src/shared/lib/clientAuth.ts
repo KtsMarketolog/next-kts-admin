@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 
 import {
-  createStoredClientSession,
+  createVerifiedStoredClientSession,
   getStoredClientSession,
   revokeStoredClientSession,
 } from './db/clientSessionsRepo';
@@ -16,16 +16,18 @@ export type ClientSession = {
 };
 
 type CreateClientSessionOptions = {
+  credentialProof: string;
   ip?: string | null;
   userAgent?: string | null;
 };
 
-export async function createClientSession(clientUserId: number, options: CreateClientSessionOptions = {}) {
-  const storedSession = await createStoredClientSession({
+export async function createClientSession(clientUserId: number, options: CreateClientSessionOptions) {
+  const storedSession = await createVerifiedStoredClientSession({
     clientUserId,
     ip: options.ip,
     userAgent: options.userAgent,
     maxAgeSeconds: SESSION_MAX_AGE_SECONDS,
+    credentialProof: options.credentialProof,
   });
   const jar = await cookies();
   jar.set(COOKIE_NAME, storedSession.token, {
