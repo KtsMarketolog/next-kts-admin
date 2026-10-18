@@ -29,6 +29,7 @@ type WholesalePriceEditorScreenProps = {
   editorLoading: boolean;
   editorLoadError: string;
   editorSaveError: string;
+  editorSaveConflict: boolean;
   retryEditorLoad: () => void;
   editor: PriceEditor;
   setEditor: Dispatch<SetStateAction<PriceEditor>>;
@@ -72,6 +73,7 @@ export function WholesalePriceEditorScreen({
   editorLoading,
   editorLoadError,
   editorSaveError,
+  editorSaveConflict,
   retryEditorLoad,
   editor,
   setEditor,
@@ -138,6 +140,16 @@ export function WholesalePriceEditorScreen({
         </div>
       ) : (
         <>
+          {editorSaveConflict ? (
+            <div role="alert">
+              <h3>Прайс уже изменён другим пользователем</h3>
+              <p>{editorSaveError}</p>
+              <p>Ваш черновик оставлен в форме. Скопируйте нужные правки перед загрузкой актуальной версии.</p>
+              <button type="button" className={styles.secondary} disabled={busy} onClick={retryEditorLoad}>
+                Загрузить актуальные данные
+              </button>
+            </div>
+          ) : null}
           <WholesalePriceEditorDetails
             screen={screen}
             editor={editor}
@@ -184,10 +196,10 @@ export function WholesalePriceEditorScreen({
           />
 
           <div className={styles.actions}>
-            <button disabled={busy} onClick={savePriceList}>Сохранить прайс</button>
+            <button disabled={busy || editorSaveConflict} onClick={savePriceList}>Сохранить прайс</button>
             <button className={styles.secondary} onClick={() => router.push(editorBackHref)}>Отмена</button>
           </div>
-          {editorSaveError ? <p role="alert">{editorSaveError}</p> : null}
+          {editorSaveError && !editorSaveConflict ? <p role="alert">{editorSaveError}</p> : null}
         </>
       )}
     </section>

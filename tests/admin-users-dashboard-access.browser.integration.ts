@@ -16,7 +16,7 @@ import React, {useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {AdminUsersSection} from './src/features/admin/users/AdminUsersSection';
 import styles from './src/app/admin/admin.module.scss';
-const user = {id:'admin:42', source:'admin', numericId:42, name:'Тестовый закупщик', login:'buyer', email:'buyer@example.test', role:'purchaser', isActive:true, canManageTopDashboard:false, dashboardAccess:['top:7','top:999'], dashboardAccessVersion:'a'.repeat(64), accesses:[], priceListCount:0, supportManagerId:null, supportManagerName:'', isCurrent:false, displayPassword:''};
+const user = {id:'admin:42', revision:'1', source:'admin', numericId:42, name:'Тестовый закупщик', login:'buyer', email:'buyer@example.test', role:'purchaser', isActive:true, canManageTopDashboard:false, dashboardAccess:['top:7','top:999'], dashboardAccessVersion:'a'.repeat(64), accesses:[], priceListCount:0, supportManagerId:null, supportManagerName:'', isCurrent:false, displayPassword:''};
 const delegated = new URLSearchParams(location.search).has('delegated');
 window.fixtureOptions = [{key:'top:7',title:'Стратегический обзор',href:'/admin/top/7',defaultGranted:delegated},{key:'top:8',title:'Другой обзор',href:'/admin/top/8'},{key:'route-planner',title:'Компоновщик рейсов',description:'Общий отчёт с данными',href:'/admin/top/route-planner'}];
 window.fixtureCalls = [];
@@ -189,7 +189,7 @@ async function main() {
             const delegatedSave=(await page.evaluate('window.fixtureCalls'))[0];
             assert.equal(delegatedSave.url,'/api/admin/users/admin%3A42');
             assert.equal(delegatedSave.method,'PUT');
-            assert.deepEqual(Object.keys(delegatedSave.payload).sort(),['canManageTopDashboard','dashboardAccess','dashboardAccessVersion','email','isActive','login','name','role','supportManagerId'],'delegated save has only existing metadata for server comparison and grants, never password fields');
+            assert.deepEqual(Object.keys(delegatedSave.payload).sort(),['canManageTopDashboard','dashboardAccess','dashboardAccessVersion','email','expectedRevision','isActive','login','name','role','supportManagerId'],'delegated save has only existing metadata for server comparison and grants, never password fields');
             assert.deepEqual({name:delegatedSave.payload.name,login:delegatedSave.payload.login,email:delegatedSave.payload.email,role:delegatedSave.payload.role,isActive:delegatedSave.payload.isActive,canManageTopDashboard:delegatedSave.payload.canManageTopDashboard,supportManagerId:delegatedSave.payload.supportManagerId},
               {name:'Тестовый закупщик',login:'buyer',email:'buyer@example.test',role:'purchaser',isActive:true,canManageTopDashboard:false,supportManagerId:null},'delegated update preserves all existing metadata');
             assert.deepEqual(delegatedSave.payload.dashboardAccess,['top:999','top:8']);

@@ -2,10 +2,15 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import { Client } from 'pg';
 import { AccessUserManagementError, AccessUserProfileForbiddenError, DashboardOptionsConflictError } from '../src/shared/lib/accessUserManagement';
-import { createAccessUser, deleteAccessUser, getAccessUsers, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
+import { createAccessUser, deleteAccessUser, getAccessUsers, updateAccessUser as saveAccessUser } from '../src/shared/lib/db/adminUsersRepo';
+import { createStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
 import { query } from '../src/shared/lib/db/client';
 import { dashboardGrantOptionsVersion, getDashboardAudience, getDashboardGrantOptions, setDashboardAudience } from '../src/shared/lib/db/dashboardAccessRepo';
+import { updateWholesaleManager as saveWholesaleManager } from '../src/shared/lib/db/wholesaleAdminRepo/managerRepo';
+import { RecordVersionConflictError } from '../src/shared/lib/recordVersion';
+import { currentAccessUserRevision, updateCurrentAccessUser as updateAccessUser } from './helpers/access-user-revision-fixtures';
 
 function guard() {
   assert.equal(process.env.KTS_PURCHASER_TEST, '1');
@@ -19,6 +24,26 @@ function guard() {
 const values = () => ({ name: 'Synthetic delegated user', login: `delegated-${randomUUID()}`, email: '', role: 'purchaser' as const,
   isActive: true, canManageTopDashboard: false, passwordHash: `synthetic-hash-${randomUUID()}`, dashboardAccess: [] as string[] });
 
+async function employeeState(user: { source: 'admin' | 'manager'; numericId: number }) {
+  const table = user.source === 'admin' ? 'admin_users' : 'wholesale_managers';
+  const column = user.source === 'admin' ? 'admin_user_id' : 'manager_id';
+  return {
+    profile: (await query(`select row_to_json(u.*) as profile from ${table} u where id=$1`, [user.numericId])).rows,
+    grants: (await query(`select key from dashboard_view_grants where ${column}=$1 order by key`, [user.numericId])).rows,
+    sessions: (await query(`select row_to_json(s.*) as session from admin_sessions s where ${column}=$1 order by id`, [user.numericId])).rows,
+  };
+}
+
+async function waitForEmployeeRowLock(table: string) {
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const blocked = await query<{ n: string }>(`select count(*)::text as n from pg_stat_activity
+      where datname=current_database() and wait_event_type='Lock' and query like $1`, [`%from ${table}%for update%`]);
+    if (Number(blocked.rows[0].n) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail('Synthetic stale employee save did not wait for the concurrent writer');
+}
+
 test('Admin TOP scoped account administration in isolated PostgreSQL', async (t) => {
   guard();
   try {
@@ -26,6 +51,105 @@ test('Admin TOP scoped account administration in isolated PostgreSQL', async (t)
     const admin = await createAccessUser(adminInput);
     const delegatedInput = { ...values(), role: 'admintop' as const };
     const delegated = await createAccessUser(delegatedInput);
+
+    await t.test('a pending old form cannot reactivate a concurrently disabled employee', async () => {
+      for (const role of ['purchaser', 'manager'] as const) {
+        const input = { ...values(), role };
+        const user = await createAccessUser(input);
+        const table = user.source === 'admin' ? 'admin_users' : 'wholesale_managers';
+        await createStoredAdminSession(user.source === 'admin'
+          ? { role, adminUserId: user.numericId } : { role, managerId: user.numericId });
+        const writer = new Client({ connectionString: process.env.DATABASE_URL });
+        await writer.connect();
+        let pending: Promise<unknown> | undefined;
+        try {
+          await writer.query('begin');
+          await writer.query(`update ${table} set is_active=false where id=$1`, [user.numericId]);
+          // The old save starts while the competing update still owns the row lock.
+          pending = saveAccessUser(user.id, {
+            ...input, passwordHash: undefined, name: 'Stale rename must not commit', expectedRevision: user.revision,
+          });
+          const rejected = assert.rejects(pending, RecordVersionConflictError);
+          await waitForEmployeeRowLock(table);
+          await writer.query('commit');
+          await rejected;
+          const state = await employeeState(user);
+          assert.equal(state.profile[0].profile.is_active, false);
+          assert.equal(state.profile[0].profile.name, input.name);
+          assert.equal(state.profile[0].profile.password_hash, input.passwordHash);
+          assert.equal(state.sessions[0].session.revoked_at, null, 'Rejected stale save must not revoke sessions');
+          assert.equal(await currentAccessUserRevision(user.id), (BigInt(user.revision) + BigInt(1)).toString());
+        } finally {
+          await writer.query('rollback').catch(() => {});
+          await pending?.catch(() => {});
+          await writer.end();
+        }
+      }
+    });
+
+    await t.test('two central forms from one revision commit exactly one whole change', async () => {
+      for (const role of ['purchaser', 'manager'] as const) {
+        const input = { ...values(), role };
+        const user = await createAccessUser(input);
+        const changes = [
+          { name: 'Concurrent disabled winner', isActive: false },
+          { name: 'Concurrent renamed winner', isActive: true },
+        ];
+        const results = await Promise.allSettled(changes.map((change) => saveAccessUser(user.id, {
+          ...input, ...change, passwordHash: undefined, expectedRevision: user.revision,
+        })));
+        assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+        const loser = results.find((result) => result.status === 'rejected');
+        assert.ok(loser && loser.status === 'rejected' && loser.reason instanceof RecordVersionConflictError);
+        const winnerIndex = results.findIndex((result) => result.status === 'fulfilled');
+        const current = (await getAccessUsers()).find((entry) => entry.id === user.id)!;
+        assert.equal(current.name, changes[winnerIndex].name);
+        assert.equal(current.isActive, changes[winnerIndex].isActive);
+        assert.equal(current.revision, (BigInt(user.revision) + BigInt(1)).toString());
+      }
+    });
+
+    await t.test('stale password, role and grant changes have no profile or session side effects', async () => {
+      const input = { ...values(), role: 'manager' as const };
+      const user = await createAccessUser(input);
+      await createStoredAdminSession({ role: 'manager', managerId: user.numericId });
+      await saveAccessUser(user.id, { ...input, passwordHash: undefined, name: 'Current profile', expectedRevision: user.revision });
+      const before = await employeeState(user);
+      for (const change of [
+        { passwordHash: 'synthetic-stale-password' }, { role: 'top' as const },
+        { isActive: false }, { dashboardAccess: ['currency-rates'] },
+      ]) {
+        await assert.rejects(saveAccessUser(user.id, {
+          ...input, passwordHash: undefined, ...change, expectedRevision: user.revision,
+        }), RecordVersionConflictError);
+        assert.deepEqual(await employeeState(user), before);
+      }
+      await assert.rejects(saveAccessUser(user.id, { ...input, passwordHash: undefined }), RecordVersionConflictError);
+      assert.deepEqual(await employeeState(user), before, 'An old client without a revision must fail closed');
+    });
+
+    await t.test('legacy and central manager editors share the same revision in both directions', async () => {
+      const input = { ...values(), role: 'manager' as const };
+      const user = await createAccessUser(input);
+      const legacy = { ...input, phone: '', canAccessTopDashboard: false, revokeSessions: false, passwordHash: undefined };
+      await saveAccessUser(user.id, { ...input, passwordHash: undefined, isActive: false, expectedRevision: user.revision });
+      const disabled = await employeeState(user);
+      await assert.rejects(saveWholesaleManager(user.numericId, {
+        ...legacy, name: 'Stale legacy activation', expectedRevision: user.revision,
+      }), RecordVersionConflictError);
+      assert.deepEqual(await employeeState(user), disabled);
+
+      const centralRevision = await currentAccessUserRevision(user.id);
+      const legacyResult = await saveWholesaleManager(user.numericId, {
+        ...legacy, isActive: false, phone: '+70000000999', expectedRevision: centralRevision,
+      });
+      assert.equal(legacyResult.revision, await currentAccessUserRevision(user.id));
+      const legacySaved = await employeeState(user);
+      await assert.rejects(saveAccessUser(user.id, {
+        ...input, passwordHash: undefined, email: 'stale@example.test', expectedRevision: centralRevision,
+      }), RecordVersionConflictError);
+      assert.deepEqual(await employeeState(user), legacySaved);
+    });
 
     await t.test('read projection excludes site administrators and all credential material', async () => {
       const result = await getAccessUsers(delegated.numericId, 'admintop');

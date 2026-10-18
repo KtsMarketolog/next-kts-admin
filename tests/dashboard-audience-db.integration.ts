@@ -7,7 +7,8 @@ import { hasDashboardManagementRight } from '../src/shared/lib/dashboardPermissi
 import { query } from '../src/shared/lib/db/client';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import { createTopDashboardBlock } from '../src/shared/lib/db/topDashboardBlocksRepo';
-import { createAccessUser, getAccessUsers, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
+import { createAccessUser, getAccessUsers } from '../src/shared/lib/db/adminUsersRepo';
+import { updateCurrentAccessUser as updateAccessUser } from './helpers/access-user-revision-fixtures';
 import { createStoredAdminSession, getStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
 import { DashboardAudienceForbiddenError, getDashboardAudience, getDashboardGrantOptions, setDashboardAudience } from '../src/shared/lib/db/dashboardAccessRepo';
 
@@ -78,7 +79,7 @@ test('all-employees policy isolated PostgreSQL acceptance', async (t) => {
       assert.equal(excluded.mode, 'all');
       assert.equal(excluded.users.find((item) => item.id === user.id)?.checked, false);
       await assert.rejects(setDashboardAudience(key, before.users.filter((item) => item.eligible).map((item) => item.id), before.version, 'all'), /изменены/);
-      await assert.rejects(updateAccessUser(user.id, {...input, passwordHash: undefined, dashboardAccess: current.dashboardAccess, dashboardAccessVersion: current.dashboardAccessVersion}), /другом окне/);
+      await assert.rejects(updateAccessUser(user.id, {...input, passwordHash: undefined, dashboardAccess: current.dashboardAccess, dashboardAccessVersion: current.dashboardAccessVersion}), /изменены другим пользователем/);
       const restored = await setDashboardAudience(key, [...excluded.users.filter((item) => item.eligible && item.checked).map((item) => item.id), user.id], excluded.version, 'all');
       assert.equal(restored.users.find((item) => item.id === user.id)?.checked, true);
       assert.equal(await getStoredAdminSession(stored.token), null, 'restoring access must not revive a revoked session');

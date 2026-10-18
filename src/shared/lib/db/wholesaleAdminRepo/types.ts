@@ -2,6 +2,7 @@ import type { WholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWo
 
 export type WholesaleManager = {
   id: number;
+  revision: string;
   name: string;
   login: string;
   email: string;
@@ -34,6 +35,7 @@ export type WholesaleManagerAuth = {
 
 export type WholesaleManagerProfile = {
   id: number;
+  revision: string;
   name: string;
   login: string;
   email: string;
@@ -121,6 +123,7 @@ export type WholesalePriceGroupStockSettingInput = {
 
 export type WholesalePriceListEditor = {
   id: number;
+  revision: string;
   title: string;
   clientCompanyId: number | null;
   clientName: string;

@@ -56,6 +56,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const editorReady = editorLoad.key === editorKey && editorLoad.state === 'ready';
   const editorLoadError = editorLoad.key === editorKey && editorLoad.state === 'error' ? editorLoad.message : '';
   const [editorSaveError, setEditorSaveError] = useState('');
+  const [editorSaveConflict, setEditorSaveConflict] = useState(false);
   const savingRef = useRef(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -193,6 +194,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       editorCompaniesRef.current = null;
       setEditorLoad({ key: editorKey, state: 'loading' });
       setEditorSaveError('');
+      setEditorSaveConflict(false);
       const [catalogData, nextClientCompanies, priceData] = await Promise.all([
         readWholesaleEditorResponse('/api/admin/wholesale/catalog', controller.signal, 'Не удалось загрузить каталог'),
         loadClientCompanies(controller.signal),
@@ -261,6 +263,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   }, [editorReady, editorKey, loadClientCompanies, screen]);
 
   const savePriceList = async () => {
+    if (editorSaveConflict) return;
     if (!editorReady || (screen === 'edit' && editor.id !== editId)) {
       setEditorSaveError('Дождитесь полной загрузки редактора. Сохранение недоступно.');
       return;
@@ -297,6 +300,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...editor,
+          expectedRevision: editor.revision,
           // Unavailable rows are retained in the model, but are not edited here.
           // With server-side upsert they remain untouched, including legacy overrides.
           items: editor.items.filter((item) => catalogDiscountBaseByKey.has(`${item.productId}:${item.variantId ?? 'base'}`)),
@@ -305,6 +309,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         }),
       });
       if (!res.ok) {
+        if (res.status === 409) setEditorSaveConflict(true);
         setEditorSaveError(await readApiError(res, 'Не удалось сохранить прайс'));
         return;
       }
@@ -466,7 +471,9 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         editorLoading={editorLoading}
         editorLoadError={editorLoadError}
         editorSaveError={editorSaveError}
+        editorSaveConflict={editorSaveConflict}
         retryEditorLoad={() => {
+          if (editorSaveConflict && !confirm('Загрузить актуальные данные? Ваши несохранённые изменения в этой форме будут заменены.')) return;
           setEditorLoad({ key: editorKey, state: 'loading' });
           setEditorLoadAttempt((attempt) => attempt + 1);
         }}

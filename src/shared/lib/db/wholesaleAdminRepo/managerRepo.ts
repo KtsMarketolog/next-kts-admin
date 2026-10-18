@@ -2,6 +2,7 @@ import { query, withTransaction } from '../client';
 import { ensureSiteSchema } from '../schema';
 import { revokeManagerSessions } from '../adminSessionsRepo';
 import { resolveEmployeePasswordCiphertext } from '../../employeePasswordVault';
+import { assertRecordRevision } from '../../recordVersion';
 import {
   normalizeLogin,
   normalizeManagerRole,
@@ -16,6 +17,7 @@ import type {
 
 type ManagerRow = {
   id: string;
+  revision: string;
   name: string;
   login: string;
   email: string;
@@ -34,6 +36,7 @@ type ManagerRow = {
 function mapManager(row: ManagerRow): WholesaleManager {
   return {
     id: Number(row.id),
+    revision: row.revision,
     name: row.name,
     login: row.login,
     email: row.email,
@@ -56,6 +59,7 @@ export async function getWholesaleManagers() {
   const result = await query<ManagerRow>(`
     select
       m.id::text,
+      m.revision::text,
       m.name,
       m.login,
       m.email,
@@ -128,6 +132,7 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
   await ensureSiteSchema();
   const result = await query<{
     id: string;
+    revision: string;
     name: string;
     login: string;
     email: string;
@@ -137,7 +142,7 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
     can_manage_top_dashboard: boolean;
     is_active: boolean;
   }>(
-    `select id::text, name, login, email, phone, coalesce(nullif(role, ''), 'manager') as role, can_access_top_dashboard, can_manage_top_dashboard, is_active
+    `select id::text, revision::text, name, login, email, phone, coalesce(nullif(role, ''), 'manager') as role, can_access_top_dashboard, can_manage_top_dashboard, is_active
      from wholesale_managers
      where id = $1
      limit 1`,
@@ -147,6 +152,7 @@ export async function getWholesaleManagerById(id: number): Promise<WholesaleMana
   if (!row) return null;
   return {
     id: Number(row.id),
+    revision: row.revision,
     name: row.name,
     login: row.login,
     email: row.email,
@@ -211,6 +217,7 @@ export async function createWholesaleManager(input: {
 export async function updateWholesaleManager(
   id: number,
   input: {
+    expectedRevision?: string;
     name: string;
     login: string;
     email: string;
@@ -228,22 +235,24 @@ export async function updateWholesaleManager(
   const supportManagerId = await normalizeWholesaleSupportManagerId(input.supportManagerId, id);
   const canManageTopDashboard = input.canManageTopDashboard === true;
   const canAccessTopDashboard = input.canAccessTopDashboard === true || canManageTopDashboard;
-  await withTransaction(async (client) => {
+  return withTransaction(async (client) => {
     const existing = await client.query<{
+      revision: string;
       password_hash: string; password_ciphertext: string | null; display_password: string | null;
       can_access_top_dashboard: boolean; can_manage_top_dashboard: boolean; is_active: boolean;
-    }>(`select password_hash, password_ciphertext, display_password,
+    }>(`select password_hash, password_ciphertext, display_password, revision::text,
                can_access_top_dashboard, can_manage_top_dashboard, is_active
         from wholesale_managers where id = $1 for update`, [id]);
     const previous = existing.rows[0];
     if (!previous) throw new Error('Менеджер не найден');
+    assertRecordRevision(input.expectedRevision, previous.revision);
     const passwordCiphertext = await resolveEmployeePasswordCiphertext({
       password: input.passwordHash ? input.password : undefined,
       passwordHash: input.passwordHash ?? previous.password_hash,
       previousCiphertext: previous.password_ciphertext,
       legacyPassword: input.passwordHash ? undefined : previous.display_password,
     });
-    await client.query(
+    const updated = await client.query<{ revision: string }>(
       `update wholesale_managers
        set name = $2,
            login = $3,
@@ -258,7 +267,7 @@ export async function updateWholesaleManager(
            can_access_top_dashboard = $10,
            can_manage_top_dashboard = $11,
            updated_at = now()
-       where id = $1`,
+       where id = $1 returning revision::text`,
       [
         id,
         input.name,
@@ -279,6 +288,7 @@ export async function updateWholesaleManager(
       || previous.can_manage_top_dashboard !== canManageTopDashboard) {
       await revokeManagerSessions(id, client);
     }
+    return { revision: updated.rows[0].revision };
   });
 }
 

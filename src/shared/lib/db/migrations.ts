@@ -16,6 +16,7 @@ import { applyDashboardProfitabilityAuditMigration } from './dashboardProfitabil
 import { applyDashboardUsageDetailsMigration } from './dashboardUsageDetailsMigration';
 import { applyPersonalDashboardRecipientMigration } from './managerDashboardRecipientMigration';
 import { applyCurrencyDashboardHtmlMigration } from './currencyDashboardHtmlMigration';
+import { applyRecordVersionMigration } from './recordVersionMigration';
 
 type SchemaMigration = {
   id: string;
@@ -854,6 +855,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610140001_dashboard_usage_details', description: 'Reviewed upload metadata and visible report time, preserving existing journal and business data', apply: applyDashboardUsageDetailsMigration},
   {id: '202610160001_personal_dashboard_leader_recipients', description: 'Add separately owned leader personal snapshots without modifying existing manager data', apply: applyPersonalDashboardRecipientMigration},
   {id: '202610160002_currency_dashboard_html_versions', description: 'Isolated immutable currency HTML drafts and atomic publication with rollback', apply: applyCurrencyDashboardHtmlMigration},
+  {id: '202610180001_record_write_versions', description: 'Optimistic record versions for employees and price lists, preserving existing data', apply: applyRecordVersionMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

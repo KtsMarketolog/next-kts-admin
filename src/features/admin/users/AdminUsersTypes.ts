@@ -3,6 +3,7 @@ export type UserTab = 'admin' | 'manager' | 'support_manager' | 'top' | 'adminto
 
 export type AccessUser = {
   id: string;
+  revision: string;
   source: 'admin' | 'manager';
   numericId: number;
   name: string;

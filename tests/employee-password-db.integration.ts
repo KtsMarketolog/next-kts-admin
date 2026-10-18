@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
-import { createAccessUser, getAccessUsers, updateAccessUser, type AccessUser } from '../src/shared/lib/db/adminUsersRepo';
+import { createAccessUser, getAccessUsers, type AccessUser } from '../src/shared/lib/db/adminUsersRepo';
 import { createStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
 import { query, withTransaction } from '../src/shared/lib/db/client';
 import { applyEmployeePasswordMigration } from '../src/shared/lib/db/employeePasswordMigration';
 import { readEmployeePassword } from '../src/shared/lib/db/employeePasswordRepo';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
-import { createWholesaleManager, getWholesaleManagers, updateWholesaleManager } from '../src/shared/lib/db/wholesaleAdminRepo/managerRepo';
+import { createWholesaleManager, getWholesaleManagers } from '../src/shared/lib/db/wholesaleAdminRepo/managerRepo';
+import { updateCurrentAccessUser as updateAccessUser, updateCurrentWholesaleManager as updateWholesaleManager } from './helpers/access-user-revision-fixtures';
 import { hashEmployeePassword } from '../src/shared/lib/employeePasswordHash';
 import { decryptEmployeePassword, verifyEmployeePasswordCopy } from '../src/shared/lib/employeePasswordVault';
 

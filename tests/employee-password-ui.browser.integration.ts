@@ -21,7 +21,7 @@ const wholesale=new URLSearchParams(location.search).has('wholesale');
 const delegated=new URLSearchParams(location.search).has('delegated');
 window.mode='ok';window.password='CurrentSynthetic123';window.calls=[];window.pending=[];window.copied=[];
 Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>window.copied.push(value)}});
-const users=[1,2].map(id=>({id:'manager:'+id,numericId:id,source:'manager',name:'Synthetic '+id,login:'synthetic-'+id,email:'',phone:'',role:'manager',isActive:true,canAccessTopDashboard:false,canManageTopDashboard:false,dashboardAccess:[],dashboardAccessVersion:'a'.repeat(64),accesses:[],priceListCount:0,supportManagerId:null,supportManagerName:'',isCurrent:false,displayPassword:'UnexpectedServerCopy123'}));
+const users=[1,2].map(id=>({id:'manager:'+id,revision:'1',numericId:id,source:'manager',name:'Synthetic '+id,login:'synthetic-'+id,email:'',phone:'',role:'manager',isActive:true,canAccessTopDashboard:false,canManageTopDashboard:false,dashboardAccess:[],dashboardAccessVersion:'a'.repeat(64),accesses:[],priceListCount:0,supportManagerId:null,supportManagerName:'',isCurrent:false,displayPassword:'UnexpectedServerCopy123'}));
 window.fetch=async(url,init={})=>{
   window.calls.push({url,method:init.method||'GET',cache:init.cache,payload:init.body?JSON.parse(init.body):null});
   if(!init.method)return Response.json(url.includes('/wholesale/')?{managers:users.map(u=>({...u,id:u.numericId}))}:{users,dashboardOptions:[],dashboardOptionsVersion:'b'.repeat(64)});
@@ -33,6 +33,7 @@ window.fetch=async(url,init={})=>{
       return Response.json({password:window.password});
     }
     if(init.method==='DELETE')return Response.json({ok:true});
+    if(window.mode==='conflict')return Response.json({error:'Данные уже изменены другим пользователем. Обновите данные и повторите изменения.',code:'RECORD_VERSION_CONFLICT'},{status:409});
     const body=JSON.parse(init.body);if(body.password)window.password=body.password;
     const numeric=Number(decodeURIComponent(url).split(':').pop())||Number(url.split('/').pop())||3;
     return Response.json(url.includes('/wholesale/')?{ok:true,id:3}:{user:{...users.find(u=>u.numericId===numeric)||users[0],...body,id:init.method==='POST'?'manager:3':'manager:'+numeric}});
@@ -164,6 +165,17 @@ async function main() {
           await first.getByRole('button', { name: 'Изменить пароль', exact: true }).click();
           assert.equal(await first.getByLabel('Текущий пароль', { exact: true }).inputValue(), '••••••••', 'editing hides the current password');
           await first.getByPlaceholder('Введите новый пароль').fill('UpdatedSynthetic572');
+          await first.getByLabel('Имя', { exact: true }).fill('Unsaved local employee');
+          const readsBeforeConflict = await page.evaluate('window.calls.filter(c=>c.method==="GET").length');
+          await page.evaluate('window.mode="conflict"');
+          await first.getByRole('button', { name: 'Сохранить', exact: true }).click();
+          await page.getByRole('alert').getByText(/изменены другим пользователем/).waitFor();
+          assert.equal(await first.getByLabel('Имя', { exact: true }).inputValue(), 'Unsaved local employee');
+          assert.equal(await first.getByPlaceholder('Введите новый пароль').inputValue(), 'UpdatedSynthetic572', 'conflict preserves the password draft');
+          assert.equal(await page.evaluate('window.calls.filter(c=>c.method==="GET").length'), readsBeforeConflict, 'conflict does not fetch a newer revision behind the editable draft');
+          assert.equal(await page.evaluate('window.calls.filter(c=>c.method==="PUT").at(-1).payload.expectedRevision'), '1');
+          assert.equal(await first.getByRole('button', { name: 'Сохранить', exact: true }).isEnabled(), true);
+          await page.getByRole('alert').getByText(/заменит несохранённые изменения/).waitFor();
           await page.evaluate('window.mode="hold"');
           await first.getByRole('button', { name: 'Сохранить', exact: true }).click();
           assert.equal(await first.getByPlaceholder('Введите новый пароль').isDisabled(), true);
@@ -177,6 +189,7 @@ async function main() {
           assert.equal(await first.getByLabel('Текущий пароль', { exact: true }).inputValue(), '••••••••', 'successful save never reveals its password');
           const write = await page.evaluate('window.calls.filter(c=>c.method==="PUT").at(-1)');
           assert.equal(write.payload.password, 'UpdatedSynthetic572');
+          assert.equal(write.payload.expectedRevision, '1', 'a retry still uses the original revision until explicit reload');
           assert.equal('displayPassword' in write.payload, false);
 
           await page.clock.fastForward(3_000);

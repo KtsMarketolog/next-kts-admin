@@ -34,7 +34,8 @@ import {
 import { prepareSupportSharedRoutePlannerUpload } from '../src/shared/lib/supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles } from '../src/shared/lib/topDashboardDataStorage';
 import { drainDashboardFileCleanup } from '../src/shared/lib/dashboardFileCleanup';
-import { getAccessUsers, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
+import { getAccessUsers } from '../src/shared/lib/db/adminUsersRepo';
+import { currentAccessUserRevision, updateCurrentAccessUser as updateAccessUser } from './helpers/access-user-revision-fixtures';
 import { getDashboardAudience, setDashboardAudience } from '../src/shared/lib/db/dashboardAccessRepo';
 
 function guard() {
@@ -145,7 +146,8 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         assert.equal(imported.status, 'imported');
         const savedSnapshot = (await query('select * from personal_dashboard_snapshots where manager_id=$1 order by id', [recipient.id])).rows;
         const savedState = (await query('select * from personal_dashboard_snapshot_state where manager_id=$1', [recipient.id])).rows;
-        const savedManager = (await query('select * from wholesale_managers where id=$1', [recipient.id])).rows;
+        const savedManager = (await query("select to_jsonb(m) - 'revision' - 'updated_at' as profile from wholesale_managers m where id=$1", [recipient.id])).rows;
+        const savedManagerRevision = await currentAccessUserRevision(`manager:${recipient.id}`);
         const savedPrice = (await query('select * from wholesale_price_lists where id=$1', [price.rows[0].id])).rows;
         const recipients = async () => (await listPersonalDashboardAdmin()).groups.find((group) => group.audience === audience)!.managers;
         assert.equal((await recipients()).find((item) => item.id === recipient.id)?.snapshot?.id, imported.snapshotId);
@@ -160,7 +162,9 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
         assert.equal((await recipients()).find((item) => item.id === recipient.id)?.snapshot?.id, imported.snapshotId, 'regrant restores the same saved snapshot');
         assert.deepEqual((await query('select * from personal_dashboard_snapshots where manager_id=$1 order by id', [recipient.id])).rows, savedSnapshot);
         assert.deepEqual((await query('select * from personal_dashboard_snapshot_state where manager_id=$1', [recipient.id])).rows, savedState);
-        assert.deepEqual((await query('select * from wholesale_managers where id=$1', [recipient.id])).rows, savedManager);
+        assert.deepEqual((await query("select to_jsonb(m) - 'revision' - 'updated_at' as profile from wholesale_managers m where id=$1", [recipient.id])).rows, savedManager);
+        assert.equal(await currentAccessUserRevision(`manager:${recipient.id}`), (BigInt(savedManagerRevision) + BigInt(2)).toString(),
+          'Each grant-only edit invalidates the previous employee form without changing its business profile');
         assert.deepEqual((await query('select * from wholesale_price_lists where id=$1', [price.rows[0].id])).rows, savedPrice);
         await query('update wholesale_managers set is_active=false where id=$1', [recipient.id]);
         assert.equal((await recipients()).some((item) => item.id === recipient.id), false, 'inactive employees stay hidden despite their grant');

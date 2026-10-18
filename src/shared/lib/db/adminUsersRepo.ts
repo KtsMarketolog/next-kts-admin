@@ -4,6 +4,7 @@ import { parseDashboardAccess } from '../dashboardAccess';
 import { AccessUserProfileForbiddenError, assertAccessUserManagementAllowed, assertDelegatedAccessOnly, DashboardOptionsConflictError } from '../accessUserManagement';
 import type { AdminSessionRole } from '../adminAuth';
 import { resolveEmployeePasswordCiphertext } from '../employeePasswordVault';
+import { assertRecordRevision, RecordVersionConflictError } from '../recordVersion';
 import { revokeAdminUserSessions, revokeManagerSessions } from './adminSessionsRepo';
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
@@ -28,6 +29,7 @@ export type AdminUserAuth = {
 
 export type AccessUser = {
   id: string;
+  revision: string;
   source: AccessUserSource;
   numericId: number;
   name: string;
@@ -48,6 +50,7 @@ export type AccessUser = {
 };
 
 type AccessUserInput = {
+  expectedRevision?: string;
   name: string;
   login: string;
   email: string;
@@ -65,6 +68,7 @@ type AccessUserInput = {
 type AccessUserRow = {
   source: AccessUserSource;
   id: string;
+  revision: string;
   name: string;
   login: string;
   email: string;
@@ -164,6 +168,7 @@ function mapAccessUser(row: AccessUserRow, currentAdminUserId?: number | null): 
   const canManageTopDashboard = normalizeTopManagementAccess(role, row.can_manage_top_dashboard);
   return {
     id: `${row.source}:${numericId}`,
+    revision: row.revision,
     source: row.source,
     numericId,
     name: row.name,
@@ -322,6 +327,7 @@ export async function getAccessUsers(currentAdminUserId?: number | null, actorRo
       select
         'admin'::text as source,
         au.id::text,
+        au.revision::text,
         au.name,
         au.login,
         au.email,
@@ -339,6 +345,7 @@ export async function getAccessUsers(currentAdminUserId?: number | null, actorRo
       select
         'manager'::text as source,
         wm.id::text,
+        wm.revision::text,
         wm.name,
         wm.login,
         wm.email,
@@ -394,6 +401,7 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
          returning
            'manager'::text as source,
            id::text,
+           revision::text,
            name,
            login,
            email,
@@ -421,6 +429,7 @@ export async function createAccessUser(input: AccessUserInput & { passwordHash: 
        returning
          'admin'::text as source,
          id::text,
+         revision::text,
          name,
          login,
          email,
@@ -472,6 +481,7 @@ export async function updateAccessUser(
         `select
            'admin'::text as source,
            id::text,
+           revision::text,
            name,
            login,
            email,
@@ -493,14 +503,16 @@ export async function updateAccessUser(
       const existingRow = existingResult.rows[0];
       if (!existingRow) throw new Error('Пользователь не найден');
       assertAccessUserManagementAllowed(actorRole, existingRow.role, input.role);
+      assertRecordRevision(input.expectedRevision, existingRow.revision);
       if (actorRole === 'admin') await assertLoginAvailable(input.login, parsed, client);
       const previous = mapAccessUser(existingRow, currentAdminUserId);
       previous.dashboardAccess = await getDashboardGrants(client,'admin',previous.numericId);
-      if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new Error('Доступы уже изменены в другом окне. Обновите список сотрудников.');
+      if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new RecordVersionConflictError();
       if (actorRole === 'admintop') {
         assertDelegatedAccessOnly(previous, input);
         const dashboardAccess = await saveDashboardAccess(client, previous.numericId, previous.role, input.dashboardAccess, previous);
-        const user = { ...previous, dashboardAccess, dashboardAccessVersion: dashboardAccessVersion(dashboardAccess) };
+        const touched = await client.query<{ revision: string; updated_at: string }>('update admin_users set updated_at = clock_timestamp() where id = $1 returning revision::text, updated_at::text', [previous.numericId]);
+        const user = { ...previous, revision: touched.rows[0].revision, updatedAt: touched.rows[0].updated_at, dashboardAccess, dashboardAccessVersion: dashboardAccessVersion(dashboardAccess) };
         return finishAccessUserUpdate(client, { previous, user, roleChanged: false, passwordChanged: false, permissionsChanged: dashboardAccessVersion(previous.dashboardAccess) !== user.dashboardAccessVersion });
       }
       const isSelf = previous.isCurrent;
@@ -533,6 +545,7 @@ export async function updateAccessUser(
            returning
              'manager'::text as source,
              id::text,
+             revision::text,
              name,
              login,
              email,
@@ -586,6 +599,7 @@ export async function updateAccessUser(
          returning
            'admin'::text as source,
            id::text,
+           revision::text,
            name,
            login,
            email,
@@ -630,6 +644,7 @@ export async function updateAccessUser(
       `select
          'manager'::text as source,
          wm.id::text,
+         wm.revision::text,
          wm.name,
          wm.login,
          wm.email,
@@ -655,14 +670,16 @@ export async function updateAccessUser(
     const existingRow = existingResult.rows[0];
     if (!existingRow) throw new Error('Пользователь не найден');
     assertAccessUserManagementAllowed(actorRole, existingRow.role, input.role);
+    assertRecordRevision(input.expectedRevision, existingRow.revision);
     if (actorRole === 'admin') await assertLoginAvailable(input.login, parsed, client);
     const previous = mapAccessUser(existingRow, currentAdminUserId);
     previous.dashboardAccess=await getDashboardGrants(client,'manager',previous.numericId);
-    if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new Error('Доступы уже изменены в другом окне. Обновите список сотрудников.');
+    if(input.dashboardAccessVersion!==undefined && input.dashboardAccessVersion!==dashboardAccessVersion(previous.dashboardAccess)) throw new RecordVersionConflictError();
     if (actorRole === 'admintop') {
       assertDelegatedAccessOnly(previous, input);
       const dashboardAccess = await saveDashboardAccess(client, previous.numericId, previous.role, input.dashboardAccess, previous);
-      const user = { ...previous, dashboardAccess, dashboardAccessVersion: dashboardAccessVersion(dashboardAccess) };
+      const touched = await client.query<{ revision: string; updated_at: string }>('update wholesale_managers set updated_at = clock_timestamp() where id = $1 returning revision::text, updated_at::text', [previous.numericId]);
+      const user = { ...previous, revision: touched.rows[0].revision, updatedAt: touched.rows[0].updated_at, dashboardAccess, dashboardAccessVersion: dashboardAccessVersion(dashboardAccess) };
       return finishAccessUserUpdate(client, { previous, user, roleChanged: false, passwordChanged: false, permissionsChanged: dashboardAccessVersion(previous.dashboardAccess) !== user.dashboardAccessVersion });
     }
     const passwordCiphertext = await resolveEmployeePasswordCiphertext({
@@ -691,6 +708,7 @@ export async function updateAccessUser(
          returning
            'admin'::text as source,
            id::text,
+           revision::text,
            name,
            login,
            email,
@@ -749,6 +767,7 @@ export async function updateAccessUser(
        returning
          'manager'::text as source,
          id::text,
+         revision::text,
          name,
          login,
          email,
@@ -801,6 +820,7 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
         `select
            'admin'::text as source,
            id::text,
+           revision::text,
            name,
            login,
            email,
@@ -834,6 +854,7 @@ export async function deleteAccessUser(id: string, currentAdminUserId?: number |
       `select
          'manager'::text as source,
          wm.id::text,
+         wm.revision::text,
          wm.name,
          wm.login,
          wm.email,

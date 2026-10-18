@@ -11,6 +11,7 @@ import { shouldRevokeManagerSessionsForUpdate } from '@/shared/lib/managerSessio
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { parseRecordRevision, RecordVersionConflictError } from '@/shared/lib/recordVersion';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
 type Context = {
@@ -49,6 +50,11 @@ export async function PUT(request: Request, context: Context) {
   if (!name || !login) {
     return Response.json({ error: 'Имя и логин обязательны' }, { status: 400 });
   }
+  const expectedRevision = parseRecordRevision(body.expectedRevision);
+  if (!expectedRevision) {
+    const conflict = new RecordVersionConflictError();
+    return Response.json({ error: conflict.message, code: conflict.code }, { status: 409 });
+  }
   if (password) {
     const passwordPolicy = validatePasswordPolicy(password);
     if (!passwordPolicy.ok) {
@@ -83,8 +89,10 @@ export async function PUT(request: Request, context: Context) {
     activeStateChanged,
   });
 
+  let updated: { revision: string };
   try {
-    await updateWholesaleManager(numericId, {
+    updated = await updateWholesaleManager(numericId, {
+      expectedRevision,
       name,
       login,
       email,
@@ -98,6 +106,7 @@ export async function PUT(request: Request, context: Context) {
       revokeSessions,
     });
   } catch (error) {
+    if (error instanceof RecordVersionConflictError) return Response.json({ error: error.message, code: error.code }, { status: 409 });
     return Response.json({ error: error instanceof Error ? error.message : 'Не удалось сохранить менеджера' }, { status: 400 });
   }
 
@@ -124,7 +133,7 @@ export async function PUT(request: Request, context: Context) {
     },
   });
 
-  return Response.json({ ok: true });
+  return Response.json({ ok: true, revision: updated.revision });
 }
 
 export async function DELETE(request: Request, context: Context) {

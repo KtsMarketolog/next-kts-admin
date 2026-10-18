@@ -246,7 +246,9 @@ export function AdminUsersSection({ showStatus, canManageSiteAdmins = true }: Ad
     }
     if (nextPassword && !validatePasswordBeforeSave(nextPassword)) return;
 
-    const payload = canManageSiteAdmins ? { ...withoutEmployeePassword(user), password: nextPassword } : {
+    // Keep the revision loaded with this editable row, never replace it from a background read.
+    const payload = canManageSiteAdmins ? { ...withoutEmployeePassword(user), expectedRevision: user.revision, password: nextPassword } : {
+      expectedRevision: user.revision,
       name: user.name, login: user.login, email: user.email, role: user.role,
       isActive: user.isActive, canManageTopDashboard: user.canManageTopDashboard,
       supportManagerId: user.supportManagerId, dashboardAccess: user.dashboardAccess,

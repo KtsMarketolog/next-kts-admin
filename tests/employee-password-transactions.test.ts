@@ -8,12 +8,14 @@ import * as management from '../src/shared/lib/accessUserManagement';
 import * as dashboardAccess from '../src/shared/lib/dashboardAccess';
 import { hashEmployeePassword } from '../src/shared/lib/employeePasswordHash';
 import * as vault from '../src/shared/lib/employeePasswordVault';
+import * as versions from '../src/shared/lib/recordVersion';
 
 type CentralRepo = typeof import('../src/shared/lib/db/adminUsersRepo');
 type ManagerRepo = typeof import('../src/shared/lib/db/wholesaleAdminRepo/managerRepo');
 type SessionRepo = typeof import('../src/shared/lib/db/adminSessionsRepo');
 type Source = 'admin' | 'manager';
 type Row = {
+  revision: string;
   source: Source; id: string; name: string; login: string; email: string; phone: string; role: string;
   is_active: boolean; can_manage_top_dashboard: boolean; can_access_top_dashboard: boolean;
   price_list_count: string; support_manager_id: null; support_manager_name: string;
@@ -47,6 +49,7 @@ function load<T>(path: string, dependencies: Record<string, unknown>): T {
 
 function harness(source: Source = 'manager', overrides: Partial<Row> = {}) {
   const original: Row = {
+    revision: '1',
     source, id: '42', name: 'Synthetic', login: 'synthetic', email: '', phone: '',
     role: source === 'admin' ? 'top' : 'manager', is_active: true,
     can_manage_top_dashboard: false, can_access_top_dashboard: false,
@@ -86,6 +89,7 @@ function harness(source: Source = 'manager', overrides: Partial<Row> = {}) {
       const move = sql.includes('coalesce($6::text, password_hash)');
       const old = move ? current(destination === 'admin' ? 'manager' : 'admin', args[7]) : undefined;
       const row = structuredClone(old ?? original);
+      row.revision = '1';
       row.source = destination; row.id = '43'; row.name = String(args[0]); row.login = String(args[1]); row.email = String(args[2]);
       row.role = String(args[legacy ? 4 : 3]);
       row.password_hash = String(args[legacy ? 8 : 5] ?? old?.password_hash);
@@ -99,6 +103,8 @@ function harness(source: Source = 'manager', overrides: Partial<Row> = {}) {
     if (sql.startsWith('update admin_users') || sql.startsWith('update wholesale_managers')) {
       const destination: Source = sql.startsWith('update admin_users') ? 'admin' : 'manager';
       const row = current(destination, args[0]); assert.ok(row);
+      row.revision = String(BigInt(row.revision) + BigInt(1));
+      if (sql.includes('set updated_at = clock_timestamp()')) { events.push('touch'); return result(row); }
       const legacy = sql.includes('phone = $5');
       const hashIndex = destination === 'admin' ? 6 : legacy ? 5 : 4;
       assert.match(sql, /password_hash = case when \$\d+::text is null then password_hash else \$\d+ end/);
@@ -138,6 +144,7 @@ function harness(source: Source = 'manager', overrides: Partial<Row> = {}) {
   });
   const central = load<CentralRepo>('src/shared/lib/db/adminUsersRepo.ts', {
     '../dashboardAccess': dashboardAccess, '../accessUserManagement': management, '../employeePasswordVault': vault,
+    '../recordVersion': versions,
     './adminSessionsRepo': sessions, './client': transport, './schema': schema,
     './dashboardAccessRepo': {
       DASHBOARD_ACCESS_LOCK: 'synthetic-lock', dashboardAccessVersion: (keys: string[]) => JSON.stringify(keys),
@@ -150,9 +157,11 @@ function harness(source: Source = 'manager', overrides: Partial<Row> = {}) {
   });
   const managers = load<ManagerRepo>('src/shared/lib/db/wholesaleAdminRepo/managerRepo.ts', {
     '../client': transport, '../schema': schema, '../adminSessionsRepo': sessions, '../../employeePasswordVault': vault,
+    '../../recordVersion': versions,
     './managerHelpers': { normalizeLogin: (login: string) => login.trim().toLowerCase(), normalizeManagerRole: (role?: string) => role || 'manager', normalizeWholesaleSupportManagerId: async () => null },
   });
   const input = { name: original.name, login: original.login, email: original.email, role: original.role as 'top' | 'manager',
+    expectedRevision: original.revision,
     isActive: original.is_active, canManageTopDashboard: original.can_manage_top_dashboard, supportManagerId: null };
   const legacyInput = { ...input, phone: '', canAccessTopDashboard: false, revokeSessions: false };
   return { central, managers, state, control, events, input, legacyInput, original };
@@ -245,7 +254,7 @@ test('delegated dashboard edits revoke atomically but cannot mutate protected pr
   assert.equal(h.state.rows[0].password_hash, oldHash);
   assert.equal(h.state.rows[0].password_ciphertext, h.original.password_ciphertext);
   for (const change of [{ passwordHash: newHash, password: newPassword }, { name: 'Forbidden' }, { role: 'admin' as const }]) {
-    await assert.rejects(h.central.updateAccessUser('manager:42', { ...h.input, ...change }, null, 'admintop'), /только|управляет/);
+    await assert.rejects(h.central.updateAccessUser('manager:42', { ...h.input, expectedRevision: h.state.rows[0].revision, ...change }, null, 'admintop'), /только|управляет/);
   }
 });
 
@@ -269,4 +278,48 @@ test('legacy manager create stores only ciphertext; lists never reveal legacy pl
   const listed = await h.managers.getWholesaleManagers();
   assert.ok(listed.every((manager) => manager.displayPassword === ''));
   assert.doesNotMatch(JSON.stringify(listed), /SyntheticOld123|SyntheticNew456|password_hash|password_ciphertext/);
+});
+
+for (const source of ['admin', 'manager'] as const) {
+  test(`${source}: stale profile cannot reactivate an account, change its password or move its role`, async () => {
+    const h = harness(source);
+    const disabled = await h.central.updateAccessUser(`${source}:42`, { ...h.input, isActive: false });
+    assert.equal(disabled.user.revision, '2');
+    const snapshot = structuredClone(h.state);
+    const previousEvents = [...h.events];
+    for (const expectedRevision of [undefined, '', '0', '1', '999']) {
+      await assert.rejects(h.central.updateAccessUser(`${source}:42`, {
+        ...h.input, expectedRevision, name: 'Stale edit', isActive: true,
+        passwordHash: newHash, password: newPassword,
+        role: source === 'admin' ? 'manager' : 'top',
+      }), versions.RecordVersionConflictError);
+      assert.deepEqual(h.state, snapshot, 'no credentials, grants, profile or session side effects');
+      assert.deepEqual(h.events, previousEvents, 'conflict detected before any write');
+    }
+    const fresh = await h.central.updateAccessUser(`${source}:42`, {
+      ...h.input, expectedRevision: disabled.user.revision, isActive: false, name: 'Fresh edit',
+    });
+    assert.equal(fresh.user.revision, '3');
+    assert.equal(fresh.user.isActive, false);
+  });
+}
+
+test('legacy and central manager editors share one revision, including delegated access-only edits', async () => {
+  const h = harness();
+  const legacy = await h.managers.updateWholesaleManager(42, { ...h.legacyInput, isActive: false });
+  assert.equal(legacy.revision, '2');
+  await assert.rejects(h.central.updateAccessUser('manager:42', h.input), versions.RecordVersionConflictError);
+  const delegated = await h.central.updateAccessUser('manager:42', {
+    ...h.input, expectedRevision: legacy.revision, isActive: false, dashboardAccess: ['currency-rates'],
+  }, null, 'admintop');
+  assert.equal(delegated.user.revision, '3');
+  const snapshot = structuredClone(h.state);
+  await assert.rejects(h.managers.updateWholesaleManager(42, {
+    ...h.legacyInput, expectedRevision: legacy.revision, passwordHash: newHash, password: newPassword,
+  }), versions.RecordVersionConflictError);
+  assert.deepEqual(h.state, snapshot);
+  const fresh = await h.managers.updateWholesaleManager(42, {
+    ...h.legacyInput, expectedRevision: delegated.user.revision, isActive: false, name: 'Fresh legacy edit',
+  });
+  assert.equal(fresh.revision, '4');
 });

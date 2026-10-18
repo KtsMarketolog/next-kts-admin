@@ -95,6 +95,7 @@ export function useWholesaleManagers({ showStatus }: UseWholesaleManagersOptions
     await runAction(async (committed) => {
       await employeeRequest(`/api/admin/wholesale/managers/${manager.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...withoutEmployeePassword(manager),
+          expectedRevision: manager.revision,
           name: manager.name.trim(), login: manager.login.trim(), email: manager.email.trim(), phone: manager.phone.trim(), password, supportManagerId: null,
         }),
       }, { mutation: true });

@@ -7,6 +7,7 @@ import type { CatalogCategory, ClientCompanyOption, PriceEditor, PriceGroupStock
 
 export type PriceListPayload = {
   id?: number;
+  revision?: string;
   title?: string | null;
   clientCompanyId?: number | null;
   clientName?: string | null;
@@ -52,6 +53,7 @@ export function buildPriceEditorFromPayload(
   const selectedClientCompany = clientCompanies.find((company) => company.id === priceList.clientCompanyId) ?? null;
   return {
     id: priceList.id,
+    revision: priceList.revision,
     title: priceList.title ?? '',
     clientCompanyId: priceList.clientCompanyId ?? null,
     clientName: priceList.clientName ?? '',

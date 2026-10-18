@@ -11,6 +11,7 @@ import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { parseRecordRevision, RecordVersionConflictError } from '@/shared/lib/recordVersion';
 import { normalizeWholesalePriceWorkflowStatus } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import { resolveWholesalePriceListManagerAssignment } from '@/shared/lib/wholesalePriceListAccess';
 import {
@@ -92,6 +93,11 @@ export async function PUT(request: Request, context: Context) {
   }
   const existing = await getWholesalePriceListEditor(numericId, session);
   if (!existing) return Response.json({ error: 'Not found' }, { status: 404 });
+  const expectedRevision = parseRecordRevision(body.expectedRevision);
+  if (!expectedRevision) {
+    const conflict = new RecordVersionConflictError();
+    return Response.json({ error: conflict.message, code: conflict.code }, { status: 409 });
+  }
 
   const title = normalizeTextField(body.title, 160);
   if (!title) return Response.json({ error: 'Title is required' }, { status: 400 });
@@ -117,10 +123,12 @@ export async function PUT(request: Request, context: Context) {
     return Response.json({ error: 'Выберите менеджера по сопровождению' }, { status: 400 });
   }
 
+  let revision: string;
   try {
-    await updateWholesalePriceList(
+    revision = await updateWholesalePriceList(
       numericId,
       {
+        expectedRevision,
         title,
         clientCompanyId,
         clientName: normalizeTextField(body.clientName, 200),
@@ -140,13 +148,16 @@ export async function PUT(request: Request, context: Context) {
       session,
     );
   } catch (error) {
+    if (error instanceof RecordVersionConflictError) {
+      return Response.json({ error: error.message, code: error.code }, { status: 409 });
+    }
     return Response.json({ error: getWholesalePriceSaveError(error) }, { status: 400 });
   }
 
   try { publishClientRealtimeEvent({ type: 'client.updated', companyId: clientCompanyId }); }
   catch { console.error('price_saved_realtime_notification_failed'); }
 
-  return Response.json({ ok: true });
+  return Response.json({ ok: true, revision });
 }
 
 export async function DELETE(request: Request, context: Context) {

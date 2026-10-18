@@ -6,6 +6,7 @@ import ts from 'typescript';
 import * as access from '../src/shared/lib/dashboardAccess';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 import * as userManagement from '../src/shared/lib/accessUserManagement';
+import * as versions from '../src/shared/lib/recordVersion';
 
 type Route = {
   GET(): Promise<Response>;
@@ -26,6 +27,7 @@ function routes(authorized = true) {
     '@/shared/lib/adminSecurity': {enforceAdminActionRateLimit: async () => null},
     '@/shared/lib/dashboardAccess': access,
     '@/shared/lib/accessUserManagement': userManagement,
+    '@/shared/lib/recordVersion': versions,
     '@/shared/lib/db/dashboardAccessRepo':{dashboardGrantOptionsVersion:()=> 'a'.repeat(64),getDashboardGrantOptions:async()=>{reads++;return [...access.DASHBOARD_REPORT_OPTIONS,{key:'top:7',title:'Аналитика продаж'},{key:'top:12',title:'Новый отчёт'}];}},
     '@/shared/lib/db': {
       getAccessUsers: async () => {reads++; return [user];},
@@ -63,7 +65,7 @@ function request(method: string, dashboardAccess: unknown) {
   return new Request('https://example.test/api/admin/users', {method,
     headers: {origin: 'https://example.test', 'content-type': 'application/json'},
     body: JSON.stringify({name: 'Synthetic', login: 'buyer', role: 'purchaser', password: 'Synthetic12345',
-      isActive: true, canManageTopDashboard: true, dashboardAccess,dashboardAccessVersion:'a'.repeat(64),dashboardOptionsVersion:'a'.repeat(64)})});
+      isActive: true, canManageTopDashboard: true, expectedRevision: '1', dashboardAccess,dashboardAccessVersion:'a'.repeat(64),dashboardOptionsVersion:'a'.repeat(64)})});
 }
 
 test('admin options contain all current dashboards, private scopes are enforced separately', async () => {

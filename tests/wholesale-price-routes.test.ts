@@ -7,11 +7,12 @@ import * as save from '../src/shared/lib/wholesalePriceSave';
 import * as security from '../src/shared/lib/wholesaleSecurity';
 import * as access from '../src/shared/lib/wholesalePriceListAccess';
 import * as workflow from '../src/shared/lib/wholesalePriceWorkflowStatus';
+import * as versions from '../src/shared/lib/recordVersion';
 
 // Execute the actual handlers. Stub only IO/auth, not the body parser or handler
 // control flow. No connection to an application database is possible here.
 function handler(method: 'POST' | 'PUT', options: { saveError?: Error; notificationError?: boolean } = {}) {
-  const writes: Array<{ items: unknown[] }> = [];
+  const writes: Array<{ items: unknown[]; expectedRevision?: string }> = [];
   let assignments = 0;
   let notifications = 0;
   const filename = method === 'POST'
@@ -26,6 +27,7 @@ function handler(method: 'POST' | 'PUT', options: { saveError?: Error; notificat
     '@/shared/lib/wholesaleSecurity': security,
     '@/shared/lib/wholesalePriceListAccess': access,
     '@/shared/lib/wholesalePriceWorkflowStatus': workflow,
+    '@/shared/lib/recordVersion': versions,
     '@/shared/lib/adminAuth': { requireEmployee: async () => ({ session: { role: 'admin' } }) },
     '@/shared/lib/adminSecurity': { enforceAdminActionRateLimit: async () => null },
     '@/shared/lib/originProtection': { enforceSameOriginRequest: () => null },
@@ -36,14 +38,14 @@ function handler(method: 'POST' | 'PUT', options: { saveError?: Error; notificat
     '@/shared/lib/db/securityAuditRepo': {},
     '@/shared/lib/rateLimit': {},
     '@/shared/lib/db': {
-      getWholesalePriceListEditor: async () => ({ token: 'existing-token-not-changed' }),
+      getWholesalePriceListEditor: async () => ({ token: 'existing-token-not-changed', revision: '7' }),
       createWholesalePriceList: async (input: { items: unknown[] }) => {
         if (options.saveError) throw options.saveError;
         writes.push(input); return 45;
       },
       updateWholesalePriceList: async (_id: number, input: { items: unknown[] }) => {
         if (options.saveError) throw options.saveError;
-        writes.push(input);
+        writes.push(input); return '8';
       },
       updateClientCompanyManagerAssignments: async () => { assignments++; },
     },
@@ -59,7 +61,7 @@ function handler(method: 'POST' | 'PUT', options: { saveError?: Error; notificat
 
 function payload() {
   return {
-    title: 'Synthetic large price', clientCompanyId: 1, managerId: 2, supportManagerId: 3,
+    title: 'Synthetic large price', clientCompanyId: 1, managerId: 2, supportManagerId: 3, expectedRevision: '7',
     items: Array.from({ length: 7474 }, (_, i) => ({
       productId: i + 1, variantId: null, visible: i >= 5000, priceManuallyChanged: i === 7473,
       customWholesalePrice: '123.45', discountPercent: '61', sortOrder: i + 1,
@@ -77,6 +79,10 @@ for (const method of ['POST', 'PUT'] as const) {
     assert.deepEqual(h.writes[0].items, body.items);
     assert.equal(h.assignments(), 0, 'company assignment belongs to the database transaction, not a second route write');
     assert.equal(h.notifications(), 1);
+    if (method === 'PUT') {
+      assert.equal(h.writes[0].expectedRevision, '7');
+      assert.equal((await response.json()).revision, '8');
+    }
   });
 
   test(`${method} rejected atomic save does not publish an event or run a second assignment write`, async () => {
@@ -118,3 +124,25 @@ for (const method of ['POST', 'PUT'] as const) {
     assert.equal(h.assignments(), 0);
   });
 }
+
+test('PUT returns a distinct 409 for stale revisions and never publishes a successful-save event', async () => {
+  const h = handler('PUT', { saveError: new versions.RecordVersionConflictError() });
+  const response = await h.run(new Request('https://example.test/api/price', { method: 'PUT', body: JSON.stringify(payload()) }));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, 'RECORD_VERSION_CONFLICT');
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.notifications(), 0);
+});
+
+test('PUT fails closed for older clients with no valid expected revision, rather than adopting a fresh server token', async () => {
+  for (const expectedRevision of [undefined, null, '', '0', 7, '7.0']) {
+    const h = handler('PUT');
+    const response = await h.run(new Request('https://example.test/api/price', {
+      method: 'PUT', body: JSON.stringify({ ...payload(), expectedRevision }),
+    }));
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, 'RECORD_VERSION_CONFLICT');
+    assert.equal(h.writes.length, 0);
+    assert.equal(h.notifications(), 0);
+  }
+});

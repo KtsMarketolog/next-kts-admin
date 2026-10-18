@@ -274,7 +274,7 @@ test('wholesale assignment sync starts after editor init and uses its exact snap
       else editor = update;
     },
     setEditorLoad: (value: { state: string }) => { assert.notEqual(value.state, 'error'); editorReady = value.state === 'ready'; },
-    setEditorSaveError: () => {}, setClientCompanies: () => {}, setCatalog: () => {},
+    setEditorSaveError: () => {}, setEditorSaveConflict: () => {}, setClientCompanies: () => {}, setCatalog: () => {},
     startClientRealtimeSync: env.start,
     readWholesaleEditorResponse: async () => ({ priceList: { id: 45, clientCompanyId: 1, clientName: 'Initial company', token: 'synthetic-token' } }),
     parseWholesaleEditorCatalog: () => [],

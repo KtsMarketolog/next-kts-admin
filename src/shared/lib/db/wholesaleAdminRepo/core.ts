@@ -1,4 +1,5 @@
 import type { AdminSession } from '@/shared/lib/adminAuth';
+import { assertRecordRevision } from '@/shared/lib/recordVersion';
 import {
   getWholesalePriceListAccessScope,
   resolveWholesalePriceListManagerAssignment,
@@ -380,97 +381,103 @@ export async function getWholesaleCatalog() {
 export async function getWholesalePriceListEditor(id: number, session?: AdminSession | null) {
   await ensureSiteSchema();
   const scope = getWholesalePriceListAccessScope(session);
-  const priceList = await query<
-    Omit<WholesalePriceListEditor, 'id' | 'items' | 'clientCompanyId' | 'managerId' | 'supportManagerId' | 'priceGroupStockSettings'> & {
-      id: string;
-      client_company_id: string | null;
-      manager_id: string | null;
-      support_manager_id: string | null;
-    }
-  >(
-    `select id::text, title, client_company_id::text, client_name as "clientName", token, valid_until::text as "validUntil",
-            comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", show_stock as "showStock",
-            show_stock_text as "showStockText", is_active as "isActive", manager_id::text, support_manager_id::text
-     from wholesale_price_lists
-     where id = $1
-       and (
-         $2::bigint is null
-         or ($3::text = 'manager' and manager_id = $2)
-         or ($3::text = 'support_manager' and (support_manager_id = $2 or manager_id = $2))
-       )
-     limit 1`,
-    [id, scope.managerId, scope.role],
-  );
-  const row = priceList.rows[0];
-  if (!row) return null;
+  // Header/version, items and group settings must belong to the same committed
+  // snapshot. Separate READ COMMITTED queries can pair old rows with a new token.
+  return withTransaction(async (client) => {
+    await client.query('set transaction isolation level repeatable read read only');
+    const priceList = await client.query<
+      Omit<WholesalePriceListEditor, 'id' | 'items' | 'clientCompanyId' | 'managerId' | 'supportManagerId' | 'priceGroupStockSettings'> & {
+        id: string;
+        client_company_id: string | null;
+        manager_id: string | null;
+        support_manager_id: string | null;
+      }
+    >(
+      `select id::text, revision::text, title, client_company_id::text, client_name as "clientName", token, valid_until::text as "validUntil",
+              comment, workflow_status as "workflowStatus", show_retail_prices as "showRetailPrices", show_stock as "showStock",
+              show_stock_text as "showStockText", is_active as "isActive", manager_id::text, support_manager_id::text
+       from wholesale_price_lists
+       where id = $1
+         and (
+           $2::bigint is null
+           or ($3::text = 'manager' and manager_id = $2)
+           or ($3::text = 'support_manager' and (support_manager_id = $2 or manager_id = $2))
+         )
+       limit 1`,
+      [id, scope.managerId, scope.role],
+    );
+    const row = priceList.rows[0];
+    if (!row) return null;
 
-  const items = await query<{
-    product_id: string;
-    variant_id: string | null;
-    custom_wholesale_price: string | null;
-    discount_percent: string | null;
-    price_manually_changed: boolean;
-    visible: boolean;
-    sort_order: number;
-  }>(
-    `select wholesale_product_id::text as product_id,
-            wholesale_variant_id::text as variant_id,
-            custom_wholesale_price::text,
-            discount_percent::text,
-            price_manually_changed,
-            visible,
-            sort_order
-     from wholesale_price_list_items
-     where price_list_id = $1
-     order by sort_order asc, id asc`,
-    [id],
-  );
-  const groupStockSettings = await query<{
-    price_group: string;
-    show_stock_numbers: boolean;
-    show_stock_text: boolean;
-  }>(
-    `select price_group, show_stock_numbers, show_stock_text
-     from wholesale_price_list_group_stock_settings
-     where price_list_id = $1
-     order by lower(price_group) asc`,
-    [id],
-  );
+    const items = await client.query<{
+      product_id: string;
+      variant_id: string | null;
+      custom_wholesale_price: string | null;
+      discount_percent: string | null;
+      price_manually_changed: boolean;
+      visible: boolean;
+      sort_order: number;
+    }>(
+      `select wholesale_product_id::text as product_id,
+              wholesale_variant_id::text as variant_id,
+              custom_wholesale_price::text,
+              discount_percent::text,
+              price_manually_changed,
+              visible,
+              sort_order
+       from wholesale_price_list_items
+       where price_list_id = $1
+       order by sort_order asc, id asc`,
+      [id],
+    );
+    const groupStockSettings = await client.query<{
+      price_group: string;
+      show_stock_numbers: boolean;
+      show_stock_text: boolean;
+    }>(
+      `select price_group, show_stock_numbers, show_stock_text
+       from wholesale_price_list_group_stock_settings
+       where price_list_id = $1
+       order by lower(price_group) asc`,
+      [id],
+    );
 
-  return {
-    id: Number(row.id),
-    title: row.title,
-    clientCompanyId: row.client_company_id ? Number(row.client_company_id) : null,
-    clientName: row.clientName,
-    token: row.token,
-    validUntil: row.validUntil,
-    comment: row.comment,
-    workflowStatus: normalizeWholesalePriceWorkflowStatus(row.workflowStatus),
-    showRetailPrices: row.showRetailPrices,
-    showStock: row.showStock !== false,
-    showStockText: row.showStockText === true,
-    isActive: row.isActive,
-    managerId: row.manager_id ? Number(row.manager_id) : null,
-    supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
-    items: items.rows.map((item) => ({
-      productId: Number(item.product_id),
-      variantId: item.variant_id ? Number(item.variant_id) : null,
-      customWholesalePrice: item.custom_wholesale_price,
-      discountPercent: item.discount_percent,
-      priceManuallyChanged: item.price_manually_changed === true,
-      visible: item.visible,
-      sortOrder: item.sort_order,
-    })),
-    priceGroupStockSettings: groupStockSettings.rows.map((setting) => ({
-      priceGroup: setting.price_group,
-      showStock: setting.show_stock_numbers === true,
-      showStockText: setting.show_stock_text === true,
-    })),
-  };
+    return {
+      id: Number(row.id),
+      revision: row.revision,
+      title: row.title,
+      clientCompanyId: row.client_company_id ? Number(row.client_company_id) : null,
+      clientName: row.clientName,
+      token: row.token,
+      validUntil: row.validUntil,
+      comment: row.comment,
+      workflowStatus: normalizeWholesalePriceWorkflowStatus(row.workflowStatus),
+      showRetailPrices: row.showRetailPrices,
+      showStock: row.showStock !== false,
+      showStockText: row.showStockText === true,
+      isActive: row.isActive,
+      managerId: row.manager_id ? Number(row.manager_id) : null,
+      supportManagerId: row.support_manager_id ? Number(row.support_manager_id) : null,
+      items: items.rows.map((item) => ({
+        productId: Number(item.product_id),
+        variantId: item.variant_id ? Number(item.variant_id) : null,
+        customWholesalePrice: item.custom_wholesale_price,
+        discountPercent: item.discount_percent,
+        priceManuallyChanged: item.price_manually_changed === true,
+        visible: item.visible,
+        sortOrder: item.sort_order,
+      })),
+      priceGroupStockSettings: groupStockSettings.rows.map((setting) => ({
+        priceGroup: setting.price_group,
+        showStock: setting.show_stock_numbers === true,
+        showStockText: setting.show_stock_text === true,
+      })),
+    };
+  });
 }
 
 export async function createWholesalePriceList(
-  input: Omit<WholesalePriceListEditor, 'id'>,
+  input: Omit<WholesalePriceListEditor, 'id' | 'revision'>,
   session?: AdminSession | null,
 ) {
   await ensureSiteSchema();
@@ -529,7 +536,7 @@ export async function createWholesalePriceList(
 
 export async function updateWholesalePriceList(
   id: number,
-  input: Omit<WholesalePriceListEditor, 'id'>,
+  input: Omit<WholesalePriceListEditor, 'id' | 'revision'> & { expectedRevision: string },
   session?: AdminSession | null,
 ) {
   await ensureSiteSchema();
@@ -538,11 +545,12 @@ export async function updateWholesalePriceList(
   const managerId = assignment.managerId;
   const supportManagerId = assignment.supportManagerId;
   const actor = actorMeta(session);
-  const { previousRow, previousVisibleItems, nextVisibleItems, event, clientCompany, nextInput } = await withTransaction(async (client) => {
+  const { previousRow, previousVisibleItems, nextVisibleItems, event, clientCompany, nextInput, revision } = await withTransaction(async (client) => {
     const clientCompany = await lockPriceListCompany(client, input.clientCompanyId, assignment, session);
     const nextInput = { ...input, clientCompanyId: clientCompany.id, clientName: clientCompany.title };
     const execute: PriceListWriteQuery = (text, params) => client.query(text, params);
     const previous = await client.query<{
+      revision: string;
       title: string;
       client_name: string;
       manager_id: string | null;
@@ -550,7 +558,7 @@ export async function updateWholesalePriceList(
       workflow_status: string | null;
       is_active: boolean;
     }>(
-      `select title, client_name, manager_id::text, valid_until::text, workflow_status, is_active
+      `select revision::text, title, client_name, manager_id::text, valid_until::text, workflow_status, is_active
        from wholesale_price_lists
        where id = $1
          and (
@@ -564,6 +572,7 @@ export async function updateWholesalePriceList(
     );
     const previousRow = previous.rows[0];
     if (!previousRow) throw new Error('Прайс не найден или недоступен. Обновите страницу.');
+    assertRecordRevision(input.expectedRevision, previousRow.revision);
     const previousItems = await client.query<{ count: string }>(
       `select count(*)::text as count from wholesale_price_list_items where price_list_id = $1 and visible = true`,
       [id],
@@ -619,7 +628,8 @@ export async function updateWholesalePriceList(
     };
     await writePriceListEventRow(event, execute);
     await writePriceListCompanyAssignment(client, clientCompany.id, assignment);
-    return { previousRow, previousVisibleItems, nextVisibleItems, event, clientCompany, nextInput };
+    const saved = await client.query<{ revision: string }>('select revision::text from wholesale_price_lists where id = $1', [id]);
+    return { previousRow, previousVisibleItems, nextVisibleItems, event, clientCompany, nextInput, revision: saved.rows[0].revision };
   });
   await trackAnalyticsEvent(priceListEventAnalytics(event));
   const baseEvent = {
@@ -682,6 +692,7 @@ export async function updateWholesalePriceList(
       },
     });
   }
+  return revision;
 }
 
 export async function updateWholesalePriceListManagerAssignmentsForClientCompany(

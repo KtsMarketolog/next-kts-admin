@@ -13,7 +13,7 @@ const catalog: CatalogCategory[] = [{ id: 0, title: 'Без категории',
   description: '', imageUrl: null, priceGroup: '', priceGroupImageUrl: null, priceEur: null, priceRub: '100', priceCny: null,
   generalDiscount: null, manualDiscount: null, manualDiscountRop: null, stock: 0, unit: null, isExpected: false,
   stockUpdatedAt: null, variants: [{ id: null, title: 'Цена', wholesalePrice: '100', retailPrice: null }] }] }];
-const detail = () => ({ id: 11, title: 'Price', clientCompanyId: 3, clientName: 'Client', token: 'synthetic', validUntil: null,
+const detail = () => ({ id: 11, revision: '42', title: 'Price', clientCompanyId: 3, clientName: 'Client', token: 'synthetic', validUntil: null,
   comment: '', workflowStatus: 'not_sent', showRetailPrices: false, showStock: true, showStockText: false, isActive: true,
   managerId: 4, supportManagerId: 5, items: [item, inactiveItem, inactiveVariant],
   priceGroupStockSettings: [{ priceGroup: 'Inactive group', showStock: true, showStockText: false }] });
@@ -64,7 +64,7 @@ test('successful empty catalogue is accepted but missing, partial, duplicate or 
 test('detail requires correct identity and complete stored arrays; invalid rows cannot become default items', () => {
   assert.equal(parseWholesaleEditorPrice({ priceList: detail() }, 11).id, 11);
   assert.deepEqual(parseWholesaleEditorPrice({ priceList: { ...detail(), items: [], priceGroupStockSettings: [] } }, 11).items, []);
-  for (const price of [null, {}, { ...detail(), id: 12 }, { ...detail(), items: undefined }, { ...detail(), items: {} },
+  for (const price of [null, {}, { ...detail(), id: 12 }, { ...detail(), revision: undefined }, { ...detail(), revision: '0' }, { ...detail(), items: undefined }, { ...detail(), items: {} },
     { ...detail(), items: [null] }, { ...detail(), items: [item, item] }, { ...detail(), items: [{ ...item, visible: undefined }] },
     { ...detail(), workflowStatus: undefined }, { ...detail(), workflowStatus: 'unknown' },
     { ...detail(), priceGroupStockSettings: undefined }, { ...detail(), priceGroupStockSettings: [{}] }]) {
@@ -74,6 +74,7 @@ test('detail requires correct identity and complete stored arrays; invalid rows 
 
 test('loaded editor retains absent rows and inactive group stock settings independently from active display', () => {
   const editor = buildPriceEditorFromPayload(parseWholesaleEditorPrice({ priceList: detail() }, 11), catalog, []);
+  assert.equal(editor.revision, '42');
   assert.deepEqual(editor.items, detail().items);
   assert.deepEqual(editor.priceGroupStockSettings, { 'inactive group': detail().priceGroupStockSettings[0] });
 });

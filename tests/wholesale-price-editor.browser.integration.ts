@@ -15,6 +15,7 @@ import {AdminWholesaleGateway} from './src/features/admin/wholesale/AdminWholesa
 const params=new URLSearchParams(location.search);
 window.calls=[]; window.navigations=[]; window.pending=[];
 window.fault=params.get('fault')||''; window.writeFault=''; window.hold=''; window.catalogMode=params.get('catalog')||'normal';
+window.priceRevision='7';window.pricePatch={};
 window.navigate=href=>{history.pushState(null,'',href);window.dispatchEvent(new Event('fixture:navigate'));};
 window.EventSource=class{addEventListener(){}removeEventListener(){}close(){}};
 window.fixtureItems=[
@@ -26,19 +27,20 @@ window.fixtureItems=[
   {productId:999,variantId:null,customWholesalePrice:'0',discountPercent:'0',priceManuallyChanged:true,visible:false,sortOrder:91},
 ];
 const managers=[{id:7,name:'Synthetic MR',login:'synthetic-mr',role:'manager'}, {id:8,name:'Synthetic MS',login:'synthetic-ms',role:'support_manager'}]
- .map(row=>({...row,email:'',phone:'',supportManagerId:null,supportManagerName:'',isActive:true,canAccessTopDashboard:false,canManageTopDashboard:false,priceListCount:1}));
+ .map(row=>({...row,revision:'1',email:'',phone:'',supportManagerId:null,supportManagerName:'',isActive:true,canAccessTopDashboard:false,canManageTopDashboard:false,priceListCount:1}));
 const companies=[{id:5,title:'Synthetic company',managerId:7,supportManagerId:8,isActive:true}];
 const product=(id,variants)=>({id,title:'Synthetic product '+id,sku:'S-'+id,model:'',description:'',imageUrl:null,priceGroup:'Synthetic group',priceGroupImageUrl:null,priceEur:null,priceRub:'100.00',priceCny:null,generalDiscount:null,manualDiscount:null,manualDiscountRop:null,stock:2,unit:'шт.',isExpected:false,stockUpdatedAt:null,variants});
 const variant=(id)=>({id,title:id===null?'Base':'Variant '+id,retailPrice:'120.00',wholesalePrice:'100.00'});
 const categories=[{id:1,title:'Synthetic category',products:[product(101,[variant(null)]),product(102,[variant(12),variant(14)]),product(103,[variant(null)])]}];
-const priceList=id=>({id,title:'Synthetic price '+id,clientCompanyId:5,clientName:'Synthetic company',token:'synthetic-token-'+id,validUntil:'',comment:'preserved comment',workflowStatus:'not_sent',showRetailPrices:false,showStock:true,showStockText:false,isActive:true,managerId:7,supportManagerId:8,items:window.fixtureItems,priceGroupStockSettings:[{priceGroup:'Inactive group',showStock:true,showStockText:false}]});
+const priceList=id=>({id,revision:window.priceRevision,title:'Synthetic price '+id,clientCompanyId:5,clientName:'Synthetic company',token:'synthetic-token-'+id,validUntil:'',comment:'preserved comment',workflowStatus:'not_sent',showRetailPrices:false,showStock:true,showStockText:false,isActive:true,managerId:7,supportManagerId:8,items:window.fixtureItems,priceGroupStockSettings:[{priceGroup:'Inactive group',showStock:true,showStockText:false}],...window.pricePatch});
 window.fetch=async(input,init={})=>{
   const url=String(input),method=init.method||'GET';
   window.calls.push({url,method,body:init.body?JSON.parse(init.body):null});
   if(method!=='GET'){
     if(window.writeFault==='reject')throw new TypeError('Synthetic save interruption');
     if(window.writeFault==='http')return Response.json({error:'Synthetic save unavailable'},{status:503});
-    return Response.json({ok:true,id:41});
+    if(method==='PUT'&&JSON.parse(init.body).expectedRevision!==window.priceRevision)return Response.json({error:'Данные уже изменены другим пользователем. Обновите данные и повторите изменения.',code:'RECORD_VERSION_CONFLICT'},{status:409});
+    return Response.json({ok:true,id:41,revision:String(Number(window.priceRevision)+1)});
   }
   const target=url==='/api/admin/wholesale/catalog'?'catalog':url==='/api/admin/clients'?'clients':/^\\/api\\/admin\\/wholesale\\/price-lists\\/\\d+$/.test(url)?'detail':'';
   const id=target==='detail'?Number(url.split('/').pop()):null;
@@ -51,6 +53,7 @@ window.fetch=async(input,init={})=>{
   if(fault==='catalog-nested'&&target==='catalog')payload={categories:[{id:1,title:'Broken category',products:null}]};
   if(fault==='detail-items'&&target==='detail')payload={priceList:{...priceList(id),items:null}};
   if(fault==='detail-id'&&target==='detail')payload={priceList:priceList(id+1)};
+  if(fault==='detail-revision'&&target==='detail')payload={priceList:{...priceList(id),revision:undefined}};
   const captured=JSON.stringify(payload);
   const finish=()=>{
     if(fault===target+'-reject')throw new TypeError('Synthetic network interruption');
@@ -137,7 +140,7 @@ async function main() {
         for (const fault of [
           'catalog-http', 'catalog-reject', 'catalog-json', 'catalog-shape', 'catalog-nested',
           'clients-http', 'clients-reject', 'clients-json', 'clients-shape',
-          'detail-http', 'detail-reject', 'detail-json', 'detail-shape', 'detail-items', 'detail-id',
+          'detail-http', 'detail-reject', 'detail-json', 'detail-shape', 'detail-items', 'detail-id', 'detail-revision',
         ]) {
           await page.goto(`${origin}/admin/wholesale/41/edit?fault=${fault}`);
           await blocked();
@@ -147,7 +150,7 @@ async function main() {
           await page.getByRole('button', { name: /Повторить/ }).click();
           await ready();
         }
-        console.log(`${engineName}: 15 HTTP/network/JSON/shape failures fail closed and retry recovers`);
+        console.log(`${engineName}: 16 HTTP/network/JSON/shape/revision failures fail closed and retry recovers`);
 
         // Creation needs the same protection; a successful empty response is not an error response.
         await page.goto(`${origin}/admin/wholesale/create?fault=catalog-http`);
@@ -215,6 +218,52 @@ async function main() {
           await page.waitForFunction('window.navigations.length===1');
           assert.equal((await writes()).length, 2, 'successful explicit retry remains available');
         }
+
+        // Another admin saves different prices while this editor has an unsaved comment.
+        // A 409 must keep the draft and its original revision, not silently rebase it.
+        await page.goto(`${origin}/admin/wholesale/41/edit`);
+        await ready();
+        const comment = page.getByLabel(/^Комментарий/);
+        await title.fill('Unsaved local title');
+        await comment.fill('Unsaved local comment');
+        const readsBeforeConflict = await page.evaluate('window.calls.filter(call=>call.method==="GET"&&call.url==="/api/admin/wholesale/price-lists/41").length');
+        await page.evaluate('window.priceRevision="8";window.pricePatch={title:"New server price",comment:"New server comment"};window.fixtureItems=window.fixtureItems.map(item=>item.productId===101?{...item,customWholesalePrice:"95.30"}:item)');
+        await save.click();
+        await page.getByRole('heading', { name: 'Прайс уже изменён другим пользователем' }).waitFor();
+        assert.equal((await writes())[0].body.expectedRevision, '7');
+        assert.equal((await writes())[0].body.items.find((item: { productId: number }) => item.productId === 101).customWholesalePrice, '81.25');
+        assert.equal(await title.inputValue(), 'Unsaved local title');
+        assert.equal(await comment.inputValue(), 'Unsaved local comment');
+        assert.equal(await save.isDisabled(), true);
+        assert.equal(await page.evaluate('window.navigations.length'), 0);
+        await page.clock.fastForward(15_001);
+        assert.equal(await page.evaluate('window.calls.filter(call=>call.method==="GET"&&call.url==="/api/admin/wholesale/price-lists/41").length'), readsBeforeConflict, 'background sync does not rebase the stale price revision');
+        assert.equal(await title.inputValue(), 'Unsaved local title');
+        assert.equal((await writes()).length, 1);
+
+        const reload = page.getByRole('button', { name: 'Загрузить актуальные данные', exact: true });
+        page.once('dialog', async (dialog: { type(): string; message(): string; dismiss(): Promise<void> }) => {
+          assert.equal(dialog.type(), 'confirm');
+          assert.match(dialog.message(), /несохранённые изменения/);
+          await dialog.dismiss();
+        });
+        await reload.click();
+        assert.equal(await title.inputValue(), 'Unsaved local title');
+        assert.equal(await comment.inputValue(), 'Unsaved local comment');
+        assert.equal(await page.evaluate('window.calls.filter(call=>call.method==="GET"&&call.url==="/api/admin/wholesale/price-lists/41").length'), readsBeforeConflict);
+        page.once('dialog', async (dialog: { accept(): Promise<void> }) => { await dialog.accept(); });
+        await reload.click();
+        await ready('New server price');
+        assert.equal(await comment.inputValue(), 'New server comment');
+        await comment.fill('Local comment after explicit reload');
+        await save.click();
+        await page.waitForFunction('window.navigations.length===1');
+        const rebased = (await writes())[1].body;
+        assert.equal(rebased.expectedRevision, '8');
+        assert.equal(rebased.title, 'New server price');
+        assert.equal(rebased.comment, 'Local comment after explicit reload');
+        assert.equal(rebased.items.find((item: { productId: number }) => item.productId === 101).customWholesalePrice, '95.30', 'explicit reload preserves the other administrator’s new price');
+        console.log(`${engineName}: conflict keeps draft/version, blocks silent resave, and confirmed reload pairs fresh fields with fresh revision`);
 
         // A loaded editor must not remain saveable while a different route loads or fails.
         await page.goto(`${origin}/admin/wholesale/41/edit`);

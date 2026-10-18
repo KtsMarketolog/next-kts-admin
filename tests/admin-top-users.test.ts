@@ -7,6 +7,7 @@ import { isAdminManagementSession, isTopDashboardManagementSession } from '../sr
 import { canAssignDashboardAccess } from '../src/shared/lib/dashboardPermissions';
 import * as management from '../src/shared/lib/accessUserManagement';
 import * as dashboards from '../src/shared/lib/dashboardAccess';
+import * as versions from '../src/shared/lib/recordVersion';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 import { roleOptionsForTab, USER_TABS } from '../src/features/admin/users/AdminUsersConfig';
 import { defaultDashboardAccess, readDashboardOptions } from '../src/features/admin/users/AdminUsersDashboardAccess';
@@ -60,6 +61,7 @@ function api(session: AdminSession | null) {
     },
     '@/shared/lib/employeePasswordHash': { hashEmployeePassword: async () => 'hash-not-for-response' },
     '@/shared/lib/accessUserManagement': management,
+    '@/shared/lib/recordVersion': versions,
     '@/shared/lib/adminSecurity': { enforceAdminActionRateLimit: async () => null },
     '@/shared/lib/dashboardAccess': dashboards,
     '@/shared/lib/db/dashboardAccessRepo': { getDashboardGrantOptions: async () => [{ key: 'top:7', title: 'Shared' }], dashboardGrantOptionsVersion: () => 'a'.repeat(64) },
@@ -74,6 +76,7 @@ function api(session: AdminSession | null) {
       updateAccessUser: async (id: string, input: Record<string, unknown>, _currentId: number, actorRole: AdminSessionRole) => {
         const user = users.find((item) => item.id === id)!;
         management.assertAccessUserManagementAllowed(actorRole, user.role, String(input.role));
+        versions.assertRecordRevision(input.expectedRevision, '1');
         if (actorRole === 'admintop') management.assertDelegatedAccessOnly(user as Parameters<typeof management.assertDelegatedAccessOnly>[0], input as Parameters<typeof management.assertDelegatedAccessOnly>[1]);
         writes.push({ input, actorRole });
         return { previous: user, user, passwordChanged: Boolean(input.passwordHash), permissionsChanged: true };
@@ -107,9 +110,22 @@ const context = (id = 'manager:5') => ({ params: Promise.resolve({ id }) });
 function request(method: string, overrides: Record<string, unknown> = {}, origin = 'https://example.test') {
   return new Request('https://example.test/api/admin/users', {
     method, headers: { origin, 'Content-Type': 'application/json' },
-    ...(method === 'DELETE' ? {} : { body: JSON.stringify({ name: 'Employee', login: 'employee', email: '', role: 'manager', password: method === 'POST' ? 'StrongNewPassword123' : '', dashboardAccess: ['top:7'], dashboardAccessVersion: 'a'.repeat(64), dashboardOptionsVersion: 'a'.repeat(64), ...overrides }) }),
+    ...(method === 'DELETE' ? {} : { body: JSON.stringify({ name: 'Employee', login: 'employee', email: '', role: 'manager', expectedRevision: '1', password: method === 'POST' ? 'StrongNewPassword123' : '', dashboardAccess: ['top:7'], dashboardAccessVersion: 'a'.repeat(64), dashboardOptionsVersion: 'a'.repeat(64), ...overrides }) }),
   });
 }
+
+test('missing or stale employee revisions return an explicit conflict without writes or audit success events', async () => {
+  for (const expectedRevision of [undefined, '', '0', 1, '2']) {
+    const scoped = api(delegated);
+    const response = await scoped.item.PUT(request('PUT', { expectedRevision }), context());
+    assert.equal(response.status, 409);
+    const body = await response.json();
+    assert.equal(body.code, 'RECORD_VERSION_CONFLICT');
+    assert.match(body.error, /изменены другим пользователем/);
+    assert.deepEqual(scoped.writes, []);
+    assert.deepEqual(scoped.audits, []);
+  }
+});
 
 test('Admin TOP users API scopes reads and never returns protected admin profile or credentials', async () => {
   const scoped = api(delegated);

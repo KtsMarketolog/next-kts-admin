@@ -7,7 +7,8 @@ import { Client } from 'pg';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import { query } from '../src/shared/lib/db/client';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
-import { createWholesalePriceList, getWholesaleCatalog, getWholesalePriceListEditor, updateWholesalePriceList } from '../src/shared/lib/db/wholesaleAdminRepo/core';
+import { createWholesalePriceList, getWholesaleCatalog, getWholesalePriceListEditor, updateWholesalePriceList as updateVersionedWholesalePriceList } from '../src/shared/lib/db/wholesaleAdminRepo/core';
+import { RecordVersionConflictError } from '../src/shared/lib/recordVersion';
 import type { WholesalePriceListEditor, WholesalePriceListItemInput } from '../src/shared/lib/db/wholesaleAdminRepo/types';
 import { getPublicWholesalePriceList, getPublicWholesaleRequestItems } from '../src/shared/lib/db/wholesaleRepo';
 import { parseWholesalePriceItems, readWholesalePriceSaveBody } from '../src/shared/lib/wholesalePriceSave';
@@ -26,8 +27,15 @@ function guard() {
   assert.equal(url.searchParams.get('port'), '55474');
 }
 
-type SaveInput = Omit<WholesalePriceListEditor, 'id'>;
+type SaveInput = Omit<WholesalePriceListEditor, 'id' | 'revision'>;
 const admin: AdminSession = { role: 'admin' };
+// Existing acceptance cases model a freshly loaded editor unless they explicitly
+// pass its revision. Conflict cases below deliberately reuse the same version.
+async function updateWholesalePriceList(id: number, input: SaveInput & { revision?: string; expectedRevision?: string }, session: AdminSession) {
+  const expectedRevision = input.expectedRevision ?? input.revision
+    ?? (await query<{ revision: string }>('select revision::text from wholesale_price_lists where id=$1', [id])).rows[0]?.revision;
+  return updateVersionedWholesalePriceList(id, { ...input, expectedRevision }, session);
+}
 async function normalized(items: WholesalePriceListItemInput[]) {
   const request = new Request('http://localhost/api/test-price', {
     method: 'POST', body: JSON.stringify({ items }), headers: { 'content-type': 'application/json' },
@@ -163,7 +171,9 @@ test('wholesale full-catalogue saves in isolated PostgreSQL', { timeout: 180_000
       assert.ok(before);
       await updateWholesalePriceList(priceId, { ...before, items: await normalized(before.items) }, admin);
       const after = await getWholesalePriceListEditor(priceId, admin);
-      assert.deepEqual(after, before);
+      assert.ok(after);
+      assert.ok(BigInt(after.revision) > BigInt(before.revision));
+      assert.deepEqual({ ...after, revision: before.revision }, before);
     });
 
     await t.test('resaving preserves old prices, tokens, item IDs, snapshots and an already open basket', async () => {
@@ -327,17 +337,59 @@ test('wholesale full-catalogue saves in isolated PostgreSQL', { timeout: 180_000
       assert.deepEqual(await stableState(priceId), before);
     });
 
-    await t.test('concurrent updates serialize overlapping keys without deleting rows omitted by a partial payload', async () => {
-      const first = { ...savedInput, title: 'Concurrent A', items: makeItems(7475).map((row) => ({ ...row, visible: true })) };
-      const second = { ...savedInput, title: 'Concurrent B', items: makeItems(20001).map((row) => ({ ...row, visible: false })) };
-      await Promise.all([updateWholesalePriceList(priceId, first, admin), updateWholesalePriceList(priceId, second, admin)]);
+    await t.test('two concurrent old forms cannot overwrite each other; exactly one commits without deleting omitted rows', async () => {
+      const before = (await getWholesalePriceListEditor(priceId, admin))!;
+      const first = { ...before, title: 'Concurrent A', items: makeItems(7475).map((row) => ({ ...row, visible: true })) };
+      const second = { ...before, title: 'Concurrent B', items: makeItems(20001).map((row) => ({ ...row, visible: false })) };
+      const outcomes = await Promise.allSettled([updateWholesalePriceList(priceId, first, admin), updateWholesalePriceList(priceId, second, admin)]);
+      assert.equal(outcomes.filter((result) => result.status === 'fulfilled').length, 1);
+      const rejected = outcomes.find((result) => result.status === 'rejected');
+      assert.ok(rejected?.status === 'rejected' && rejected.reason instanceof RecordVersionConflictError);
       const editor = await getWholesalePriceListEditor(priceId, admin);
       assert.ok(editor);
       assert.ok(['Concurrent A', 'Concurrent B'].includes(editor.title));
       const expected = editor.title === first.title
-        ? [...first.items, ...second.items.slice(first.items.length)] : second.items;
+        ? [...first.items, ...before.items.slice(first.items.length)] : second.items;
       assert.deepEqual(editor.items, canonical(expected));
       assert.equal(editor.items.length, 20001, 'the shorter update cannot delete the other stored keys');
+    });
+
+    await t.test('stale comment save preserves newer prices, settings, events and company assignments; explicit reload succeeds', async () => {
+      const original = (await getWholesalePriceListEditor(priceId, admin))!;
+      const latestItems = original.items.map((item, index) => index === 0
+        ? { ...item, customWholesalePrice: '345.67', priceManuallyChanged: true } : item);
+      const revision = await updateWholesalePriceList(priceId, { ...original, items: latestItems, comment: 'First administrator' }, admin);
+      const committed = await stableState(priceId), committedCompany = await companyState(), committedTotals = await totals();
+      await assert.rejects(updateWholesalePriceList(priceId, { ...original, comment: 'Stale administrator', managerId: otherManagerId }, admin), RecordVersionConflictError);
+      assert.deepEqual(await stableState(priceId), committed);
+      assert.deepEqual(await companyState(), committedCompany);
+      assert.deepEqual(await totals(), committedTotals);
+      const fresh = (await getWholesalePriceListEditor(priceId, admin))!;
+      assert.equal(fresh.revision, revision);
+      assert.equal(fresh.items[0].customWholesalePrice, '345.67');
+      await updateWholesalePriceList(priceId, { ...fresh, comment: 'Reloaded administrator' }, admin);
+      assert.equal((await getWholesalePriceListEditor(priceId, admin))!.items[0].customWholesalePrice, '345.67');
+    });
+
+    await t.test('child-only price and stock-setting changes invalidate an already loaded editor', async () => {
+      for (const sql of [
+        'update wholesale_price_list_items set custom_wholesale_price=345.68 where id=(select id from wholesale_price_list_items where price_list_id=$1 order by id limit 1)',
+        'update wholesale_price_list_group_stock_settings set show_stock_text=not show_stock_text where price_list_id=$1',
+      ]) {
+        const stale = (await getWholesalePriceListEditor(priceId, admin))!;
+        await query(sql, [priceId]);
+        const committed = await stableState(priceId);
+        await assert.rejects(updateWholesalePriceList(priceId, { ...stale, comment: 'MUST NOT APPLY' }, admin), RecordVersionConflictError);
+        assert.deepEqual(await stableState(priceId), committed);
+      }
+    });
+
+    await t.test('missing or malformed expected revision cannot bypass repository concurrency protection', async () => {
+      const before = await stableState(priceId);
+      for (const expectedRevision of [undefined, '', '0', '1.1', '999999999999999999999999999999999999']) {
+        await assert.rejects(updateVersionedWholesalePriceList(priceId, { ...savedInput, expectedRevision: expectedRevision as string }, admin), RecordVersionConflictError);
+        assert.deepEqual(await stableState(priceId), before);
+      }
     });
 
     await t.test('wrong, missing and inactive manager assignments reject create/update without any partial price', async () => {

@@ -12,6 +12,7 @@ import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { parseRecordRevision, RecordVersionConflictError } from '@/shared/lib/recordVersion';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
 const ACCESS_ROLES = new Set<AccessUserRole>(['admin', 'wholesale_admin', 'manager', 'support_manager', 'top', 'admintop', 'purchaser']);
@@ -66,6 +67,11 @@ export async function PUT(request: Request, context: Context) {
   if (!name || !login || !role) {
     return badRequest('Имя, логин и роль обязательны');
   }
+  const expectedRevision = parseRecordRevision(body.expectedRevision);
+  if (!expectedRevision) {
+    const conflict = new RecordVersionConflictError();
+    return Response.json({ error: conflict.message, code: conflict.code }, { status: 409 });
+  }
   if (password) {
     const passwordPolicy = validatePasswordPolicy(password);
     if (!passwordPolicy.ok) {
@@ -77,6 +83,7 @@ export async function PUT(request: Request, context: Context) {
     const result = await updateAccessUser(
       id,
       {
+        expectedRevision,
         name,
         login,
         email,
@@ -139,6 +146,7 @@ export async function PUT(request: Request, context: Context) {
 
     return Response.json({ user: result.user });
   } catch (error) {
+    if (error instanceof RecordVersionConflictError) return Response.json({ error: error.message, code: error.code }, { status: 409 });
     if (error instanceof AccessUserManagementError || error instanceof AccessUserProfileForbiddenError) return badRequest(error.message, 403);
     return badRequest(error instanceof Error ? error.message : 'Не удалось сохранить пользователя');
   }

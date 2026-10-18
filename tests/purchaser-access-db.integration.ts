@@ -9,7 +9,8 @@ import { withTransaction } from '../src/shared/lib/db/client';
 import { applyDashboardAccessMigration } from '../src/shared/lib/db/dashboardAccessMigration';
 import { getDashboardAudience,setDashboardAudience } from '../src/shared/lib/db/dashboardAccessRepo';
 import { canViewDashboard } from '../src/shared/lib/dashboardAccess';
-import { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
+import { createAccessUser, deleteAccessUser, getAccessUsers, getAdminUserByLogin } from '../src/shared/lib/db/adminUsersRepo';
+import { updateCurrentAccessUser as updateAccessUser } from './helpers/access-user-revision-fixtures';
 import { createStoredAdminSession, getStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
 import { createTopDashboardBlock } from '../src/shared/lib/db/topDashboardBlocksRepo';
 import { consumeTwoFactorChallenge, createTwoFactorChallenge } from '../src/shared/lib/db/twoFactorRepo';
@@ -188,7 +189,7 @@ test('purchaser access isolated PostgreSQL acceptance', async (t) => {
       assert.ok(latest.dashboardAccess.includes(key));
       assert.equal(canViewDashboard(await getStoredAdminSession(stored.token),key),true);
       assert.equal(isTopDashboardManagementSession(await getStoredAdminSession(stored.token)),false);
-      await assert.rejects(updateAccessUser(manager.id,{...values,passwordHash:undefined,dashboardAccess:[],dashboardAccessVersion:oldUser.dashboardAccessVersion}),/другом окне/);
+      await assert.rejects(updateAccessUser(manager.id,{...values,passwordHash:undefined,dashboardAccess:[],dashboardAccessVersion:oldUser.dashboardAccessVersion}),/изменены другим пользователем/);
       const removed=await updateAccessUser(manager.id,{...values,passwordHash:undefined,dashboardAccess:['manager:development'],dashboardAccessVersion:latest.dashboardAccessVersion});
       assert.equal(removed.user.role,'manager');assert.equal(removed.user.numericId,manager.numericId);
       assert.equal(await getStoredAdminSession(stored.token),null);

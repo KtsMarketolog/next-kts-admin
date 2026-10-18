@@ -80,7 +80,7 @@ export function AdminUsersView({
 
       {!canManageSiteAdmins && <p className={styles.mutedText}>Можно создавать сотрудников и назначать доступ к отчётам. Изменение существующих профилей, паролей и удаление — только у администратора сайта. Его учётные записи здесь не отображаются.</p>}
 
-      {requestError && <div role="alert"><p>{requestError}</p><button type="button" disabled={busyId !== null || loading} onClick={() => void reloadUsers()}>Обновить список и проверить результат</button></div>}
+      {requestError && <div role="alert"><p>{requestError}</p><p>Обновление списка заменит несохранённые изменения в формах актуальными данными сервера.</p><button type="button" disabled={busyId !== null || loading} onClick={() => void reloadUsers()}>Обновить список и проверить результат</button></div>}
       <fieldset disabled={busyId !== null || loading} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
 
       <div className={styles.userRoleTabs}>

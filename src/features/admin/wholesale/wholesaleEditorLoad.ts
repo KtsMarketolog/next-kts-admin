@@ -1,6 +1,7 @@
 import type { CatalogCategory } from './AdminWholesaleTypes';
 import type { PriceListPayload } from './AdminWholesaleGateway.helpers';
 import { WHOLESALE_PRICE_WORKFLOW_STATUSES } from '@/shared/lib/wholesalePriceWorkflowStatus';
+import { parseRecordRevision } from '@/shared/lib/recordVersion';
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -46,6 +47,7 @@ export function parseWholesaleEditorPrice(payload: unknown, expectedId: number):
   if (!record(payload) || !record(payload.priceList)) throw invalid();
   const price = payload.priceList;
   if (price.id !== expectedId || !id(price.id)
+    || !parseRecordRevision(price.revision)
     || !WHOLESALE_PRICE_WORKFLOW_STATUSES.some((status) => status.value === price.workflowStatus)
     || !['title', 'clientName', 'token', 'comment'].every((key) => typeof price[key] === 'string')
     || !nullableText(price.validUntil)

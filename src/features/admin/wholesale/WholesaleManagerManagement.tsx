@@ -82,7 +82,7 @@ export function WholesaleManagerManagement({
 }: WholesaleManagerManagementProps) {
   return (
           <div className={styles.wholesaleManagersAdminBlock}>
-        {requestError && <div role="alert"><p>{requestError}</p><button type="button" disabled={busy} onClick={() => void reloadManagers()}>Обновить список и проверить результат</button></div>}
+        {requestError && <div role="alert"><p>{requestError}</p><p>Обновление списка заменит несохранённые изменения в формах актуальными данными сервера.</p><button type="button" disabled={busy} onClick={() => void reloadManagers()}>Обновить список и проверить результат</button></div>}
         <fieldset disabled={busy} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
 
         <div className={styles.userRoleTabs}>

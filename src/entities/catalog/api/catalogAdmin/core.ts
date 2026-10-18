@@ -685,6 +685,22 @@ export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promi
          and is_active = true`,
       [activeIds],
     );
+    // Editors lock the parent before its positions. Use the same order here
+    // before the child-change revision trigger touches affected price lists.
+    await client.query(
+      `select price.id
+       from wholesale_price_lists price
+       where exists (
+         select 1 from wholesale_price_list_items items
+         join wholesale_products products on products.id = items.wholesale_product_id
+         where items.price_list_id = price.id
+           and products.catalog_product_id is not null
+           and not (products.catalog_product_id = any($1::bigint[]))
+           and items.visible = true
+       )
+       order by price.id for update of price`,
+      [activeIds],
+    );
     await client.query(
       `update wholesale_price_list_items items
        set visible = false,

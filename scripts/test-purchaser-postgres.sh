@@ -28,3 +28,4 @@ node --import tsx --test tests/purchaser-access-db.integration.ts
 node --import tsx --test tests/dashboard-audience-db.integration.ts
 node --import tsx --test tests/admin-top-users-db.integration.ts
 node --import tsx --test tests/employee-password-db.integration.ts
+node --import tsx --test tests/record-version-migration.integration.ts
