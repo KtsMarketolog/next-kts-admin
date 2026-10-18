@@ -1,6 +1,6 @@
 import type { AdminSession } from '../adminAuth';
-import { query } from './client';
-import { assertClientCompanyVisible } from './clientCompaniesRepo';
+import { query, withTransaction } from './client';
+import { assertClientCompanyVisible, assertClientCompanyWritable } from './clientCompaniesRepo';
 import { ensureSiteSchema } from './schema';
 
 export type ClientDocument = {
@@ -125,36 +125,40 @@ export async function createClientDocument(
   session: AdminSession,
 ): Promise<ClientDocument> {
   await ensureSiteSchema();
-  await assertClientCompanyVisible(companyId, session);
+  return withTransaction(async (client) => {
+    await assertClientCompanyWritable(companyId, session, client);
+    await client.query('lock table client_documents in row exclusive mode');
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [`client-document:${input.filePath}`]);
 
-  const result = await query<ClientDocumentRow>(
-    `insert into client_documents (
-       company_id, title, original_name, mime_type, file_path, file_size, is_visible
-     )
-     values ($1, $2, $3, $4, $5, $6, $7)
-     returning
-       id::text,
-       company_id::text,
-       title,
-       original_name,
-       mime_type,
-       file_path,
-       file_size::text,
-       is_visible,
-       created_at::text,
-       updated_at::text`,
-    [
-      companyId,
-      input.title,
-      input.originalName,
-      input.mimeType,
-      input.filePath,
-      input.fileSize,
-      input.isVisible,
-    ],
-  );
+    const result = await client.query<ClientDocumentRow>(
+      `insert into client_documents (
+         company_id, title, original_name, mime_type, file_path, file_size, is_visible
+       )
+       values ($1, $2, $3, $4, $5, $6, $7)
+       returning
+         id::text,
+         company_id::text,
+         title,
+         original_name,
+         mime_type,
+         file_path,
+         file_size::text,
+         is_visible,
+         created_at::text,
+         updated_at::text`,
+      [
+        companyId,
+        input.title,
+        input.originalName,
+        input.mimeType,
+        input.filePath,
+        input.fileSize,
+        input.isVisible,
+      ],
+    );
 
-  return withoutFilePath(mapClientDocument(result.rows[0]));
+    return withoutFilePath(mapClientDocument(result.rows[0]));
+  }, { retryOnConflict: true, trackCommitOutcome: true });
 }
 
 export async function updateClientDocumentVisibility(
@@ -164,56 +168,65 @@ export async function updateClientDocumentVisibility(
   session: AdminSession,
 ): Promise<ClientDocument> {
   await ensureSiteSchema();
-  await assertClientCompanyVisible(companyId, session);
+  return withTransaction(async (client) => {
+    await assertClientCompanyWritable(companyId, session, client);
 
-  const result = await query<ClientDocumentRow>(
-    `update client_documents
-     set is_visible = $3,
-         updated_at = now()
-     where company_id = $1 and id = $2
-     returning
-       id::text,
-       company_id::text,
-       title,
-       original_name,
-       mime_type,
-       file_path,
-       file_size::text,
-       is_visible,
-       created_at::text,
-       updated_at::text`,
-    [companyId, documentId, isVisible],
-  );
-  if (!result.rows[0]) throw new Error('Документ не найден');
-  return withoutFilePath(mapClientDocument(result.rows[0]));
+    const result = await client.query<ClientDocumentRow>(
+      `update client_documents
+       set is_visible = $3,
+           updated_at = now()
+       where company_id = $1 and id = $2
+       returning
+         id::text,
+         company_id::text,
+         title,
+         original_name,
+         mime_type,
+         file_path,
+         file_size::text,
+         is_visible,
+         created_at::text,
+         updated_at::text`,
+      [companyId, documentId, isVisible],
+    );
+    if (!result.rows[0]) throw new Error('Документ не найден');
+    return withoutFilePath(mapClientDocument(result.rows[0]));
+  }, { retryOnConflict: true, trackCommitOutcome: true });
 }
 
 export async function deleteClientDocument(
   companyId: number,
   documentId: number,
   session: AdminSession,
-): Promise<ClientDocumentFile> {
+): Promise<ClientDocumentFile & { cleanupId: number }> {
   await ensureSiteSchema();
-  await assertClientCompanyVisible(companyId, session);
+  return withTransaction(async (client) => {
+    await assertClientCompanyWritable(companyId, session, client);
 
-  const result = await query<ClientDocumentRow>(
-    `delete from client_documents
-     where company_id = $1 and id = $2
-     returning
-       id::text,
-       company_id::text,
-       title,
-       original_name,
-       mime_type,
-       file_path,
-       file_size::text,
-       is_visible,
-       created_at::text,
-       updated_at::text`,
-    [companyId, documentId],
-  );
-  if (!result.rows[0]) throw new Error('Документ не найден');
-  return mapClientDocument(result.rows[0]);
+    const result = await client.query<ClientDocumentRow>(
+      `delete from client_documents
+       where company_id = $1 and id = $2
+       returning
+         id::text,
+         company_id::text,
+         title,
+         original_name,
+         mime_type,
+         file_path,
+         file_size::text,
+         is_visible,
+         created_at::text,
+         updated_at::text`,
+      [companyId, documentId],
+    );
+    if (!result.rows[0]) throw new Error('Документ не найден');
+    const document = mapClientDocument(result.rows[0]);
+    const cleanup = await client.query<{ id: string }>(
+      `insert into client_document_file_cleanup (document_id, company_id, file_path)
+       values ($1, $2, $3) returning id::text`, [document.id, companyId, document.filePath],
+    );
+    return { ...document, cleanupId: Number(cleanup.rows[0].id) };
+  }, { retryOnConflict: true, trackCommitOutcome: true });
 }
 
 export async function getClientDocumentForAdminDownload(

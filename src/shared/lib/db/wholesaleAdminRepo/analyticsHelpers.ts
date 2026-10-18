@@ -125,7 +125,7 @@ export async function resolveWholesaleClientCompany(clientCompanyId: number | nu
   const result = await query<{ id: string; title: string }>(
     `select id::text, title
      from client_companies
-     where id = $1 and is_active = true
+     where id = $1 and is_active = true and archived_at is null
      limit 1`,
     [id],
   );

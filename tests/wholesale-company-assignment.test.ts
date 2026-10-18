@@ -36,6 +36,7 @@ test('manager company access is checked in the same locked SELECT; admin and who
     await lockPriceListCompany(f.client, 1, assignment, { role, managerId: 2 });
     assert.deepEqual(f.calls[1].params, [1, ['admin', 'wholesale_admin'].includes(role), 2]);
     assert.match(f.calls[1].sql, /is_active = true/);
+    assert.match(f.calls[1].sql, /archived_at is null/);
     assert.match(f.calls[1].sql, /manager_id = \$3 or support_manager_id = \$3/);
   }
 });
@@ -69,6 +70,7 @@ test('assignment update is scoped to the selected company on the supplied transa
   assert.equal(f.calls.length, 1);
   assert.deepEqual(f.calls[0].params, [1, 2, 3]);
   assert.match(f.calls[0].sql, /where id = \$1/);
+  assert.match(f.calls[0].sql, /archived_at is null/);
   assert.doesNotMatch(f.calls[0].sql, /wholesale_price_lists|delete|truncate/i);
 });
 

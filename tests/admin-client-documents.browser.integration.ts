@@ -20,7 +20,7 @@ const previous={...saved,id:1,title:'Existing document',originalName:'existing.t
 window.calls=[];window.signals=[];window.finish=null;window.finishRead=null;
 window.fetch=async(url,init={})=>{
  if(!init.method||init.method==='GET'){
-  if(url==='/api/admin/clients')return Response.json({companies:[client]});
+  if(url==='/api/admin/clients?scope=all')return Response.json({companies:[client]});
   if(url.endsWith('/price-lists'))return Response.json({priceLists:[]});
   if(url.endsWith('/price-requests'))return Response.json({requests:[]});
   if(url.endsWith('/chat/unread'))return Response.json({unreadCount:0});

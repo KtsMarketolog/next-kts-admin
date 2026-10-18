@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
+import { lstat, mkdir, readFile, realpath, unlink, writeFile } from 'fs/promises';
 import path from 'path';
 
 export const MAX_CLIENT_DOCUMENT_SIZE = 20 * 1024 * 1024;
@@ -26,6 +26,7 @@ export type SavedClientDocumentFile = {
 };
 
 export async function saveClientDocumentUpload(companyId: number, file: File): Promise<SavedClientDocumentFile> {
+  if (!Number.isSafeInteger(companyId) || companyId <= 0) throw new Error('Некорректный клиент');
   if (file.size <= 0) throw new Error('Файл пустой');
   if (file.size > MAX_CLIENT_DOCUMENT_SIZE) throw new Error('Файл должен быть не больше 20 МБ');
 
@@ -55,8 +56,25 @@ export async function readClientDocumentFile(filePath: string) {
   return readFile(/*turbopackIgnore: true*/ resolveClientDocumentPath(filePath));
 }
 
-export async function removeClientDocumentFile(filePath: string) {
-  await unlink(/*turbopackIgnore: true*/ resolveClientDocumentPath(filePath)).catch(() => undefined);
+export async function removeClientDocumentFile(filePath: string, companyId?: number) {
+  const fullPath = resolveClientDocumentPath(filePath, companyId);
+  // A missing/unavailable storage root is not evidence that this exact file was
+  // removed. Leave the durable request pending until storage is available again.
+  const root = await realpath(/*turbopackIgnore: true*/ getUploadRoot());
+  try {
+    // A lexical prefix check alone does not protect against symlink directories.
+    const expectedParent = path.join(root, path.dirname(filePath));
+    const actualParent = await realpath(/*turbopackIgnore: true*/ path.dirname(fullPath));
+    if (actualParent !== expectedParent) throw new Error('Небезопасный каталог документа');
+    const stat = await lstat(/*turbopackIgnore: true*/ fullPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Небезопасный файл документа');
+    await unlink(/*turbopackIgnore: true*/ fullPath);
+    return 'removed' as const;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing' as const;
+    // Permission/storage failures must remain visible to the durable cleanup queue.
+    throw error;
+  }
 }
 
 function getAllowedExtension(filename: string) {
@@ -70,14 +88,14 @@ function normalizeOriginalName(value: string) {
   return value.replace(/[\\/:*?"<>|\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220) || 'document';
 }
 
-function resolveClientDocumentPath(filePath: string) {
+function resolveClientDocumentPath(filePath: string, companyId?: number) {
   const uploadRoot = path.resolve(/*turbopackIgnore: true*/ getUploadRoot());
-  const normalized = filePath.replace(/\\/g, '/');
-  if (!normalized.startsWith('client-documents/')) {
+  const match = /^client-documents\/([1-9]\d*)\/([a-zA-Z0-9][a-zA-Z0-9._-]*)$/.exec(filePath);
+  if (!match || (companyId !== undefined && match[1] !== String(companyId))) {
     throw new Error('Некорректный путь файла');
   }
 
-  const fullPath = path.resolve(/*turbopackIgnore: true*/ uploadRoot, normalized);
+  const fullPath = path.resolve(/*turbopackIgnore: true*/ uploadRoot, filePath);
   if (!fullPath.startsWith(`${uploadRoot}${path.sep}`)) {
     throw new Error('Некорректный путь файла');
   }

@@ -8,10 +8,15 @@ import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 
 import { AdminClientCompanyCard } from './AdminClientCompanyCard';
 import { AdminClientCreateForm } from './AdminClientCreateForm';
+import { AdminClientDeletionDialog } from './AdminClientDeletionDialog';
 import { submitClientMutation } from './clientMutation';
 import { useAdminRequestScope } from '../shared/useAdminRequestScope';
 import {
   emptyDraft,
+  archiveClientConfirmation,
+  clientMatchesScope,
+  mergeClientDrafts,
+  readClientDeletionPreview,
   readApiError,
   readApiErrorFallback,
   toDraft,
@@ -19,12 +24,22 @@ import {
   type ClientCompany,
   type ClientDraft,
   type Manager,
+  type ClientListScope,
+  type ClientDeletionPreview,
 } from './AdminClientsModel';
 
 export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const { request, cancelAll, isActive } = useAdminRequestScope();
   const [companies, setCompanies] = useState<ClientCompany[]>([]);
   const companiesRef = useRef<ClientCompany[]>([]);
+  const companyBaselines = useRef(new Map<number, ClientCompany>());
+  const [scope, setScope] = useState<ClientListScope>('active');
+  const scopeRef = useRef<ClientListScope>('active');
+  const loadSequence = useRef(0);
+  const [loading, setLoading] = useState(true);
+  const [canPermanentlyDelete, setCanPermanentlyDelete] = useState(false);
+  const [deletionPreview, setDeletionPreview] = useState<ClientDeletionPreview | null>(null);
+  const [deletionError, setDeletionError] = useState('');
   const mutationRef = useRef(false);
   const dataGeneration = useRef(0);
   const [managers, setManagers] = useState<Manager[]>([]);
@@ -56,20 +71,26 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const loadClients = useCallback(async (preserveDrafts = false, signal?: AbortSignal) => {
     if (mutationRef.current) return;
     const generation = dataGeneration.current;
-    const response = await request('/api/admin/clients', { cache: 'no-store', signal });
-    if (!response.ok) throw new Error(await readApiError(response, 'Не удалось загрузить клиентов'));
-    const data = await response.json();
-    if (signal?.aborted || generation !== dataGeneration.current) return;
-    const nextCompanies = Array.isArray(data.companies) ? data.companies : [];
-    const previousCompanies = new Map(companiesRef.current.map((company) => [company.id, company]));
-    companiesRef.current = nextCompanies;
-    setCompanies(nextCompanies);
-    setCompanyDrafts((current) => Object.fromEntries(nextCompanies.map((company: ClientCompany) => {
-      const previous = previousCompanies.get(company.id);
-      const dirty = current[company.id] && (!previous || JSON.stringify(current[company.id]) !== JSON.stringify(toDraft(previous)));
-      return [company.id, preserveDrafts && dirty ? current[company.id] : toDraft(company)];
-    })));
-  }, [request]);
+    const sequence = ++loadSequence.current;
+    try {
+      const response = await request(scope === 'archived' ? '/api/admin/clients?scope=archived' : '/api/admin/clients', { cache: 'no-store', signal });
+      if (!response.ok) throw new Error(await readApiError(response, 'Не удалось загрузить клиентов'));
+      const data = await response.json();
+      if (signal?.aborted || generation !== dataGeneration.current || sequence !== loadSequence.current || scope !== scopeRef.current) return;
+      if (!Array.isArray(data.companies)) throw new Error('Получен неполный список клиентов. Обновите список.');
+      setCanPermanentlyDelete(data.canPermanentlyDelete === true);
+      const nextCompanies = (data.companies as ClientCompany[]).filter((company) => clientMatchesScope(company, scope));
+      const previousCompanies = new Map(companyBaselines.current);
+      for (const company of nextCompanies) companyBaselines.current.set(company.id, company);
+      companiesRef.current = nextCompanies;
+      setCompanies(nextCompanies);
+      setCompanyDrafts((current) => preserveDrafts
+        ? mergeClientDrafts(current, nextCompanies, previousCompanies)
+        : { ...current, ...Object.fromEntries(nextCompanies.map((company) => [company.id, toDraft(company)])) });
+    } finally {
+      if (sequence === loadSequence.current && scope === scopeRef.current && isActive()) setLoading(false);
+    }
+  }, [request, scope, isActive]);
 
   const loadManagers = async () => {
     const response = await request('/api/admin/wholesale/managers', { cache: 'no-store' });
@@ -125,8 +146,9 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     const nextCompanies = existing
       ? companiesRef.current.map((item) => item.id === company.id ? company : item)
       : [company, ...companiesRef.current];
-    companiesRef.current = nextCompanies;
-    setCompanies(nextCompanies);
+    companyBaselines.current.set(company.id, company);
+    companiesRef.current = nextCompanies.filter((item) => clientMatchesScope(item, scopeRef.current));
+    setCompanies(companiesRef.current);
     setCompanyDrafts((current) => ({ ...current, [company.id]: toDraft(company) }));
   };
 
@@ -229,16 +251,20 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     }
   };
 
-  const deleteCompany = async (company: ClientCompany) => {
-    const confirmed = window.confirm(
-      `Удалить клиента "${company.title || 'Без названия'}"? Пользователь личного кабинета и его сессии тоже будут удалены.`,
-    );
+  const archiveCompany = async (company: ClientCompany) => {
+    const confirmed = window.confirm(archiveClientConfirmation(company));
     if (!confirmed) return;
 
     if (!startMutation()) return;
     try {
-      const result = await submitClientMutation(`/api/admin/clients/${company.id}`, { method: 'DELETE' }, request);
+      const result = await submitClientMutation(`/api/admin/clients/${company.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedUpdatedAt: company.updatedAt }),
+      }, request);
       if (!isActive()) return;
+      if (!result.company?.archivedAt) throw new Error('Не удалось подтвердить архивирование. Обновите список перед повторной попыткой.');
+      companyBaselines.current.set(company.id, result.company);
       companiesRef.current = companiesRef.current.filter((item) => item.id !== company.id);
       setCompanies(companiesRef.current);
       setClientPasswordDrafts((current) => {
@@ -261,9 +287,90 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         delete next[company.id];
         return next;
       });
-      setStatus(['Клиент удалён.', ...result.warnings].join(' '));
+      setStatus(['Клиент перенесён в архив. Данные и файлы сохранены, вход закрыт. Публичные ссылки на прайсы не отключены.', ...result.warnings].join(' '));
     } catch (error) {
-      if (isActive()) setStatus(readApiErrorFallback(error, 'Не удалось подтвердить удаление клиента'));
+      if (isActive()) setStatus(readApiErrorFallback(error, 'Не удалось подтвердить архивирование клиента'));
+    } finally {
+      finishMutation();
+    }
+  };
+
+  const restoreCompany = async (company: ClientCompany) => {
+    if (!window.confirm(`Восстановить клиента «${company.title || 'Без названия'}» из архива? Доступ останется отключённым. Включить его можно отдельно в карточке клиента после проверки данных.`)) return;
+    if (!startMutation()) return;
+    try {
+      const result = await submitClientMutation(`/api/admin/clients/${company.id}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedUpdatedAt: company.updatedAt }),
+      }, request);
+      if (!isActive()) return;
+      if (!result.company || result.company.archivedAt || result.company.isActive) throw new Error('Не удалось подтвердить восстановление. Обновите список перед повторной попыткой.');
+      acceptSavedCompany(result.company);
+      setStatus(['Клиент восстановлен. Он находится во вкладке «Клиенты», доступ остаётся отключённым.', ...result.warnings].join(' '));
+    } catch (error) {
+      if (isActive()) setStatus(readApiErrorFallback(error, 'Не удалось подтвердить восстановление клиента'));
+    } finally {
+      finishMutation();
+    }
+  };
+
+  const selectScope = (nextScope: ClientListScope) => {
+    if (nextScope === scopeRef.current || mutationRef.current) return;
+    dataGeneration.current += 1;
+    scopeRef.current = nextScope;
+    companiesRef.current = [];
+    setCompanies([]);
+    setStatus('');
+    setLoading(true);
+    setScope(nextScope);
+  };
+
+  const previewPermanentDeletion = async (company: ClientCompany) => {
+    if (!canPermanentlyDelete || !company.archivedAt || !startMutation()) return;
+    setDeletionError('');
+    try {
+      const response = await request(`/api/admin/clients/${company.id}/deletion-preview`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(await readApiError(response, 'Не удалось проверить состав удаляемых данных'));
+      const data = await response.json();
+      const preview = readClientDeletionPreview(data?.preview, company.id);
+      if (isActive()) setDeletionPreview(preview);
+    } catch (error) {
+      if (isActive()) setStatus(readApiErrorFallback(error, 'Не удалось проверить состав удаляемых данных'));
+    } finally {
+      finishMutation();
+    }
+  };
+
+  const permanentlyDeleteCompany = async (confirmationTitle: string) => {
+    const preview = deletionPreview;
+    if (!canPermanentlyDelete || !preview || confirmationTitle !== preview.title || !startMutation()) return;
+    setDeletionError('');
+    try {
+      const response = await request(`/api/admin/clients/${preview.id}/purge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedUpdatedAt: preview.updatedAt, expectedRevision: preview.revision, confirmationTitle }),
+      });
+      if (!response.ok) throw new Error(await readApiError(response, 'Не удалось подтвердить удаление. Обновите список перед повтором.'));
+      const data = await response.json().catch(() => null);
+      if (!data || data.ok !== true || data.saved !== true) throw new Error('Не удалось подтвердить удаление. Обновите список перед повтором.');
+      if (!isActive()) return;
+      companiesRef.current = companiesRef.current.filter((item) => item.id !== preview.id);
+      companyBaselines.current.delete(preview.id);
+      setCompanies(companiesRef.current);
+      setCompanyDrafts((current) => { const next = { ...current }; delete next[preview.id]; return next; });
+      setClientPasswordDrafts((current) => { const next = { ...current }; delete next[preview.id]; return next; });
+      setClientPasswordEditIds((current) => { const next = { ...current }; delete next[preview.id]; return next; });
+      setExpandedCompanyIds((current) => { const next = { ...current }; delete next[preview.id]; return next; });
+      setDeletionPreview(null);
+      const warnings = Array.isArray(data.warnings) ? data.warnings.flatMap((warning: { message?: unknown }) => typeof warning?.message === 'string' ? [warning.message] : []) : [];
+      const fileStatus = !Number.isSafeInteger(data.cleanupPending) || data.cleanupPending < 0
+        ? 'Статус очистки файлов не получен; его нужно проверить отдельно.'
+        : data.cleanupPending > 0 ? `Заданий очистки файлов, ожидающих отдельного подтверждения: ${data.cleanupPending}.` : 'Ожидающих заданий очистки файлов нет.';
+      setStatus([`Клиент удалён навсегда. Прайсы и их товары сохранены, привязки к клиенту сняты. ${fileStatus}`, ...warnings].join(' '));
+    } catch (error) {
+      if (isActive()) setDeletionError(readApiErrorFallback(error, 'Не удалось подтвердить удаление. Обновите список перед повтором.'));
     } finally {
       finishMutation();
     }
@@ -312,17 +419,23 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
 
       {status ? <p role="status" className={styles.status}>{status}</p> : null}
 
-      <AdminClientCreateForm
+      <div className={styles.userRoleTabs} aria-label="Список клиентов">
+        <button type="button" aria-pressed={scope === 'active'} disabled={busy} onClick={() => selectScope('active')}>Клиенты</button>
+        <button type="button" aria-pressed={scope === 'archived'} disabled={busy} onClick={() => selectScope('archived')}>Архив</button>
+      </div>
+      {scope === 'archived' ? <p className={styles.mutedText}>Данные и файлы хранятся в архиве до явного ручного удаления администратором, без автоматического удаления по сроку. Восстановление не включает доступ в кабинет. Публичные ссылки на прайсы не отключаются архивированием, заявки по ним могут продолжать поступать.</p> : null}
+
+      {scope === 'active' ? <AdminClientCreateForm
         draft={draft}
         developmentManagers={developmentManagers}
         supportManagers={supportManagers}
-        busy={busy}
+        busy={busy || loading}
         onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
         onCreate={createCompany}
-      />
+      /> : null}
 
       <div className={styles.clientCompanyList}>
-        {companies.length === 0 ? <p className={styles.mutedText}>Клиенты пока не добавлены.</p> : null}
+        {loading ? <p className={styles.mutedText}>Загружаем список клиентов...</p> : companies.length === 0 ? <p className={styles.mutedText}>{scope === 'archived' ? 'Архив пуст.' : 'Клиенты пока не добавлены.'}</p> : null}
         {companies.map((company) => (
           <AdminClientCompanyCard
             key={company.id}
@@ -333,19 +446,24 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
             passwordDraft={clientPasswordDrafts[company.id] || ''}
             developmentManagers={developmentManagers}
             supportManagers={supportManagers}
-            busy={busy}
+            busy={busy || loading}
             isExpanded={Boolean(expandedCompanyIds[company.id])}
             isSaved={savedCompanyId === company.id}
+            canPermanentlyDelete={canPermanentlyDelete}
             onDraftChange={updateCompanyDraft}
             onCopyPassword={copyClientPassword}
             onToggleExpanded={toggleCompanyExpanded}
             onTogglePasswordEdit={toggleClientPasswordEdit}
             onPasswordDraftChange={(id, value) => setClientPasswordDrafts((current) => ({ ...current, [id]: value }))}
             onSave={saveCompany}
-            onDelete={deleteCompany}
+            onArchive={archiveCompany}
+            onRestore={restoreCompany}
+            onPermanentDelete={previewPermanentDeletion}
           />
         ))}
       </div>
+      {deletionPreview ? <AdminClientDeletionDialog key={`${deletionPreview.id}:${deletionPreview.revision}`} preview={deletionPreview}
+        busy={busy} error={deletionError} onCancel={() => setDeletionPreview(null)} onConfirm={permanentlyDeleteCompany} /> : null}
     </section>
   );
 }

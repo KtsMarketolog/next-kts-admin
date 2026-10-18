@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'crypto';
 import type { PoolClient } from 'pg';
 
 import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
-import { query } from './client';
+import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 
 export type StoredClientSession = {
@@ -33,20 +33,40 @@ export async function createStoredClientSession(input: CreateClientSessionInput)
   const maxAgeSeconds = input.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS;
   const expiresAt = new Date(Date.now() + maxAgeSeconds * 1000);
 
-  await query(
-    `insert into client_sessions (
-       id, session_hash, client_user_id, ip_hash, user_agent, expires_at
-     )
-     values ($1, $2, $3, $4, $5, $6)`,
-    [
-      sessionId,
-      hashSessionToken(token),
-      input.clientUserId,
-      hashSensitiveValue(input.ip || ''),
-      safeHeaderValue(input.userAgent, 500),
-      expiresAt,
-    ],
-  );
+  await withTransaction(async (client) => {
+    // Serialize session creation with archive/restore. A login that checked the
+    // password before archiving must not create a usable session afterwards.
+    const company = await client.query<{ id: string }>(
+      `select cc.id::text
+       from client_companies cc
+       join client_users cu on cu.company_id = cc.id
+       where cu.id = $1 and cc.is_active = true and cc.archived_at is null
+       for update of cc`,
+      [input.clientUserId],
+    );
+    if (!company.rows[0]) throw new Error('Компания клиента отключена или находится в архиве');
+    const user = await client.query<{ id: string }>(
+      `select id::text from client_users
+       where id = $1 and company_id = $2 and is_active = true
+       for share`,
+      [input.clientUserId, company.rows[0].id],
+    );
+    if (!user.rows[0]) throw new Error('Учётная запись клиента отключена');
+    await client.query(
+      `insert into client_sessions (
+         id, session_hash, client_user_id, ip_hash, user_agent, expires_at
+       )
+       values ($1, $2, $3, $4, $5, $6)`,
+      [
+        sessionId,
+        hashSessionToken(token),
+        input.clientUserId,
+        hashSensitiveValue(input.ip || ''),
+        safeHeaderValue(input.userAgent, 500),
+        expiresAt,
+      ],
+    );
+  });
 
   return { token, sessionId, expiresAt };
 }
@@ -72,7 +92,7 @@ export async function getStoredClientSession(token: string): Promise<StoredClien
        s.created_at::text,
        s.expires_at::text,
        cu.is_active as user_is_active,
-       cc.is_active as company_is_active,
+       (cc.is_active and cc.archived_at is null) as company_is_active,
        cu.password_changed_at::text
      from client_sessions s
      join client_users cu on cu.id = s.client_user_id

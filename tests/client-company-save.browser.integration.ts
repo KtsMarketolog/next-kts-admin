@@ -34,7 +34,7 @@ window.fetch=async(url,init={})=>{
  let company;
  if(method==='POST'){company={...window.companies[0],...body,id:14,displayPassword:body.password};window.companies.push(company);}
  if(method==='PUT'){company={...window.companies[0],...body,displayPassword:body.password||window.companies[0].displayPassword};window.companies[0]=company;}
- if(method==='DELETE')window.companies=[];
+ if(method==='DELETE'){company={...window.companies[0],isActive:false,archivedAt:'2026-10-18T12:00:00Z'};window.companies=[];}
  const warnings=window.mode==='warning'?[{code:'CLIENT_UPDATE_AUDIT_UNAVAILABLE',message:'Данные сохранены, запись журнала требует повторения.'}]:[];
  if(window.mode==='reload-failure')window.failRefresh=true;
  return Response.json({saved:true,company,ok:true,warnings});
@@ -102,7 +102,7 @@ async function main() {
           } else if (scenario === 'delete') {
             await page.evaluate('window.mode="warning"');
             page.once('dialog', (dialog: { accept(): Promise<void> }) => void dialog.accept());
-            await card.getByRole('button', { name: 'Удалить', exact: true }).click();
+            await card.getByRole('button', { name: 'В архив', exact: true }).click();
             await page.waitForFunction('window.calls.some(c=>c.method==="DELETE")');
             await page.waitForFunction('document.querySelectorAll("article").length===0');
             await page.getByText(/журнала требует повторения/).waitFor();

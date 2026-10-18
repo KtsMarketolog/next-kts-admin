@@ -31,6 +31,7 @@ export type ClientCompanyRow = {
   display_password: string | null;
   chat_unread_count: string;
   is_active: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -74,6 +75,7 @@ export function mapClientCompany(row: ClientCompanyRow): ClientCompany {
     displayPassword: row.display_password ?? '',
     chatUnreadCount: Number(row.chat_unread_count ?? 0),
     isActive: row.is_active,
+    archivedAt: row.archived_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

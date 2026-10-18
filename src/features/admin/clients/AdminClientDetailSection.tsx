@@ -69,8 +69,6 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   }, [clientId, request]);
 
   useEffect(() => {
-    if (activeTab === 'chat') return undefined;
-
     return startClientRealtimeSync({
       eventsEndpoint: `/api/admin/clients/${clientId}/events`,
       eventTypes: ['chat.updated', 'documents.updated', 'client.updated'],
@@ -78,7 +76,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
         await Promise.all([
           loadUnreadCount(signal),
           activeTab === 'documents' ? loadDocuments(signal) : undefined,
-          request('/api/admin/clients', { cache: 'no-store', signal })
+          request('/api/admin/clients?scope=all', { cache: 'no-store', signal })
             .then((response) => response.ok ? response.json() : null)
             .then((data) => {
               if (signal.aborted || !Array.isArray(data?.companies)) return;
@@ -110,7 +108,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
       setLoading(true);
       setError('');
       const [clientResponse, priceListResponse, priceRequestResponse, documentsResponse] = await Promise.all([
-        request('/api/admin/clients', { cache: 'no-store', signal: controller.signal }),
+        request('/api/admin/clients?scope=all', { cache: 'no-store', signal: controller.signal }),
         request(`/api/admin/clients/${clientId}/price-lists`, { cache: 'no-store', signal: controller.signal }),
         request(`/api/admin/clients/${clientId}/price-requests`, { cache: 'no-store', signal: controller.signal }),
         request(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store', signal: controller.signal }),
@@ -151,6 +149,10 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   }, [clientId, request]);
 
   const runDocumentAction = async (action: () => Promise<void>) => {
+    if (client?.archivedAt) {
+      setDocumentStatus('Клиент в архиве. Документы доступны только для просмотра и скачивания.');
+      return;
+    }
     if (documentBusyRef.current) return;
     documentBusyRef.current = true;
     documentsGeneration.current += 1;
@@ -232,7 +234,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   };
 
   const deleteDocument = async (document: ClientDocument) => {
-    if (!window.confirm(`Удалить документ "${document.title || document.originalName}"?`)) return;
+    if (!window.confirm(`Безвозвратно удалить документ «${document.title || document.originalName}» и его файл? В отличие от архивирования клиента, это удаление документа. При временной ошибке диска файл будет поставлен в очередь контролируемой очистки.`)) return;
 
     await runDocumentAction(async () => {
       const response = await request(`/api/admin/clients/${clientId}/documents/${document.id}`, {
@@ -248,7 +250,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
 
       if (data?.ok !== true) throw new Error(ADMIN_UNKNOWN_OUTCOME);
       setDocuments((current) => current.filter((currentDocument) => currentDocument.id !== document.id));
-      setDocumentStatus('Документ удален');
+      setDocumentStatus(typeof data.warning === 'string' && data.warning ? data.warning : 'Документ удалён');
     });
   };
 
@@ -270,6 +272,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     if (activeTab === 'documents') {
       return (
         <AdminClientDocumentsPanel
+          readOnly={Boolean(client.archivedAt)}
           busy={documentBusy}
           clientId={client.id}
           documents={documents}
@@ -291,6 +294,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     if (activeTab === 'chat') {
       return (
         <ClientChatPanel
+          readOnly={Boolean(client.archivedAt)}
           key={client.id}
           endpoint={`/api/admin/clients/${client.id}/chat`}
           eventsEndpoint={`/api/admin/clients/${client.id}/events`}
@@ -309,7 +313,8 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
         <DetailRow label="Менеджер" value={client.managerName} />
         <DetailRow label="Сопровождение" value={client.supportManagerName} />
         <DetailRow label="Пользователей ЛК" value={client.userCount} />
-        <DetailRow label="Статус" value={client.isActive ? 'Активен' : 'Отключен'} />
+        <DetailRow label="Статус" value={client.archivedAt ? 'В архиве' : client.isActive ? 'Активен' : 'Отключен'} />
+        {client.archivedAt ? <DetailRow label="Архивирован" value={formatDate(client.archivedAt)} /> : null}
         <DetailRow label="Создан" value={formatDate(client.createdAt)} />
         <DetailRow label="Обновлен" value={formatDate(client.updatedAt)} />
         <div className={styles.clientDetailNote}>
@@ -360,13 +365,15 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
         <div>
-          <p>{client.isActive ? 'Активный клиент' : 'Отключенный клиент'}</p>
+          <p>{client.archivedAt ? 'Архив клиента' : client.isActive ? 'Активный клиент' : 'Отключенный клиент'}</p>
           <h2>{client.title || 'Без названия'}</h2>
         </div>
         <button className={styles.secondary} type="button" onClick={onBack}>
           Назад к клиентам
         </button>
       </div>
+
+      {client.archivedAt ? <p role="status" className={styles.status}>Клиент в архиве с {formatDate(client.archivedAt)}. Вход закрыт, редактирование документов и отправка сообщений отключены. Данные и файлы сохранены без автоматического удаления. Публичные ссылки на прайсы не отключены. Для восстановления откройте вкладку «Архив» в списке клиентов.</p> : null}
 
       <div className={styles.clientDetailSummary}>
         <DetailRow label="Email" value={client.email} />

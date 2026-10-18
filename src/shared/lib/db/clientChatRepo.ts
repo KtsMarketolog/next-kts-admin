@@ -1,7 +1,7 @@
 import type { AdminSession } from '../adminAuth';
 import type { ClientSession } from '../clientAuth';
-import { query } from './client';
-import { assertClientCompanyVisible } from './clientCompaniesRepo';
+import { query, withTransaction } from './client';
+import { assertClientCompanyVisible, assertClientCompanyWritable } from './clientCompaniesRepo';
 import { ensureSiteSchema } from './schema';
 
 export type ClientChatAuthorType = 'client' | 'employee';
@@ -61,29 +61,29 @@ function readColumn(viewer: ClientChatAuthorType) {
   return viewer === 'client' ? 'client_read_at' : 'employee_read_at';
 }
 
-async function ensureClientChatReadState(companyId: number) {
-  await query(
-    `insert into client_chat_read_state (company_id)
-     values ($1)
-     on conflict (company_id) do nothing`,
-    [companyId],
-  );
-}
-
 async function markClientChatRead(companyId: number, viewer: ClientChatAuthorType) {
   const column = readColumn(viewer);
-  await query(
-    `insert into client_chat_read_state (company_id, ${column}, updated_at)
-     values ($1, now(), now())
-     on conflict (company_id) do update
-     set ${column} = greatest(client_chat_read_state.${column}, now()),
-         updated_at = now()`,
-    [companyId],
-  );
+  return withTransaction(async (client) => {
+    // Reading archived correspondence must not modify its read markers.
+    const company = await client.query<{ id: string }>(
+      `select id::text from client_companies
+       where id = $1 and archived_at is null for share`,
+      [companyId],
+    );
+    if (!company.rows[0]) return false;
+    await client.query(
+      `insert into client_chat_read_state (company_id, ${column}, updated_at)
+       values ($1, now(), now())
+       on conflict (company_id) do update
+       set ${column} = greatest(client_chat_read_state.${column}, now()),
+           updated_at = now()`,
+      [companyId],
+    );
+    return true;
+  });
 }
 
 async function getClientChatReadState(companyId: number) {
-  await ensureClientChatReadState(companyId);
   const result = await query<ClientChatReadStateRow>(
     `select client_read_at::text, employee_read_at::text
      from client_chat_read_state
@@ -92,19 +92,6 @@ async function getClientChatReadState(companyId: number) {
     [companyId],
   );
   return result.rows[0] ?? { client_read_at: '1970-01-01T00:00:00.000Z', employee_read_at: '1970-01-01T00:00:00.000Z' };
-}
-
-async function getClientAuthorName(clientUserId: number) {
-  const result = await query<{ name: string; company_title: string }>(
-    `select cu.name, cc.title as company_title
-     from client_users cu
-     join client_companies cc on cc.id = cu.company_id
-     where cu.id = $1
-     limit 1`,
-    [clientUserId],
-  );
-  const row = result.rows[0];
-  return row?.name || row?.company_title || 'Клиент';
 }
 
 async function getEmployeeAuthorName(session: AdminSession) {
@@ -166,10 +153,10 @@ export async function getClientChatMessages(companyId: number, viewer?: ClientCh
 
 export async function getClientChatConversation(companyId: number, viewer: ClientChatAuthorType): Promise<ClientChatConversation> {
   await ensureSiteSchema();
-  await markClientChatRead(companyId, viewer);
+  const markedRead = await markClientChatRead(companyId, viewer);
   return {
     messages: await getClientChatMessages(companyId, viewer),
-    unreadCount: 0,
+    unreadCount: markedRead ? 0 : await getClientChatUnreadCount(companyId, viewer),
   };
 }
 
@@ -212,7 +199,8 @@ export async function getClientChatUnreadCountsForAdmin(session: AdminSession): 
        on messages.company_id = cc.id
       and messages.author_type = 'client'
       and messages.created_at > coalesce(reads.employee_read_at, 'epoch'::timestamptz)
-     where ($1::boolean = true or cc.manager_id = $2 or cc.support_manager_id = $2)
+     where cc.archived_at is null
+       and ($1::boolean = true or cc.manager_id = $2 or cc.support_manager_id = $2)
      group by cc.id`,
     [canSeeAllClients, session.managerId ?? 0],
   );
@@ -224,25 +212,39 @@ export async function getClientChatUnreadCountsForAdmin(session: AdminSession): 
 
 export async function createClientChatMessageForClient(session: ClientSession, body: string) {
   await ensureSiteSchema();
-  const authorName = await getClientAuthorName(session.clientUserId);
-  const result = await query<ClientChatMessageRow>(
-    `insert into client_chat_messages (company_id, client_user_id, author_type, author_name, body)
-     values ($1, $2, 'client', $3, $4)
-     returning id::text, company_id::text, author_type, author_name, body, created_at::text`,
-    [session.companyId, session.clientUserId, authorName, body],
-  );
-  return mapClientChatMessage(result.rows[0]);
+  return withTransaction(async (client) => {
+    const company = await client.query<{ title: string }>(
+      `select title from client_companies
+       where id = $1 and is_active = true and archived_at is null for share`,
+      [session.companyId],
+    );
+    if (!company.rows[0]) throw new Error('Компания клиента отключена или находится в архиве');
+    const user = await client.query<{ name: string }>(
+      `select name from client_users where id = $1 and company_id = $2 and is_active = true for share`,
+      [session.clientUserId, session.companyId],
+    );
+    if (!user.rows[0]) throw new Error('Учётная запись клиента отключена');
+    const result = await client.query<ClientChatMessageRow>(
+      `insert into client_chat_messages (company_id, client_user_id, author_type, author_name, body)
+       values ($1, $2, 'client', $3, $4)
+       returning id::text, company_id::text, author_type, author_name, body, created_at::text`,
+      [session.companyId, session.clientUserId, user.rows[0].name || company.rows[0].title || 'Клиент', body],
+    );
+    return mapClientChatMessage(result.rows[0]);
+  });
 }
 
 export async function createClientChatMessageForAdmin(companyId: number, session: AdminSession, body: string) {
   await ensureSiteSchema();
-  await assertClientCompanyVisible(companyId, session);
   const authorName = await getEmployeeAuthorName(session);
-  const result = await query<ClientChatMessageRow>(
-    `insert into client_chat_messages (company_id, admin_user_id, manager_id, author_type, author_name, body)
-     values ($1, $2, $3, 'employee', $4, $5)
-     returning id::text, company_id::text, author_type, author_name, body, created_at::text`,
-    [companyId, session.adminUserId ?? null, session.managerId ?? null, authorName, body],
-  );
-  return mapClientChatMessage(result.rows[0]);
+  return withTransaction(async (client) => {
+    await assertClientCompanyWritable(companyId, session, client);
+    const result = await client.query<ClientChatMessageRow>(
+      `insert into client_chat_messages (company_id, admin_user_id, manager_id, author_type, author_name, body)
+       values ($1, $2, $3, 'employee', $4, $5)
+       returning id::text, company_id::text, author_type, author_name, body, created_at::text`,
+      [companyId, session.adminUserId ?? null, session.managerId ?? null, authorName, body],
+    );
+    return mapClientChatMessage(result.rows[0]);
+  });
 }

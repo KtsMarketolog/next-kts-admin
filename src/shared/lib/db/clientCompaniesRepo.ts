@@ -70,6 +70,16 @@ export async function assertClientCompanyVisible(id: number, session: AdminSessi
   if (!result.rows[0]) throw new Error('Компания клиента не найдена');
 }
 
+/** Call inside the write transaction: archive and mutations serialize on the company row. */
+export async function assertClientCompanyWritable(id: number, session: AdminSession, client: Pick<PoolClient, 'query'>) {
+  await assertClientCompanyVisible(id, session, client);
+  const result = await client.query<{ archived_at: string | null }>(
+    'select archived_at::text from client_companies where id = $1', [id],
+  );
+  if (!result.rows[0]) throw new Error('Компания клиента не найдена');
+  if (result.rows[0].archived_at) throw new Error('Клиент в архиве. Сначала восстановите его; данные не изменены.');
+}
+
 export async function getClientCompanyPriceLists(
   companyId: number,
   options: { session?: AdminSession; activeOnly?: boolean } = {},
@@ -100,7 +110,7 @@ export async function getClientCompanyPriceLists(
   return result.rows.map(mapClientCompanyPriceList);
 }
 
-export async function getClientCompanies(session: AdminSession): Promise<ClientCompany[]> {
+export async function getClientCompanies(session: AdminSession, scope: 'active' | 'archived' | 'all' = 'active'): Promise<ClientCompany[]> {
   await ensureSiteSchema();
   const result = await query<ClientCompanyRow>(
     `select
@@ -132,6 +142,7 @@ export async function getClientCompanies(session: AdminSession): Promise<ClientC
            and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
        ) as chat_unread_count,
        cc.is_active,
+       cc.archived_at::text,
        cc.created_at::text,
        cc.updated_at::text
      from client_companies cc
@@ -146,9 +157,10 @@ export async function getClientCompanies(session: AdminSession): Promise<ClientC
        limit 1
      ) primary_user on true
      where ($1::boolean = true or cc.manager_id = $2 or cc.support_manager_id = $2)
+       and ($3::text = 'all' or ($3 = 'archived' and cc.archived_at is not null) or ($3 = 'active' and cc.archived_at is null))
      group by cc.id, manager.name, support.name, primary_user.id, primary_user.login, primary_user.password_changed_at, primary_user.display_password
      order by cc.is_active desc, cc.title asc, cc.created_at desc`,
-    [canSeeAllClients(session), session.managerId ?? 0],
+    [canSeeAllClients(session), session.managerId ?? 0, scope],
   );
   return result.rows.map(mapClientCompany);
 }
@@ -187,6 +199,7 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
          ''::text as display_password,
          '0'::text as chat_unread_count,
          is_active,
+         archived_at::text,
          created_at::text,
          updated_at::text`,
       [
@@ -245,7 +258,12 @@ export async function updateClientCompany(
   return withTransaction(async (client) => {
     await assertManagerAssignments(assignments, client);
     // Permission cannot become stale between checking and updating ownership.
-    await assertClientCompanyVisible(id, session, client);
+    await assertClientCompanyWritable(id, session, client);
+    if (!input.expectedUpdatedAt || !Number.isFinite(Date.parse(input.expectedUpdatedAt))) throw new ClientArchiveConflictError();
+    const version = await client.query<{ matches: boolean }>(
+      'select updated_at = $2::timestamptz as matches from client_companies where id = $1', [id, input.expectedUpdatedAt],
+    );
+    if (!version.rows[0]?.matches) throw new ClientArchiveConflictError();
     const result = await client.query<ClientCompanyRow>(
       `update client_companies
        set title = $2,
@@ -260,7 +278,7 @@ export async function updateClientCompany(
            support_manager_id = $11,
            require_2fa = $12,
            is_active = $13,
-           updated_at = now()
+           updated_at = clock_timestamp()
        where id = $1
        returning
          id::text,
@@ -291,6 +309,7 @@ export async function updateClientCompany(
              and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
          ) as chat_unread_count,
          is_active,
+         archived_at::text,
          created_at::text,
          updated_at::text`,
       [
@@ -350,25 +369,43 @@ export async function updateClientCompanyManagerAssignments(
   session: AdminSession,
 ) {
   await ensureSiteSchema();
-  await assertClientCompanyVisible(id, session);
   const assignments = await normalizeManagerAssignments(input, session);
-  await assertManagerAssignments(assignments);
-
-  await query(
+  await withTransaction(async (client) => {
+    await assertManagerAssignments(assignments, client);
+    await assertClientCompanyWritable(id, session, client);
+    await client.query(
     `update client_companies
      set manager_id = $2,
          support_manager_id = $3,
          updated_at = now()
      where id = $1`,
     [id, assignments.managerId, assignments.supportManagerId],
-  );
+    );
+  }, { trackCommitOutcome: true });
 }
 
-export async function deleteClientCompany(id: number, session: AdminSession): Promise<ClientCompany> {
+export class ClientArchiveConflictError extends Error {
+  constructor() { super('Данные клиента уже изменены другим пользователем. Обновите список перед повторной попыткой.'); }
+}
+
+// Kept as a compatibility export for the old DELETE endpoint. Never physically deletes a company.
+export async function deleteClientCompany(id: number, session: AdminSession, expectedUpdatedAt: string): Promise<ClientCompany> {
+  return changeClientArchiveState(id, session, expectedUpdatedAt, true);
+}
+
+export async function restoreClientCompany(id: number, session: AdminSession, expectedUpdatedAt: string): Promise<ClientCompany> {
+  return changeClientArchiveState(id, session, expectedUpdatedAt, false);
+}
+
+async function changeClientArchiveState(id: number, session: AdminSession, expectedUpdatedAt: string, archive: boolean): Promise<ClientCompany> {
   await ensureSiteSchema();
 
   return withTransaction(async (client) => {
     await assertClientCompanyVisible(id, session, client);
+    const version = await client.query<{ matches: boolean }>(
+      'select updated_at = $2::timestamptz as matches from client_companies where id = $1', [id, expectedUpdatedAt],
+    );
+    if (!version.rows[0]?.matches) throw new ClientArchiveConflictError();
     const result = await client.query<ClientCompanyRow>(
       `select
          cc.id::text,
@@ -399,6 +436,7 @@ export async function deleteClientCompany(id: number, session: AdminSession): Pr
              and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
          ) as chat_unread_count,
          cc.is_active,
+         cc.archived_at::text,
          cc.created_at::text,
          cc.updated_at::text
        from client_companies cc
@@ -420,8 +458,16 @@ export async function deleteClientCompany(id: number, session: AdminSession): Pr
     if (!result.rows[0]) throw new Error('Компания клиента не найдена');
 
     const company = mapClientCompany(result.rows[0]);
-    await client.query(`delete from client_companies where id = $1`, [id]);
-    return company;
+    if (Boolean(company.archivedAt) === archive) return company;
+    const changed = await client.query<{ archived_at: string | null; updated_at: string }>(
+      `update client_companies set archived_at = case when $2::boolean then clock_timestamp() else null end,
+         is_active = false, updated_at = clock_timestamp() where id = $1
+       returning archived_at::text, updated_at::text`, [id, archive],
+    );
+    // Restore also revokes sessions; it never reopens access automatically.
+    await client.query(`update client_sessions set revoked_at = coalesce(revoked_at, now())
+      where client_user_id in (select id from client_users where company_id = $1) and revoked_at is null`, [id]);
+    return { ...company, isActive: false, archivedAt: changed.rows[0].archived_at, updatedAt: changed.rows[0].updated_at };
   }, { trackCommitOutcome: true });
 }
 
@@ -454,7 +500,7 @@ export async function getClientUserByLogin(login: string): Promise<ClientPortalU
        cu.login,
        cu.password_hash,
        cu.is_active,
-       cc.is_active as company_is_active,
+       (cc.is_active and cc.archived_at is null) as company_is_active,
        cc.require_2fa,
        cu.password_changed_at::text
      from client_users cu
@@ -532,6 +578,7 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
      where cu.id = $1
        and cu.is_active = true
        and cc.is_active = true
+       and cc.archived_at is null
      limit 1`,
     [clientUserId],
   );
@@ -573,7 +620,13 @@ export async function getClientUserPasswordHash(clientUserId: number) {
 
 export async function updateClientUserPassword(clientUserId: number, passwordHash: string, displayPassword = '') {
   await ensureSiteSchema();
-  await query(
+  await withTransaction(async (client) => {
+    const company = await client.query(`select cc.id from client_companies cc
+      join client_users cu on cu.company_id = cc.id
+      where cu.id = $1 and cu.is_active = true and cc.is_active = true and cc.archived_at is null
+      for update of cc`, [clientUserId]);
+    if (!company.rows[0]) throw new Error('Клиент недоступен');
+    await client.query(
     `update client_users
      set password_hash = $2,
          display_password = $3,
@@ -581,7 +634,8 @@ export async function updateClientUserPassword(clientUserId: number, passwordHas
          updated_at = now()
      where id = $1`,
     [clientUserId, passwordHash, displayPassword],
-  );
+    );
+  }, { trackCommitOutcome: true });
 }
 
 export async function recordClientUserLogin(clientUserId: number) {

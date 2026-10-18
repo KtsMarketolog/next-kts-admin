@@ -34,12 +34,16 @@ function inputFromBody(body: Record<string, unknown>, passwordHash?: string, dis
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const { denied, session } = await requireEmployee();
   if (denied) return denied;
 
-  const companies = await getClientCompanies(session);
-  return Response.json({ companies });
+  const scope = new URL(request.url).searchParams.get('scope') || 'active';
+  if (scope !== 'active' && scope !== 'archived' && scope !== 'all') {
+    return Response.json({ error: 'Некорректный раздел клиентов' }, { status: 400 });
+  }
+  const companies = await getClientCompanies(session, scope);
+  return Response.json({ companies, canPermanentlyDelete: session.role === 'admin' || session.role === 'wholesale_admin' });
 }
 
 export async function POST(request: Request) {

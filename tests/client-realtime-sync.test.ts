@@ -6,7 +6,7 @@ import ts from 'typescript';
 
 import { mergeClientChatMessages } from '../src/shared/lib/clientChatState';
 import type { startClientRealtimeSync } from '../src/shared/lib/clientRealtimeSync';
-import { emptyDraft, readApiError, readApiErrorFallback, toDraft, type ClientCompany, type ClientDraft } from '../src/features/admin/clients/AdminClientsModel';
+import { clientMatchesScope, emptyDraft, mergeClientDrafts, readApiError, readApiErrorFallback, toDraft, type ClientCompany, type ClientDraft } from '../src/features/admin/clients/AdminClientsModel';
 import type { ClientCompanyOption, PriceEditor } from '../src/features/admin/wholesale/AdminWholesaleTypes';
 
 // Run the actual browser helper with isolated events/timers: no HTTP, real timers or server.
@@ -214,7 +214,10 @@ test('clients mount starts one initial GET and background refresh preserves draf
   let managerLoads = 0;
   const loadClients = executeCallback<(preserve?: boolean, signal?: AbortSignal) => Promise<void>>(declaration.initializer.arguments[0], parsed.source, {
     request: (_url: string, options: { signal?: AbortSignal }) => new Promise((resolve) => { requests.push({ resolve, signal: options.signal }); }),
-    companiesRef, mutationRef, dataGeneration, toDraft, readApiError,
+    companiesRef, mutationRef, dataGeneration, toDraft, readApiError, clientMatchesScope, mergeClientDrafts,
+    companyBaselines: { current: new Map<number, ClientCompany>() },
+    scope: 'active', scopeRef: { current: 'active' }, loadSequence: { current: 0 },
+    isActive: () => true, setLoading: () => {}, setCanPermanentlyDelete: () => {},
     setCompanies: () => {},
     setCompanyDrafts: (update: (current: Record<number, ClientDraft>) => Record<number, ClientDraft>) => { drafts = update(drafts); },
   });
@@ -334,7 +337,7 @@ for (const succeeds of [false, true]) {
     const sending: boolean[] = [];
     const sendingRef = { current: false };
     const send = executeCallback<(event: { preventDefault: () => void }) => Promise<void>>(declaration.initializer, parsed.source, {
-      draft, sendingRef, endpoint: '/authorized/chat',
+      draft, sendingRef, endpoint: '/authorized/chat', readOnly: false,
       fetch: (_url: string, options: { body: string; signal: AbortSignal }) => {
         posts += 1;
         assert.deepEqual(JSON.parse(options.body), { message: 'Outgoing message' });

@@ -33,7 +33,7 @@ export async function lockPriceListCompany(
   const allClients = !session || session.role === 'admin' || session.role === 'wholesale_admin';
   const company = await client.query<{ id: string; title: string }>(
     `select id::text, title from client_companies
-     where id = $1 and is_active = true
+     where id = $1 and is_active = true and archived_at is null
        and ($2::boolean or manager_id = $3 or support_manager_id = $3)
      for update`,
     [companyId, allClients, session?.managerId ?? 0],
@@ -45,7 +45,7 @@ export async function lockPriceListCompany(
 export async function writePriceListCompanyAssignment(client: PoolClient, companyId: number, assignment: Assignment) {
   const result = await client.query(
     `update client_companies set manager_id = $2, support_manager_id = $3, updated_at = now()
-     where id = $1`,
+     where id = $1 and archived_at is null`,
     [companyId, assignment.managerId, assignment.supportManagerId],
   );
   if (result.rowCount !== 1) throw new Error('Не удалось сохранить назначение менеджеров клиента');

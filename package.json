@@ -10,6 +10,7 @@
     "lint": "eslint",
     "test": "node --import tsx --test tests/*.test.ts",
     "site:seed-content": "tsx scripts/seed-site-content.ts",
+    "clients:document-cleanup": "tsx scripts/client-document-cleanup.ts",
     "analogs:generate": "node scripts/generate-analogs-data.mjs",
     "cleanup": "node scripts/cleanup-maintenance.mjs",
     "stock:import-email": "tsx scripts/import-stock-from-email.ts",

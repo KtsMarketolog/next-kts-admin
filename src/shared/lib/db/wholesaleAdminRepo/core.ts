@@ -13,7 +13,7 @@ import {
 
 import { trackAnalyticsEvent } from '../analyticsRepo';
 import { query, withTransaction } from '../client';
-import { assertClientCompanyVisible } from '../clientCompaniesRepo';
+import { assertClientCompanyWritable } from '../clientCompaniesRepo';
 import { writeClientCompanyPriceListAssignments } from '../clientCompanyPriceListAssignments';
 import { ensureSiteSchema } from '../schema';
 import {
@@ -704,9 +704,10 @@ export async function updateWholesalePriceListManagerAssignmentsForClientCompany
   await ensureSiteSchema();
   const companyId = Number(clientCompanyId);
   if (!Number.isInteger(companyId) || companyId <= 0) return;
-  if (session) await assertClientCompanyVisible(companyId, session);
-
-  await writeClientCompanyPriceListAssignments({ query }, companyId, input);
+  await withTransaction(async (client) => {
+    await assertClientCompanyWritable(companyId, session ?? { role: 'admin' }, client);
+    await writeClientCompanyPriceListAssignments(client, companyId, input);
+  });
 }
 
 export async function deleteWholesalePriceList(id: number, session?: AdminSession | null) {

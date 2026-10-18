@@ -8,6 +8,7 @@ import { formatDate } from './AdminClientDetail.helpers';
 import { EmptyClientTab } from './AdminClientDetailParts';
 
 type AdminClientDocumentsPanelProps = {
+  readOnly?: boolean;
   busy: boolean;
   clientId: number;
   documents: ClientDocument[];
@@ -25,6 +26,7 @@ type AdminClientDocumentsPanelProps = {
 };
 
 export function AdminClientDocumentsPanel({
+  readOnly = false,
   busy,
   clientId,
   documents,
@@ -42,7 +44,7 @@ export function AdminClientDocumentsPanel({
 }: AdminClientDocumentsPanelProps) {
   return (
     <div className={styles.clientDocumentsPanel}>
-      <form className={styles.clientDocumentUploadForm} onSubmit={onUpload}>
+      {!readOnly ? <form className={styles.clientDocumentUploadForm} onSubmit={onUpload}>
         <label>
           <span>Название</span>
           <input
@@ -71,7 +73,7 @@ export function AdminClientDocumentsPanel({
           {busy ? 'Обработка...' : 'Прикрепить документ'}
         </button>
         {busy ? <button type="button" className={styles.secondary} onClick={onCancel}>Отменить ожидание</button> : null}
-      </form>
+      </form> : <p className={styles.mutedText}>Документы архивного клиента доступны только для просмотра и скачивания.</p>}
 
       {status ? <p className={styles.clientDocumentStatus}>{status}</p> : null}
 
@@ -88,7 +90,7 @@ export function AdminClientDocumentsPanel({
                   {document.originalName} · {formatFileSize(document.fileSize)} · {formatDate(document.createdAt)}
                 </p>
               </div>
-              <label className={styles.clientDocumentCheckbox}>
+              {!readOnly ? <label className={styles.clientDocumentCheckbox}>
                 <input
                   type="checkbox"
                   disabled={busy}
@@ -96,7 +98,7 @@ export function AdminClientDocumentsPanel({
                   onChange={(event) => onToggleVisibility(document, event.target.checked)}
                 />
                 <span>Показать</span>
-              </label>
+              </label> : null}
               <a
                 className={styles.clientDocumentLink}
                 href={`/api/admin/clients/${clientId}/documents/${document.id}/download`}
@@ -105,9 +107,9 @@ export function AdminClientDocumentsPanel({
               >
                 Скачать
               </a>
-              <button className={styles.danger} type="button" disabled={busy} onClick={() => onDelete(document)}>
+              {!readOnly ? <button className={styles.danger} type="button" disabled={busy} onClick={() => onDelete(document)}>
                 Удалить
-              </button>
+              </button> : null}
             </article>
           ))}
         </div>

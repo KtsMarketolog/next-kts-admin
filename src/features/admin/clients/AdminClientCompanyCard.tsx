@@ -16,13 +16,16 @@ type AdminClientCompanyCardProps = {
   busy: boolean;
   isExpanded: boolean;
   isSaved: boolean;
+  canPermanentlyDelete: boolean;
   onDraftChange: (id: number, patch: Partial<ClientDraft>) => void;
   onCopyPassword: (password?: string) => void;
   onToggleExpanded: (id: number) => void;
   onTogglePasswordEdit: (id: number) => void;
   onPasswordDraftChange: (id: number, value: string) => void;
   onSave: (id: number) => void;
-  onDelete: (company: ClientCompany) => void;
+  onArchive: (company: ClientCompany) => void;
+  onRestore: (company: ClientCompany) => void;
+  onPermanentDelete: (company: ClientCompany) => void;
 };
 
 export function AdminClientCompanyCard({
@@ -36,14 +39,39 @@ export function AdminClientCompanyCard({
   busy,
   isExpanded,
   isSaved,
+  canPermanentlyDelete,
   onDraftChange,
   onCopyPassword,
   onToggleExpanded,
   onTogglePasswordEdit,
   onPasswordDraftChange,
   onSave,
-  onDelete,
+  onArchive,
+  onRestore,
+  onPermanentDelete,
 }: AdminClientCompanyCardProps) {
+  if (company.archivedAt) {
+    return (
+      <article className={styles.clientCompanyCard}>
+        <div className={styles.clientCompanyHeader}>
+          <div>
+            <p>В архиве · {new Date(company.archivedAt).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })} МСК</p>
+            <h3>{company.title || 'Без названия'}</h3>
+          </div>
+          <div className={styles.clientCompanyMeta}>
+            <span>{company.email || 'Email не указан'}</span>
+            <span>{company.managerName ? `Менеджер: ${company.managerName}` : 'Менеджер не выбран'}</span>
+            <span>Вход в кабинет закрыт. Данные и файлы сохранены.</span>
+          </div>
+        </div>
+        <div className={styles.clientCompanyActions}>
+          <Link className={styles.clientOpenLink} href={`/admin/clients/${company.id}`}>Открыть архив клиента</Link>
+          <button className={styles.secondary} type="button" disabled={busy} onClick={() => onRestore(company)}>Восстановить</button>
+          {canPermanentlyDelete ? <button className={styles.danger} type="button" disabled={busy} onClick={() => onPermanentDelete(company)}>Удалить навсегда</button> : null}
+        </div>
+      </article>
+    );
+  }
   return (
     <article className={styles.clientCompanyCard}>
       <div className={styles.clientCompanyHeader}>
@@ -169,8 +197,8 @@ export function AdminClientCompanyCard({
             <button className={isSaved ? styles.savedButton : ''} disabled={busy} onClick={() => onSave(company.id)}>
               {isSaved ? 'Сохранено' : 'Сохранить'}
             </button>
-            <button className={styles.danger} type="button" disabled={busy} onClick={() => onDelete(company)}>
-              Удалить
+            <button className={styles.secondary} type="button" disabled={busy} onClick={() => onArchive(company)}>
+              В архив
             </button>
           </div>
         </fieldset>

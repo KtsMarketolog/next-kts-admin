@@ -1,8 +1,10 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
-import { saveClientDocumentUpload, removeClientDocumentFile } from '@/shared/lib/clientDocumentStorage';
+import { saveClientDocumentUpload } from '@/shared/lib/clientDocumentStorage';
 import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { createClientDocument, getClientDocumentsForAdmin } from '@/shared/lib/db';
+import { removeUnreferencedClientDocumentUpload } from '@/shared/lib/db/clientDocumentCleanupRepo';
+import { TransactionCommitUnknownError } from '@/shared/lib/db/transactionOutcome';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
@@ -72,10 +74,23 @@ export async function POST(request: Request, context: Context) {
       session,
     );
 
-    publishClientRealtimeEvent({ type: 'documents.updated', companyId: clientId });
+    try {
+      publishClientRealtimeEvent({ type: 'documents.updated', companyId: clientId });
+    } catch {
+      console.warn(JSON.stringify({ event: 'client_document_notification_failed', clientId }));
+    }
     return Response.json({ document });
   } catch (error) {
-    if (savedFile) await removeClientDocumentFile(savedFile.filePath);
+    if (savedFile) {
+      try {
+        await removeUnreferencedClientDocumentUpload(savedFile.filePath, clientId);
+      } catch {
+        console.warn(JSON.stringify({ event: 'client_document_upload_cleanup_failed', clientId }));
+      }
+    }
+    if (error instanceof TransactionCommitUnknownError) {
+      return Response.json({ error: error.message, saved: null, code: error.code }, { status: 503 });
+    }
     return Response.json(
       { error: error instanceof Error ? error.message : 'Не удалось прикрепить документ' },
       { status: 400 },

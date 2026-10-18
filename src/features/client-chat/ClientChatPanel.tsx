@@ -21,6 +21,7 @@ type ClientChatPanelProps = {
   endpoint: string;
   eventsEndpoint: string;
   currentAuthorType: ChatAuthorType;
+  readOnly?: boolean;
   onUnreadCountChange?: (count: number) => void;
 };
 
@@ -40,7 +41,7 @@ async function readApiError(response: Response, fallback: string) {
   return typeof data?.error === 'string' && data.error ? data.error : fallback;
 }
 
-export function ClientChatPanel({ endpoint, eventsEndpoint, currentAuthorType, onUnreadCountChange }: ClientChatPanelProps) {
+export function ClientChatPanel({ endpoint, eventsEndpoint, currentAuthorType, onUnreadCountChange, readOnly = false }: ClientChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -91,7 +92,7 @@ export function ClientChatPanel({ endpoint, eventsEndpoint, currentAuthorType, o
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault();
     const message = draft.trim();
-    if (!message || sendingRef.current) return;
+    if (readOnly || !message || sendingRef.current) return;
 
     sendingRef.current = true;
     setSending(true);
@@ -131,7 +132,7 @@ export function ClientChatPanel({ endpoint, eventsEndpoint, currentAuthorType, o
         ) : messages.length === 0 ? (
           <div className={styles.empty}>
             <strong>Сообщений пока нет</strong>
-            <span>Напишите первое сообщение.</span>
+            <span>{readOnly ? 'Переписка архивного клиента доступна только для просмотра.' : 'Напишите первое сообщение.'}</span>
           </div>
         ) : (
           messages.map((message) => (
@@ -160,7 +161,7 @@ export function ClientChatPanel({ endpoint, eventsEndpoint, currentAuthorType, o
         )}
       </div>
 
-      <form className={styles.composer} onSubmit={sendMessage}>
+      {!readOnly ? <form className={styles.composer} onSubmit={sendMessage}>
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -169,7 +170,7 @@ export function ClientChatPanel({ endpoint, eventsEndpoint, currentAuthorType, o
           placeholder="Введите сообщение"
         />
         <button disabled={sending || !draft.trim()}>{sending ? 'Отправляем...' : 'Отправить'}</button>
-      </form>
+      </form> : <p className={styles.status}>Клиент в архиве. Отправка сообщений отключена.</p>}
       {status || loadError ? <p className={styles.status}>{status || loadError}</p> : null}
     </div>
   );

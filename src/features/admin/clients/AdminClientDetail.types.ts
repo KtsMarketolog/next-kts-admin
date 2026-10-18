@@ -13,6 +13,7 @@ export type ClientCompany = {
   clientUserId: number | null;
   chatUnreadCount: number;
   isActive: boolean;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };

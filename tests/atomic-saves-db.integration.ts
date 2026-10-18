@@ -70,7 +70,7 @@ test('client and stock business saves are atomic in isolated PostgreSQL', { time
       phone: '+0 synthetic', address: '', note: 'Original note', managerId: managerA, supportManagerId: supportA,
       requireTwoFactor: false, isActive: true, passwordHash: 'synthetic-old-hash', displayPassword: 'synthetic-old-password',
     };
-    const company = await createClientCompany(originalInput, admin);
+    let company = await createClientCompany(originalInput, admin);
     assert.ok(company.clientUserId);
     await query(`update client_users set password_changed_at='2000-01-01' where id=$1`, [company.clientUserId]);
     const session = await createStoredClientSession({ clientUserId: company.clientUserId });
@@ -101,6 +101,7 @@ test('client and stock business saves are atomic in isolated PostgreSQL', { time
       (select json_agg(i order by i.id) from wholesale_price_list_items i where price_list_id=$3) as items`,
     [company.id, company.clientUserId, priceId])).rows[0];
     const proposed: ClientCompanyInput = {
+      expectedUpdatedAt: company.updatedAt,
       ...originalInput, title: 'Synthetic changed client', note: 'Changed note', phone: '+1 synthetic',
       managerId: managerB, supportManagerId: supportB, passwordHash: 'synthetic-new-hash', displayPassword: 'synthetic-new-password',
     };
@@ -132,6 +133,7 @@ test('client and stock business saves are atomic in isolated PostgreSQL', { time
     await t.test('successful client save commits assignments and password without touching prices or positions', async () => {
       const before = await clientState();
       const saved = await updateClientCompany(company.id, proposed, admin);
+      company = saved;
       assert.equal(saved.title, proposed.title);
       assert.equal(saved.managerId, managerB);
       assert.equal(saved.supportManagerId, supportB);
@@ -161,7 +163,7 @@ test('client and stock business saves are atomic in isolated PostgreSQL', { time
 
     await t.test('comment-only client save keeps unchanged price revisions and active sessions', async () => {
       const before = await clientState();
-      await updateClientCompany(company.id, { ...proposed, note: 'Comment-only edit', passwordHash: undefined, displayPassword: undefined }, admin);
+      await updateClientCompany(company.id, { ...proposed, expectedUpdatedAt: company.updatedAt, note: 'Comment-only edit', passwordHash: undefined, displayPassword: undefined }, admin);
       const after = await clientState();
       assert.deepEqual(after.prices, before.prices);
       assert.deepEqual(after.items, before.items);

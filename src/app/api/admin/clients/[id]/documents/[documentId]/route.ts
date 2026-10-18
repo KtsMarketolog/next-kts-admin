@@ -1,8 +1,9 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
-import { removeClientDocumentFile } from '@/shared/lib/clientDocumentStorage';
 import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
 import { deleteClientDocument, updateClientDocumentVisibility } from '@/shared/lib/db';
+import { processClientDocumentCleanup } from '@/shared/lib/db/clientDocumentCleanupRepo';
+import { TransactionCommitUnknownError } from '@/shared/lib/db/transactionOutcome';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 
 type Context = {
@@ -34,6 +35,9 @@ export async function PATCH(request: Request, context: Context) {
     publishClientRealtimeEvent({ type: 'documents.updated', companyId: clientId });
     return Response.json({ document });
   } catch (error) {
+    if (error instanceof TransactionCommitUnknownError) {
+      return Response.json({ error: error.message, saved: null, code: error.code }, { status: 503 });
+    }
     return Response.json(
       { error: error instanceof Error ? error.message : 'Не удалось обновить документ' },
       { status: 400 },
@@ -55,15 +59,35 @@ export async function DELETE(request: Request, context: Context) {
   const limited = await enforceAdminActionRateLimit(session, 'client_document_delete', 60);
   if (limited) return limited;
 
+  let cleanupId: number;
   try {
     const document = await deleteClientDocument(clientId, numericDocumentId, session);
-    await removeClientDocumentFile(document.filePath);
-    publishClientRealtimeEvent({ type: 'documents.updated', companyId: clientId });
-    return Response.json({ ok: true });
+    cleanupId = document.cleanupId;
   } catch (error) {
+    if (error instanceof TransactionCommitUnknownError) {
+      return Response.json({ error: error.message, saved: null, code: error.code }, { status: 503 });
+    }
     return Response.json(
       { error: error instanceof Error ? error.message : 'Не удалось удалить документ' },
       { status: 400 },
     );
   }
+  // The record has been deleted and the cleanup request is durable. A disk or
+  // realtime failure must not report that the document deletion was rolled back.
+  let cleanupPending = true;
+  try {
+    cleanupPending = (await processClientDocumentCleanup(cleanupId)).pending;
+  } catch {
+    console.warn(JSON.stringify({ event: 'client_document_cleanup_pending', cleanupId }));
+  }
+  try {
+    publishClientRealtimeEvent({ type: 'documents.updated', companyId: clientId });
+  } catch {
+    console.warn(JSON.stringify({ event: 'client_document_notification_failed', clientId }));
+  }
+  return Response.json({
+    ok: true,
+    cleanupPending,
+    ...(cleanupPending ? { warning: 'Документ удалён из списка. Очистка файла ожидает повторной проверки администратором.' } : {}),
+  });
 }

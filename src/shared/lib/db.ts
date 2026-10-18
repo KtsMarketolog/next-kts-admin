@@ -77,6 +77,8 @@ export {
   assertClientCompanyVisible,
   createClientCompany,
   deleteClientCompany,
+  restoreClientCompany,
+  ClientArchiveConflictError,
   getClientCompanyPriceLists,
   getClientCompanies,
   getClientPortalProfile,

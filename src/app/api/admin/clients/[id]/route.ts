@@ -2,6 +2,7 @@ import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireEmployee } from '@/shared/lib/adminAuth';
 import {
   deleteClientCompany,
+  ClientArchiveConflictError,
   updateClientCompany,
   type ClientCompanyInput,
 } from '@/shared/lib/db';
@@ -25,6 +26,7 @@ function managerIdFromBody(value: unknown) {
 
 function inputFromBody(body: Record<string, unknown>, passwordHash?: string, displayPassword?: string): ClientCompanyInput {
   return {
+    expectedUpdatedAt: typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined,
     title: normalizeTextField(body.title, 200),
     inn: '',
     kpp: '',
@@ -58,6 +60,9 @@ export async function PUT(request: Request, context: Context) {
   if (limited) return limited;
 
   const body = await request.json().catch(() => ({}));
+  if (typeof body.expectedUpdatedAt !== 'string' || body.expectedUpdatedAt.length > 64 || !Number.isFinite(Date.parse(body.expectedUpdatedAt))) {
+    return Response.json({ saved: false, error: 'Обновите данные клиента перед сохранением.' }, { status: 428 });
+  }
   const password = typeof body.password === 'string' ? body.password.trim() : '';
   const passwordPolicy = password ? validatePasswordPolicy(password) : { ok: true };
   if (!passwordPolicy.ok) {
@@ -118,6 +123,9 @@ export async function PUT(request: Request, context: Context) {
     ]);
     return Response.json({ company, saved: true, warnings });
   } catch (error) {
+    if (error instanceof ClientArchiveConflictError) {
+      return Response.json({ saved: false, error: error.message }, { status: 409 });
+    }
     if (error instanceof TransactionCommitUnknownError) {
       return Response.json({ saved: null, code: 'COMMIT_OUTCOME_UNKNOWN', error: 'Не удалось подтвердить результат сохранения. Обновите данные перед повторной попыткой.' }, { status: 503 });
     }
@@ -143,19 +151,25 @@ export async function DELETE(request: Request, context: Context) {
   const limited = await enforceAdminActionRateLimit(session, 'client_company_delete', 30);
   if (limited) return limited;
 
+  const body = await request.json().catch(() => null);
+  const expectedUpdatedAt = body?.expectedUpdatedAt;
+  if (typeof expectedUpdatedAt !== 'string' || expectedUpdatedAt.length > 64 || !Number.isFinite(Date.parse(expectedUpdatedAt))) {
+    return Response.json({ saved: false, error: 'Обновите страницу перед архивированием клиента.' }, { status: 428 });
+  }
+
   try {
-    const company = await deleteClientCompany(numericId, session);
+    const company = await deleteClientCompany(numericId, session, expectedUpdatedAt);
     const warnings = await runPostCommitTasks([
       {
         code: 'CLIENT_REALTIME_UNAVAILABLE',
-        message: 'Клиент удалён, но уведомление других открытых страниц не отправлено. Обновите их вручную.',
+        message: 'Клиент перенесён в архив, но уведомление других открытых страниц не отправлено. Обновите их вручную.',
         run: () => publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id }),
       },
       {
-        code: 'CLIENT_DELETE_AUDIT_UNAVAILABLE',
-        message: 'Клиент удалён, но запись об удалении в журнал не добавлена. Требуется повторить журналирование.',
+        code: 'CLIENT_ARCHIVE_AUDIT_UNAVAILABLE',
+        message: 'Клиент перенесён в архив, но запись в журнал не добавлена. Требуется повторить журналирование.',
         run: () => recordSecurityEvent({
-          eventType: 'client_company_deleted',
+          eventType: 'client_company_archived',
           actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
           adminUserId: session.adminUserId,
           managerId: session.managerId,
@@ -165,17 +179,20 @@ export async function DELETE(request: Request, context: Context) {
           ip: getClientIp(request),
           userAgent: request.headers.get('user-agent'),
           referer: request.headers.get('referer'),
-          metadata: { title: company.title, userCount: company.userCount },
+          metadata: { title: company.title, userCount: company.userCount, archivedAt: company.archivedAt, automaticPurge: false },
         }, { required: true }),
       },
     ]);
-    return Response.json({ ok: true, saved: true, warnings });
+    return Response.json({ ok: true, saved: true, company, warnings });
   } catch (error) {
+    if (error instanceof ClientArchiveConflictError) {
+      return Response.json({ saved: false, error: error.message }, { status: 409 });
+    }
     if (error instanceof TransactionCommitUnknownError) {
-      return Response.json({ saved: null, code: 'COMMIT_OUTCOME_UNKNOWN', error: 'Не удалось подтвердить результат удаления. Обновите данные перед повторной попыткой.' }, { status: 503 });
+      return Response.json({ saved: null, code: 'COMMIT_OUTCOME_UNKNOWN', error: 'Не удалось подтвердить результат архивирования. Обновите данные перед повторной попыткой.' }, { status: 503 });
     }
     return Response.json(
-      { saved: false, error: error instanceof Error ? error.message : 'Не удалось удалить компанию клиента' },
+      { saved: false, error: error instanceof Error ? error.message : 'Не удалось архивировать клиента' },
       { status: 400 },
     );
   }

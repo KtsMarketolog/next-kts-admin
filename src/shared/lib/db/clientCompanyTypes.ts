@@ -22,11 +22,13 @@ export type ClientCompany = {
   displayPassword: string;
   chatUnreadCount: number;
   isActive: boolean;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
 export type ClientCompanyInput = {
+  expectedUpdatedAt?: string;
   title: string;
   inn: string;
   kpp: string;
