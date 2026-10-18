@@ -25,7 +25,7 @@ import {
 import { lockPriceListCompany, writePriceListCompanyAssignment } from './priceListCompanyWrite';
 import {
   replaceWholesalePriceListGroupStockSettings,
-  replaceWholesalePriceListItems,
+  upsertWholesalePriceListItems,
   type PriceListWriteQuery,
 } from './priceListWrite';
 
@@ -494,7 +494,7 @@ export async function createWholesalePriceList(
       ],
     );
     const id = Number(result.rows[0].id);
-    await replaceWholesalePriceListItems(execute, id, input.items);
+    await upsertWholesalePriceListItems(execute, id, input.items);
     await replaceWholesalePriceListGroupStockSettings(execute, id, input.priceGroupStockSettings);
     const event: PriceListEventInput = {
       priceListId: id,
@@ -569,7 +569,6 @@ export async function updateWholesalePriceList(
       [id],
     );
     const previousVisibleItems = Number(previousItems.rows[0]?.count ?? 0);
-    const nextVisibleItems = nextInput.items.filter((item) => item.visible).length;
     const updated = await client.query(
       `update wholesale_price_lists
        set title = $2,
@@ -600,7 +599,14 @@ export async function updateWholesalePriceList(
       ],
     );
     if (updated.rowCount !== 1) throw new Error('Прайс не найден или недоступен. Обновите страницу.');
-    await replaceWholesalePriceListItems(execute, id, nextInput.items);
+    await upsertWholesalePriceListItems(execute, id, nextInput.items);
+    // Omitted positions remain stored. Count the committed-to-be state rather
+    // than the request subset, otherwise a partial save falsely reports removal.
+    const nextItems = await client.query<{ count: string }>(
+      `select count(*)::text as count from wholesale_price_list_items where price_list_id = $1 and visible = true`,
+      [id],
+    );
+    const nextVisibleItems = Number(nextItems.rows[0]?.count ?? 0);
     await replaceWholesalePriceListGroupStockSettings(execute, id, nextInput.priceGroupStockSettings);
     const event: PriceListEventInput = {
       priceListId: id,

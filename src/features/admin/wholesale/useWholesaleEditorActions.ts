@@ -66,10 +66,11 @@ export function useWholesaleEditorActions({
     (productId: number, visible: boolean) => {
       setEditor((current) => ({
         ...current,
-        items: current.items.map((item) => (item.productId === productId ? { ...item, visible } : item)),
+        items: current.items.map((item) => (item.productId === productId
+          && catalogDiscountBaseByKey.has(`${item.productId}:${item.variantId ?? 'base'}`) ? { ...item, visible } : item)),
       }));
     },
-    [setEditor],
+    [catalogDiscountBaseByKey, setEditor],
   );
 
   const setPriceGroupVisible = useCallback(

@@ -69,10 +69,10 @@ export function WholesalePriceCatalogPanel({
   setProductVisible,
   updateItem,
 }: WholesalePriceCatalogPanelProps) {
-  if (catalog.length === 0) {
+  if (catalogRows.length === 0) {
     return (
       <p className={styles.mutedText}>
-        В базе прайс-товаров пока нет позиций. Сначала нужно добавить отдельные wholesale-товары.
+        Каталог загружен: активных позиций нет. Ранее сохранённые позиции прайса и их настройки не удаляются.
       </p>
     );
   }

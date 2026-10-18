@@ -7,7 +7,7 @@ import { Client } from 'pg';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import { query } from '../src/shared/lib/db/client';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
-import { createWholesalePriceList, getWholesalePriceListEditor, updateWholesalePriceList } from '../src/shared/lib/db/wholesaleAdminRepo/core';
+import { createWholesalePriceList, getWholesaleCatalog, getWholesalePriceListEditor, updateWholesalePriceList } from '../src/shared/lib/db/wholesaleAdminRepo/core';
 import type { WholesalePriceListEditor, WholesalePriceListItemInput } from '../src/shared/lib/db/wholesaleAdminRepo/types';
 import { getPublicWholesalePriceList, getPublicWholesaleRequestItems } from '../src/shared/lib/db/wholesaleRepo';
 import { parseWholesalePriceItems, readWholesalePriceSaveBody } from '../src/shared/lib/wholesalePriceSave';
@@ -191,6 +191,97 @@ test('wholesale full-catalogue saves in isolated PostgreSQL', { timeout: 180_000
       assert.equal((await query(`select count(*)::text as n from wholesale_price_lists`)).rows[0].n, '2');
     });
 
+    await t.test('empty item payload preserves every stored row and reports no item removals', async () => {
+      const before = await getWholesalePriceListEditor(priceId, admin);
+      assert.ok(before);
+      const rowState = async () => (await stableState(priceId)).items;
+      const itemsBefore = await rowState();
+      const basketIds = (await query<{ id: string }>(`select id::text from wholesale_price_list_items
+        where price_list_id=$1 and visible=true order by id`, [priceId])).rows.map((row) => Number(row.id));
+      const basketBefore = await getPublicWholesaleRequestItems(before.token, basketIds);
+      const removalCount = async () => (await query<{ n: string }>(`select count(*)::text as n
+        from wholesale_analytics_events where price_list_id=$1 and event_type='price_items_removed'`, [priceId])).rows[0].n;
+      const removalsBefore = await removalCount();
+
+      await updateWholesalePriceList(priceId, { ...before, comment: 'Metadata-only save after an empty item payload', items: [] }, admin);
+
+      const after = await getWholesalePriceListEditor(priceId, admin);
+      assert.ok(after);
+      assert.deepEqual(after.items, before.items);
+      assert.equal(await rowState(), itemsBefore, 'empty payload must not even touch stored item timestamps/snapshots');
+      assert.equal(after.token, before.token);
+      assert.equal(await removalCount(), removalsBefore, 'omitted visible rows are not removals');
+      assert.deepEqual(await getPublicWholesaleRequestItems(before.token, basketIds), basketBefore);
+    });
+
+    await t.test('partial saves retain inactive products/variants and their settings on reactivation; hiding remains explicit', async () => {
+      const candidates = makeItems(20001);
+      const rows = [candidates[0], candidates[1], candidates[7474], candidates[20000], candidates[2]];
+      Object.assign(rows[0], { visible: true, customWholesalePrice: '75.00', priceManuallyChanged: true });
+      Object.assign(rows[1], { visible: true, customWholesalePrice: '123.45', discountPercent: '17.25', priceManuallyChanged: true });
+      Object.assign(rows[2], { visible: true, customWholesalePrice: '150.00', discountPercent: '25', priceManuallyChanged: false });
+      Object.assign(rows[3], { visible: false, customWholesalePrice: '42.50', discountPercent: '9', priceManuallyChanged: true });
+      rows[4].visible = true;
+      const data = input(rows, 'Inactive items keep all settings');
+      const testPriceId = await createWholesalePriceList(data, admin);
+      await query(`update wholesale_price_list_items set snapshot_product_title='Retained inactive snapshot'
+        where price_list_id=$1 and wholesale_product_id in ($2,$3)`, [testPriceId, rows[1].productId, rows[2].productId]);
+      // Legacy databases can have an override without today's manual/discount
+      // flags. Re-serializing that unavailable row would normalize its price to
+      // null. An omitted key must preserve the historical row exactly instead.
+      await query(`update wholesale_price_list_items set custom_wholesale_price=78.90,
+        price_manually_changed=false, discount_percent=null
+        where price_list_id=$1 and wholesale_product_id=$2`, [testPriceId, rows[4].productId]);
+      const retainedRows = async () => (await query(`select row_to_json(i.*) as item
+        from wholesale_price_list_items i where price_list_id=$1 and wholesale_product_id <> $2 order by id`,
+      [testPriceId, rows[0].productId])).rows;
+      const before = await retainedRows();
+      await query('update wholesale_products set is_active=false where id in ($1,$2)', [rows[1].productId, rows[4].productId]);
+      await query('update wholesale_product_variants set is_active=false where id=$1', [rows[2].variantId]);
+      try {
+        const catalog = await getWholesaleCatalog();
+        const products = catalog.flatMap((category) => category.products);
+        assert.ok(!products.some((product) => product.id === rows[1].productId));
+        assert.ok(!products.some((product) => product.id === rows[4].productId));
+        assert.ok(!products.some((product) => product.variants.some((variant) => variant.id === rows[2].variantId)));
+
+        // The editor only sends a remaining active position, deliberately hidden.
+        // All omitted visible/inactive/hidden positions are independent stored state.
+        await updateWholesalePriceList(testPriceId, { ...data, items: [{ ...rows[0], visible: false }] }, admin);
+        assert.deepEqual(await retainedRows(), before, 'omission must preserve IDs, timestamps, prices, discounts and snapshot fields');
+        await updateWholesalePriceList(testPriceId, { ...data, items: [] }, admin);
+        assert.deepEqual(await retainedRows(), before, 'a later empty payload must also retain the legacy override verbatim');
+        const editor = await getWholesalePriceListEditor(testPriceId, admin);
+        assert.ok(editor);
+        assert.equal(editor.items.length, 5);
+        assert.equal(editor.items.find((item) => item.productId === rows[0].productId)!.visible, false);
+        assert.equal(editor.items.find((item) => item.productId === rows[0].productId)!.customWholesalePrice, '75.00');
+        const legacy = editor.items.find((item) => item.productId === rows[4].productId)!;
+        assert.equal(legacy.customWholesalePrice, '78.90');
+        assert.equal(legacy.priceManuallyChanged, false);
+        assert.equal(legacy.discountPercent, null);
+        assert.deepEqual(editor.priceGroupStockSettings, data.priceGroupStockSettings);
+        const publicWhileInactive = await getPublicWholesalePriceList(data.token);
+        assert.ok(publicWhileInactive);
+        assert.equal(publicWhileInactive.categories.flatMap((category) => category.products).length, 0);
+        const removals = await query<{ metadata: { removed: number; from: number; to: number } }>(`select metadata
+          from wholesale_analytics_events where price_list_id=$1 and event_type='price_items_removed'`, [testPriceId]);
+        assert.equal(removals.rows.length, 1);
+        assert.equal(removals.rows[0].metadata.removed, 1, 'only the explicit visibility change counts as removal');
+        assert.equal(removals.rows[0].metadata.from, 4);
+        assert.equal(removals.rows[0].metadata.to, 3);
+      } finally {
+        await query('update wholesale_products set is_active=true where id in ($1,$2)', [rows[1].productId, rows[4].productId]);
+        await query('update wholesale_product_variants set is_active=true where id=$1', [rows[2].variantId]);
+      }
+      const publicAfterReactivation = await getPublicWholesalePriceList(data.token);
+      assert.ok(publicAfterReactivation);
+      const restored = publicAfterReactivation.categories.flatMap((category) => category.products);
+      assert.deepEqual(restored.map((product) => product.id), [rows[1].productId, rows[4].productId, rows[2].productId]);
+      assert.deepEqual(restored.map((product) => product.variants[0].wholesalePrice), ['123.45', '78.90', '150.00']);
+      assert.deepEqual(await retainedRows(), before);
+    });
+
     await t.test('invalid product in the final batch rolls back header/items/groups/events on update', async () => {
       const before = await stableState(priceId);
       const rows = makeItems(20001);
@@ -236,14 +327,17 @@ test('wholesale full-catalogue saves in isolated PostgreSQL', { timeout: 180_000
       assert.deepEqual(await stableState(priceId), before);
     });
 
-    await t.test('concurrent updates serialize complete item sets and never mix batches', async () => {
+    await t.test('concurrent updates serialize overlapping keys without deleting rows omitted by a partial payload', async () => {
       const first = { ...savedInput, title: 'Concurrent A', items: makeItems(7475).map((row) => ({ ...row, visible: true })) };
       const second = { ...savedInput, title: 'Concurrent B', items: makeItems(20001).map((row) => ({ ...row, visible: false })) };
       await Promise.all([updateWholesalePriceList(priceId, first, admin), updateWholesalePriceList(priceId, second, admin)]);
       const editor = await getWholesalePriceListEditor(priceId, admin);
       assert.ok(editor);
       assert.ok(['Concurrent A', 'Concurrent B'].includes(editor.title));
-      assert.deepEqual(editor.items, canonical(editor.title === first.title ? first.items : second.items));
+      const expected = editor.title === first.title
+        ? [...first.items, ...second.items.slice(first.items.length)] : second.items;
+      assert.deepEqual(editor.items, canonical(expected));
+      assert.equal(editor.items.length, 20001, 'the shorter update cannot delete the other stored keys');
     });
 
     await t.test('wrong, missing and inactive manager assignments reject create/update without any partial price', async () => {

@@ -134,6 +134,7 @@ export type WholesalePriceListEditor = {
   isActive: boolean;
   managerId: number | null;
   supportManagerId: number | null;
+  // Saves upsert these logical keys; omitted stored positions are preserved.
   items: WholesalePriceListItemInput[];
   priceGroupStockSettings: WholesalePriceGroupStockSettingInput[];
 };

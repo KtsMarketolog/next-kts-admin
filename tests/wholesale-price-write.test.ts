@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {
   replaceWholesalePriceListGroupStockSettings,
-  replaceWholesalePriceListItems,
+  upsertWholesalePriceListItems,
   WHOLESALE_PRICE_WRITE_BATCH_SIZE,
   type PriceListWriteQuery,
 } from '../src/shared/lib/db/wholesaleAdminRepo/priceListWrite';
@@ -34,11 +34,10 @@ for (const count of [7475, 20001]) {
     const input = items(count);
     input[count - 1] = { ...input[count - 1], visible: true, discountPercent: '10', customWholesalePrice: '90' };
     const { calls, execute } = recordingQuery();
-    await replaceWholesalePriceListItems(execute, 45, input);
-    assert.equal(calls.length, 2 + Math.ceil(count / WHOLESALE_PRICE_WRITE_BATCH_SIZE));
-    assert.match(calls.at(-1)!.sql, /^delete from wholesale_price_list_items existing/);
-    assert.match(calls.at(-1)!.sql, /not exists/);
-    const written = calls.slice(1, -1).flatMap(({ sql, params }) => {
+    await upsertWholesalePriceListItems(execute, 45, input);
+    assert.equal(calls.length, 1 + Math.ceil(count / WHOLESALE_PRICE_WRITE_BATCH_SIZE));
+    assert.ok(calls.every(({ sql }) => !/\bdelete\b/i.test(sql)), 'no payload may delete omitted positions');
+    const written = calls.slice(1).flatMap(({ sql, params }) => {
       assert.equal(params.length, 2);
       assert.equal(params[0], 45);
       assert.match(sql, /order by item\.input_order/);
@@ -65,7 +64,7 @@ test('bulk writer preserves variant, manual-price, zero-discount and sort-order 
   input[1] = { ...input[1], discountPercent: '0', sortOrder: 3 };
   input[2] = { ...input[2], customWholesalePrice: '', priceManuallyChanged: true };
   const { calls, execute } = recordingQuery();
-  await replaceWholesalePriceListItems(execute, 1, input);
+  await upsertWholesalePriceListItems(execute, 1, input);
   const written = JSON.parse(String(calls[1].params[1]));
   assert.equal(written[0].variant_id, 12);
   assert.equal(written[0].custom_wholesale_price, '42.50');
@@ -80,15 +79,15 @@ test('bulk writer preserves variant, manual-price, zero-discount and sort-order 
 
 test('short insert row count fails immediately rather than silently skipping stale catalog IDs', async () => {
   const { calls, execute } = recordingQuery(2);
-  await assert.rejects(replaceWholesalePriceListItems(execute, 1, items(3001)), /позиции каталога изменились/);
-  assert.equal(calls.length, 3, 'duplicate check and two batches only; no pruning before all batches succeed');
+  await assert.rejects(upsertWholesalePriceListItems(execute, 1, items(3001)), /позиции каталога изменились/);
+  assert.equal(calls.length, 3, 'duplicate check and two batches only; no later writes after a failed batch');
 });
 
 test('duplicate keys across batches reject before deleting any existing items', async () => {
   const input = items(2001);
   input[2000] = { ...input[0], visible: true };
   const { calls, execute } = recordingQuery();
-  await assert.rejects(replaceWholesalePriceListItems(execute, 1, input), /повторяющиеся позиции/);
+  await assert.rejects(upsertWholesalePriceListItems(execute, 1, input), /повторяющиеся позиции/);
   assert.equal(calls.length, 0);
 });
 
@@ -99,16 +98,28 @@ test('legacy duplicate rows fail closed before writes and cannot mask invalid in
     assert.match(sql, /having count\(\*\) > 1/);
     return { rowCount: 1 };
   };
-  await assert.rejects(replaceWholesalePriceListItems(execute, 45, items(2)), /требуется проверка администратором/);
+  await assert.rejects(upsertWholesalePriceListItems(execute, 45, items(2)), /требуется проверка администратором/);
   assert.equal(queries, 1);
 });
 
-test('empty item replacement prunes only this price list without deleting any price-list header', async () => {
+test('empty item update never clears the saved positions', async () => {
   const { calls, execute } = recordingQuery();
-  await replaceWholesalePriceListItems(execute, 1, []);
+  await upsertWholesalePriceListItems(execute, 1, []);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /^select /);
+  assert.deepEqual(calls[0].params, [1]);
+});
+
+test('partial item update only upserts requested keys and retains explicit hide intent', async () => {
+  const input = [{ ...items(1)[0], visible: false, customWholesalePrice: '42.50', priceManuallyChanged: true }];
+  const { calls, execute } = recordingQuery();
+  await upsertWholesalePriceListItems(execute, 1, input);
   assert.equal(calls.length, 2);
-  assert.match(calls[1].sql, /existing.price_list_id = \$1 and not exists/);
-  assert.deepEqual(calls[1].params, [1, '[]']);
+  assert.ok(calls.every(({ sql }) => !/\bdelete\b/i.test(sql)));
+  const written = JSON.parse(String(calls[1].params[1]));
+  assert.equal(written.length, 1);
+  assert.equal(written[0].visible, false);
+  assert.equal(written[0].custom_wholesale_price, '42.50');
 });
 
 test('group settings preserve trimming, empty-entry skipping and last-enabled duplicate upsert semantics', async () => {

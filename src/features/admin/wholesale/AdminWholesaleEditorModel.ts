@@ -66,9 +66,11 @@ export function getInitialCustomWholesalePrice(row: ReturnType<typeof flatCatalo
 
 export function mergeEditorItems(categories: CatalogCategory[], items: PriceItem[]) {
   const current = new Map(items.map((item) => [`${item.productId}:${item.variantId ?? 'base'}`, item]));
-  return flatCatalogItems(categories).map((row, index) => {
+  const catalogKeys = new Set<string>();
+  const activeItems = flatCatalogItems(categories).map((row, index) => {
     const { product, variant } = row;
     const key = `${product.id}:${variant.id ?? 'base'}`;
+    catalogKeys.add(key);
     const currentItem = current.get(key);
     const customWholesalePrice = getInitialCustomWholesalePrice(row, currentItem);
     if (currentItem) return { ...currentItem, customWholesalePrice, discountPercent: currentItem.discountPercent ?? null };
@@ -83,4 +85,7 @@ export function mergeEditorItems(categories: CatalogCategory[], items: PriceItem
       sortOrder: index + 1,
     };
   });
+  // The active catalogue is a display projection, not the saved price-list composition.
+  // Keep unavailable products/variants verbatim: no recalculation, hiding or reset.
+  return [...activeItems, ...items.filter((item) => !catalogKeys.has(`${item.productId}:${item.variantId ?? 'base'}`))];
 }

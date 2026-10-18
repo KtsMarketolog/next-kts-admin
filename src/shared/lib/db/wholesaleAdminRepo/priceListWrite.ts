@@ -5,7 +5,11 @@ export type PriceListWriteQuery = (text: string, params: unknown[]) => Promise<{
 
 export const WHOLESALE_PRICE_WRITE_BATCH_SIZE = 1000;
 
-export async function replaceWholesalePriceListItems(
+// This is a patch by logical product/variant key, never a replacement of the
+// stored set. Omission (including an empty request) is not deletion intent:
+// catalogue failures and temporarily inactive products must retain overrides.
+// Explicit visible=false hides a position without destroying its saved data.
+export async function upsertWholesalePriceListItems(
   execute: PriceListWriteQuery,
   id: number,
   items: WholesalePriceListItemInput[],
@@ -83,18 +87,6 @@ export async function replaceWholesalePriceListItems(
     // A disappeared product or foreign/disappeared variant must roll back the whole price list.
     if (result.rowCount !== batch.length) throw new Error('Некоторые позиции каталога изменились. Обновите страницу и повторите сохранение прайса.');
   }
-  // Only deliberately omitted logical positions are removed. Unchanged positions keep
-  // their IDs, created_at and snapshot fields, so existing public baskets remain valid.
-  // The enclosing transaction locks the price-list header for the entire reconciliation.
-  await execute(
-    `delete from wholesale_price_list_items existing
-     where existing.price_list_id = $1 and not exists (
-       select 1 from jsonb_to_recordset($2::jsonb) as item(product_id bigint, variant_id bigint)
-       where existing.wholesale_product_id = item.product_id
-         and existing.wholesale_variant_id is not distinct from item.variant_id
-     )`,
-    [id, JSON.stringify(items.map((item) => ({ product_id: item.productId, variant_id: item.variantId })))],
-  );
 }
 
 export async function replaceWholesalePriceListGroupStockSettings(

@@ -261,30 +261,34 @@ test('wholesale assignment sync starts after editor init and uses its exact snap
   const initial: ClientCompanyOption[] = [{ id: 1, title: 'Initial company', managerId: 2, supportManagerId: 3, isActive: true }];
   let serverCompanies = initial;
   const editorCompaniesRef = { current: initial as ClientCompanyOption[] | null };
-  let editorLoading = true;
+  let editorReady = false;
   let editor: PriceEditor | null = null;
   const bindings = {
     screen: 'edit', editId: 45, canManageWholesale: true, createManagerId: null,
+    editorKey: 'edit:45::true', AbortController,
+    window: { setTimeout: () => 1, clearTimeout: () => {} },
     editorCompaniesRef,
     loadClientCompanies: async () => serverCompanies,
     setEditor: (update: PriceEditor | ((current: PriceEditor) => PriceEditor)) => {
       if (typeof update === 'function') { assert.ok(editor); editor = update(editor); }
       else editor = update;
     },
-    setEditorLoading: (value: boolean) => { editorLoading = value; },
+    setEditorLoad: (value: { state: string }) => { assert.notEqual(value.state, 'error'); editorReady = value.state === 'ready'; },
+    setEditorSaveError: () => {}, setClientCompanies: () => {}, setCatalog: () => {},
     startClientRealtimeSync: env.start,
-    loadCatalog: async () => [],
-    fetch: async () => ({ ok: true, json: async () => ({ priceList: { id: 45, clientCompanyId: 1, clientName: 'Initial company', token: 'synthetic-token' } }) }),
+    readWholesaleEditorResponse: async () => ({ priceList: { id: 45, clientCompanyId: 1, clientName: 'Initial company', token: 'synthetic-token' } }),
+    parseWholesaleEditorCatalog: () => [],
+    parseWholesaleEditorPrice: (payload: { priceList: unknown }) => payload.priceList,
     buildPriceEditorFromPayload,
     showStatus: (message: string) => { assert.fail(message); },
   };
-  const startSync = () => executeCallback<() => (() => void) | undefined>(syncEffect, parsed.source, { ...bindings, editorLoading })();
+  const startSync = () => executeCallback<() => (() => void) | undefined>(syncEffect, parsed.source, { ...bindings, editorReady })();
   assert.equal(startSync(), undefined, 'an old snapshot must not allow sync while a new editor is loading');
   assert.equal(env.streams.length, 0);
   const stopInit = executeCallback<() => () => void>(initEffect, parsed.source, bindings)();
   assert.equal(editorCompaniesRef.current, null);
   await env.flush();
-  assert.equal(editorLoading, false);
+  assert.equal(editorReady, true);
   assert.equal(editorCompaniesRef.current, initial);
   const currentEditor = () => { assert.ok(editor); return editor; };
   assert.equal(currentEditor().managerId, 2);

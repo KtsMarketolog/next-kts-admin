@@ -16,6 +16,7 @@ import { useWholesaleCatalogFilters } from './useWholesaleCatalogFilters';
 import { useWholesaleEditorActions } from './useWholesaleEditorActions';
 import { useWholesaleManagers } from './useWholesaleManagers';
 import { buildPriceEditorFromPayload, normalizeClientCompanyOptions } from './AdminWholesaleGateway.helpers';
+import { assertWholesaleEditorCompanies, parseWholesaleEditorCatalog, parseWholesaleEditorPrice, readWholesaleEditorResponse } from './wholesaleEditorLoad';
 
 import {
   emptyEditor,
@@ -39,7 +40,6 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     managerAnalyticsId,
     managerDetailId,
     screen,
-    startsInEditor,
   } = useAdminWholesaleGatewayPath(canManageWholesale);
   const [currentManager, setCurrentManager] = useState<CurrentManager | null>(null);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -47,7 +47,16 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const editorCompaniesRef = useRef<ClientCompanyOption[] | null>(null);
   const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
   const [editor, setEditor] = useState<PriceEditor>(() => emptyEditor());
-  const [editorLoading, setEditorLoading] = useState(startsInEditor);
+  const editorKey = `${screen}:${editId ?? ''}:${createManagerId ?? ''}:${canManageWholesale}`;
+  const [editorLoad, setEditorLoad] = useState<
+    { key: string; state: 'loading' | 'ready' } | { key: string; state: 'error'; message: string }
+  >({ key: '', state: 'loading' });
+  const [editorLoadAttempt, setEditorLoadAttempt] = useState(0);
+  const editorLoading = editorLoad.key !== editorKey || editorLoad.state === 'loading';
+  const editorReady = editorLoad.key === editorKey && editorLoad.state === 'ready';
+  const editorLoadError = editorLoad.key === editorKey && editorLoad.state === 'error' ? editorLoad.message : '';
+  const [editorSaveError, setEditorSaveError] = useState('');
+  const savingRef = useRef(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
@@ -142,27 +151,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     setPriceLists(Array.isArray(data.priceLists) ? data.priceLists : []);
   }, [showStatus]);
 
-  const loadCatalog = async () => {
-    const res = await fetch('/api/admin/wholesale/catalog', { cache: 'no-store' });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const nextCatalog = Array.isArray(data.categories) ? data.categories : [];
-    setCatalog(nextCatalog);
-    return nextCatalog as CatalogCategory[];
-  };
-
-  const loadClientCompanies = useCallback(async (signal?: AbortSignal): Promise<ClientCompanyOption[]> => {
-    const res = await fetch('/api/admin/clients', { cache: 'no-store', signal });
-    if (!res.ok) {
-      if (signal) throw new Error('Не удалось обновить клиентов');
-      setClientCompanies([]);
-      return [];
-    }
-    const data = await res.json().catch(() => ({}));
-    if (signal?.aborted) return [];
-    const nextClientCompanies = normalizeClientCompanyOptions(data);
-    setClientCompanies(nextClientCompanies);
-    return nextClientCompanies;
+  const loadClientCompanies = useCallback(async (signal: AbortSignal): Promise<ClientCompanyOption[]> => {
+    const data = await readWholesaleEditorResponse('/api/admin/clients', signal, 'Не удалось загрузить список клиентов');
+    assertWholesaleEditorCompanies(data);
+    return normalizeClientCompanyOptions(data);
   }, []);
 
   useEffect(() => {
@@ -184,60 +176,63 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
   useEffect(() => {
     if (screen !== 'create' && screen !== 'edit') {
-      setEditorLoading(false);
+      editorCompaniesRef.current = null;
       return;
     }
 
     let isActive = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      if (!isActive) return;
+      isActive = false;
+      controller.abort();
+      setEditorLoad({ key: editorKey, state: 'error', message: 'Сервер не ответил вовремя. Повторите загрузку.' });
+    }, 30_000);
 
     async function loadEditorData() {
       editorCompaniesRef.current = null;
-      setEditorLoading(true);
-      const [nextCatalog, nextClientCompanies] = await Promise.all([loadCatalog(), loadClientCompanies()]);
+      setEditorLoad({ key: editorKey, state: 'loading' });
+      setEditorSaveError('');
+      const [catalogData, nextClientCompanies, priceData] = await Promise.all([
+        readWholesaleEditorResponse('/api/admin/wholesale/catalog', controller.signal, 'Не удалось загрузить каталог'),
+        loadClientCompanies(controller.signal),
+        screen === 'edit' && editId
+          ? readWholesaleEditorResponse(`/api/admin/wholesale/price-lists/${editId}`, controller.signal, 'Не удалось загрузить прайс')
+          : Promise.resolve(null),
+      ]);
       if (!isActive) return;
-      if (screen === 'create') {
-        editorCompaniesRef.current = nextClientCompanies;
-        setEditor({
+      const nextCatalog = parseWholesaleEditorCatalog(catalogData);
+      const nextEditor = screen === 'create'
+        ? {
           ...emptyEditor(),
           managerId: canManageWholesale ? createManagerId : null,
           supportManagerId: null,
           items: mergeEditorItems(nextCatalog, []),
-        });
-        setEditorLoading(false);
-        return;
-      }
-
-      if (!editId) {
-        setEditorLoading(false);
-        return;
-      }
-      const res = await fetch(`/api/admin/wholesale/price-lists/${editId}`, { cache: 'no-store' });
-      if (!isActive) return;
-      if (!res.ok) {
-        setEditorLoading(false);
-        showStatus('Прайс не найден');
-        return;
-      }
-      const data = await res.json();
-      if (!isActive) return;
+        }
+        : buildPriceEditorFromPayload(parseWholesaleEditorPrice(priceData, editId!), nextCatalog, nextClientCompanies);
+      // Publish one complete load only. Never expose a prior route's draft or a partial catalogue.
       editorCompaniesRef.current = nextClientCompanies;
-      setEditor(buildPriceEditorFromPayload(data.priceList, nextCatalog, nextClientCompanies));
-      setEditorLoading(false);
+      setCatalog(nextCatalog);
+      setClientCompanies(nextClientCompanies);
+      setEditor(nextEditor);
+      setEditorLoad({ key: editorKey, state: 'ready' });
     }
 
-    void loadEditorData().catch(() => {
+    void loadEditorData().catch((error: unknown) => {
       if (!isActive) return;
-      showStatus('Не удалось загрузить данные прайса');
-      setEditorLoading(false);
-    });
+      controller.abort();
+      setEditorLoad({ key: editorKey, state: 'error', message: error instanceof Error ? error.message : 'Не удалось загрузить данные прайса' });
+    }).finally(() => window.clearTimeout(timeout));
 
     return () => {
       isActive = false;
+      controller.abort();
+      window.clearTimeout(timeout);
     };
-  }, [canManageWholesale, createManagerId, editId, loadClientCompanies, screen, showStatus]);
+  }, [canManageWholesale, createManagerId, editId, editorKey, editorLoadAttempt, loadClientCompanies, screen]);
 
   useEffect(() => {
-    if ((screen !== 'create' && screen !== 'edit') || editorLoading || !editorCompaniesRef.current) return undefined;
+    if ((screen !== 'create' && screen !== 'edit') || !editorReady || !editorCompaniesRef.current) return undefined;
 
     let previousCompanies = editorCompaniesRef.current;
     return startClientRealtimeSync({
@@ -246,6 +241,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       refresh: async (signal) => {
         const nextCompanies = await loadClientCompanies(signal);
         if (signal.aborted) return;
+        setClientCompanies(nextCompanies);
         const previous = previousCompanies;
         previousCompanies = nextCompanies;
         setEditor((current) => {
@@ -262,9 +258,14 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         });
       },
     });
-  }, [editorLoading, loadClientCompanies, screen]);
+  }, [editorReady, editorKey, loadClientCompanies, screen]);
 
   const savePriceList = async () => {
+    if (!editorReady || (screen === 'edit' && editor.id !== editId)) {
+      setEditorSaveError('Дождитесь полной загрузки редактора. Сохранение недоступно.');
+      return;
+    }
+    if (savingRef.current) return;
     if (!editor.title.trim()) {
       showStatus('Введите название прайса');
       return;
@@ -287,23 +288,34 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
 
     const method = screen === 'edit' ? 'PUT' : 'POST';
     const url = screen === 'edit' && editor.id ? `/api/admin/wholesale/price-lists/${editor.id}` : '/api/admin/wholesale/price-lists';
+    savingRef.current = true;
     setBusy(true);
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...editor,
-        clientCompanyId: selectedClientCompany.id,
-        clientName: selectedClientCompany.title,
-      }),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      showStatus(await readApiError(res, 'Не удалось сохранить прайс'));
-      return;
+    setEditorSaveError('');
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...editor,
+          // Unavailable rows are retained in the model, but are not edited here.
+          // With server-side upsert they remain untouched, including legacy overrides.
+          items: editor.items.filter((item) => catalogDiscountBaseByKey.has(`${item.productId}:${item.variantId ?? 'base'}`)),
+          clientCompanyId: selectedClientCompany.id,
+          clientName: selectedClientCompany.title,
+        }),
+      });
+      if (!res.ok) {
+        setEditorSaveError(await readApiError(res, 'Не удалось сохранить прайс'));
+        return;
+      }
+      showStatus('Прайс сохранён');
+      router.push(editorBackHref);
+    } catch {
+      setEditorSaveError('Не удалось получить подтверждение сохранения. Проверьте прайс перед повторной отправкой: изменения могли сохраниться.');
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
     }
-    showStatus('Прайс сохранён');
-    router.push(editorBackHref);
   };
 
   const deletePriceList = async (id: number) => {
@@ -452,6 +464,12 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         analyticsBackHref={analyticsBackHref}
         editorBackHref={editorBackHref}
         editorLoading={editorLoading}
+        editorLoadError={editorLoadError}
+        editorSaveError={editorSaveError}
+        retryEditorLoad={() => {
+          setEditorLoad({ key: editorKey, state: 'loading' });
+          setEditorLoadAttempt((attempt) => attempt + 1);
+        }}
         editor={editor}
         setEditor={setEditor}
         commentRows={commentRows}

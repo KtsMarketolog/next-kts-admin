@@ -27,6 +27,9 @@ type WholesalePriceEditorScreenProps = {
   analyticsBackHref: string | null;
   editorBackHref: string;
   editorLoading: boolean;
+  editorLoadError: string;
+  editorSaveError: string;
+  retryEditorLoad: () => void;
   editor: PriceEditor;
   setEditor: Dispatch<SetStateAction<PriceEditor>>;
   commentRows: number;
@@ -67,6 +70,9 @@ export function WholesalePriceEditorScreen({
   analyticsBackHref,
   editorBackHref,
   editorLoading,
+  editorLoadError,
+  editorSaveError,
+  retryEditorLoad,
   editor,
   setEditor,
   commentRows,
@@ -123,6 +129,13 @@ export function WholesalePriceEditorScreen({
 
       {editorLoading ? (
         renderWholesaleEditorSkeleton()
+      ) : editorLoadError ? (
+        <div role="alert">
+          <h3>Редактор не загружен</h3>
+          <p>{editorLoadError}</p>
+          <p>Сохранение недоступно. Позиции прайса не изменены.</p>
+          <button type="button" className={styles.secondary} onClick={retryEditorLoad}>Повторить загрузку</button>
+        </div>
       ) : (
         <>
           <WholesalePriceEditorDetails
@@ -135,6 +148,13 @@ export function WholesalePriceEditorScreen({
             developmentManagers={developmentManagers}
             supportManagers={supportManagers}
           />
+
+          {editor.items.some((item) => !catalogDiscountBaseByKey.has(`${item.productId}:${item.variantId ?? 'base'}`)) ? (
+            <p className={styles.mutedText}>
+              В прайсе есть позиции вне активного каталога. Их индивидуальные цены, скидки и настройки сохранены;
+              они не меняются при настройке показанных товаров.
+            </p>
+          ) : null}
 
           <WholesalePriceCatalogPanel
             catalog={catalog}
@@ -167,6 +187,7 @@ export function WholesalePriceEditorScreen({
             <button disabled={busy} onClick={savePriceList}>Сохранить прайс</button>
             <button className={styles.secondary} onClick={() => router.push(editorBackHref)}>Отмена</button>
           </div>
+          {editorSaveError ? <p role="alert">{editorSaveError}</p> : null}
         </>
       )}
     </section>

@@ -2,12 +2,10 @@ import {
   makeToken,
   mergeEditorItems,
   normalizePriceGroupStockSettings,
-  type CatalogCategory,
-  type ClientCompanyOption,
-  type PriceEditor,
-} from './AdminWholesaleModel';
+} from './AdminWholesaleEditorModel';
+import type { CatalogCategory, ClientCompanyOption, PriceEditor, PriceGroupStockSetting } from './AdminWholesaleTypes';
 
-type PriceListPayload = {
+export type PriceListPayload = {
   id?: number;
   title?: string | null;
   clientCompanyId?: number | null;
@@ -23,12 +21,12 @@ type PriceListPayload = {
   managerId?: number | null;
   supportManagerId?: number | null;
   items?: PriceEditor['items'];
-  priceGroupStockSettings?: PriceEditor['priceGroupStockSettings'];
+  priceGroupStockSettings?: PriceGroupStockSetting[];
 };
 
 export function normalizeClientCompanyOptions(data: unknown): ClientCompanyOption[] {
-  const payload = data as { companies?: ClientCompanyOption[] };
-  return Array.isArray(payload.companies)
+  const payload = data as { companies?: ClientCompanyOption[] } | null;
+  return Array.isArray(payload?.companies)
     ? payload.companies
         .filter((company) => company && company.isActive !== false)
         .map((company) => ({
