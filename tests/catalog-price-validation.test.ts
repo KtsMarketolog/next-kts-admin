@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import * as helpers from '../src/entities/catalog/api/catalogAdmin/helpers';
 import type { CatalogProductInput } from '../src/entities/catalog/api/catalogAdmin/types';
 import { parseCatalogExcel } from '../src/entities/catalog/api/catalogExcel';
+import { loadCatalogAdminModule } from './helpers/catalogAdminModule';
 
 const fields = ['priceEur', 'priceRub', 'priceCny', 'generalDiscount', 'manualDiscount', 'manualDiscountRop'] as const;
 const labels = {
@@ -33,8 +34,7 @@ function load<T>(filename: string, dependencies: Record<string, unknown>): T {
 function coreWithoutIo() {
   const calls: string[] = [];
   const forbidden = (name: string) => async () => { calls.push(name); throw new Error(`Unexpected IO: ${name}`); };
-  const core = load<typeof import('../src/entities/catalog/api/catalogAdmin/core')>(
-    '../src/entities/catalog/api/catalogAdmin/core.ts', {
+  const core = loadCatalogAdminModule<typeof import('../src/entities/catalog/api/catalogAdmin/core')>({
       '@/shared/lib/db': { ensureSiteSchema: forbidden('site schema') },
       '@/shared/lib/db/client': { query: forbidden('query'), withTransaction: forbidden('transaction') },
       '@/shared/lib/db/catalogStockWrite': { withCatalogStockWrite: forbidden('catalog transaction') },

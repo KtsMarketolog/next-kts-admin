@@ -61,17 +61,24 @@ test('personal management keeps main panels and preview ahead of audience-scoped
 for (const component of ['TopDashboardViewer', 'AdminTopDashboardSection']) {
   test(`${component} puts sales help after and outside the fullscreen report card`, () => {
     const result = placement(`top-dashboard/${component}`);
-    assert.ok(ts.isJsxElement(result.previous));
-    assert.equal(result.previous.openingElement.tagName.getText(result.source), 'section');
-    assert.match(result.previous.openingElement.attributes.getText(result.source), /ref=\{previewCardRef\}/);
-    assert.match(result.previous.getText(result.source), /<iframe\b/);
-    assert.doesNotMatch(result.previous.getText(result.source), /<DashboardInstructions\b/);
     assert.match(result.child.getText(result.source), /overview\?\.instruction === 'sales-analytics'/);
     assert.match(result.help.attributes.getText(result.source), /dashboardKey=\{`top:\$\{blockId\}`\}/);
     if (component === 'AdminTopDashboardSection') {
-      assert.ok(ts.isJsxElement(result.next));
-      assert.match(result.next.openingElement.attributes.getText(result.source), /id="top-dashboard-data-upload"/);
+      assert.ok(ts.isJsxSelfClosingElement(result.previous));
+      assert.equal(result.previous.tagName.getText(result.source), 'TopDashboardManagementPreview');
+      assert.match(result.previous.attributes.getText(result.source), /previewCardRef=\{previewCardRef\}/);
+      const preview = readFileSync(new URL('../src/features/admin/top-dashboard/TopDashboardManagementPreview.tsx', import.meta.url), 'utf8');
+      assert.match(preview, /<section\s+ref=\{previewCardRef\}/);
+      assert.match(preview, /<iframe\b/);
+      assert.doesNotMatch(preview, /<DashboardInstructions\b/);
+      assert.ok(ts.isJsxSelfClosingElement(result.next));
+      assert.equal(result.next.tagName.getText(result.source), 'TopDashboardDataPanel');
     } else {
+      assert.ok(ts.isJsxElement(result.previous));
+      assert.equal(result.previous.openingElement.tagName.getText(result.source), 'section');
+      assert.match(result.previous.openingElement.attributes.getText(result.source), /ref=\{previewCardRef\}/);
+      assert.match(result.previous.getText(result.source), /<iframe\b/);
+      assert.doesNotMatch(result.previous.getText(result.source), /<DashboardInstructions\b/);
       assert.equal(result.next, undefined);
     }
   });

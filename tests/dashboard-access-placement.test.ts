@@ -21,7 +21,7 @@ function editors(file: string) {
     assert.ok(ts.isJsxElement(container));
     const siblings = container.children.filter((child) => !ts.isJsxText(child) || child.text.trim());
     const previous = siblings[siblings.indexOf(expression) - 1];
-    assert.ok(previous && ts.isJsxElement(previous));
+    assert.ok(previous && (ts.isJsxElement(previous) || ts.isJsxSelfClosingElement(previous)));
     for (let ancestor: ts.Node | undefined = editor.parent; ancestor; ancestor = ancestor.parent) {
       if (ts.isJsxElement(ancestor)) assert.notEqual(ancestor.openingElement.tagName.getText(source), 'form', 'Access controls must not submit an HTML or data upload form');
     }
@@ -33,14 +33,18 @@ test('TOP follows report, data, HTML and publication, access, then histories in 
   const matches = editors('../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx');
   assert.equal(matches.length, 1);
   assert.match(matches[0].key, /top:\$\{blockId\}/);
-  assert.match(matches[0].previous, /id="top-dashboard-html-upload"/);
-  assert.match(matches[0].previous, /topDashboardUploadCard/);
-  assert.match(matches[0].previous, /Выбрать HTML/);
-  assert.match(matches[0].previous, /Опубликовать черновик/);
+  assert.match(matches[0].previous, /^<TopDashboardHtmlPanel\b/);
+  const htmlPanel = readFileSync(new URL('../src/features/admin/top-dashboard/TopDashboardHtmlPanel.tsx', import.meta.url), 'utf8');
+  assert.match(htmlPanel, /id="top-dashboard-html-upload"/);
+  assert.match(htmlPanel, /topDashboardUploadCard/);
+  assert.match(htmlPanel, /Выбрать HTML/);
+  assert.match(htmlPanel, /Опубликовать черновик/);
   const source = matches[0].container;
-  const sequence = ['ref={previewCardRef}', 'id="top-dashboard-data-upload"', 'id="top-dashboard-html-upload"', '<DashboardAudienceEditor', 'id="top-dashboard-data-history"', 'id="top-dashboard-html-history"'];
+  const sequence = ['<TopDashboardManagementPreview', '<TopDashboardDataPanel', '<TopDashboardHtmlPanel', '<DashboardAudienceEditor', '<TopDashboardVersionHistories'];
   const positions = sequence.map((marker) => source.indexOf(marker));
   assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])));
+  const histories = readFileSync(new URL('../src/features/admin/top-dashboard/TopDashboardVersionHistories.tsx', import.meta.url), 'utf8');
+  assert.ok(histories.indexOf('id="top-dashboard-data-history"') < histories.indexOf('id="top-dashboard-html-history"'));
 });
 
 test('personal editors keep their placement and refresh recipients while route-planner follows data and HTML publication', () => {

@@ -32,11 +32,13 @@ window.fixtureRuntimeTargets=scenario==='runtime'?targets:null;
 if(scenario==='legacy')window.fixtureOverview.activeDataContract={htmlVersionId:10,mode:'legacy',snapshotFormat:'kts-bundle-v1',profile:'sales-analytics',directUploadTarget:null,uploadTargets:[]};
 window.fixtureUploads=[];window.fixtureRuntimeUploads=[];window.fixtureStatuses=[];window.fixtureConfirms=[];window.fixtureConfirmAllowed=true;window.fixtureFail=false;window.fixtureConflict=false;window.fixtureFailureMode=null;window.fixtureOverviewLoads=0;
 window.fixtureAccessLoads=0;
+window.fixtureMutations=[];
 window.confirm=message=>{window.fixtureConfirms.push(message);return window.fixtureConfirmAllowed};
 window.fixtureCommit=()=>{const o=window.fixtureOverview;const id=o.data.activeVersionId+1;o.data={...o.data,previousVersionId:o.data.activeVersionId,activeVersionId:id,versions:[snapshot(id),...o.data.versions.map(v=>({...v,status:'previous'}))]};};
 window.fixtureChangeVersion=()=>{const o=window.fixtureOverview;o.activeVersionId=11;o.activeDataContract={...o.activeDataContract,htmlVersionId:11};o.versions=o.versions.map(v=>({...v,status:v.id===11?'active':'archived'}));};
 const originalFetch=window.fetch.bind(window);
 window.fetch=async(input,init)=>{
+ if(typeof input==='string'&&input.startsWith('/api/admin/top-dashboard/blocks/7')&&init?.method&&init.method!=='GET')window.fixtureMutations.push({url:input,method:init.method,body:typeof init.body==='string'?JSON.parse(init.body):null});
  if(typeof input==='string'&&input.startsWith('/api/admin/dashboard-access?')){
   window.fixtureAccessLoads++;
   if(access==='denied')return Response.json({error:'Нет доступа'},{status:403});
@@ -44,9 +46,32 @@ window.fetch=async(input,init)=>{
  }
  if(input==='/api/admin/top-dashboard/blocks/7'&&(!init?.method||init.method==='GET')){window.fixtureOverviewLoads++;return Response.json(window.fixtureOverview);}
  if(input==='/api/admin/top-dashboard/blocks/7/versions'&&init?.method==='POST'){
+  if(window.fixtureFailureMode==='pending')return new Promise((_,reject)=>{init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});});
   if(window.fixtureFailureMode==='network')throw new TypeError('Failed to fetch');
   if(window.fixtureFailureMode)return Response.json({error:'HTML не принят сервером'},{status:422});
   const saved={...version(12,'draft'),originalName:init.body.get('file').name};window.fixtureOverview.versions.unshift(saved);return Response.json({version:saved});
+ }
+ if(input==='/api/admin/top-dashboard/blocks/7'&&init?.method==='PATCH'){
+  if(window.fixtureFailureMode==='network')throw new TypeError('Failed to fetch');
+  window.fixtureOverview.block.title=JSON.parse(init.body).title;return Response.json({block:window.fixtureOverview.block});
+ }
+ if(input==='/api/admin/top-dashboard/blocks/7/active'&&init?.method==='PUT'){
+  const o=window.fixtureOverview;const body=JSON.parse(init.body);
+  if(body.expectedActiveVersionId!==o.activeVersionId)return Response.json({error:'HTML изменился'},{status:409});
+  const previous=o.activeVersionId;o.activeVersionId=body.versionId;o.previousVersionId=previous;
+  o.activeDataContract={...o.activeDataContract,htmlVersionId:body.versionId};
+  o.versions=o.versions.map(v=>({...v,status:v.id===body.versionId?'active':v.id===previous?'archived':v.status}));
+  return Response.json({state:{change:body.versionId===9?'rolled_back':'published'}});
+ }
+ if(input==='/api/admin/top-dashboard/blocks/7/data/active'&&init?.method==='PUT'){
+  const o=window.fixtureOverview;const body=JSON.parse(init.body);
+  if(body.expectedActiveVersionId!==o.data.activeVersionId)return Response.json({error:'Данные изменились'},{status:409});
+  const previous=o.data.activeVersionId;o.data.activeVersionId=body.versionId;o.data.previousVersionId=previous;
+  o.data.versions=o.data.versions.map(v=>({...v,status:v.id===body.versionId?'active':v.id===previous?'previous':'archived'}));
+  return Response.json({ok:true});
+ }
+ if(input==='/api/admin/top-dashboard/blocks/7/versions/11'&&init?.method==='DELETE'){
+  window.fixtureOverview.versions=window.fixtureOverview.versions.filter(v=>v.id!==11);return Response.json({ok:true});
  }
  if(input==='/api/admin/top-dashboard/blocks/7/data'&&init?.method==='PUT'){
   if(scenario==='legacy')window.fixtureUploads.push({headers:init.headers,name:init.body.name});
@@ -290,9 +315,63 @@ async function main() {
         assert.match(await htmlFeedback.innerText(), /new-report\.html.*черновик #12.*публикация не изменена/);
         assert.equal(await page.evaluate(() => (window as any).fixtureOverview.activeVersionId), 10);
         assert.equal(await htmlInput.evaluate((input: HTMLInputElement) => input.files?.length), 0);
+
+        // Each extracted operation owns its draft, but all mutations still share one lock.
+        await page.goto(`${origin}/?case=legacy`);
+        await page.getByRole('button', { name: 'Изменить название', exact: true }).click();
+        const titleInput = page.getByRole('textbox', { name: 'Название блока', exact: true });
+        await titleInput.fill('Несохранённый заголовок');
+        await dataInput.setInputFiles(json('preserved-data.json', 17));
+        await htmlInput.setInputFiles({ name: 'pending-report.html', mimeType: 'text/html', buffer: Buffer.from('<!doctype html><title>Fixture</title>') });
+        await page.evaluate(() => { (window as any).fixtureFailureMode = 'pending'; });
+        await page.getByRole('button', { name: 'Загрузить как черновик', exact: true }).click();
+        await page.getByRole('button', { name: 'Прервать ожидание', exact: true }).waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Заменить для всех', exact: true }).isDisabled(), true);
+        assert.equal(await page.getByRole('button', { name: 'Сохранить', exact: true }).isDisabled(), true);
+        assert.equal(await page.getByRole('button', { name: 'Опубликовать черновик', exact: true }).isDisabled(), true);
+        await page.getByRole('button', { name: 'Прервать ожидание', exact: true }).click();
+        await page.waitForSelector('#top-dashboard-html-upload-feedback[role="alert"]');
+        assert.equal(await htmlInput.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), 'pending-report.html');
+        assert.equal(await dataInput.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), 'preserved-data.json');
+        assert.equal(await titleInput.inputValue(), 'Несохранённый заголовок');
+        assert.equal(await page.getByRole('button', { name: 'Заменить для всех', exact: true }).isEnabled(), true);
+        assert.equal(await page.evaluate(() => (window as any).fixtureMutations.length), 1);
+        await page.evaluate(() => { (window as any).fixtureFailureMode = null; });
+        await page.getByRole('button', { name: 'Заменить для всех', exact: true }).click();
+        await page.waitForSelector('#top-dashboard-data-upload-feedback[role="status"]');
+        assert.equal(await titleInput.inputValue(), 'Несохранённый заголовок', 'data save cannot reset the title draft');
+        assert.equal(await htmlInput.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), 'pending-report.html', 'data save cannot reset the selected HTML');
+        await page.evaluate(() => { (window as any).fixtureFrame = document.querySelector('.topDashboardLayout iframe'); (window as any).fixtureFailureMode = 'network'; });
+        await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+        await page.waitForSelector('#top-dashboard-block-mutation-error');
+        assert.equal(await titleInput.inputValue(), 'Несохранённый заголовок');
+        await page.evaluate(() => { (window as any).fixtureFailureMode = null; });
+        await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+        await page.getByRole('heading', { name: 'Несохранённый заголовок', exact: true }).waitFor();
+        assert.equal(await page.evaluate(() => (window as any).fixtureFrame === document.querySelector('.topDashboardLayout iframe')), true, 'renaming does not remount the report');
+        assert.equal(await htmlInput.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), 'pending-report.html');
+
+        // Publication and both histories retain their optimistic version checks and frame selection.
+        await page.goto(`${origin}/?case=legacy`);
+        await page.getByRole('button', { name: 'Опубликовать черновик', exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('.topDashboardPreviewCard iframe')?.getAttribute('src')?.includes('/versions/11/frame'));
+        assert.deepEqual(await page.evaluate(() => (window as any).fixtureMutations.at(-1).body), { versionId: 11, expectedActiveVersionId: 10 });
+        assert.equal(await page.locator('.topDashboardPreviewCard').getByText('Активная', { exact: true }).count(), 1);
+        await page.getByRole('button', { name: 'Откатить данные', exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('.topDashboardActiveDataCard')?.textContent?.includes('synthetic-199.ktsmf'));
+        assert.deepEqual(await page.evaluate(() => (window as any).fixtureMutations.at(-1).body), { versionId: 199, expectedActiveVersionId: 200 });
+        assert.match(await page.evaluate(() => (window as any).fixtureConfirms.at(-1)), /Вернуть данные/);
+        await page.getByRole('button', { name: 'Откатить', exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('.topDashboardPreviewCard iframe')?.getAttribute('src')?.includes('/versions/10/frame'));
+        assert.deepEqual(await page.evaluate(() => (window as any).fixtureMutations.at(-1).body), { versionId: 10, expectedActiveVersionId: 11 });
+        const inactiveRow = page.locator('#top-dashboard-html-history .topDashboardVersionRow').filter({hasText:'synthetic-11.html'});
+        await inactiveRow.getByRole('button', { name: 'Удалить', exact: true }).click();
+        await page.waitForFunction(() => !document.querySelector('#top-dashboard-html-history')?.textContent?.includes('synthetic-11.html'));
+        assert.match(await page.evaluate(() => (window as any).fixtureConfirms.at(-1)), /необратимо/);
+        assert.equal(await page.locator('.topDashboardLayout iframe').count(), 1);
         assert.deepEqual(errors, []);
         await context.close();
-        console.log(`${engine}: multi-file/runtime uploads and persistent HTML/data feedback for 422, network, 409, missing acknowledgement and success passed`);
+        console.log(`${engine}: upload protocols/feedback, draft isolation, shared mutation lock/cancel, publication, rollback and history deletion passed`);
       } finally { await browser.close(); }
     }
     console.log(`Feedback screenshots: ${screenshots}`);

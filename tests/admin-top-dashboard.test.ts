@@ -314,7 +314,7 @@ test('TOP users expose a separate Admin TOP capability without changing their pr
     import.meta.url,
   ), 'utf8');
   const panelSource = readFileSync(new URL(
-    '../src/app/admin/AdminPanel.tsx',
+    '../src/app/admin/useAdminPanelSession.ts',
     import.meta.url,
   ), 'utf8');
   const updateRouteSource = readFileSync(new URL(
@@ -356,7 +356,7 @@ test('wholesale managers expose separate TOP viewing and management capabilities
     import.meta.url,
   ), 'utf8');
   const panelSource = readFileSync(new URL(
-    '../src/app/admin/AdminPanel.tsx',
+    '../src/app/admin/adminPanelAccess.ts',
     import.meta.url,
   ), 'utf8');
 
@@ -409,7 +409,7 @@ test('TOP viewer routes enforce published-only HTML at both frame layers', () =>
 
 test('TOP viewer exposes only reports with both active HTML and active data', () => {
   const source = readFileSync(new URL(
-    '../src/shared/lib/db/topDashboardBlocksRepo.ts',
+    '../src/shared/lib/db/topDashboardBlocksRepo/publishedReads.ts',
     import.meta.url,
   ), 'utf8');
   const publishedFunctions = [
@@ -424,7 +424,7 @@ test('TOP viewer exposes only reports with both active HTML and active data', ()
     const nextFunctionName = publishedFunctions[index + 1];
     const end = nextFunctionName
       ? source.indexOf(`export async function ${nextFunctionName}`, start)
-      : source.indexOf('export async function activateTopDashboardBlockVersion', start);
+      : source.length;
     const section = source.slice(start, end);
     assert.ok(start >= 0 && end > start, `${functionName} source is present`);
     assert.match(section, /top_dashboard_block_data_state/);
@@ -446,7 +446,7 @@ test('TOP viewer component contains no dashboard mutation controls', () => {
 
 test('TOP admin wraps direct generic files before using the universal stream endpoint', () => {
   const sectionSource = readFileSync(new URL(
-    '../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx',
+    '../src/features/admin/top-dashboard/useTopDashboardDataVersions.ts',
     import.meta.url,
   ), 'utf8');
   const dataRouteSource = readFileSync(new URL(
@@ -925,7 +925,7 @@ test('dashboard adapter relays detached Blob-anchor downloads instead of navigat
 test('dashboard frames keep downloads inside the trusted bridge and explicitly delegate fullscreen', () => {
   const sources = [
     readFileSync(new URL(
-      '../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx',
+      '../src/features/admin/top-dashboard/TopDashboardManagementPreview.tsx',
       import.meta.url,
     ), 'utf8'),
     readFileSync(new URL(
@@ -1097,6 +1097,9 @@ test('top-level dashboard download hook accepts messages only from its exact fra
   const components = [
     readFileSync(new URL(
       '../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx',
+      import.meta.url,
+    ), 'utf8') + readFileSync(new URL(
+      '../src/features/admin/top-dashboard/TopDashboardManagementPreview.tsx',
       import.meta.url,
     ), 'utf8'),
     readFileSync(new URL(

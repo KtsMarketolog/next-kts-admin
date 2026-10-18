@@ -92,8 +92,9 @@ test('dates migration only adds nullable metadata and does not invent dates for 
 });
 
 test('catalog query dates come from active data and publication, never renaming a block', () => {
-  const source = readFileSync(new URL('../src/shared/lib/db/topDashboardBlocksRepo.ts', import.meta.url), 'utf8');
-  const catalogQueries = source.slice(source.indexOf('export async function getTopDashboardBlocks'), source.indexOf('export async function createTopDashboardBlock('));
+  const catalogQueries = ['reads', 'publishedReads'].map((module) =>
+    readFileSync(new URL(`../src/shared/lib/db/topDashboardBlocksRepo/${module}.ts`, import.meta.url), 'utf8'),
+  ).join('\n');
   assert.match(catalogQueries, /native_active_data\.created_at::text as data_uploaded_at/);
   assert.match(catalogQueries, /native_active\.first_published_at::text as html_published_at/);
   assert.doesNotMatch(catalogQueries, /greatest\(blocks\.updated_at/);

@@ -19,7 +19,9 @@ test('history does not substitute arbitrary archive rows for missing pointers', 
 });
 
 test('TOP management separates the working HTML pair and drafts and labels previous HTML', () => {
-  const source = readFileSync(new URL('../src/features/admin/top-dashboard/AdminTopDashboardSection.tsx', import.meta.url), 'utf8');
+  const source = ['TopDashboardVersionHistories', 'TopDashboardDataPanel'].map((name) => readFileSync(
+    new URL(`../src/features/admin/top-dashboard/${name}.tsx`, import.meta.url), 'utf8',
+  )).join('\n');
   assert.match(source, /versions: workingHtmlVersions/);
   assert.match(source, /versions: overview\.versions\.filter\(\(version\) => version\.status === 'draft'\)/);
   assert.match(source, /workingDataVersions\.map/);

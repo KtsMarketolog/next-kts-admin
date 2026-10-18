@@ -4,6 +4,7 @@ import test from 'node:test';
 import ts from 'typescript';
 
 import * as helpers from '../src/entities/catalog/api/catalogAdmin/helpers';
+import { loadCatalogAdminModule } from './helpers/catalogAdminModule';
 
 function load<T>(filename: string, dependencies: Record<string, unknown>): T {
   const code = ts.transpileModule(readFileSync(new URL(filename, import.meta.url), 'utf8'), {
@@ -53,7 +54,7 @@ function harness(repeatImport = false) {
   const gate = load<typeof import('../src/shared/lib/db/catalogStockWrite')>('../src/shared/lib/db/catalogStockWrite.ts', {
     '@/shared/lib/db/client': database,
   });
-  const core = load<typeof import('../src/entities/catalog/api/catalogAdmin/core')>('../src/entities/catalog/api/catalogAdmin/core.ts', {
+  const core = loadCatalogAdminModule<typeof import('../src/entities/catalog/api/catalogAdmin/core')>({
     '@/shared/lib/db/client': database,
     '@/shared/lib/db/catalogStockWrite': gate,
     '@/shared/lib/db': { ensureSiteSchema: async () => {} },
