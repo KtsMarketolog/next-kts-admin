@@ -2,7 +2,7 @@ import type { ClientDocumentFile } from './db';
 import { readClientDocumentFile } from './clientDocumentStorage';
 
 export async function createClientDocumentDownloadResponse(document: ClientDocumentFile) {
-  const bytes = await readClientDocumentFile(document.filePath);
+  const bytes = await readClientDocumentFile(document.filePath, document.companyId);
   const filename = document.originalName || document.title || `document-${document.id}`;
 
   return new Response(new Uint8Array(bytes), {
@@ -11,6 +11,8 @@ export async function createClientDocumentDownloadResponse(document: ClientDocum
       'Content-Length': String(bytes.length),
       'Content-Disposition': createContentDisposition(filename),
       'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
+      'X-Robots-Tag': 'noindex, nofollow, noarchive',
     },
   });
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { blocksPublicClientDocumentRequest } from '@/shared/lib/clientDocumentPaths';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const PRIVATE_CACHE_PREFIXES = ['/admin', '/cabinet', '/login', '/price'];
@@ -94,6 +95,15 @@ export function proxy(request: NextRequest) {
       },
     });
   }
+  if (blocksPublicClientDocumentRequest(request.nextUrl)) {
+    return new NextResponse(null, {
+      status: 403,
+      headers: {
+        'Cache-Control': 'private, no-store',
+        'X-Robots-Tag': X_ROBOTS_TAG_PRIVATE,
+      },
+    });
+  }
   // This application does not expose Server Actions. Rejecting the header in
   // the lightweight proxy prevents stale clients and automated probes from
   // reaching React's comparatively expensive action decoder.
@@ -140,6 +150,7 @@ export const config = {
     },
     // This route authenticates, rate-limits and checks Origin before reading
     // its bounded gzip stream. Avoid Next proxy cloning/buffering that stream.
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$|api/admin/manager-dashboard/shared/json/?$).*)',
+    // Image requests must pass the private-document guard before cache lookup.
+    '/((?!_next/static|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$|api/admin/manager-dashboard/shared/json/?$).*)',
   ],
 };

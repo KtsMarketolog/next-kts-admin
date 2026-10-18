@@ -98,6 +98,7 @@ jobs:
           rsync -a --exclude='uploads/' public/ deploy-artifact/public/
           cp ecosystem.config.cjs deploy-artifact/ecosystem.config.cjs
           cp scripts/verify-production-seo.mjs deploy-artifact/scripts/verify-production-seo.mjs
+          cp scripts/verify-client-document-privacy.mjs deploy-artifact/scripts/verify-client-document-privacy.mjs
           cp scripts/dashboard-usage-prune.mjs deploy-artifact/scripts/dashboard-usage-prune.mjs
           # Ship the explicit single-file cleanup tool; never execute it during deploy.
           node -e 'require("esbuild").buildSync({entryPoints:["scripts/client-document-cleanup.ts"],bundle:true,platform:"node",format:"cjs",target:"node24",external:["pg"],outfile:"deploy-artifact/scripts/client-document-cleanup.cjs"})'
@@ -105,6 +106,8 @@ jobs:
           mkdir -p deploy-artifact/ops/dashboard-usage
           cp ops/dashboard-usage/install.mjs ops/dashboard-usage/kts-dashboard-usage.service \
             ops/dashboard-usage/kts-dashboard-usage.timer deploy-artifact/ops/dashboard-usage/
+          mkdir -p deploy-artifact/ops/client-documents
+          cp ops/client-documents/protect-storage.mjs deploy-artifact/ops/client-documents/
           printf '%s\n' "$RELEASE_ID" > deploy-artifact/.release-id
 
           tar -czf "kts-release-${RELEASE_ID}.tar.gz" -C deploy-artifact .
@@ -360,6 +363,13 @@ jobs:
           rm -rf "$RELEASE/runtime-data"
           ln -sfn "$SHARED/runtime-data" "$RELEASE/runtime-data"
 
+          # Nginx serves /uploads/ itself. Keep private documents in place for
+          # existing DB links/backups, but remove traversal for its separate uid.
+          # This gate is mandatory and never requires root or changes public uploads.
+          node "$RELEASE/ops/client-documents/protect-storage.mjs" \
+            --app-env "$BASE/.env.local" --public-root "$SHARED/public/uploads"
+          node "$RELEASE/scripts/verify-client-document-privacy.mjs"
+
           EXPECTED_CWD="$CURRENT"
           EXPECTED_SCRIPT="$CURRENT/server.js"
 
@@ -403,6 +413,7 @@ jobs:
             "http://127.0.0.1:3001/api/health/ready" \
             "Release canary" \
             120
+          node "$RELEASE/scripts/verify-client-document-privacy.mjs" "http://127.0.0.1:3001"
           env \
             SEO_REQUIRE_YANDEX_VERIFICATION=1 \
             SEO_REQUIRE_CATALOG_ENTITIES=1 \
@@ -449,6 +460,10 @@ jobs:
             exit 1
           fi
 
+          node "$RELEASE/ops/client-documents/protect-storage.mjs" \
+            --app-env "$BASE/.env.local" --public-root "$SHARED/public/uploads" --check
+          node "$RELEASE/scripts/verify-client-document-privacy.mjs"
+
           pm2 save
 
           ACTIVATION_STARTED=0
@@ -475,3 +490,8 @@ jobs:
             rm -rf -- "$RELEASE_CANDIDATE"
           done
           EOF
+
+      - name: Verify private document isolation publicly
+        run: |
+          set -euo pipefail
+          node scripts/verify-client-document-privacy.mjs
