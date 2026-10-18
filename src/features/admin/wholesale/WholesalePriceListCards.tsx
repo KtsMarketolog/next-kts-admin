@@ -6,6 +6,7 @@ import { formatDate, renderLastPriceChange, type PriceList } from './AdminWholes
 type WholesalePriceListCardsProps = {
   priceLists: PriceList[];
   copiedToken: string | null;
+  busy?: boolean;
   emptyText: string;
   onEdit: (item: PriceList) => void;
   onOpen: (item: PriceList) => void;
@@ -16,6 +17,7 @@ type WholesalePriceListCardsProps = {
 export function WholesalePriceListCards({
   priceLists,
   copiedToken,
+  busy = false,
   emptyText,
   onEdit,
   onOpen,
@@ -87,7 +89,7 @@ export function WholesalePriceListCards({
               >
                 {copiedToken === item.token ? 'Скопировано' : 'Скопировать ссылку'}
               </button>
-              <button className={styles.danger} onClick={() => onDelete(item.id)}>
+              <button className={styles.danger} disabled={busy} onClick={() => onDelete(item.id)}>
                 Удалить
               </button>
             </div>

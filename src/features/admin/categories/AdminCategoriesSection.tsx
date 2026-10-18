@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
 import { AdminImagePicker } from '@/features/admin/shared/AdminImagePicker';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
 
 type CatalogCategory = {
   id: number;
@@ -50,20 +51,22 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
   const [iconSizes, setIconSizes] = useState<Record<number, CategoryIconSize>>({});
   const [categoryBusyId, setCategoryBusyId] = useState<number | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const { request, isActive } = useAdminRequestScope();
 
   const loadCategories = useCallback(async () => {
     try {
-      const response = await fetch('/api/admin/catalog/categories', { cache: 'no-store' });
+      const response = await request('/api/admin/catalog/categories', { cache: 'no-store' });
       if (!response.ok) {
         showStatus(await readError(response, 'Не удалось загрузить категории'));
         return;
       }
       const data = await response.json();
-      setCategories(Array.isArray(data.categories) ? data.categories : []);
-    } catch {
-      showStatus('Не удалось загрузить категории');
+      if (isActive()) setCategories(Array.isArray(data.categories) ? data.categories : []);
+    } catch (error) {
+      if (isActive()) showStatus(error instanceof Error ? error.message : 'Не удалось загрузить категории');
     }
-  }, [showStatus]);
+  }, [request, isActive, showStatus]);
 
   useEffect(() => {
     void loadCategories();
@@ -78,6 +81,7 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
     }
 
     let isMounted = true;
+    const controller = new AbortController();
 
     setIconSizes((current) => {
       const next: Record<number, CategoryIconSize> = {};
@@ -93,7 +97,7 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
     categoriesWithIcons.forEach((category) => {
       void (async () => {
         try {
-          const response = await fetch(category.iconUrl, { method: 'HEAD', cache: 'no-store' });
+          const response = await request(category.iconUrl, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
           const label = response.ok ? formatContentLength(response.headers.get('content-length')) : null;
 
           if (!isMounted) return;
@@ -121,8 +125,9 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
-  }, [categories]);
+  }, [categories, request]);
 
   const markSaved = (id: string) => {
     setSavedId(id);
@@ -131,10 +136,9 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
     }, 1800);
   };
 
-  const saveCategoryIcon = async (categoryId: number, iconUrl: string) => {
-    setCategoryBusyId(categoryId);
+  const persistCategoryIcon = async (categoryId: number, iconUrl: string) => {
     try {
-      const response = await fetch(`/api/admin/catalog/categories/${categoryId}`, {
+      const response = await request(`/api/admin/catalog/categories/${categoryId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ iconUrl }),
@@ -146,6 +150,7 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
       }
 
       const data = await response.json();
+      if (!isActive()) return false;
       if (data.category) {
         setCategories((current) => current.map((category) => (category.id === categoryId ? data.category : category)));
         if (!iconUrl) {
@@ -160,18 +165,26 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
         return true;
       }
       return false;
-    } catch {
-      showStatus('Не удалось сохранить иконку категории');
+    } catch (error) {
+      if (isActive()) showStatus(error instanceof Error ? error.message : 'Не удалось сохранить иконку категории');
       return false;
-    } finally {
-      setCategoryBusyId((current) => (current === categoryId ? null : current));
     }
   };
 
+  const saveCategoryIcon = async (categoryId: number, iconUrl: string) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setCategoryBusyId(categoryId);
+    try { return await persistCategoryIcon(categoryId, iconUrl); }
+    finally { inFlight.current = false; if (isActive()) setCategoryBusyId(null); }
+  };
+
   const saveCategoryVisibility = async (categoryId: number, showOnSite: boolean) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setCategoryBusyId(categoryId);
     try {
-      const response = await fetch(`/api/admin/catalog/categories/${categoryId}`, {
+      const response = await request(`/api/admin/catalog/categories/${categoryId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ showOnSite }),
@@ -183,29 +196,34 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
       }
 
       const data = await response.json();
+      if (!isActive()) return;
       if (data.category) {
         setCategories((current) => current.map((category) => (category.id === categoryId ? data.category : category)));
         markSaved(`visibility-${categoryId}`);
         showStatus(showOnSite ? 'Категория показывается на сайте' : 'Категория скрыта на сайте');
       }
-    } catch {
-      showStatus('Не удалось сохранить отображение категории');
+    } catch (error) {
+      if (isActive()) showStatus(error instanceof Error ? error.message : 'Не удалось сохранить отображение категории');
     } finally {
-      setCategoryBusyId((current) => (current === categoryId ? null : current));
+      inFlight.current = false;
+      if (isActive()) setCategoryBusyId(null);
     }
   };
 
   const uploadCategoryIcon = async (categoryId: number, file: File) => {
+    if (inFlight.current) return;
     if (file.size > CATEGORY_ICON_MAX_FILE_SIZE) {
       showStatus(`Размер изображения превышает 500 КБ. Сейчас: ${formatFileSize(file.size)}`);
       return;
     }
 
+    inFlight.current = true;
     setCategoryBusyId(categoryId);
     try {
       const nextIconSize = formatFileSize(file.size);
       const iconUrl = await uploadImage(file);
-      const saved = await saveCategoryIcon(categoryId, iconUrl);
+      if (!isActive()) return;
+      const saved = await persistCategoryIcon(categoryId, iconUrl);
       if (saved) {
         setIconSizes((current) => ({
           ...current,
@@ -213,8 +231,10 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
         }));
       }
     } catch (error) {
-      showStatus(error instanceof Error ? error.message : 'Не удалось загрузить иконку категории');
-      setCategoryBusyId((current) => (current === categoryId ? null : current));
+      if (isActive()) showStatus(error instanceof Error ? error.message : 'Не удалось загрузить иконку категории');
+    } finally {
+      inFlight.current = false;
+      if (isActive()) setCategoryBusyId(null);
     }
   };
 
@@ -245,6 +265,7 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
               <article className={styles.catalogCategoryIconRow} key={category.id}>
                 <div className={styles.catalogCategoryIconUpload}>
                   <AdminImagePicker
+                    disabled={categoryBusyId !== null}
                     imageUrl={category.iconUrl}
                     emptyText="Иконка не загружена"
                     uploadLabel={categoryBusyId === category.id ? 'Загрузка...' : 'Добавить/заменить иконку'}
@@ -267,7 +288,7 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
                     <input
                       type="checkbox"
                       checked={category.showOnSite}
-                      disabled={categoryBusyId === category.id}
+                      disabled={categoryBusyId !== null}
                       onChange={(event) => saveCategoryVisibility(category.id, event.target.checked)}
                     />
                     <span>{savedId === `visibility-${category.id}` ? 'Сохранено' : 'Показывать на сайте'}</span>
@@ -276,7 +297,7 @@ export function AdminCategoriesSection({ showStatus, uploadImage }: AdminCategor
                     <button
                       type="button"
                       className={savedId === `category-${category.id}` ? styles.savedButton : styles.secondary}
-                      disabled={categoryBusyId === category.id}
+                      disabled={categoryBusyId !== null}
                       onClick={() => saveCategoryIcon(category.id, '')}
                     >
                       {savedId === `category-${category.id}` ? 'Сохранено' : 'Убрать иконку'}

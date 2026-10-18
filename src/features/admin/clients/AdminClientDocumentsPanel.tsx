@@ -21,6 +21,7 @@ type AdminClientDocumentsPanelProps = {
   onToggleVisibility: (document: ClientDocument, isVisible: boolean) => void;
   onUpload: (event: FormEvent<HTMLFormElement>) => void;
   onVisibleChange: (value: boolean) => void;
+  onCancel: () => void;
 };
 
 export function AdminClientDocumentsPanel({
@@ -37,6 +38,7 @@ export function AdminClientDocumentsPanel({
   onToggleVisibility,
   onUpload,
   onVisibleChange,
+  onCancel,
 }: AdminClientDocumentsPanelProps) {
   return (
     <div className={styles.clientDocumentsPanel}>
@@ -45,6 +47,7 @@ export function AdminClientDocumentsPanel({
           <span>Название</span>
           <input
             type="text"
+            disabled={busy}
             value={title}
             onChange={(event) => onTitleChange(event.target.value)}
             placeholder="Название документа"
@@ -55,17 +58,19 @@ export function AdminClientDocumentsPanel({
           <input
             key={fileInputKey}
             type="file"
+            disabled={busy}
             accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp"
             onChange={onFileChange}
           />
         </label>
         <label className={styles.clientDocumentCheckbox}>
-          <input type="checkbox" checked={isVisible} onChange={(event) => onVisibleChange(event.target.checked)} />
+          <input type="checkbox" disabled={busy} checked={isVisible} onChange={(event) => onVisibleChange(event.target.checked)} />
           <span>Показать</span>
         </label>
         <button type="submit" disabled={busy}>
-          {busy ? 'Прикрепляем...' : 'Прикрепить документ'}
+          {busy ? 'Обработка...' : 'Прикрепить документ'}
         </button>
+        {busy ? <button type="button" className={styles.secondary} onClick={onCancel}>Отменить ожидание</button> : null}
       </form>
 
       {status ? <p className={styles.clientDocumentStatus}>{status}</p> : null}
@@ -86,6 +91,7 @@ export function AdminClientDocumentsPanel({
               <label className={styles.clientDocumentCheckbox}>
                 <input
                   type="checkbox"
+                  disabled={busy}
                   checked={document.isVisible}
                   onChange={(event) => onToggleVisibility(document, event.target.checked)}
                 />
@@ -99,7 +105,7 @@ export function AdminClientDocumentsPanel({
               >
                 Скачать
               </a>
-              <button className={styles.danger} type="button" onClick={() => onDelete(document)}>
+              <button className={styles.danger} type="button" disabled={busy} onClick={() => onDelete(document)}>
                 Удалить
               </button>
             </article>

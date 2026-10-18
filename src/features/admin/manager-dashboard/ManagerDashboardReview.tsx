@@ -1,5 +1,7 @@
 'use client';
 
+import { adminRequest } from '@/features/admin/shared/adminRequest';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -37,7 +39,7 @@ export function ManagerDashboardReview({ canViewOwn = false }: { canViewOwn?: bo
       pending = true;
       if (visible) setLoading(true);
       try {
-        const response = await fetch(`/api/admin/manager-dashboard/review${managerId ? `?manager=${managerId}` : ''}`, {
+        const response = await adminRequest(`/api/admin/manager-dashboard/review${managerId ? `?manager=${managerId}` : ''}`, {
           credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
         });
         const data = await response.json();

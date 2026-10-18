@@ -35,6 +35,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
   const personalOverview = section === 'personal' && 'groups' in overview ? overview : null;
   const groups = personalOverview?.groups ?? NO_PERSONAL_GROUPS;
   const [pending, setPending] = useState(false);
+  const [cancelableUpload, setCancelableUpload] = useState(false);
   const [previewSelection, setPreviewSelection] = useState<{ audience: PersonalDashboardAudience | 'support-shared'; versionId: number } | null>(null);
   const [fileErrors, setFileErrors] = useState<Partial<Record<PersonalDashboardAudience, string>>>({});
   const [results, setResults] = useState<ManagerDashboardImport[]>([]);
@@ -51,6 +52,8 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
   const previewPanel = useRef<HTMLElement>(null);
   const audienceGrid = useRef<HTMLDivElement>(null);
   const mutationRef = useRef(false);
+  const uploadController = useRef<AbortController | null>(null);
+  useEffect(() => () => { uploadController.current?.abort(); }, []);
   const busy = externalBusy || pending;
   const previewGroup = groups.find((item) => item.audience === previewSelection?.audience);
   const shared = section === 'shared' ? overview.supportShared : undefined;
@@ -201,6 +204,9 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
     // Hold one guard across every request and clear the input once: retries must
     // be a new explicit selection, never a replay of already processed files.
     mutationRef.current = true;
+    const controller = new AbortController();
+    uploadController.current = controller;
+    setCancelableUpload(true);
     setPending(true);
     if (snapshotInput.current) snapshotInput.current.value = '';
     const completed = [...rejected];
@@ -210,7 +216,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
         files.forEach((file) => form.append('files', file));
         let result: ManagerDashboardMutationResult | null;
         try {
-          result = await performMutation('/snapshots', { method: 'POST', body: form }, index === batches.length - 1
+          result = await performMutation('/snapshots', { method: 'POST', body: form, signal: controller.signal }, index === batches.length - 1
             ? 'Обработка файлов завершена. Результат каждого файла указан ниже.'
             : `Обработана часть ${index + 1} из ${batches.length}. Продолжаем загрузку файлов.`);
         } catch {
@@ -224,9 +230,17 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
           return;
         }
         completed.push(...(result.results ?? []));
+        if (result.cancelledAfterSave || controller.signal.aborted) {
+          setResults([...completed,
+            ...batches.slice(index + 1).flat().map((file) => ({ originalName: file.name, status: 'skipped', message: 'Файл не отправлен: дальнейшая загрузка остановлена пользователем. Уже сохранённые файлы не отменены.' })),
+          ]);
+          return;
+        }
         setResults([...completed]);
       }
     } finally {
+      uploadController.current = null;
+      setCancelableUpload(false);
       mutationRef.current = false;
       setPending(false);
     }
@@ -314,13 +328,16 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
     if (!window.confirm(`Опубликовать JSON «${file.name}» для ВСЕХ сотрудников с доступом к компоновщику?\n\nHTML: «${sharedActiveHtml.originalName}», версия #${sharedActiveHtml.id}.\nОн заменит текущий общий JSON этой версии. Предыдущий файл сохранится, личные дашборды не изменятся.`)) return;
     // Hold the same guard while compressing, not only while the request runs.
     mutationRef.current = true;
+    const controller = new AbortController();
+    uploadController.current = controller;
+    setCancelableUpload(true);
     setPending(true);
     try {
       setSharedJsonProgress('Подготавливаем JSON к загрузке…');
-      const body = await prepareSharedJsonUpload(file);
+      const body = await prepareSharedJsonUpload(file, { signal: controller.signal });
       setSharedJsonProgress('Загружаем и проверяем JSON… Не закрывайте страницу.');
       const result = await performMutation('/shared/json', {
-        method: 'POST', body,
+        method: 'POST', body, signal: controller.signal,
         headers: {
           'Content-Type': 'application/gzip',
           'X-KTS-Shared-Version': String(sharedActiveHtml.id),
@@ -333,6 +350,8 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
     } catch (cause) {
       setSharedError(cause instanceof Error ? cause.message : 'Не удалось подготовить или загрузить JSON. Проверьте текущую версию перед повторной попыткой.');
     } finally {
+      uploadController.current = null;
+      setCancelableUpload(false);
       mutationRef.current = false;
       setPending(false);
       setSharedJsonProgress('');
@@ -363,6 +382,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
 
   return (
     <div className={styles.stack}>
+      {cancelableUpload ? <div role="status"><button type="button" className={styles.secondary} onClick={() => uploadController.current?.abort()}>Прервать загрузку</button><p>Прерывание ожидания не отменяет уже сохранённые данные. Перед повторной отправкой проверьте журнал.</p></div> : null}
       {section === 'shared' ? <RoutePlannerViewer shared={shared} loading={busy} onReload={onReload ?? (async () => true)} showHistory={false} /> : null}
       {personalOverview ? <div ref={audienceGrid} className={`${styles.audienceGrid}${audience ? ` ${styles.audienceGridSingle}` : ''}`}>
         {(audience ? [audience] : AUDIENCES).map((audience) => {

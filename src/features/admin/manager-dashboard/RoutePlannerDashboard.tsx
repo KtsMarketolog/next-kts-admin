@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import adminStyles from '@/app/admin/admin.module.scss';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
+import { ADMIN_SNAPSHOT_TIMEOUT_MS, ADMIN_UPLOAD_TIMEOUT_MS } from '@/features/admin/shared/adminRequest';
 
 import { ManagerDashboardManagement } from './ManagerDashboardManagement';
 import { RoutePlannerViewer } from './ManagerDashboardViewer';
@@ -28,6 +30,10 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const revision = useRef(0);
   const mutating = useRef(false);
+  const mutationController = useRef<AbortController | null>(null);
+  const { request, cancelAll } = useAdminRequestScope();
+  useEffect(() => () => { mutationController.current?.abort(); }, []);
+  const cancelMutation = () => { mutationController.current?.abort(); cancelAll(); };
 
   const read = useCallback(async (response: Response) => {
     if (response.status === 401 || response.status === 403) {
@@ -41,11 +47,11 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
     return data;
   }, [router]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     const current = ++revision.current;
     setLoading(true);
     try {
-      const next = await read(await fetch(API_PATH, {cache: 'no-store', credentials: 'same-origin'})) as RoutePlannerOverview;
+      const next = await read(await request(API_PATH, {cache: 'no-store', credentials: 'same-origin', signal})) as RoutePlannerOverview;
       if (next.mode !== mode) throw new Error('Права доступа изменились. Откройте раздел заново.');
       if (revision.current === current) {
         setOverview(next);
@@ -54,7 +60,7 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
     } finally {
       if (revision.current === current) setLoading(false);
     }
-  }, [mode, read]);
+  }, [mode, read, request]);
 
   useEffect(() => {
     void load().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Не удалось открыть компоновщик.'));
@@ -69,7 +75,7 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
       if (checking || document.visibilityState === 'hidden') return;
       checking = true;
       try {
-        const next = await read(await fetch(API_PATH, {cache: 'no-store', credentials: 'same-origin', signal: controller.signal})) as RoutePlannerOverview;
+        const next = await read(await request(API_PATH, {cache: 'no-store', credentials: 'same-origin', signal: controller.signal})) as RoutePlannerOverview;
         if (!controller.signal.aborted) setUpdateAvailable(reportIdentity(next) !== reportIdentity(overview));
       } catch { /* A temporary network error must not interrupt the open report. */ }
       finally { checking = false; }
@@ -84,7 +90,7 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [overview, read]);
+  }, [overview, read, request]);
 
   async function refresh() {
     setError('');
@@ -95,18 +101,34 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
   async function mutate(path: string, init: RequestInit, successMessage: string): Promise<ManagerDashboardMutationResult | null> {
     if (mutating.current || !path.startsWith('/shared/')) return null;
     mutating.current = true;
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    mutationController.current = controller;
+    init.signal?.addEventListener('abort', cancel, { once: true });
+    if (init.signal?.aborted) controller.abort();
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const result = await read(await fetch(`/api/admin/manager-dashboard${path}`, {...init, credentials: 'same-origin'})) as ManagerDashboardMutationResult;
+      const result = await read(await request(`/api/admin/manager-dashboard${path}`, {...init, credentials: 'same-origin', signal: controller.signal}, {
+        timeoutMs: path.includes('snapshots') || path === '/shared/json' ? ADMIN_SNAPSHOT_TIMEOUT_MS
+          : init.body instanceof FormData ? ADMIN_UPLOAD_TIMEOUT_MS : undefined,
+      })) as ManagerDashboardMutationResult;
       setMessage(result.message || successMessage);
-      try { await load(); } catch { setError('Операция выполнена, но список не удалось обновить. Нажмите «Обновить».'); }
+      try { await load(controller.signal); } catch { setError('Операция выполнена, но список не удалось обновить. Нажмите «Обновить».'); }
+      if (controller.signal.aborted) {
+        setMessage('Текущая операция сохранена. Дальнейшая отправка остановлена.');
+        return { ...result, cancelledAfterSave: true };
+      }
       return result;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось выполнить операцию.');
       return null;
-    } finally { mutating.current = false; setBusy(false); }
+    } finally {
+      init.signal?.removeEventListener('abort', cancel);
+      mutationController.current = null;
+      mutating.current = false; setBusy(false);
+    }
   }
 
   return <main className={`${adminStyles.page} ${styles.dashboardPage}`}>
@@ -119,6 +141,7 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
     </div>
     {error ? <p className={styles.error} role="alert">{error}</p> : null}
     {message ? <p className={styles.notice} role="status">{message}</p> : null}
+    {busy ? <p className={styles.muted} role="status">Выполняем операцию… <button type="button" className={styles.secondary} onClick={cancelMutation}>Прервать ожидание</button></p> : null}
     {updateAvailable ? <div className={styles.notice} role="status"><p>Опубликовано обновление компоновщика или его данных.</p><button className={styles.secondary} disabled={loading || busy} type="button" onClick={() => void refresh()}>Открыть обновление</button></div> : null}
     {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем компоновщик…</p></section> : null}
     {overview?.mode === 'manage' ? <ManagerDashboardManagement section="shared" overview={overview} canAssignAccess={canAssignAccess} busy={busy || loading} mutate={mutate} onReload={refresh} /> : null}

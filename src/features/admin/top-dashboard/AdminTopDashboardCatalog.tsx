@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
 import type { DashboardAccessOption } from '@/shared/lib/dashboardAccess';
 import { DashboardDataDates } from './DashboardDataDates';
 import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
@@ -65,6 +66,8 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, c
   const [title, setTitle] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
   const showStatusRef = useRef(showStatus);
+  const creatingRef = useRef(false);
+  const { request, isActive } = useAdminRequestScope();
 
   useEffect(() => {
     showStatusRef.current = showStatus;
@@ -79,7 +82,7 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, c
     }
     setLoading(true);
     try {
-      const response = await fetch('/api/admin/top-dashboard/blocks', {
+      const response = await request('/api/admin/top-dashboard/blocks', {
         cache: 'no-store',
         credentials: 'same-origin',
       });
@@ -96,14 +99,15 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, c
         ? nextBlocks
         : nextBlocks.filter((block) => Number.isInteger(block.activeVersionId)));
       setLoadError(null);
-    } catch {
-      const message = 'Не удалось загрузить HTML-страницы';
+    } catch (error) {
+      if (!isActive()) return;
+      const message = error instanceof Error ? error.message : 'Не удалось загрузить HTML-страницы';
       setLoadError(message);
       showStatusRef.current(message);
     } finally {
       setLoading(false);
     }
-  }, [canManage, canReadTopBlocks]);
+  }, [canManage, canReadTopBlocks, request, isActive]);
 
   useEffect(() => {
     void loadBlocks();
@@ -111,14 +115,14 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, c
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch('/api/admin/dashboard-metadata', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+    void request('/api/admin/dashboard-metadata', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error('Metadata unavailable');
         const data = await response.json();
         if (!controller.signal.aborted) { setReportDates(Array.isArray(data.reports) ? data.reports : []); setDatesError(false); }
       }).catch(() => { if (!controller.signal.aborted) setDatesError(true); });
     return () => controller.abort();
-  }, []);
+  }, [request]);
 
   useEffect(() => {
     if (creating) titleInputRef.current?.focus();
@@ -126,6 +130,7 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, c
 
   const createBlock = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (creatingRef.current) return;
     const normalizedTitle = title.trim();
     if (!normalizedTitle) {
       showStatusRef.current('Введите название блока');
@@ -133,9 +138,10 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, c
       return;
     }
 
+    creatingRef.current = true;
     setCreateBusy(true);
     try {
-      const response = await fetch('/api/admin/top-dashboard/blocks', {
+      const response = await request('/api/admin/top-dashboard/blocks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -158,9 +164,10 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, c
       setCreating(false);
       showStatusRef.current('Новый блок создан');
       router.push(`/admin/top/${blockId}`, { scroll: false });
-    } catch {
-      showStatusRef.current('Не удалось создать блок');
+    } catch (error) {
+      if (isActive()) showStatusRef.current(error instanceof Error ? error.message : 'Не удалось подтвердить создание блока. Обновите список перед повторной попыткой.');
     } finally {
+      creatingRef.current = false;
       setCreateBusy(false);
     }
   };

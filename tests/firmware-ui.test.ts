@@ -86,6 +86,8 @@ function ui(options: { post?: (init: RequestInit) => Promise<Response>; get?: ()
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const modules: Record<string, unknown> = {
     react: hooks, 'react/jsx-runtime': jsx, '@/app/admin/admin.module.scss': { default: {} }, '@/shared/lib/firmwareContract': contract,
+    '@/features/admin/shared/adminRequest': { ADMIN_UPLOAD_TIMEOUT_MS: 300_000 },
+    '@/features/admin/shared/useAdminRequestScope': { useAdminRequestScope: () => ({ request: fetch }) },
   };
   const testModule = { exports: {} as API };
   new Function('require', 'module', 'exports', 'fetch', 'window', 'crypto', code)((name: string) => {

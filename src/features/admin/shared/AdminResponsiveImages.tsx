@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import styles from '@/app/admin/admin.module.scss';
 
 type ResponsiveImageTarget = 'desktop' | 'tablet' | 'mobile';
@@ -33,6 +34,9 @@ export function AdminResponsiveImages({
   onUpload,
 }: AdminResponsiveImagesProps) {
   const urls = { imageUrl, tabletImageUrl, mobileImageUrl };
+  const uploading = useRef(false);
+  const [busy, setBusy] = useState<ResponsiveImageTarget | null>(null);
+  const [error, setError] = useState('');
 
   return (
     <div className={styles.previewStack}>
@@ -56,6 +60,7 @@ export function AdminResponsiveImages({
                     <button
                       type="button"
                       className={styles.removeImage}
+                      disabled={busy !== null}
                       onClick={() => onClear(preview.target)}
                       aria-label={`Удалить ${preview.label}`}
                     >
@@ -69,15 +74,21 @@ export function AdminResponsiveImages({
             </div>
             {onUpload && (
               <label className={styles.fileInput}>
-                {uploadLabelPrefix} для {preview.target}
+                {busy === preview.target ? 'Загрузка…' : `${uploadLabelPrefix} для ${preview.target}`}
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/avif"
+                  disabled={busy !== null}
                   onChange={async (event) => {
                     const file = event.target.files?.[0];
                     event.target.value = '';
-                    if (!file) return;
-                    await onUpload(preview.target, file);
+                    if (!file || uploading.current) return;
+                    uploading.current = true;
+                    setBusy(preview.target);
+                    setError('');
+                    try { await onUpload(preview.target, file); }
+                    catch (caught) { setError(caught instanceof Error ? caught.message : 'Не удалось загрузить изображение'); }
+                    finally { uploading.current = false; setBusy(null); }
                   }}
                 />
               </label>
@@ -85,6 +96,7 @@ export function AdminResponsiveImages({
           </div>
         );
       })}
+      {error && <p role="alert">{error}</p>}
     </div>
   );
 }

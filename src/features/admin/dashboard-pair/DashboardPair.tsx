@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
 import { CurrencyDashboard } from '@/features/admin/currency-dashboard/CurrencyDashboard';
 import { SharedDashboardFrame } from '@/features/admin/manager-dashboard/ManagerDashboardParts';
 import { useTopDashboardDownloadBridge } from '@/features/admin/top-dashboard/useTopDashboardDownloadBridge';
@@ -16,10 +17,12 @@ export function DashboardPair({currencyDeviceScope}: {currencyDeviceScope:string
   const [busy, setBusy] = useState(false);
   const [layoutOverride, setLayoutOverride] = useState<DashboardPairConfig['layout'] | null>(null);
   const requestId = useRef(0);
-  const load = useCallback(async () => {
+  const saving = useRef(false);
+  const { request, isActive } = useAdminRequestScope();
+  const load = useCallback(async (saved = false) => {
     const id = ++requestId.current;
     try {
-      const response = await fetch('/api/admin/dashboard-pair', {cache:'no-store', credentials:'same-origin'});
+      const response = await request('/api/admin/dashboard-pair', {cache:'no-store', credentials:'same-origin'});
       const result = await response.json();
       if (requestId.current !== id) return;
       if (!response.ok) {
@@ -29,12 +32,12 @@ export function DashboardPair({currencyDeviceScope}: {currencyDeviceScope:string
       setOverview(result);
       setError('');
     } catch (cause) {
-      if (requestId.current === id) setError(cause instanceof Error ? cause.message : 'Не удалось открыть отчёты');
+      if (requestId.current === id) setError(saved ? 'Настройка сохранена, но отчёты не удалось обновить. Нажмите «Обновить»; повторять сохранение не нужно.' : cause instanceof Error ? cause.message : 'Не удалось открыть отчёты');
     }
-  }, []);
+  }, [request]);
   useEffect(() => {
     void load();
-    const visibleReload = () => { if (document.visibilityState === 'visible') void load(); };
+    const visibleReload = () => { if (document.visibilityState === 'visible' && !saving.current) void load(); };
     const timer = window.setInterval(visibleReload, 60_000);
     window.addEventListener('focus', visibleReload);
     document.addEventListener('visibilitychange', visibleReload);
@@ -47,19 +50,20 @@ export function DashboardPair({currencyDeviceScope}: {currencyDeviceScope:string
   }, [load]);
 
   async function save(config: DashboardPairConfig) {
-    if (busy) return;
+    if (saving.current) return;
+    saving.current = true;
     setBusy(true);
     setError('');
     try {
-      const response = await fetch('/api/admin/dashboard-pair', {
+      const response = await request('/api/admin/dashboard-pair', {
         method:'PUT', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Не удалось сохранить настройку');
       setLayoutOverride(null);
-      await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить настройку'); }
-    finally { setBusy(false); }
+      await load(true);
+    } catch (cause) { if (isActive()) setError(cause instanceof Error ? cause.message : 'Не удалось подтвердить сохранение настройки. Обновите данные перед повторной попыткой.'); }
+    finally { saving.current = false; setBusy(false); }
   }
   const layout = layoutOverride ?? overview?.layout ?? 'columns';
   return <main className={styles.root}>
@@ -67,7 +71,7 @@ export function DashboardPair({currencyDeviceScope}: {currencyDeviceScope:string
       <div><h1>Два отчёта</h1><p>Фиксированная пара. Доступ к каждому отчёту проверяется отдельно.</p></div>
       <nav aria-label="Управление парным экраном">
         <Link href="/admin/top">К списку отчётов</Link>
-        <button type="button" onClick={() => void load()}>Обновить</button>
+        <button type="button" disabled={busy} onClick={() => void load()}>Обновить</button>
         <button type="button" aria-pressed={layout === 'columns'} onClick={() => setLayoutOverride('columns')}>Рядом</button>
         <button type="button" aria-pressed={layout === 'rows'} onClick={() => setLayoutOverride('rows')}>Друг под другом</button>
       </nav>

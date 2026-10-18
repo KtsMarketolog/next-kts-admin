@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
+import { AdminRequestError, ADMIN_UNKNOWN_OUTCOME } from '../shared/adminRequest';
+import { useAdminRequestScope } from '../shared/useAdminRequestScope';
 
 import styles from '@/app/admin/admin.module.scss';
 import { AdminManagerAnalytics } from './AdminManagerAnalytics';
@@ -31,6 +33,7 @@ import {
   type PriceList,
 } from './AdminWholesaleModel';
 export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: AdminWholesaleGatewayProps) {
+  const { request, cancelAll, isActive } = useAdminRequestScope();
   const router = useRouter();
   const {
     analyticsBackHref,
@@ -48,6 +51,11 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
   const [editor, setEditor] = useState<PriceEditor>(() => emptyEditor());
   const editorKey = `${screen}:${editId ?? ''}:${createManagerId ?? ''}:${canManageWholesale}`;
+  const viewKeyRef = useRef(editorKey);
+  useLayoutEffect(() => {
+    viewKeyRef.current = editorKey;
+    return cancelAll;
+  }, [cancelAll, editorKey]);
   const [editorLoad, setEditorLoad] = useState<
     { key: string; state: 'loading' | 'ready' } | { key: string; state: 'error'; message: string }
   >({ key: '', state: 'loading' });
@@ -127,30 +135,37 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   );
   const commentRows = useMemo(() => getTextareaRows(editor.comment), [editor.comment]);
 
-  const loadPriceLists = async () => {
-    const res = await fetch('/api/admin/wholesale/price-lists', { cache: 'no-store' });
-    if (!res.ok) return;
+  const loadPriceLists = useCallback(async () => {
+    const view = viewKeyRef.current;
+    const res = await request('/api/admin/wholesale/price-lists', { cache: 'no-store' });
+    if (!res.ok) throw new Error(await readApiError(res, 'Не удалось загрузить прайсы'));
     const data = await res.json();
-    setPriceLists(Array.isArray(data.priceLists) ? data.priceLists : []);
-  };
+    if (!Array.isArray(data.priceLists)) throw new Error('Список прайсов получен не полностью');
+    if (!isActive() || view !== viewKeyRef.current) return;
+    setPriceLists(data.priceLists);
+  }, [isActive, request]);
 
-  const loadCurrentManager = async () => {
-    const res = await fetch('/api/admin/session', { cache: 'no-store' });
-    if (!res.ok) return;
+  const loadCurrentManager = useCallback(async () => {
+    const view = viewKeyRef.current;
+    const res = await request('/api/admin/session', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Не удалось загрузить данные менеджера');
     const data = await res.json();
+    if (!isActive() || view !== viewKeyRef.current) return;
     setCurrentManager(data.manager ?? null);
-  };
+  }, [isActive, request]);
 
   const loadManagerPriceLists = useCallback(async (managerId: number) => {
-    const res = await fetch(`/api/admin/wholesale/managers/${managerId}/price-lists`, { cache: 'no-store' });
+    const view = viewKeyRef.current;
+    const res = await request(`/api/admin/wholesale/managers/${managerId}/price-lists`, { cache: 'no-store' });
     if (!res.ok) {
-      showStatus('Менеджер не найден');
-      return;
+      throw new Error(await readApiError(res, 'Не удалось загрузить прайсы менеджера'));
     }
     const data = await res.json();
+    if (!Array.isArray(data.priceLists)) throw new Error('Список прайсов получен не полностью');
+    if (!isActive() || view !== viewKeyRef.current) return;
     setCurrentManager(data.manager ?? null);
-    setPriceLists(Array.isArray(data.priceLists) ? data.priceLists : []);
-  }, [showStatus]);
+    setPriceLists(data.priceLists);
+  }, [isActive, request]);
 
   const loadClientCompanies = useCallback(async (signal: AbortSignal): Promise<ClientCompanyOption[]> => {
     const data = await readWholesaleEditorResponse('/api/admin/clients', signal, 'Не удалось загрузить список клиентов');
@@ -159,15 +174,20 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   }, []);
 
   useEffect(() => {
+    let active = true;
+    const failed = (error: unknown) => {
+      if (active) setStatus(error instanceof Error ? error.message : 'Не удалось загрузить прайсы');
+    };
     if ((screen === 'create' || screen === 'edit') || (canManageWholesale && screen === 'admin')) void loadManagers();
     if (screen === 'manager') {
-      void loadCurrentManager();
-      void loadPriceLists();
+      void loadCurrentManager().catch(failed);
+      void loadPriceLists().catch(failed);
     }
     if (canManageWholesale && screen === 'managerDetail' && managerDetailId) {
-      void loadManagerPriceLists(managerDetailId);
+      void loadManagerPriceLists(managerDetailId).catch(failed);
     }
-  }, [canManageWholesale, loadManagerPriceLists, loadManagers, managerDetailId, screen]);
+    return () => { active = false; };
+  }, [canManageWholesale, loadCurrentManager, loadManagerPriceLists, loadManagers, loadPriceLists, managerDetailId, screen]);
 
   useEffect(() => {
     if (!canManageWholesale && (screen === 'admin' || screen === 'managerDetail' || screen === 'managerAnalytics')) {
@@ -188,7 +208,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       isActive = false;
       controller.abort();
       setEditorLoad({ key: editorKey, state: 'error', message: 'Сервер не ответил вовремя. Повторите загрузку.' });
-    }, 30_000);
+    }, 60_000);
 
     async function loadEditorData() {
       editorCompaniesRef.current = null;
@@ -295,7 +315,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
     setBusy(true);
     setEditorSaveError('');
     try {
-      const res = await fetch(url, {
+      const res = await request(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -307,7 +327,8 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
           clientCompanyId: selectedClientCompany.id,
           clientName: selectedClientCompany.title,
         }),
-      });
+      }, { timeoutMs: 60_000 });
+      if (!isActive() || viewKeyRef.current !== editorKey) return;
       if (!res.ok) {
         if (res.status === 409) setEditorSaveConflict(true);
         setEditorSaveError(await readApiError(res, 'Не удалось сохранить прайс'));
@@ -315,8 +336,10 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
       }
       showStatus('Прайс сохранён');
       router.push(editorBackHref);
-    } catch {
-      setEditorSaveError('Не удалось получить подтверждение сохранения. Проверьте прайс перед повторной отправкой: изменения могли сохраниться.');
+    } catch (error) {
+      if (isActive() && viewKeyRef.current === editorKey) {
+        setEditorSaveError(error instanceof AdminRequestError ? error.message : ADMIN_UNKNOWN_OUTCOME);
+      }
     } finally {
       savingRef.current = false;
       setBusy(false);
@@ -324,24 +347,45 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
   };
 
   const deletePriceList = async (id: number) => {
+    if (savingRef.current) return;
     if (!confirm('Удалить прайс?')) return;
+    savingRef.current = true;
     setBusy(true);
-    const res = await fetch(`/api/admin/wholesale/price-lists/${id}`, { method: 'DELETE' });
-    setBusy(false);
-    showStatus(res.ok ? 'Прайс удалён' : 'Не удалось удалить прайс');
-    if (res.ok) {
-      if (screen === 'managerDetail' && managerDetailId) {
-        await loadManagerPriceLists(managerDetailId);
+    let deleted = false;
+    try {
+      const res = await request(`/api/admin/wholesale/price-lists/${id}`, { method: 'DELETE' });
+      if (!isActive() || viewKeyRef.current !== editorKey) return;
+      if (!res.ok) {
+        setStatus(await readApiError(res, 'Не удалось удалить прайс'));
         return;
       }
-      await loadPriceLists();
+      deleted = true;
+      setPriceLists((current) => current.filter((item) => item.id !== id));
+      if (screen === 'managerDetail' && managerDetailId) {
+        await loadManagerPriceLists(managerDetailId);
+      } else {
+        await loadPriceLists();
+      }
+      if (isActive() && viewKeyRef.current === editorKey) showStatus('Прайс удалён');
+    } catch (error) {
+      if (isActive() && viewKeyRef.current === editorKey) setStatus(deleted
+        ? 'Прайс удалён, но список не обновился. Обновите страницу; повторно удалять не нужно.'
+        : error instanceof AdminRequestError ? error.message : ADMIN_UNKNOWN_OUTCOME);
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
     }
   };
 
   const copyLink = async (item: PriceList) => {
     const url = `${window.location.origin}/price/${item.token}`;
-    await navigator.clipboard.writeText(url);
-    void fetch(`/api/admin/wholesale/price-lists/${item.id}/copy-link`, { method: 'POST' });
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      setStatus('Не удалось скопировать ссылку. Разрешите доступ к буферу обмена и повторите.');
+      return;
+    }
+    void request(`/api/admin/wholesale/price-lists/${item.id}/copy-link`, { method: 'POST' }).catch(() => {});
     setCopiedToken(item.token);
     showStatus('Ссылка скопирована');
     window.setTimeout(() => {
@@ -422,6 +466,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
             managerDetailId={managerDetailId}
             status={status}
             priceLists={priceLists}
+            busy={busy}
             copiedToken={copiedToken}
             onBack={onBack}
             onAdminBack={() => router.push('/admin/wholesale/admin')}
@@ -448,6 +493,7 @@ export function AdminWholesaleGateway({ canManageWholesale = true, onBack }: Adm
         managerDetailId={managerDetailId}
         status={status}
         priceLists={priceLists}
+        busy={busy}
         copiedToken={copiedToken}
         onBack={onBack}
         onAdminBack={() => router.push('/admin/wholesale/admin')}

@@ -5,6 +5,8 @@ import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
+import { ADMIN_SNAPSHOT_TIMEOUT_MS, ADMIN_UPLOAD_TIMEOUT_MS } from '@/features/admin/shared/adminRequest';
 import {
   TOP_DASHBOARD_DATA_MAX_BYTES,
   TOP_DASHBOARD_DATA_MAX_MEGABYTES,
@@ -309,6 +311,15 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   const previewCardRef = useRef<HTMLElement>(null);
   const showStatusRef = useRef(showStatus);
   const overviewRequestIdRef = useRef(0);
+  const mutationRef = useRef(false);
+  const { request, cancelAll, isActive } = useAdminRequestScope();
+  const beginMutation = (action: string) => {
+    if (mutationRef.current) return false;
+    mutationRef.current = true;
+    setBusyAction(action);
+    return true;
+  };
+  const finishMutation = () => { mutationRef.current = false; setBusyAction(null); };
   const uploadSelectionRevisionRef = useRef('');
   const runtimeUploadRef = useRef<{
     requestId: string;
@@ -318,6 +329,18 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
   const apiBasePath = `/api/admin/top-dashboard/blocks/${blockId}`;
+  const cancelPendingOperation = () => {
+    cancelAll();
+    const pending = runtimeUploadRef.current;
+    if (!pending) return;
+    previewFrameRef.current?.contentWindow?.postMessage({
+      marker: 'kts-top-dashboard-management-v1', type: 'cancel-upload', blockId,
+      htmlVersionId: pending.htmlVersionId, requestId: pending.requestId,
+    }, window.location.origin);
+    clearTimeout(pending.timer);
+    runtimeUploadRef.current = null;
+    pending.reject(new Error('Ожидание прервано. Изменение могло сохраниться; проверьте историю перед повторной отправкой.'));
+  };
 
   const reportUploadFeedback = (target: 'html' | 'data', message: string, kind: UploadFeedback['kind'] = 'error') => {
     (target === 'html' ? setHtmlUploadFeedback : setDataUploadFeedback)({ kind, message });
@@ -340,7 +363,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
     overviewRequestIdRef.current = requestId;
     setLoading(true);
     try {
-      const response = await fetch(apiBasePath, {
+      const response = await request(apiBasePath, {
         cache: 'no-store',
         credentials: 'same-origin',
       });
@@ -382,16 +405,16 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
         return versions[0]?.id ?? null;
       });
       return normalized;
-    } catch {
+    } catch (error) {
       if (requestId !== overviewRequestIdRef.current) return null;
-      const message = 'Не удалось загрузить версии HTML-страницы';
+      const message = error instanceof Error ? error.message : 'Не удалось загрузить версии HTML-страницы';
       setLoadError(message);
       showStatusRef.current(message);
       return null;
     } finally {
       if (requestId === overviewRequestIdRef.current) setLoading(false);
     }
-  }, [apiBasePath]);
+  }, [apiBasePath, request, previewFrameRef]);
 
   useEffect(() => {
     setHtmlUploadFeedback(null);
@@ -399,12 +422,13 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
     void loadOverview();
     return () => {
       overviewRequestIdRef.current += 1;
+      cancelAll();
     };
-  }, [loadOverview]);
+  }, [loadOverview, cancelAll]);
 
   useEffect(() => {
     const refreshVisibleOverview = () => {
-      if (document.visibilityState === 'visible') void loadOverview();
+      if (document.visibilityState === 'visible' && !mutationRef.current) void loadOverview();
     };
 
     window.addEventListener('focus', refreshVisibleOverview);
@@ -635,6 +659,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
   };
 
   const uploadVersion = async () => {
+    if (mutationRef.current) return;
     if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     setHtmlUploadFeedback(null);
     if (!selectedFile) {
@@ -642,15 +667,15 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       return;
     }
 
-    setBusyAction('upload');
+    if (!beginMutation('upload')) return;
     try {
       const body = new FormData();
       body.set('file', selectedFile);
-      const response = await fetch(`${apiBasePath}/versions`, {
+      const response = await request(`${apiBasePath}/versions`, {
         method: 'POST',
         body,
         credentials: 'same-origin',
-      });
+      }, { timeoutMs: ADMIN_UPLOAD_TIMEOUT_MS });
       if (!response.ok) {
         reportUploadFeedback('html', await readError(response, 'Не удалось загрузить HTML-файл'));
         return;
@@ -668,14 +693,15 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       const refreshed = await loadOverview(versionId);
       setPreviewRevision((current) => current + 1);
       reportUploadFeedback('html', `HTML «${savedName}» сохранён как черновик #${versionId}. Текущая публикация не изменена.${refreshed ? '' : ' Список версий не обновился — обновите страницу.'}`, 'success');
-    } catch {
-      reportUploadFeedback('html', 'Не удалось получить подтверждение загрузки HTML. Проверьте историю версий перед повторной попыткой.');
+    } catch (error) {
+      if (isActive()) reportUploadFeedback('html', error instanceof Error ? error.message : 'Не удалось получить подтверждение загрузки HTML. Проверьте историю версий перед повторной попыткой.');
     } finally {
-      setBusyAction(null);
+      finishMutation();
     }
   };
 
   const uploadDataVersion = async () => {
+    if (mutationRef.current) return;
     if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     setDataUploadFeedback(null);
     if (!overview || (usesUniversalDataUpload ? !selectedFileCount : !selectedDataFile)) {
@@ -717,7 +743,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       )) return;
     }
 
-    setBusyAction('upload-data');
+    if (!beginMutation('upload-data')) return;
     try {
       const uploadTargets = getSelectedUploadTargets(selectedTargetFiles);
       if (usesUniversalDataUpload && usesRuntimeUploadTargets) {
@@ -729,9 +755,11 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
         await new Promise<void>((resolve, reject) => {
           const requestId = crypto.randomUUID();
           const timer = setTimeout(() => {
+            frameWindow.postMessage({ marker: 'kts-top-dashboard-management-v1', type: 'cancel-upload',
+              blockId, htmlVersionId: overview.activeVersionId, requestId }, window.location.origin);
             runtimeUploadRef.current = null;
             reject(new Error('Подтверждение сохранения не получено. Проверьте историю данных перед повторной загрузкой.'));
-          }, 5 * 60_000);
+          }, ADMIN_SNAPSHOT_TIMEOUT_MS);
           runtimeUploadRef.current = { requestId, htmlVersionId: overview.activeVersionId!, resolve, reject, timer };
           try {
             frameWindow.postMessage({
@@ -779,12 +807,12 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
         headers['X-KTS-Top-Data-Name'] = encodeURIComponent(selectedDataFile!.name);
       }
 
-      const response = await fetch(`${apiBasePath}/data`, {
+      const response = await request(`${apiBasePath}/data`, {
         method: 'PUT',
         headers,
         body,
         credentials: 'same-origin',
-      });
+      }, { timeoutMs: ADMIN_SNAPSHOT_TIMEOUT_MS });
       if (!response.ok) {
         const message = await readError(response, 'Не удалось сохранить данные дашборда');
         if (response.status === 409) await loadOverview(selectedVersionId);
@@ -808,14 +836,16 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       setPreviewRevision((current) => current + 1);
       reportUploadFeedback('data', `Данные${savedName ? ` «${savedName}»` : ''} сохранены для всех пользователей, версия #${savedVersionId}.${refreshed ? '' : ' Список версий не обновился — обновите страницу.'}`, 'success');
     } catch (error) {
+      if (!isActive()) return;
       if (usesRuntimeUploadTargets) await loadOverview(selectedVersionId);
       reportUploadFeedback('data', `${error instanceof Error ? error.message : 'Не удалось сохранить данные дашборда'}. Подтверждение сохранения не получено; проверьте историю перед повторной загрузкой.`);
     } finally {
-      setBusyAction(null);
+      finishMutation();
     }
   };
 
   const activateDataVersion = async (version: TopDashboardDataVersion) => {
+    if (mutationRef.current) return;
     if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     if (!overview || version.status === 'active') return;
     if (!overview.activeVersionId) {
@@ -824,9 +854,9 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
     }
     if (!window.confirm(`Вернуть данные из файла «${version.originalName}»?`)) return;
 
-    setBusyAction(`activate-data:${version.id}`);
+    if (!beginMutation(`activate-data:${version.id}`)) return;
     try {
-      const response = await fetch(`${apiBasePath}/data/active`, {
+      const response = await request(`${apiBasePath}/data/active`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -842,17 +872,18 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
         return;
       }
 
-      await loadOverview(selectedVersionId);
+      const refreshed = await loadOverview(selectedVersionId);
       setPreviewRevision((current) => current + 1);
-      showStatusRef.current('Выбранная версия данных восстановлена для всех пользователей');
-    } catch {
-      showStatusRef.current('Не удалось вернуть выбранные данные');
+      showStatusRef.current(`Выбранная версия данных восстановлена для всех пользователей.${refreshed ? '' : ' Список не обновился — обновите страницу, повторять сохранение не нужно.'}`);
+    } catch (error) {
+      if (isActive()) showStatusRef.current(error instanceof Error ? error.message : 'Не удалось подтвердить восстановление данных. Обновите историю перед повторной попыткой.');
     } finally {
-      setBusyAction(null);
+      finishMutation();
     }
   };
 
   const activateVersion = async (version: TopDashboardVersion) => {
+    if (mutationRef.current) return;
     if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     if (!overview || version.status === 'active') return;
     if (
@@ -862,9 +893,9 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       return;
     }
 
-    setBusyAction(`activate:${version.id}`);
+    if (!beginMutation(`activate:${version.id}`)) return;
     try {
-      const response = await fetch(`${apiBasePath}/active`, {
+      const response = await request(`${apiBasePath}/active`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -881,17 +912,19 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       }
 
       const data = await response.json().catch(() => ({}));
-      await loadOverview(version.id);
+      const refreshed = await loadOverview(version.id);
       setPreviewRevision((current) => current + 1);
-      showStatusRef.current(data.state?.change === 'rolled_back' ? 'Выполнен откат на выбранную версию' : 'Версия опубликована');
-    } catch {
-      showStatusRef.current('Не удалось опубликовать версию HTML');
+      const success = data.state?.change === 'rolled_back' ? 'Выполнен откат на выбранную версию' : 'Версия опубликована';
+      showStatusRef.current(`${success}.${refreshed ? '' : ' Список не обновился — обновите страницу, повторять публикацию не нужно.'}`);
+    } catch (error) {
+      if (isActive()) showStatusRef.current(error instanceof Error ? error.message : 'Не удалось подтвердить публикацию. Обновите историю перед повторной попыткой.');
     } finally {
-      setBusyAction(null);
+      finishMutation();
     }
   };
 
   const deleteVersion = async (version: TopDashboardVersion) => {
+    if (mutationRef.current) return;
     if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     if (!overview || version.status === 'active') return;
     if (
@@ -909,9 +942,9 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
         ?? null
       : selectedVersionId;
 
-    setBusyAction(`delete:${version.id}`);
+    if (!beginMutation(`delete:${version.id}`)) return;
     try {
-      const response = await fetch(`${apiBasePath}/versions/${version.id}`, {
+      const response = await request(`${apiBasePath}/versions/${version.id}`, {
         method: 'DELETE',
         credentials: 'same-origin',
       });
@@ -924,13 +957,13 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
         return;
       }
 
-      await loadOverview(preferredVersionId);
+      const refreshed = await loadOverview(preferredVersionId);
       setPreviewRevision((current) => current + 1);
-      showStatusRef.current(`Версия #${version.id} удалена`);
-    } catch {
-      showStatusRef.current('Не удалось удалить версию HTML');
+      showStatusRef.current(`Версия #${version.id} удалена.${refreshed ? '' : ' Список не обновился — обновите страницу, повторять удаление не нужно.'}`);
+    } catch (error) {
+      if (isActive()) showStatusRef.current(error instanceof Error ? error.message : 'Не удалось подтвердить удаление HTML. Обновите историю перед повторной попыткой.');
     } finally {
-      setBusyAction(null);
+      finishMutation();
     }
   };
 
@@ -962,10 +995,10 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       return;
     }
 
-    setBusyAction('rename-block');
+    if (!beginMutation('rename-block')) return;
     setBlockMutationError(null);
     try {
-      const response = await fetch(apiBasePath, {
+      const response = await request(apiBasePath, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -991,12 +1024,13 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       setBlockTitleDraft('');
       setIsEditingBlockTitle(false);
       showStatusRef.current('Название блока изменено');
-    } catch {
-      const message = 'Не удалось изменить название блока';
+    } catch (error) {
+      if (!isActive()) return;
+      const message = error instanceof Error ? error.message : 'Не удалось подтвердить изменение названия. Обновите страницу перед повторной попыткой.';
       setBlockMutationError(message);
       showStatusRef.current(message);
     } finally {
-      setBusyAction(null);
+      finishMutation();
     }
   };
 
@@ -1014,10 +1048,10 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
       return;
     }
 
-    setBusyAction('delete-block');
+    if (!beginMutation('delete-block')) return;
     setBlockMutationError(null);
     try {
-      const response = await fetch(apiBasePath, {
+      const response = await request(apiBasePath, {
         method: 'DELETE',
         credentials: 'same-origin',
       });
@@ -1035,12 +1069,13 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
 
       showStatusRef.current(`Блок «${title}» удалён`);
       router.replace('/admin/top', { scroll: false });
-    } catch {
-      const message = 'Не удалось удалить блок';
+    } catch (error) {
+      if (!isActive()) return;
+      const message = error instanceof Error ? error.message : 'Не удалось подтвердить удаление блока. Обновите список перед повторной попыткой.';
       setBlockMutationError(message);
       showStatusRef.current(message);
     } finally {
-      setBusyAction(null);
+      finishMutation();
     }
   };
 
@@ -1074,6 +1109,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
 
   return (
     <div className={styles.topDashboardLayout}>
+      {busyAction ? <div role="status"><button type="button" className={styles.secondary} onClick={cancelPendingOperation}>Прервать ожидание</button><p>Прерывание ожидания не отменяет уже сохранённые данные. Перед повторной отправкой проверьте историю.</p></div> : null}
       <section
         ref={previewCardRef}
         className={`${styles.topDashboardPreviewCard}${isPreviewFullscreen ? ` ${styles.topDashboardPreviewFullscreen}` : ''}`}

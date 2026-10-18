@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
+import { runWithRequestTimeout } from '@/features/admin/shared/adminRequest';
 import {
   DASHBOARD_AUDIENCE_ROLES,
   dashboardAudienceRoleEmployeeIds,
@@ -26,15 +28,19 @@ export function DashboardAudienceEditor({ dashboardKey, onSaved }: {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const requestGeneration = useRef(0);
+  const operation = useRef(false);
+  const { request } = useAdminRequestScope();
   const currentData = data?.key === dashboardKey ? data : null;
 
   const load = useCallback(async () => {
+    if (operation.current) return;
+    operation.current = true;
     const generation = ++requestGeneration.current;
     setBusy(true);
     setMessage('');
     setHidden(false);
     try {
-      const response = await fetch(`/api/admin/dashboard-access?key=${encodeURIComponent(dashboardKey)}`, { cache: 'no-store' });
+      const response = await request(`/api/admin/dashboard-access?key=${encodeURIComponent(dashboardKey)}`, { cache: 'no-store' });
       if (generation !== requestGeneration.current) return;
       if (response.status === 401 || response.status === 403) {
         setHidden(true);
@@ -46,14 +52,14 @@ export function DashboardAudienceEditor({ dashboardKey, onSaved }: {
     } catch (error) {
       if (generation === requestGeneration.current) setMessage(error instanceof Error ? error.message : 'Не удалось загрузить сотрудников.');
     } finally {
-      if (generation === requestGeneration.current) setBusy(false);
+      if (generation === requestGeneration.current) { operation.current = false; setBusy(false); }
     }
-  }, [dashboardKey]);
+  }, [dashboardKey, request]);
 
   useEffect(() => {
     void load();
     // Ignore an old dashboard's response after navigation or unmount.
-    return () => { requestGeneration.current += 1; };
+    return () => { requestGeneration.current += 1; operation.current = false; };
   }, [load]);
 
   const visible = useMemo(() => filterDashboardAudience(currentData?.users ?? [], selectedRole, search), [currentData, selectedRole, search]);
@@ -67,12 +73,13 @@ export function DashboardAudienceEditor({ dashboardKey, onSaved }: {
   };
 
   const save = async () => {
-    if (busy || !currentData) return;
+    if (operation.current || !currentData) return;
+    operation.current = true;
     const generation = ++requestGeneration.current;
     setBusy(true);
     setMessage('');
     try {
-      const response = await fetch('/api/admin/dashboard-access', {
+      const response = await request('/api/admin/dashboard-access', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -89,14 +96,14 @@ export function DashboardAudienceEditor({ dashboardKey, onSaved }: {
       // A successful grant change must refresh dependent recipient tables. A
       // failed refresh is not a failed save and must not encourage a blind retry.
       let refreshed = true;
-      try { refreshed = (await onSaved?.()) !== false; }
+      try { refreshed = (await runWithRequestTimeout(async () => onSaved?.())) !== false; }
       catch { refreshed = false; }
       if (generation === requestGeneration.current) setMessage(refreshed ? 'Доступы сохранены.'
         : 'Доступы сохранены, но список личных файлов не удалось обновить. Нажмите «Обновить» вверху страницы.');
     } catch (error) {
       if (generation === requestGeneration.current) setMessage(error instanceof Error ? error.message : 'Не удалось сохранить доступы');
     } finally {
-      if (generation === requestGeneration.current) setBusy(false);
+      if (generation === requestGeneration.current) { operation.current = false; setBusy(false); }
     }
   };
 

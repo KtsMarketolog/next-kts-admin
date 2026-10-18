@@ -12,7 +12,8 @@ const fixture = `
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {AdminClientsSection} from './src/features/admin/clients/AdminClientsSection';
-window.calls=[];window.mode='ok';window.failRefresh=false;window.holdRead=false;
+window.calls=[];window.mode='ok';window.failRefresh=false;window.holdRead=false;window.aborts=0;
+const normalTimeout=window.setTimeout.bind(window);window.setTimeout=(fn,ms,...args)=>normalTimeout(fn,window.fastTimeout&&ms===20000?80:ms,...args);
 window.companies=[{id:13,title:'Synthetic company',email:'synthetic@example.invalid',phone:'',note:'Original note',managerId:21,managerName:'Manager',supportManagerId:22,supportManagerName:'Support',requireTwoFactor:false,userCount:1,clientLogin:'synthetic@example.invalid',clientUserId:31,passwordChangedAt:'2026-10-01T00:00:00Z',displayPassword:'OriginalSynthetic123',chatUnreadCount:0,isActive:true,createdAt:'2026-10-01T00:00:00Z',updatedAt:'2026-10-01T00:00:00Z'}];
 window.EventSource=class {addEventListener(){}close(){}};
 window.fetch=async(url,init={})=>{
@@ -25,6 +26,8 @@ window.fetch=async(url,init={})=>{
   return Response.json({companies:window.companies});
  }
  if(window.mode==='hold-write')await new Promise(resolve=>window.resumeWrite=resolve);
+ if(['hung-fetch','cancel'].includes(window.mode)){init.signal?.addEventListener('abort',()=>window.aborts++);return new Promise(()=>{});}
+ if(window.mode==='hung-body'){init.signal?.addEventListener('abort',()=>window.aborts++);return new Response(new ReadableStream());}
  if(window.mode==='reject')throw new TypeError('Synthetic lost response');
  if(window.mode==='rollback')return Response.json({saved:false,error:'Компания не сохранена: синтетическая ошибка транзакции'},{status:400});
  if(window.mode==='unknown')return Response.json({saved:null,code:'COMMIT_OUTCOME_UNKNOWN',error:'Не удалось подтвердить результат сохранения. Обновите данные перед повторной попыткой.'},{status:503});
@@ -73,7 +76,7 @@ async function main() {
       try { await access(engine.executablePath()); } catch { continue; }
       const browser = await engine.launch({ headless: true });
       try {
-        for (const scenario of ['warning', 'reload-failure', 'rollback', 'reject', 'unknown', 'create', 'delete', 'busy', 'late-read']) {
+        for (const scenario of ['warning', 'reload-failure', 'rollback', 'reject', 'unknown', 'create', 'delete', 'busy', 'late-read', 'hung-fetch', 'hung-body', 'cancel']) {
           const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
           page.setDefaultTimeout(10_000);
           const errors: string[] = [];
@@ -112,8 +115,10 @@ async function main() {
               await page.waitForFunction('typeof window.finishRead==="function"');
             }
             await page.evaluate(`window.mode=${JSON.stringify(scenario === 'busy' ? 'hold-write' : scenario)}`);
+            if (scenario.startsWith('hung-')) await page.evaluate('window.fastTimeout=true');
             await card.getByRole('button', { name: 'Сохранить', exact: true }).click();
             await page.waitForFunction('window.calls.some(c=>c.method==="PUT")');
+            if (scenario === 'cancel') await page.getByRole('button', { name: 'Отменить ожидание', exact: true }).click();
             if (scenario === 'busy') {
               assert.equal(await card.locator('textarea').isDisabled(), true);
               assert.equal(await card.getByPlaceholder('Введите новый пароль').isDisabled(), true);
@@ -141,6 +146,7 @@ async function main() {
               else await page.getByText(/подтвердить|могло сохраниться/).first().waitFor();
             }
             assert.equal(await page.evaluate('window.calls.filter(c=>c.method==="PUT").length'), 1);
+            if (scenario.startsWith('hung-') || scenario === 'cancel') assert.equal(await page.evaluate('window.aborts'), 1);
           }
           assert.deepEqual(errors, [], `${engineName}/${scenario} has no unhandled browser rejection`);
           await page.close();

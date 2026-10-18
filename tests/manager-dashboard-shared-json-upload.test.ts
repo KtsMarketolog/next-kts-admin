@@ -55,3 +55,27 @@ test('shared JSON compressed-body bound aborts streaming before an oversized req
     Object.defineProperty(globalThis, 'CompressionStream', { configurable: true, writable: true, value: original });
   }
 });
+
+test('shared JSON preparation times out a stalled source, cancels reading and permits a new upload', async () => {
+  let cancelled = false;
+  const file = { name: 'snapshot.json', size: 100, stream() {
+    return new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+  } } as unknown as File;
+  await assert.rejects(prepareSharedJsonUpload(file, { timeoutMs: 15 }), /Подготовка JSON.*слишком много времени.*не отправлен/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cancelled, true);
+  assert.ok((await prepareSharedJsonUpload(new File(['{}'], 'next.json'))).size > 0);
+});
+
+test('shared JSON preparation supports explicit abort without sending any source bytes to a server', async () => {
+  const controller = new AbortController();
+  let cancelled = false;
+  const file = { name: 'snapshot.json', size: 100, stream() {
+    return new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+  } } as unknown as File;
+  const pending = prepareSharedJsonUpload(file, { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, /Подготовка JSON прервана.*не отправлен/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cancelled, true);
+});

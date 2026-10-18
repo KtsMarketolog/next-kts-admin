@@ -5,9 +5,12 @@ import { useState } from 'react';
 import { emptyGroupCompany } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
 import { reorderByDrop } from '@/features/admin/model/reorder';
+import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
 import type { GroupCompany } from '@/features/admin/types';
 
-export function useAdminGroupCompanies({ setBusy, showStatus, reloadAdminData }: AdminCrudHookOptions) {
+export function useAdminGroupCompanies(options: AdminCrudHookOptions) {
+  const { showStatus } = options;
+  const perform = useAdminContentAction(options);
   const [groupCompanies, setGroupCompanies] = useState<GroupCompany[]>([]);
   const [groupCompanyDraft, setGroupCompanyDraft] = useState(emptyGroupCompany);
   const [groupCompanyCreated, setGroupCompanyCreated] = useState(false);
@@ -23,24 +26,15 @@ export function useAdminGroupCompanies({ setBusy, showStatus, reloadAdminData }:
   };
 
   const persistGroupCompanyOrder = async (orderedCompanies: GroupCompany[]) => {
-    setBusy(true);
-    const responses = await Promise.all(
-      orderedCompanies.map((company) =>
-        fetch(`/api/admin/group-companies/${company.id}`, {
+    await perform({ requests: orderedCompanies.map((company) => ({ url: `/api/admin/group-companies/${company.id}`, init: {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(company),
-        }),
-      ),
-    );
-    setBusy(false);
-
-    const saved = responses.every((res) => res.ok);
-    showStatus(saved ? 'Очередность группы компаний сохранена' : 'Не удалось сохранить очередность группы компаний');
-    if (saved) await reloadAdminData();
+        } })), success: 'Очередность группы компаний сохранена', failure: 'Не удалось сохранить очередность группы компаний' });
   };
 
   const moveGroupCompany = async (draggedId: number, targetId: number) => {
+    if (options.actionLock?.current) return;
     const normalized = reorderByDrop(groupCompanies, draggedId, targetId);
     if (!normalized) return;
     setGroupCompanies(normalized);
@@ -53,45 +47,32 @@ export function useAdminGroupCompanies({ setBusy, showStatus, reloadAdminData }:
       return;
     }
 
-    setBusy(true);
-    const res = await fetch('/api/admin/group-companies', {
+    await perform({ requests: [{ url: '/api/admin/group-companies', init: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...groupCompanyDraft, sortOrder: nextGroupCompanyOrder }),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Компания добавлена' : 'Не удалось добавить компанию');
-    if (res.ok) {
+    } }], success: 'Компания добавлена', failure: 'Не удалось добавить компанию', onSaved: () => {
       setGroupCompanyCreated(true);
       window.setTimeout(() => setGroupCompanyCreated(false), 2000);
       setGroupCompanyDraft(emptyGroupCompany);
-      await reloadAdminData();
-    }
+    } });
   };
 
   const saveGroupCompany = async (company: GroupCompany) => {
-    setBusy(true);
-    const res = await fetch(`/api/admin/group-companies/${company.id}`, {
+    await perform({ requests: [{ url: `/api/admin/group-companies/${company.id}`, init: {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(company),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Компания сохранена' : 'Не удалось сохранить компанию');
-    if (res.ok) {
+    } }], success: 'Компания сохранена', failure: 'Не удалось сохранить компанию', onSaved: () => {
       setSavedGroupCompanyId(company.id);
       window.setTimeout(() => setSavedGroupCompanyId((current) => (current === company.id ? null : current)), 2000);
-      await reloadAdminData();
-    }
+    } });
   };
 
   const deleteGroupCompany = async (id: number) => {
     if (!confirm('Удалить компанию из группы компаний?')) return;
-    setBusy(true);
-    const res = await fetch(`/api/admin/group-companies/${id}`, { method: 'DELETE' });
-    setBusy(false);
-    showStatus(res.ok ? 'Компания удалена' : 'Не удалось удалить компанию');
-    if (res.ok) await reloadAdminData();
+    await perform({ requests: [{ url: `/api/admin/group-companies/${id}`, init: { method: 'DELETE' } }],
+      success: 'Компания удалена', failure: 'Не удалось удалить компанию' });
   };
 
   return {

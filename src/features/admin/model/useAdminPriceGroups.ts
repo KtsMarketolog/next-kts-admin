@@ -3,9 +3,11 @@
 import { useState } from 'react';
 
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
+import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
 import type { PriceGroupImage } from '@/features/admin/types';
 
-export function useAdminPriceGroups({ setBusy, showStatus, reloadAdminData }: AdminCrudHookOptions) {
+export function useAdminPriceGroups(options: AdminCrudHookOptions) {
+  const perform = useAdminContentAction(options);
   const [priceGroups, setPriceGroups] = useState<PriceGroupImage[]>([]);
   const [savedPriceGroupTitle, setSavedPriceGroupTitle] = useState<string | null>(null);
 
@@ -14,23 +16,14 @@ export function useAdminPriceGroups({ setBusy, showStatus, reloadAdminData }: Ad
   };
 
   const savePriceGroup = async (group: PriceGroupImage) => {
-    setBusy(true);
-    const res = await fetch('/api/admin/price-groups', {
+    await perform({ requests: [{ url: '/api/admin/price-groups', init: {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: group.title, imageUrl: group.imageUrl }),
-    });
-    setBusy(false);
-
-    if (res.ok) {
+    } }], success: 'Картинка ценовой группы сохранена', failure: 'Не удалось сохранить картинку ценовой группы', onSaved: () => {
       setSavedPriceGroupTitle(group.title);
       window.setTimeout(() => setSavedPriceGroupTitle((current) => (current === group.title ? null : current)), 2000);
-      showStatus('Картинка ценовой группы сохранена');
-      await reloadAdminData();
-      return;
-    }
-
-    showStatus('Не удалось сохранить картинку ценовой группы');
+    } });
   };
 
   return {

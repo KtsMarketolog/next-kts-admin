@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
@@ -13,8 +13,20 @@ import type { AdminClientDetailSectionProps, ClientCompany, ClientTab } from './
 import { ClientPriceRequestList } from '@/features/client-requests/ClientPriceRequestList';
 import type { ClientCompanyPriceList, ClientDocument, ClientPriceRequest } from '@/shared/lib/db';
 import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
+import { ADMIN_UNKNOWN_OUTCOME, ADMIN_UPLOAD_TIMEOUT_MS } from '../shared/adminRequest';
+import { useAdminRequestScope } from '../shared/useAdminRequestScope';
+
+function isSavedDocument(value: unknown, clientId: number): value is ClientDocument {
+  if (!value || typeof value !== 'object') return false;
+  const document = value as Partial<ClientDocument>;
+  return Number.isInteger(document.id) && Number(document.id) > 0 && document.companyId === clientId
+    && typeof document.title === 'string' && typeof document.originalName === 'string';
+}
 
 export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetailSectionProps) {
+  const { request, cancelAll, isActive } = useAdminRequestScope();
+  const documentBusyRef = useRef(false);
+  const documentsGeneration = useRef(0);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -39,20 +51,22 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   }, [tabParam]);
 
   const loadUnreadCount = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch(`/api/admin/clients/${clientId}/chat/unread`, { cache: 'no-store', signal });
+    const response = await request(`/api/admin/clients/${clientId}/chat/unread`, { cache: 'no-store', signal });
     if (!response.ok) return;
     const data = await response.json().catch(() => ({}));
     if (signal?.aborted) return;
     setChatUnreadCount(Number(data.unreadCount ?? 0));
-  }, [clientId]);
+  }, [clientId, request]);
 
   const loadDocuments = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store', signal });
+    if (documentBusyRef.current) return;
+    const generation = documentsGeneration.current;
+    const response = await request(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store', signal });
     if (!response.ok) return;
     const data = await response.json().catch(() => ({}));
-    if (signal?.aborted) return;
+    if (signal?.aborted || generation !== documentsGeneration.current) return;
     setDocuments(Array.isArray(data.documents) ? data.documents : []);
-  }, [clientId]);
+  }, [clientId, request]);
 
   useEffect(() => {
     if (activeTab === 'chat') return undefined;
@@ -64,7 +78,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
         await Promise.all([
           loadUnreadCount(signal),
           activeTab === 'documents' ? loadDocuments(signal) : undefined,
-          fetch('/api/admin/clients', { cache: 'no-store', signal })
+          request('/api/admin/clients', { cache: 'no-store', signal })
             .then((response) => response.ok ? response.json() : null)
             .then((data) => {
               if (signal.aborted || !Array.isArray(data?.companies)) return;
@@ -74,7 +88,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
         ]);
       },
     });
-  }, [activeTab, clientId, loadDocuments, loadUnreadCount]);
+  }, [activeTab, clientId, loadDocuments, loadUnreadCount, request]);
 
   const selectTab = (tab: ClientTab) => {
     setActiveTab(tab);
@@ -90,15 +104,16 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     const loadClient = async () => {
       setLoading(true);
       setError('');
       const [clientResponse, priceListResponse, priceRequestResponse, documentsResponse] = await Promise.all([
-        fetch('/api/admin/clients', { cache: 'no-store' }),
-        fetch(`/api/admin/clients/${clientId}/price-lists`, { cache: 'no-store' }),
-        fetch(`/api/admin/clients/${clientId}/price-requests`, { cache: 'no-store' }),
-        fetch(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store' }),
+        request('/api/admin/clients', { cache: 'no-store', signal: controller.signal }),
+        request(`/api/admin/clients/${clientId}/price-lists`, { cache: 'no-store', signal: controller.signal }),
+        request(`/api/admin/clients/${clientId}/price-requests`, { cache: 'no-store', signal: controller.signal }),
+        request(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store', signal: controller.signal }),
       ]);
       if (!clientResponse.ok) throw new Error(await readApiError(clientResponse, 'Не удалось загрузить клиента'));
       if (!priceListResponse.ok) throw new Error(await readApiError(priceListResponse, 'Не удалось загрузить прайсы клиента'));
@@ -131,8 +146,26 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [clientId]);
+  }, [clientId, request]);
+
+  const runDocumentAction = async (action: () => Promise<void>) => {
+    if (documentBusyRef.current) return;
+    documentBusyRef.current = true;
+    documentsGeneration.current += 1;
+    setDocumentBusy(true);
+    setDocumentStatus('');
+    try {
+      await action();
+    } catch (actionError) {
+      if (isActive()) setDocumentStatus(actionError instanceof Error ? actionError.message : 'Не удалось получить результат операции. Проверьте список документов перед повтором.');
+    } finally {
+      documentsGeneration.current += 1;
+      documentBusyRef.current = false;
+      if (isActive()) setDocumentBusy(false);
+    }
+  };
 
   const handleDocumentFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     setDocumentFile(event.target.files?.[0] ?? null);
@@ -147,73 +180,76 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
       return;
     }
 
-    setDocumentBusy(true);
-    const formData = new FormData();
-    formData.append('file', documentFile);
-    formData.append('title', documentTitle);
-    formData.append('isVisible', documentVisible ? 'true' : 'false');
+    await runDocumentAction(async () => {
+      const formData = new FormData();
+      formData.append('file', documentFile);
+      formData.append('title', documentTitle);
+      formData.append('isVisible', documentVisible ? 'true' : 'false');
 
-    const response = await fetch(`/api/admin/clients/${clientId}/documents`, {
-      method: 'POST',
-      body: formData,
+      const response = await request(`/api/admin/clients/${clientId}/documents`, {
+        method: 'POST',
+        body: formData,
+      }, { timeoutMs: ADMIN_UPLOAD_TIMEOUT_MS });
+      const data = await response.json().catch(() => null);
+      if (!isActive()) return;
+
+      if (!response.ok) {
+        setDocumentStatus(typeof data?.error === 'string' ? data.error : ADMIN_UNKNOWN_OUTCOME);
+        return;
+      }
+
+      if (!isSavedDocument(data?.document, clientId)) throw new Error(ADMIN_UNKNOWN_OUTCOME);
+      const savedDocument = data.document;
+      setDocuments((current) => [savedDocument, ...current]);
+      setDocumentTitle('');
+      setDocumentFile(null);
+      setDocumentVisible(true);
+      setDocumentFileInputKey((current) => current + 1);
+      setDocumentStatus('Документ прикреплен');
     });
-    const data = await response.json().catch(() => ({}));
-    setDocumentBusy(false);
-
-    if (!response.ok) {
-      setDocumentStatus(typeof data.error === 'string' ? data.error : 'Не удалось прикрепить документ');
-      return;
-    }
-
-    if (data.document) {
-      setDocuments((current) => [data.document as ClientDocument, ...current]);
-    }
-    setDocumentTitle('');
-    setDocumentFile(null);
-    setDocumentVisible(true);
-    setDocumentFileInputKey((current) => current + 1);
-    setDocumentStatus('Документ прикреплен');
   };
 
   const toggleDocumentVisibility = async (document: ClientDocument, isVisible: boolean) => {
-    setDocumentStatus('');
-    const response = await fetch(`/api/admin/clients/${clientId}/documents/${document.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isVisible }),
+    await runDocumentAction(async () => {
+      const response = await request(`/api/admin/clients/${clientId}/documents/${document.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isVisible }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!isActive()) return;
+
+      if (!response.ok) {
+        setDocumentStatus(typeof data?.error === 'string' ? data.error : ADMIN_UNKNOWN_OUTCOME);
+        return;
+      }
+
+      if (!isSavedDocument(data?.document, clientId) || data.document.id !== document.id) throw new Error(ADMIN_UNKNOWN_OUTCOME);
+      const savedDocument = data.document;
+      setDocuments((current) => current.map((currentDocument) => currentDocument.id === document.id ? savedDocument : currentDocument));
+      setDocumentStatus('Видимость документа обновлена');
     });
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      setDocumentStatus(typeof data.error === 'string' ? data.error : 'Не удалось обновить документ');
-      return;
-    }
-
-    if (data.document) {
-      setDocuments((current) =>
-        current.map((currentDocument) =>
-          currentDocument.id === document.id ? (data.document as ClientDocument) : currentDocument,
-        ),
-      );
-    }
   };
 
   const deleteDocument = async (document: ClientDocument) => {
     if (!window.confirm(`Удалить документ "${document.title || document.originalName}"?`)) return;
 
-    setDocumentStatus('');
-    const response = await fetch(`/api/admin/clients/${clientId}/documents/${document.id}`, {
-      method: 'DELETE',
+    await runDocumentAction(async () => {
+      const response = await request(`/api/admin/clients/${clientId}/documents/${document.id}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json().catch(() => null);
+      if (!isActive()) return;
+
+      if (!response.ok) {
+        setDocumentStatus(typeof data?.error === 'string' ? data.error : ADMIN_UNKNOWN_OUTCOME);
+        return;
+      }
+
+      if (data?.ok !== true) throw new Error(ADMIN_UNKNOWN_OUTCOME);
+      setDocuments((current) => current.filter((currentDocument) => currentDocument.id !== document.id));
+      setDocumentStatus('Документ удален');
     });
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      setDocumentStatus(typeof data.error === 'string' ? data.error : 'Не удалось удалить документ');
-      return;
-    }
-
-    setDocuments((current) => current.filter((currentDocument) => currentDocument.id !== document.id));
-    setDocumentStatus('Документ удален');
   };
 
   const panel = (() => {
@@ -247,6 +283,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
           onToggleVisibility={toggleDocumentVisibility}
           onUpload={uploadDocument}
           onVisibleChange={setDocumentVisible}
+          onCancel={cancelAll}
         />
       );
     }

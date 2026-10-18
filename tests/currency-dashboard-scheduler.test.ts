@@ -100,13 +100,24 @@ function hostHarness() {
   const iframe = { contentWindow: frameWindow, addEventListener: (name: string, callback: () => void) => frameListeners.set(name, callback), removeEventListener: (name: string) => frameListeners.delete(name) };
   const doc = { hidden: false, addEventListener: (name: string, callback: () => void) => docListeners.set(name, callback), removeEventListener: (name: string) => docListeners.delete(name) };
   let refs = 0, cleanup: (() => void) | undefined;
-  const requests: { resolve: (value: { ok: boolean; json: () => Promise<unknown> }) => void; signal: AbortSignal }[] = [];
+  const requests: { resolve: (value: Response) => void; signal: AbortSignal }[] = [];
+  const controlledFetch = (_url: string, init: { signal: AbortSignal }) => new Promise<Response>((resolve) => {
+    requests.push({ resolve, signal: init.signal });
+  });
+  // Execute the real bounded transport with controlled IO. A frame reload must
+  // still abort its native signal, even when this fake server completes late.
+  const requestExports = {};
+  const requestCode = ts.transpileModule(readFileSync('src/features/admin/shared/adminRequest.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  runInNewContext(requestCode, { exports: requestExports, fetch: controlledFetch, AbortController, Response, setTimeout, clearTimeout });
   const modules: Record<string, unknown> = {
     'next/link': {},
     'react': { useRef: () => ({ current: ++refs === 1 ? iframe : null }), useState: (value: unknown) => [value, () => {}], useEffect: (effect: () => () => void) => { cleanup = effect(); } },
     'react/jsx-runtime': { jsx: () => null, jsxs: () => null },
     '@/shared/lib/currencyDashboardRpc': rpcHelpers,
     '@/shared/lib/currencyDashboardDeviceState': deviceHelpers,
+    '@/features/admin/shared/adminRequest': requestExports,
     '@/shared/lib/currencyDashboardScheduler': { ...schedulerHelpers, createCurrencySchedulerWorker: () => {
       const worker = workerFixture(); workers.push(worker); return { worker, release: () => { worker.released++; } };
     } },
@@ -121,7 +132,7 @@ function hostHarness() {
   runInNewContext(compiled, { exports, require: (name: string) => { assert.ok(name in modules, name); return modules[name]; },
     window: { isSecureContext: false, addEventListener: (name: string, callback: (...args: unknown[]) => unknown) => listeners.set(name, callback), removeEventListener: (name: string) => listeners.delete(name), setInterval, clearInterval },
     document: doc, AbortController, setTimeout, clearTimeout, TextEncoder,
-    fetch: (_url: string, init: { signal: AbortSignal }) => new Promise((resolve) => { requests.push({ resolve, signal: init.signal }); }),
+    fetch: controlledFetch,
   });
   exports.CurrencyDashboard!({ nonce: 'scheduler-nonce', deviceScope: 'user:7', canManage: false });
   const send = (id: string, method = 'schedule:start', params: unknown = {}, overrides = {}) => listeners.get('message')!({ source: frameWindow, origin: 'null', data: { channel: 'kts-currency-v1', nonce: 'scheduler-nonce', id, method, params }, ...overrides });
@@ -160,10 +171,10 @@ test('late RPC completion after frame reload cannot reply or clear a new request
     const oldRequest = h.send('1', 'snapshot:get'); assert.equal(h.requests.length, 1);
     h.frameListeners.get('load')!(); assert.equal(h.requests[0].signal.aborted, true);
     const newRequest = h.send('1', 'snapshot:get'); assert.equal(h.requests.length, 2);
-    h.requests[0].resolve({ ok: true, json: async () => ({ revision: 1 }) }); await oldRequest;
+    h.requests[0].resolve(Response.json({ revision: 1 })); await oldRequest;
     assert.equal(h.messages.length, 0);
     await h.send('1'); assert.equal(h.workers.length, 0, 'new in-flight id is still reserved');
-    h.requests[1].resolve({ ok: true, json: async () => ({ revision: 2 }) }); await newRequest;
+    h.requests[1].resolve(Response.json({ revision: 2 })); await newRequest;
     assert.deepEqual(JSON.parse(JSON.stringify(h.messages[0].result)), { revision: 2 });
     assert.equal(h.messages.length, 1);
   } finally { h.cleanup(); }

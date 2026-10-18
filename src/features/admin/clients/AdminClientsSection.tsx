@@ -9,6 +9,7 @@ import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 import { AdminClientCompanyCard } from './AdminClientCompanyCard';
 import { AdminClientCreateForm } from './AdminClientCreateForm';
 import { submitClientMutation } from './clientMutation';
+import { useAdminRequestScope } from '../shared/useAdminRequestScope';
 import {
   emptyDraft,
   readApiError,
@@ -21,6 +22,7 @@ import {
 } from './AdminClientsModel';
 
 export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
+  const { request, cancelAll, isActive } = useAdminRequestScope();
   const [companies, setCompanies] = useState<ClientCompany[]>([]);
   const companiesRef = useRef<ClientCompany[]>([]);
   const mutationRef = useRef(false);
@@ -54,7 +56,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const loadClients = useCallback(async (preserveDrafts = false, signal?: AbortSignal) => {
     if (mutationRef.current) return;
     const generation = dataGeneration.current;
-    const response = await fetch('/api/admin/clients', { cache: 'no-store', signal });
+    const response = await request('/api/admin/clients', { cache: 'no-store', signal });
     if (!response.ok) throw new Error(await readApiError(response, 'Не удалось загрузить клиентов'));
     const data = await response.json();
     if (signal?.aborted || generation !== dataGeneration.current) return;
@@ -67,10 +69,10 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       const dirty = current[company.id] && (!previous || JSON.stringify(current[company.id]) !== JSON.stringify(toDraft(previous)));
       return [company.id, preserveDrafts && dirty ? current[company.id] : toDraft(company)];
     })));
-  }, []);
+  }, [request]);
 
   const loadManagers = async () => {
-    const response = await fetch('/api/admin/wholesale/managers', { cache: 'no-store' });
+    const response = await request('/api/admin/wholesale/managers', { cache: 'no-store' });
     if (!response.ok) return;
     const data = await response.json();
     setManagers(Array.isArray(data.managers) ? data.managers : []);
@@ -163,12 +165,13 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(draft),
-      });
+      }, request);
+      if (!isActive()) return;
       setDraft(emptyDraft);
       if (result.company) acceptSavedCompany(result.company);
       setStatus(['Компания клиента добавлена.', ...result.warnings].join(' '));
     } catch (error) {
-      setStatus(readApiErrorFallback(error, 'Не удалось подтвердить добавление компании'));
+      if (isActive()) setStatus(readApiErrorFallback(error, 'Не удалось подтвердить добавление компании'));
     } finally {
       finishMutation();
     }
@@ -199,7 +202,8 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...nextDraft, password: nextPassword }),
-      });
+      }, request);
+      if (!isActive()) return;
       if (result.company) acceptSavedCompany(result.company);
       if (nextPassword) {
         setClientPasswordDrafts((current) => {
@@ -219,7 +223,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         setSavedCompanyId((current) => (current === companyId ? null : current));
       }, 2200);
     } catch (error) {
-      setStatus(readApiErrorFallback(error, 'Не удалось подтвердить сохранение компании'));
+      if (isActive()) setStatus(readApiErrorFallback(error, 'Не удалось подтвердить сохранение компании'));
     } finally {
       finishMutation();
     }
@@ -233,7 +237,8 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
 
     if (!startMutation()) return;
     try {
-      const result = await submitClientMutation(`/api/admin/clients/${company.id}`, { method: 'DELETE' });
+      const result = await submitClientMutation(`/api/admin/clients/${company.id}`, { method: 'DELETE' }, request);
+      if (!isActive()) return;
       companiesRef.current = companiesRef.current.filter((item) => item.id !== company.id);
       setCompanies(companiesRef.current);
       setClientPasswordDrafts((current) => {
@@ -258,7 +263,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       });
       setStatus(['Клиент удалён.', ...result.warnings].join(' '));
     } catch (error) {
-      setStatus(readApiErrorFallback(error, 'Не удалось подтвердить удаление клиента'));
+      if (isActive()) setStatus(readApiErrorFallback(error, 'Не удалось подтвердить удаление клиента'));
     } finally {
       finishMutation();
     }
@@ -299,6 +304,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         <button className={styles.secondary} disabled={busy} onClick={refreshClients}>
           Обновить список
         </button>
+        {busy ? <button className={styles.secondary} onClick={cancelAll}>Отменить ожидание</button> : null}
         <button className={styles.secondary} onClick={onBack}>
           Вернуться в панель управления
         </button>

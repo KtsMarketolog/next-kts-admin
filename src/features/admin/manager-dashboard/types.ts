@@ -104,6 +104,8 @@ export type ManagerDashboardOverview = {
 };
 
 export type ManagerDashboardMutationResult = {
+  /** Client-only: the write succeeded, but cancellation must stop a batch. */
+  cancelledAfterSave?: boolean;
   results?: ManagerDashboardImport[];
   message?: string;
   version?: ManagerDashboardHtmlVersion;

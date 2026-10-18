@@ -54,7 +54,7 @@ export function AdminCatalogImportPanel({
             onChange={(event) => setFileName(event.target.files?.[0]?.name ?? '')}
           />
         </label>
-        <button disabled={busyId === 'import'}>{busyId === 'import' ? 'Загрузка...' : 'Загрузить Excel'}</button>
+        <button disabled={busyId !== null}>{busyId === 'import' ? 'Загрузка...' : 'Загрузить Excel'}</button>
       </form>
 
       <div className={styles.catalogImportCard}>
@@ -76,7 +76,7 @@ export function AdminCatalogImportPanel({
             совпадать с Номенклатура.Код.
           </p>
         </div>
-        <button type="button" disabled={busyId === 'stock-email'} onClick={checkStockEmail}>
+        <button type="button" disabled={busyId !== null} onClick={checkStockEmail}>
           {busyId === 'stock-email' ? 'Проверка...' : 'Проверить почту сейчас'}
         </button>
       </div>

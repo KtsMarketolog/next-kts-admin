@@ -97,6 +97,7 @@ function journal(options: {
     react: hooks, 'react/jsx-runtime': jsx, './ManagerDashboard.module.scss': { default: {} },
     './ManagerDashboardParts': parts,
     '@/shared/lib/managerDashboardImportPagination': pagination,
+    '@/features/admin/shared/adminRequest': { adminRequest: (url: string, init: RequestInit) => fetch(url, init) },
   };
   const code = ts.transpileModule(readFileSync(new URL('../src/features/admin/manager-dashboard/ManagerDashboardImportJournal.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },

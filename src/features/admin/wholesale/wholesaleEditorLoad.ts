@@ -2,6 +2,7 @@ import type { CatalogCategory } from './AdminWholesaleTypes';
 import type { PriceListPayload } from './AdminWholesaleGateway.helpers';
 import { WHOLESALE_PRICE_WORKFLOW_STATUSES } from '@/shared/lib/wholesalePriceWorkflowStatus';
 import { parseRecordRevision } from '@/shared/lib/recordVersion';
+import { adminRequest } from '../shared/adminRequest';
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -80,7 +81,7 @@ export function assertWholesaleEditorCompanies(payload: unknown): void {
 }
 
 export async function readWholesaleEditorResponse(url: string, signal: AbortSignal, failure: string): Promise<unknown> {
-  const response = await fetch(url, { cache: 'no-store', signal });
+  const response = await adminRequest(url, { cache: 'no-store', signal }, { timeoutMs: 60_000 });
   if (!response.ok) throw new Error(failure);
   try {
     return await response.json();

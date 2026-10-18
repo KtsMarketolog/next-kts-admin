@@ -181,6 +181,12 @@ for (const preview of [false, true]) test(`the real ${preview ? 'preview' : 'pub
   let receive: (event: unknown) => Promise<void> = async () => {}, cleanup: (() => void) | undefined;
   let refs = 0, fetches = 0;
   const renderedTypes: unknown[] = [];
+  const forbiddenFetch = () => { fetches++; throw new Error('Local command reached network'); };
+  const requestExports = {};
+  const requestCode = ts.transpileModule(readFileSync('src/features/admin/shared/adminRequest.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  runInNewContext(requestCode, { exports: requestExports, fetch: forbiddenFetch, AbortController, Response, setTimeout, clearTimeout });
   const modules: Record<string, unknown> = {
     'next/link': {},
     'react': {
@@ -192,6 +198,7 @@ for (const preview of [false, true]) test(`the real ${preview ? 'preview' : 'pub
     '@/shared/lib/currencyDashboardRpc': rpcHelpers,
     '@/shared/lib/currencyDashboardDeviceState': deviceHelpers,
     '@/shared/lib/currencyDashboardScheduler': schedulerHelpers,
+    '@/features/admin/shared/adminRequest': requestExports,
     '@/features/admin/dashboard-usage/useDashboardUsage': { useDashboardUsage() {} },
     '@/features/admin/dashboard-access/DashboardAudienceEditor': {},
     './CurrencyHtmlManagement': {},
@@ -203,7 +210,7 @@ for (const preview of [false, true]) test(`the real ${preview ? 'preview' : 'pub
   runInNewContext(compiled, { exports, require: (name: string) => { assert.ok(name in modules, name); return modules[name]; },
     window: { localStorage: storage, isSecureContext: false, addEventListener: (name: string, callback: typeof receive) => { if (name === 'message') receive = callback; }, removeEventListener() {}, setInterval, clearInterval },
     document: { hidden: false, addEventListener() {}, removeEventListener() {} },
-    AbortController, setTimeout, clearTimeout, TextEncoder, fetch: () => { fetches++; throw new Error('Local command reached network'); },
+    AbortController, setTimeout, clearTimeout, TextEncoder, fetch: forbiddenFetch,
   });
   exports.CurrencyDashboard!({ nonce: 'test-device-nonce', deviceScope: 'user:7', canManage: preview, ...(preview ? { previewVersion: 3 } : {}) });
   const message = (id: string, method: string, params = {}) => ({ channel: 'kts-currency-v1', nonce: 'test-device-nonce', id, method, params });

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import type { CurrencyDashboardHtmlState } from '@/shared/lib/db/currencyDashboardHtmlRepo';
+import { adminRequest, ADMIN_UPLOAD_TIMEOUT_MS, runWithRequestTimeout } from '@/features/admin/shared/adminRequest';
 
 import styles from './CurrencyHtmlManagement.module.scss';
 
@@ -42,7 +43,6 @@ export function CurrencyHtmlManagement({ onPublished, renderPreview }: {
     const controller = new AbortController();
     activeRequest.current = controller;
     const current = () => activeRequest.current === controller;
-    const timeout = setTimeout(() => controller.abort(), 60_000);
     setBusy(operation);
     setError('');
     setNotice('');
@@ -50,14 +50,14 @@ export function CurrencyHtmlManagement({ onPublished, renderPreview }: {
     try {
       const body = operation === 'upload' ? new FormData() : undefined;
       if (body && details.file) body.append('file', details.file);
-      const response = await fetch(ENDPOINT, {
+      const response = await adminRequest(ENDPOINT, {
         method: operation === 'load' ? 'GET' : operation === 'upload' ? 'POST' : 'PATCH',
         credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
         ...(operation === 'publish' || operation === 'rollback' ? {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: operation, expectedRevision: details.revision, ...(operation === 'publish' ? { versionId: details.versionId } : {}) }),
         } : { body }),
-      });
+      }, { timeoutMs: operation === 'upload' ? ADMIN_UPLOAD_TIMEOUT_MS : undefined });
       const result = await response.json();
       if (!current()) return;
       if (response.status === 401 || response.status === 403) {
@@ -71,7 +71,7 @@ export function CurrencyHtmlManagement({ onPublished, renderPreview }: {
         setPreviewChecked(false);
         setConfirmRollback(false);
         setUncertain(true);
-        const fresh = await fetch(ENDPOINT, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
+        const fresh = await adminRequest(ENDPOINT, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
         if (!current()) return;
         if (fresh.status === 401 || fresh.status === 403) {
           setForbidden(true);
@@ -116,7 +116,7 @@ export function CurrencyHtmlManagement({ onPublished, renderPreview }: {
         const success = operation === 'publish' ? 'Новая HTML-версия опубликована.' : 'Предыдущая HTML-версия восстановлена.';
         setNotice(`${success} Общие данные дашборда сохранены.`);
         // Do not call a failed screen refresh a failed publication or encourage a retry.
-        try { await publicationCallback.current(); }
+        try { await runWithRequestTimeout(async () => publicationCallback.current(), { signal: controller.signal }); }
         catch { if (current()) setNotice(`${success} Не удалось обновить просмотр. Перезагрузите страницу; повторная публикация не нужна.`); }
       }
     } catch (cause) {
@@ -130,7 +130,6 @@ export function CurrencyHtmlManagement({ onPublished, renderPreview }: {
         setError(cause instanceof Error && cause.name !== 'AbortError' ? cause.message : 'Не удалось загрузить версии. Проверьте соединение и повторите попытку.');
       }
     } finally {
-      clearTimeout(timeout);
       if (current()) {
         activeRequest.current = null;
         setBusy(null);

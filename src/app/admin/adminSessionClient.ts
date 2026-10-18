@@ -1,4 +1,5 @@
 import type { AdminSession } from '@/shared/lib/adminAuth';
+import { adminRequest } from '@/features/admin/shared/adminRequest';
 
 import { isManagerRole } from './adminPanelConfig';
 
@@ -16,7 +17,7 @@ function wait(ms: number) {
 }
 
 async function fetchAdminSessionSnapshot(): Promise<AdminSessionResponse> {
-  const response = await fetch('/api/admin/session', { cache: 'no-store', credentials: 'same-origin' });
+  const response = await adminRequest('/api/admin/session', { cache: 'no-store', credentials: 'same-origin' }, { timeoutMs: 5_000 });
 
   if (!response.ok) {
     throw new Error(`Admin session check failed: ${response.status}`);

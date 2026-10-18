@@ -5,9 +5,12 @@ import { useState } from 'react';
 import { emptyNews } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
 import { reorderByDrop } from '@/features/admin/model/reorder';
+import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
 import type { News } from '@/features/admin/types';
 
-export function useAdminNews({ setBusy, showStatus, reloadAdminData }: AdminCrudHookOptions) {
+export function useAdminNews(options: AdminCrudHookOptions) {
+  const { showStatus } = options;
+  const perform = useAdminContentAction(options);
   const [news, setNews] = useState<News[]>([]);
   const [newsDraft, setNewsDraft] = useState(emptyNews);
   const [savedNewsId, setSavedNewsId] = useState<number | null>(null);
@@ -21,24 +24,15 @@ export function useAdminNews({ setBusy, showStatus, reloadAdminData }: AdminCrud
   };
 
   const persistNewsOrder = async (orderedNews: News[]) => {
-    setBusy(true);
-    const responses = await Promise.all(
-      orderedNews.map((item) =>
-        fetch(`/api/admin/news/${item.id}`, {
+    await perform({ requests: orderedNews.map((item) => ({ url: `/api/admin/news/${item.id}`, init: {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(item),
-        }),
-      ),
-    );
-    setBusy(false);
-
-    const saved = responses.every((res) => res.ok);
-    showStatus(saved ? 'Очередность новостей сохранена' : 'Не удалось сохранить очередность новостей');
-    if (saved) await reloadAdminData();
+        } })), success: 'Очередность новостей сохранена', failure: 'Не удалось сохранить очередность новостей' });
   };
 
   const moveNews = async (draggedId: number, targetId: number) => {
+    if (options.actionLock?.current) return;
     const normalized = reorderByDrop(news, draggedId, targetId);
     if (!normalized) return;
     setNews(normalized);
@@ -51,47 +45,34 @@ export function useAdminNews({ setBusy, showStatus, reloadAdminData }: AdminCrud
       return;
     }
 
-    setBusy(true);
-    const res = await fetch('/api/admin/news', {
+    await perform({ requests: [{ url: '/api/admin/news', init: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...newsDraft, sortOrder: nextNewsOrder }),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Новость добавлена' : 'Не удалось добавить новость');
-    if (res.ok) {
+    } }], success: 'Новость добавлена', failure: 'Не удалось добавить новость', onSaved: () => {
       setNewsCreated(true);
       window.setTimeout(() => setNewsCreated(false), 2000);
       setNewsDraft(emptyNews);
-      await reloadAdminData();
-    }
+    } });
   };
 
   const saveNews = async (item: News) => {
-    setBusy(true);
-    const res = await fetch(`/api/admin/news/${item.id}`, {
+    await perform({ requests: [{ url: `/api/admin/news/${item.id}`, init: {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(item),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Новость сохранена' : 'Не удалось сохранить новость');
-    if (res.ok) {
+    } }], success: 'Новость сохранена', failure: 'Не удалось сохранить новость', onSaved: () => {
       setSavedNewsId(item.id);
       window.setTimeout(() => {
         setSavedNewsId((current) => (current === item.id ? null : current));
       }, 2000);
-      await reloadAdminData();
-    }
+    } });
   };
 
   const deleteNews = async (id: number) => {
     if (!confirm('Удалить новость?')) return;
-    setBusy(true);
-    const res = await fetch(`/api/admin/news/${id}`, { method: 'DELETE' });
-    setBusy(false);
-    showStatus(res.ok ? 'Новость удалена' : 'Не удалось удалить новость');
-    if (res.ok) await reloadAdminData();
+    await perform({ requests: [{ url: `/api/admin/news/${id}`, init: { method: 'DELETE' } }],
+      success: 'Новость удалена', failure: 'Не удалось удалить новость' });
   };
 
   return {

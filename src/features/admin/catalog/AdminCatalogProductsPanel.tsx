@@ -150,7 +150,7 @@ export function AdminCatalogProductsPanel({
           />
           Активен
         </label>
-        <button className={savedId === 'new' ? styles.savedButton : undefined} disabled={busyId === 'new'} onClick={createProduct}>
+        <button className={savedId === 'new' ? styles.savedButton : undefined} disabled={busyId !== null} onClick={createProduct}>
           {savedId === 'new' ? 'Товар добавлен' : 'Добавить товар'}
         </button>
       </div>
@@ -310,12 +310,12 @@ export function AdminCatalogProductsPanel({
                   <div className={styles.userAccessActions}>
                     <button
                       className={savedId === String(product.id) ? styles.savedButton : undefined}
-                      disabled={busyId === String(product.id)}
+                      disabled={busyId !== null}
                       onClick={() => saveProduct(product)}
                     >
                       {savedId === String(product.id) ? 'Сохранено' : 'Сохранить'}
                     </button>
-                    <button className={styles.danger} disabled={busyId === String(product.id)} onClick={() => deleteProduct(product)}>
+                    <button className={styles.danger} disabled={busyId !== null} onClick={() => deleteProduct(product)}>
                       Удалить
                     </button>
                   </div>

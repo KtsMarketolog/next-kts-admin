@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import adminStyles from '@/app/admin/admin.module.scss';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
+import { ADMIN_SNAPSHOT_TIMEOUT_MS, ADMIN_UPLOAD_TIMEOUT_MS } from '@/features/admin/shared/adminRequest';
 import { MANAGER_DASHBOARD_TITLES, type PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
 
 import { ManagerDashboardManagement } from './ManagerDashboardManagement';
@@ -54,12 +56,16 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const requestRevision = useRef(0);
   const busyRef = useRef(false);
+  const mutationController = useRef<AbortController | null>(null);
+  const { request, cancelAll } = useAdminRequestScope();
+  useEffect(() => () => { mutationController.current?.abort(); }, []);
+  const cancelMutation = () => { mutationController.current?.abort(); cancelAll(); };
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     const revision = ++requestRevision.current;
     setLoading(true);
     try {
-      const response = await fetch(apiPath, { cache: 'no-store', credentials: 'same-origin' });
+      const response = await request(apiPath, { cache: 'no-store', credentials: 'same-origin', signal });
       if (response.status === 401 || response.status === 403) {
         setOverview(null);
         router.replace('/admin');
@@ -73,7 +79,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
     } finally {
       if (revision === requestRevision.current) setLoading(false);
     }
-  }, [apiPath, mode, router]);
+  }, [apiPath, mode, router, request]);
 
   useEffect(() => {
     void load().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Не удалось загрузить дашборд.'));
@@ -89,7 +95,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
       if (checking || document.visibilityState === 'hidden') return;
       checking = true;
       try {
-        const response = await fetch(apiPath, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
+        const response = await request(apiPath, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
         if (disposed) return;
         if (response.status === 401 || response.status === 403) {
           setOverview(null);
@@ -123,7 +129,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [apiPath, overview, router]);
+  }, [apiPath, overview, router, request]);
 
   async function refresh() {
     setError('');
@@ -139,23 +145,37 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
   async function mutate(path: string, init: RequestInit, successMessage: string): Promise<ManagerDashboardMutationResult | null> {
     if (own || busyRef.current) return null;
     busyRef.current = true;
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    mutationController.current = controller;
+    init.signal?.addEventListener('abort', cancel, { once: true });
+    if (init.signal?.aborted) controller.abort();
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`${API_PATH}${path}`, { ...init, credentials: 'same-origin' });
+      const response = await request(`${API_PATH}${path}`, { ...init, credentials: 'same-origin', signal: controller.signal }, {
+        timeoutMs: path.includes('snapshots') || path === '/shared/json' ? ADMIN_SNAPSHOT_TIMEOUT_MS
+          : init.body instanceof FormData ? ADMIN_UPLOAD_TIMEOUT_MS : undefined,
+      });
       if (response.status === 401 || response.status === 403) {
         setOverview(null);
         router.replace('/admin');
       }
       const result = await readResponse(response) as ManagerDashboardMutationResult;
       setMessage(result.message || successMessage);
-      try { await load(); } catch { setError('Операция выполнена, но список не удалось обновить. Нажмите «Обновить».'); }
+      try { await load(controller.signal); } catch { setError('Операция выполнена, но список не удалось обновить. Нажмите «Обновить».'); }
+      if (controller.signal.aborted) {
+        setMessage('Текущая операция сохранена. Дальнейшая отправка остановлена.');
+        return { ...result, cancelledAfterSave: true };
+      }
       return result;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось выполнить операцию.');
       return null;
     } finally {
+      init.signal?.removeEventListener('abort', cancel);
+      mutationController.current = null;
       busyRef.current = false;
       setBusy(false);
     }
@@ -180,7 +200,7 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
         <p>Доступна новая версия дашборда или данных. Обновите отчёт, когда будете готовы. Для зашифрованного .ktsp пароль потребуется ввести снова.</p>
         <button className={styles.secondary} type="button" disabled={loading || busy} onClick={() => void refresh()}>Открыть обновление</button>
       </div> : null}
-      {busy ? <p className={styles.muted} role="status">Выполняем операцию…</p> : null}
+      {busy ? <p className={styles.muted} role="status">Выполняем операцию… <button type="button" className={styles.secondary} onClick={cancelMutation}>Прервать ожидание</button></p> : null}
       {loading && !overview ? <section className={styles.panel} aria-busy="true"><p>Загружаем дашборд…</p></section> : null}
       {!own && overview?.mode === 'manage' ? <ManagerDashboardManagement key={audience ?? 'all'} audience={audience} overview={overview} canAssignAccess={canAssignAccess} busy={busy || loading} mutate={mutate} onReload={refresh} onAccessDenied={() => {
         requestRevision.current += 1;

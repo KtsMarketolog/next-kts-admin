@@ -82,7 +82,7 @@ async function main() {
           if (scenario === 'warning') assert.match(status, /Остатки сохранены.*письмо не перенесено/);
           if (scenario === 'reload-failure') assert.match(status, /Остатки сохранены.*список журнала не обновился/);
           if (scenario === 'rollback') assert.match(status, /Остатки не сохранены.*синтетическая ошибка/);
-          if (scenario === 'reject') assert.match(status, /запрос мог завершиться сохранением/);
+          if (scenario === 'reject') assert.match(status, /могло сохраниться/);
           if (scenario === 'unknown') assert.match(status, /Не удалось подтвердить сохранение/);
           if (scenario === 'replay') assert.match(status, /уже обработано.*повторно не изменялись/);
           if (scenario === 'invalid') assert.match(status, /Остатки не изменены.*Результат проверки записан/);

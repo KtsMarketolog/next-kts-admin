@@ -1,9 +1,11 @@
 'use client';
 
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import { AdminRequestError, ADMIN_UNKNOWN_OUTCOME, ADMIN_UPLOAD_TIMEOUT_MS } from '../shared/adminRequest';
+import { useAdminRequestScope } from '../shared/useAdminRequestScope';
 import {
   ClientsTab,
   EmptyState,
@@ -152,6 +154,9 @@ function AnalyticsExportPanel({
 }
 
 export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent }: AdminWholesaleAnalyticsProps) {
+  const { request, isActive } = useAdminRequestScope();
+  const exportBusyRef = useRef(false);
+  const clearEventsBusyRef = useRef(false);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -181,17 +186,19 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
     setError('');
 
     try {
-      const response = await fetch(`/api/admin/wholesale/analytics?period=${period}`, { cache: 'no-store', signal });
+      const response = await request(`/api/admin/wholesale/analytics?period=${period}`, { cache: 'no-store', signal }, { timeoutMs: 60_000 });
       if (!response.ok) throw new Error('Не удалось загрузить общую аналитику');
       const data = (await response.json()) as Analytics;
       if (!signal?.aborted) setAnalytics(data);
+      return true;
     } catch (reason) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || !isActive()) return false;
       setError(reason instanceof Error ? reason.message : 'Не удалось загрузить общую аналитику');
+      return false;
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [period]);
+  }, [isActive, period, request]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -223,27 +230,32 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
   const activeTab = tabs.find((item) => item.value === tab) ?? tabs[0];
 
   const clearEventLog = async () => {
-    if (!analytics?.recentEvents.length || clearEventsBusy) return;
+    if (!analytics?.recentEvents.length || clearEventsBusyRef.current) return;
     if (!window.confirm('Очистить журнал событий? Все события будут удалены.')) return;
 
+    clearEventsBusyRef.current = true;
     setClearEventsBusy(true);
     setClearEventsStatus('');
 
     try {
-      const response = await fetch('/api/admin/wholesale/analytics', { method: 'DELETE' });
+      const response = await request('/api/admin/wholesale/analytics', { method: 'DELETE' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(typeof data.error === 'string' ? data.error : 'Не удалось очистить журнал');
+        setClearEventsStatus(typeof data.error === 'string' ? data.error : 'Не удалось очистить журнал');
+        return;
       }
 
       setEventTypeFilter('');
       setActorFilter('');
       setManagerFilter('');
       setClearEventsStatus('Журнал очищен');
-      await loadAnalytics();
+      if (!await loadAnalytics() && isActive()) {
+        setClearEventsStatus('Журнал очищен, но отображение не обновилось. Обновите страницу; повторно очищать не нужно.');
+      }
     } catch (reason) {
-      setClearEventsStatus(reason instanceof Error ? reason.message : 'Не удалось очистить журнал');
+      if (isActive()) setClearEventsStatus(reason instanceof AdminRequestError ? reason.message : ADMIN_UNKNOWN_OUTCOME);
     } finally {
+      clearEventsBusyRef.current = false;
       setClearEventsBusy(false);
     }
   };
@@ -323,17 +335,19 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
   };
 
   const sendAnalyticsEmail = async () => {
+    if (exportBusyRef.current) return;
     const email = exportEmail.trim();
     if (!email) {
       setExportStatus('Укажите email');
       return;
     }
 
+    exportBusyRef.current = true;
     setExportBusy(true);
     setExportStatus('');
     setExportSendDone(false);
     try {
-      const response = await fetch('/api/admin/wholesale/analytics/export', {
+      const response = await request('/api/admin/wholesale/analytics/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -342,15 +356,19 @@ export function AdminWholesaleAnalytics({ onTabChange, managerManagementContent 
           managerId: exportManagerId,
           email,
         }),
-      });
+      }, { timeoutMs: ADMIN_UPLOAD_TIMEOUT_MS });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Не удалось отправить отчёт');
+      if (!response.ok) {
+        setExportStatus(typeof data.error === 'string' ? data.error : 'Не удалось отправить отчёт');
+        return;
+      }
       setExportStatus('Отчёт отправлен');
       setExportSendDone(true);
       window.setTimeout(() => setExportSendDone(false), 1800);
     } catch (reason) {
-      setExportStatus(reason instanceof Error ? reason.message : 'Не удалось отправить отчёт');
+      if (isActive()) setExportStatus(reason instanceof AdminRequestError ? reason.message : ADMIN_UNKNOWN_OUTCOME);
     } finally {
+      exportBusyRef.current = false;
       setExportBusy(false);
     }
   };

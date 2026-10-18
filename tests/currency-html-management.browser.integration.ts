@@ -30,8 +30,10 @@ async function main() {
   const bundle = await build({
     stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';
       import {CurrencyHtmlManagement} from './src/features/admin/currency-dashboard/CurrencyHtmlManagement';
-      window.publishedCount=0;window.failRefresh=false;
-      createRoot(document.getElementById('root')).render(<main><h1>Действующий дашборд</h1><div className="published">Дашборд расположен выше управления</div><CurrencyHtmlManagement onPublished={()=>{window.publishedCount++;if(window.failRefresh)throw new Error('synthetic refresh failure')}} renderPreview={(id)=><div data-testid="preview" data-version={id}>Синтетический предпросмотр {id}</div>}/></main>);`, resolveDir: root, loader: 'tsx' },
+      window.publishedCount=0;window.failRefresh=false;window.hangRefresh=false;window.fastTimeout=false;
+      const realTimeout=window.setTimeout.bind(window);
+      window.setTimeout=(work,ms,...args)=>realTimeout(work,window.fastTimeout&&ms>=20000?50:ms,...args);
+      createRoot(document.getElementById('root')).render(<main><h1>Действующий дашборд</h1><div className="published">Дашборд расположен выше управления</div><CurrencyHtmlManagement onPublished={()=>{window.publishedCount++;if(window.hangRefresh)return new Promise(()=>{});if(window.failRefresh)throw new Error('synthetic refresh failure')}} renderPreview={(id)=><div data-testid="preview" data-version={id}>Синтетический предпросмотр {id}</div>}/></main>);`, resolveDir: root, loader: 'tsx' },
     absWorkingDir: root, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic', alias: { '@': path.join(root, 'src') }, define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'fixture-styles', setup(plugin) {
       plugin.onLoad({ filter: /\.module\.scss$/ }, (args) => {
@@ -46,7 +48,7 @@ async function main() {
   const fonts = new Map<string, Buffer>();
   for (const match of globals.matchAll(/url\("(\/fonts\/[^"?]+)"\)/g)) fonts.set(match[1], await readFile(path.join(root, 'public', match[1])));
   let state = structuredClone(initial);
-  let mode: 'normal' | 'conflict' | 'network' | 'reject' | 'quota' | 'forbidden' | 'slow' = 'normal';
+  let mode: 'normal' | 'conflict' | 'network' | 'reject' | 'quota' | 'forbidden' | 'slow' | 'body-hang' | 'load-hang' = 'normal';
   const slow = { response: null as ServerResponse | null };
   const mutations: Array<{ method: string; payload?: Record<string, unknown>; body?: string }> = [];
   const unexpected: string[] = [];
@@ -60,12 +62,16 @@ async function main() {
     if (url.pathname === '/favicon.ico') return void response.writeHead(204).end();
     if (url.pathname !== '/api/admin/currency-dashboard/html') { unexpected.push(url.pathname); return void response.writeHead(404).end(); }
     if (mode === 'forbidden') return void json(response, 403, { error: 'Доступ отозван' });
-    if (request.method === 'GET') return void json(response, 200, state);
+    if (request.method === 'GET') {
+      if (mode === 'load-hang') { slow.response = response; return; }
+      return void json(response, 200, state);
+    }
     let body = '';
     for await (const chunk of request) body += chunk;
     if (request.method === 'POST') {
       mutations.push({ method: 'POST', body });
       if (mode === 'slow') { slow.response = response; return; }
+      if (mode === 'body-hang') { slow.response = response; response.writeHead(201, { 'Content-Type': 'application/json' }); response.write('{"versions":['); return; }
       if (mode === 'reject') return void json(response, 422, { error: 'HTML не совместим: отсутствует требуемый блок.' });
       if (mode === 'quota') return void json(response, 409, { code: 'CURRENCY_HTML_QUOTA', error: 'Хранилище HTML-версий заполнено.' });
       const version = { ...initial.versions[0], id: 3, originalName: 'новые_курсы_V26.html', sourceVersion: 'V26' };
@@ -159,6 +165,18 @@ async function main() {
             await page.getByRole('status').filter({ hasText: 'повторная публикация не нужна' }).waitFor();
             assert.equal(await page.getByRole('alert').count(), 0);
             assert.equal(state.activeVersionId, 3);
+            await page.getByRole('listitem').filter({ hasText: 'курсы_V25.html' }).getByRole('button', { name: 'Предпросмотр', exact: true }).click();
+            await page.getByLabel('Проверил предпросмотр и хочу показать эту версию сотрудникам').check();
+            await page.evaluate('window.hangRefresh=true;window.fastTimeout=true');
+            await page.getByRole('button', { name: 'Опубликовать эту версию', exact: true }).click();
+            await page.getByRole('status').filter({ hasText: 'повторная публикация не нужна' }).waitFor();
+            assert.equal(await page.getByRole('button', { name: 'Обновить версии', exact: true }).isEnabled(), true);
+            assert.equal(state.activeVersionId, 2);
+            await page.evaluate('window.hangRefresh=false;window.fastTimeout=false');
+            await page.getByRole('listitem').filter({ hasText: 'новые_курсы_V26.html' }).getByRole('button', { name: 'Предпросмотр', exact: true }).click();
+            await page.getByLabel('Проверил предпросмотр и хочу показать эту версию сотрудникам').check();
+            await page.getByRole('button', { name: 'Опубликовать эту версию', exact: true }).click();
+            await page.getByRole('status').filter({ hasText: 'повторная публикация не нужна' }).waitFor();
             mode = 'reject';
             await fileInput.setInputFiles({ name: 'incompatible.html', mimeType: 'text/html', buffer: Buffer.from('<html>incompatible</html>') });
             await page.getByRole('button', { name: 'Загрузить черновик', exact: true }).click();
@@ -174,8 +192,26 @@ async function main() {
             await page.getByRole('button', { name: 'Загрузить черновик', exact: true }).click();
             await page.getByRole('button', { name: 'Прервать загрузку', exact: true }).click();
             await page.getByRole('alert').filter({ hasText: 'Изменение могло сохраниться' }).waitFor();
-            slow.response?.destroy(); slow.response = null;
+            (slow.response as ServerResponse | null)?.destroy(); slow.response = null;
             mode = 'normal';
+            await page.getByRole('button', { name: 'Обновить версии', exact: true }).click();
+            await page.getByRole('alert').waitFor({ state: 'detached' });
+            mode = 'body-hang';
+            await page.evaluate('window.fastTimeout=true');
+            const beforeHungBody = mutations.length;
+            await page.getByRole('button', { name: 'Загрузить черновик', exact: true }).click();
+            await page.getByRole('alert').filter({ hasText: 'Изменение могло сохраниться' }).waitFor();
+            assert.equal(mutations.length, beforeHungBody + 1, 'timed-out mutations are not replayed');
+            assert.equal(await fileInput.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), 'incompatible.html', 'selection survives an uncertain write');
+            assert.equal(await page.getByRole('button', { name: 'Обновить версии', exact: true }).isEnabled(), true);
+            (slow.response as ServerResponse | null)?.destroy(); slow.response = null;
+            mode = 'load-hang';
+            await page.getByRole('button', { name: 'Обновить версии', exact: true }).click();
+            await page.getByRole('alert').filter({ hasText: 'не ответил вовремя' }).waitFor();
+            assert.equal(await page.getByRole('button', { name: 'Обновить версии', exact: true }).isEnabled(), true);
+            (slow.response as ServerResponse | null)?.destroy(); slow.response = null;
+            mode = 'normal';
+            await page.evaluate('window.fastTimeout=false');
             await page.getByRole('button', { name: 'Обновить версии', exact: true }).click();
             await page.getByRole('alert').waitFor({ state: 'detached' });
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -187,7 +223,7 @@ async function main() {
             assert.equal(await page.getByTestId('preview').count(), 0);
             assert.deepEqual(errors, []);
             assert.deepEqual(external, []);
-            console.log(`PASS ${engine}/${width}: upload validation, draft preview, explicit publish, optimistic concurrency, rollback, network recovery, cancellation, 403 clearing.`);
+            console.log(`PASS ${engine}/${width}: upload validation, draft preview, explicit publish, optimistic concurrency, rollback, network recovery, cancellation, header/body deadlines, callback timeout, no replay, retained selection, 403 clearing.`);
           } finally { await context.close(); }
         }
       } finally { await browser.close(); }

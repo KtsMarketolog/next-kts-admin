@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
 import { DashboardInstructions } from '@/features/admin/dashboard-instructions/DashboardInstructions';
 
 import { useTopDashboardDownloadBridge } from './useTopDashboardDownloadBridge';
@@ -91,6 +92,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
   const previewCardRef = useRef<HTMLElement>(null);
   const showStatusRef = useRef(showStatus);
   const requestIdRef = useRef(0);
+  const { request } = useAdminRequestScope();
   const apiBasePath = `/api/admin/top-dashboard/blocks/${blockId}`;
   useDashboardUsage({ dashboardKey: `top:${blockId}`, iframeRef: previewFrameRef, versionId: overview?.activeVersionId ?? null });
 
@@ -104,7 +106,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
     setLoading(true);
 
     try {
-      const response = await fetch(apiBasePath, {
+      const response = await request(apiBasePath, {
         cache: 'no-store',
         credentials: 'same-origin',
       });
@@ -133,7 +135,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [apiBasePath]);
+  }, [apiBasePath, request, previewFrameRef]);
 
   useEffect(() => {
     void loadOverview();

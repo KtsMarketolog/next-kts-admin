@@ -3,6 +3,8 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
+import { ADMIN_UPLOAD_TIMEOUT_MS } from '@/features/admin/shared/adminRequest';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
 import { FIRMWARE_FILES, MAX_FIRMWARE_STORAGE_BYTES, type FirmwareKind, type FirmwareOverview, type FirmwareVersion } from '@/shared/lib/firmwareContract';
 
 type Selection = { file: File; sha256: string | null; error: string | null };
@@ -94,10 +96,11 @@ export function AdminFirmwareSection({ showStatus }: Props) {
   const loadSequence = useRef(0);
   const actionInFlight = useRef(false);
   const mounted = useRef(true);
+  const { request } = useAdminRequestScope();
 
   const loadFirmware = useCallback(async (signal?: AbortSignal) => {
     const sequence = ++loadSequence.current;
-    const response = await fetch('/api/admin/firmware', { cache: 'no-store', signal });
+    const response = await request('/api/admin/firmware', { cache: 'no-store', signal });
     if (!response.ok) throw new Error(await responseError(response, 'Не удалось загрузить состояние прошивки'));
     const data: unknown = await response.json();
     if (!isOverview(data)) throw new Error('Сервер вернул некорректное состояние прошивки');
@@ -106,7 +109,7 @@ export function AdminFirmwareSection({ showStatus }: Props) {
       setMustRefresh(false);
     }
     return data;
-  }, []);
+  }, [request]);
 
   useEffect(() => {
     mounted.current = true;
@@ -161,9 +164,10 @@ export function AdminFirmwareSection({ showStatus }: Props) {
     setBusy(action);
     setError(null);
     try {
-      const response = await fetch('/api/admin/firmware', action === 'publish'
+      const response = await request('/api/admin/firmware', action === 'publish'
         ? { method: 'POST', body: firmwarePublishForm(pair, overview.revision) }
-        : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, expectedRevision: overview.revision, previousId: overview.previous!.id }) });
+        : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, expectedRevision: overview.revision, previousId: overview.previous!.id }) },
+      { timeoutMs: action === 'publish' ? ADMIN_UPLOAD_TIMEOUT_MS : undefined });
       if (!response.ok) {
         const message = await responseError(response, 'Не удалось выполнить операцию');
         if (response.status === 409) {

@@ -38,6 +38,8 @@ window.fetch=async(input,init={})=>{
   window.calls.push({url,method,body:init.body?JSON.parse(init.body):null});
   if(method!=='GET'){
     if(window.writeFault==='reject')throw new TypeError('Synthetic save interruption');
+    if(window.writeFault==='headers')return new Promise(()=>{});
+    if(window.writeFault==='body')return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('{'));}}));
     if(window.writeFault==='http')return Response.json({error:'Synthetic save unavailable'},{status:503});
     if(method==='PUT'&&JSON.parse(init.body).expectedRevision!==window.priceRevision)return Response.json({error:'Данные уже изменены другим пользователем. Обновите данные и повторите изменения.',code:'RECORD_VERSION_CONFLICT'},{status:409});
     return Response.json({ok:true,id:41,revision:String(Number(window.priceRevision)+1)});
@@ -200,19 +202,23 @@ async function main() {
         assert.equal(bulkItems.some((item: { productId: number; variantId: number }) => item.productId >= 997 || (item.productId === 102 && item.variantId === 13)), false, 'bulk edits never submit hidden product or variant updates');
         assert.ok(bulkItems.every((item: { visible: boolean; discountPercent: string }) => item.visible === false && item.discountPercent === '10'), 'bulk edits still affect visible catalogue keys');
 
-        for (const failure of ['http', 'reject']) {
+        for (const failure of ['http', 'reject', 'headers', 'body']) {
           await page.goto(`${origin}/admin/wholesale/41/edit`);
           await ready();
           await title.fill('Unsaved title retained after network failure');
           await page.evaluate(`window.writeFault=${JSON.stringify(failure)}`);
           await save.click();
+          if (failure === 'headers' || failure === 'body') {
+            assert.equal(await save.isDisabled(), true);
+            await page.clock.fastForward(60_001);
+          }
           await page.getByRole('alert').waitFor();
           await page.clock.fastForward(3_001);
           assert.equal(await save.isEnabled(), true, 'failed save releases its busy lock');
           assert.equal(await title.inputValue(), 'Unsaved title retained after network failure');
           assert.equal(await page.getByRole('alert').count(), 1, 'save failure persists until resolved');
           assert.equal(await page.evaluate('window.navigations.length'), 0, 'failed save does not navigate away');
-          if (failure === 'reject') assert.match(await page.getByRole('alert').innerText(), /изменения могли сохраниться/);
+          if (failure !== 'http') assert.match(await page.getByRole('alert').innerText(), /могло сохраниться/);
           await page.evaluate('window.writeFault=""');
           await save.click();
           await page.waitForFunction('window.navigations.length===1');
@@ -311,7 +317,7 @@ async function main() {
         await ready();
         await page.evaluate('window.hold="catalog";window.navigate("/admin/wholesale/42/edit")');
         await page.waitForFunction('window.pending.some(request=>request.target==="catalog")');
-        await page.clock.fastForward(30_001);
+        await page.clock.fastForward(60_001);
         await blocked();
         await page.evaluate('window.hold="";window.pending.shift().release()');
         await page.waitForTimeout(50);

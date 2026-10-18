@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import { adminRequest, ADMIN_UPLOAD_TIMEOUT_MS, runWithRequestTimeout } from '@/features/admin/shared/adminRequest';
 
 import { CURRENCY_RPC_CHANNEL, CURRENCY_RPC_MAX_BYTES, parseCurrencyRpcRequest } from '@/shared/lib/currencyDashboardRpc';
 import { createCurrencyDeviceBridge, isCurrencyDeviceMethod } from '@/shared/lib/currencyDashboardDeviceState';
@@ -98,7 +99,6 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
         }
       };
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60_000);
       pending.set(data.id, controller);
       try {
         if (data.method === 'schedule:start') {
@@ -111,7 +111,7 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
           return;
         }
         if (isCurrencyDeviceMethod(data.method)) {
-          reply({ result: await deviceCommand(data.method, data.params) });
+          reply({ result: await runWithRequestTimeout(async () => deviceCommand(data.method, data.params), { signal: controller.signal, timeoutMs: 60_000 }) });
           return;
         }
         const payload = parseCurrencyRpcRequest(data);
@@ -121,10 +121,11 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
         }
         const body = JSON.stringify(payload);
         if (new TextEncoder().encode(body).byteLength > CURRENCY_RPC_MAX_BYTES) throw new Error('Снимок больше 2 МБ');
-        const response = await fetch('/api/admin/currency-dashboard', {
+        const mutation = payload.method === 'snapshot:save' || payload.method === 'snapshot:rollback';
+        const response = await adminRequest('/api/admin/currency-dashboard', {
           method: 'POST', credentials: 'same-origin', cache: 'no-store',
           headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal,
-        });
+        }, { mutation, timeoutMs: mutation ? ADMIN_UPLOAD_TIMEOUT_MS : 60_000 });
         const result = await response.json();
         if (disposed || generation !== requestGeneration) return;
         if (!response.ok) {
@@ -147,7 +148,6 @@ export function CurrencyDashboard({ nonce, deviceScope, canManage, embedded = fa
         reply({ error: { message: cause instanceof Error && cause.name !== 'AbortError'
           ? cause.message : 'Сервер не ответил. Проверьте соединение и повторите запрос.' } });
       } finally {
-        clearTimeout(timeout);
         if (generation === requestGeneration) {
           if (pending.get(data.id) === controller) pending.delete(data.id);
           completed.add(data.id);

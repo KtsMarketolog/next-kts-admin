@@ -1,14 +1,15 @@
 import type { ClientCompany } from './AdminClientsModel';
+import { adminRequest, AdminRequestError } from '../shared/adminRequest';
 
 const unknownOutcome = 'Не удалось подтвердить результат операции. Обновите данные перед повторной попыткой.';
 
-export async function submitClientMutation(url: string, init: RequestInit) {
+export async function submitClientMutation(url: string, init: RequestInit, request = adminRequest) {
   let response: Response;
   try {
-    response = await fetch(url, init);
-  } catch {
+    response = await request(url, init);
+  } catch (error) {
     // The request may already have committed before the response was lost.
-    throw new Error(unknownOutcome);
+    throw error instanceof AdminRequestError ? error : new Error(unknownOutcome);
   }
   const data = await response.json().catch(() => null);
   if (!response.ok) {

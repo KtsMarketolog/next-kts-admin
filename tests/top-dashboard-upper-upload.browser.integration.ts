@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { access } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -59,6 +59,8 @@ async function main() {
   let puts = 0;
   let gets = 0;
   let conflict = false;
+  let stall: 'none' | 'headers' | 'body' = 'none';
+  const stalled = { response: null as ServerResponse | null };
   const requestErrors: string[] = [];
   const server = createServer(async (request, response) => {
     try {
@@ -94,6 +96,11 @@ window.__messages=[];window.addEventListener('message',e=>{if(e.source===documen
         for await (const chunk of request) chunks.push(Buffer.from(chunk));
         const bytes = Buffer.concat(chunks);
         decodeTopDashboardMultiFileSnapshot(bytes);
+        if (stall !== 'none') {
+          stalled.response = response;
+          if (stall === 'body') { response.writeHead(200, {'Content-Type': 'application/json'}); response.write('{"state":'); }
+          return;
+        }
         if (conflict) response.writeHead(409, {'Content-Type': 'application/json'}).end(JSON.stringify({error: 'Synthetic concurrent update'}));
         else {
           stored = bytes;
@@ -193,6 +200,28 @@ window.__messages=[];window.addEventListener('message',e=>{if(e.source===documen
           await targets();
           await checkRestored(selected);
           if (fixture.name === 'static-multiple') {
+            const oldBytes = Buffer.from(stored!);
+            stall = 'headers';
+            const cancelled = upload('cancel-stalled', selected);
+            for (let attempt = 0; attempt < 100 && !stalled.response; attempt++) await page.waitForTimeout(10);
+            assert.ok(stalled.response, 'request reached the synthetic server before cancellation');
+            await send('cancel-upload', {requestId: 'cancel-stalled'});
+            assert.equal((await cancelled).ok, false);
+            (stalled.response as ServerResponse | null)?.destroy(); stalled.response = null;
+            assert.deepEqual(stored, oldBytes);
+            stall = 'body';
+            await page.frameLocator('#outer').locator('body').evaluate(() => {
+              const original = window.setTimeout.bind(window);
+              window.setTimeout = ((work: TimerHandler, ms?: number, ...args: unknown[]) => original(work, ms === 20 * 60_000 ? 60 : ms, ...args)) as typeof window.setTimeout;
+            });
+            const beforeTimeout = puts;
+            assert.equal((await upload('timeout-stalled-body', selected)).ok, false);
+            assert.equal(puts, beforeTimeout + 1, 'timeout does not replay the mutation');
+            (stalled.response as ServerResponse | null)?.destroy(); stalled.response = null;
+            assert.deepEqual(stored, oldBytes);
+            stall = 'none';
+            // Start a fresh frame to restore real timer intervals before retrying.
+            await page.reload(); await targets(); await checkRestored(selected);
             selected[0].files.push({name: 'stock.json.gz', type: 'application/gzip', lastModified: 1, webkitRelativePath: '', text: 'synthetic opaque gzip bytes'});
             assert.equal((await upload('second', selected)).ok, true);
             checkStored(selected);

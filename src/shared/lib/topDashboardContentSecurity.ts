@@ -1255,9 +1255,43 @@ export function createTopDashboardFrameBridgeScript(
   let saveCompleted = 0;
   let saveLoopRunning = false;
   let managementUploadPending = false;
+  let managementUploadController = null;
+  let managementUploadRequestId = null;
+  const pendingSnapshotRequests = new Set();
   let discoveredUploadTargets = [];
   let uploadTargetsKnown = false;
   let pendingTargetProbe = null;
+
+  // Includes the response body. A timed-out write has an unknown outcome, so
+  // never replay it automatically; let the administrator inspect the history.
+  async function snapshotRequest(work, externalSignal) {
+    const controller = new AbortController();
+    let stop;
+    let timer;
+    const interrupted = new Promise((_, reject) => {
+      stop = () => {
+        reject(new Error('Подтверждение сохранения не получено. Проверьте историю перед повторной загрузкой.'));
+        controller.abort();
+      };
+      timer = window.setTimeout(stop, 20 * 60_000);
+    });
+    pendingSnapshotRequests.add(stop);
+    const abort = () => stop();
+    externalSignal?.addEventListener('abort', abort, { once: true });
+    if (externalSignal?.aborted) abort();
+    try {
+      if (controller.signal.aborted) return await interrupted;
+      return await Promise.race([interrupted, work(controller.signal)]);
+    } finally {
+      window.clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', abort);
+      pendingSnapshotRequests.delete(stop);
+    }
+  }
+  window.addEventListener('pagehide', () => {
+    managementUploadController?.abort();
+    for (const stop of pendingSnapshotRequests) stop();
+  });
 
   function showNotice(kind, message, autoHide) {
     if (!(notice instanceof HTMLElement)) return;
@@ -1817,7 +1851,7 @@ export function createTopDashboardFrameBridgeScript(
     return true;
   }
 
-  async function saveCurrentMultiFileData() {
+  async function saveCurrentMultiFileData(externalSignal) {
     let blob;
     try {
       blob = encodeMultiFileSnapshot();
@@ -1826,10 +1860,11 @@ export function createTopDashboardFrameBridgeScript(
       return false;
     }
 
-    let response;
     try {
-      response = await fetch(CONFIG.dataPath, {
+      return await snapshotRequest(async (signal) => {
+      const response = await fetch(CONFIG.dataPath, {
         method: 'PUT',
+        signal,
         credentials: 'same-origin',
         cache: 'no-store',
         headers: {
@@ -1844,11 +1879,6 @@ export function createTopDashboardFrameBridgeScript(
         },
         body: blob,
       });
-    } catch {
-      showNotice('error', 'Файлы открыты, но не сохранены на сервере', false);
-      return false;
-    }
-
     if (!response.ok) {
       showNotice(
         'error',
@@ -1859,6 +1889,7 @@ export function createTopDashboardFrameBridgeScript(
     }
     let payload;
     try { payload = await response.json(); } catch { payload = null; }
+    if (signal.aborted) throw new Error('Ожидание прервано.');
     const nextVersionId = payload && payload.state && payload.state.activeVersionId;
     if (!Number.isSafeInteger(nextVersionId) || nextVersionId <= 0) {
       showNotice('error', 'Сервер сохранил файлы, но вернул некорректный ответ', false);
@@ -1866,6 +1897,11 @@ export function createTopDashboardFrameBridgeScript(
     }
     activeDataVersionId = nextVersionId;
     return true;
+      }, externalSignal);
+    } catch {
+      showNotice('error', 'Файлы открыты, но подтверждение сохранения не получено. Проверьте историю перед повторной загрузкой.', false);
+      return false;
+    }
   }
 
   async function runMultiFileSaveLoop() {
@@ -1990,17 +2026,25 @@ export function createTopDashboardFrameBridgeScript(
     }
   }
 
-  function refreshUploadTargets(requestId) {
+  function refreshUploadTargets(requestId, signal) {
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        window.clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        if (pendingTargetProbe === probe) pendingTargetProbe = null;
+      };
+      const abort = () => { cleanup(); reject(new Error('Проверка поля загрузки прервана.')); };
       const timer = window.setTimeout(() => {
-        pendingTargetProbe = null;
+        cleanup();
         reject(new Error('Не удалось проверить поле загрузки. Перезагрузите предпросмотр.'));
       }, 5000);
-      pendingTargetProbe = { requestId, resolve: () => {
-        window.clearTimeout(timer);
-        pendingTargetProbe = null;
+      const probe = { requestId, resolve: () => {
+        cleanup();
         resolve();
       } };
+      pendingTargetProbe = probe;
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) { abort(); return; }
       iframe.contentWindow.postMessage({ marker: MULTI_FILE_MARKER, type: 'probe-upload-targets', requestId }, '*');
     });
   }
@@ -2015,8 +2059,12 @@ export function createTopDashboardFrameBridgeScript(
       return;
     }
     managementUploadPending = true;
+    const controller = new AbortController();
+    managementUploadController = controller;
+    managementUploadRequestId = data.requestId;
     let previousTargets = null;
     try {
+      await snapshotRequest(async (signal) => {
       if (!initialLoadStarted || adapterExpectedFormat !== 'multi-file-v1'
         || adapterExpectedProfile !== 'generic' || !loadPromise || !(await loadPromise)) {
         throw new Error('Предпросмотр ещё не готов к загрузке. Повторите после его открытия.');
@@ -2024,7 +2072,8 @@ export function createTopDashboardFrameBridgeScript(
       if (data.expectedActiveDataVersionId !== activeDataVersionId) {
         throw new Error('Данные изменились. Обновите страницу перед загрузкой.');
       }
-      await refreshUploadTargets(data.requestId);
+      await refreshUploadTargets(data.requestId, signal);
+      if (signal.aborted) throw new Error('Ожидание прервано.');
       previousTargets = multiFileTargets;
       if (!Array.isArray(data.targets) || !data.targets.length
         || data.targets.length > MULTI_FILE_MAX_TARGETS) throw new Error('Не выбраны файлы данных.');
@@ -2044,16 +2093,19 @@ export function createTopDashboardFrameBridgeScript(
       }
       multiFileTargets = replacement;
       showNotice('pending', 'Сохраняем выбранные файлы…', false);
-      if (!(await saveCurrentMultiFileData())) {
+      if (!(await saveCurrentMultiFileData(signal))) {
         throw new Error('Не удалось подтвердить сохранение. Обновите страницу и проверьте журнал перед повторной загрузкой.');
       }
       showNotice('success', 'Данные сохранены для всех пользователей', true);
       respond(true);
+      }, controller.signal);
     } catch (error) {
       if (previousTargets) multiFileTargets = previousTargets;
       respond(false, error instanceof Error ? error.message : 'Не удалось сохранить файлы.');
     } finally {
       managementUploadPending = false;
+      managementUploadController = null;
+      managementUploadRequestId = null;
     }
   }
 
@@ -2071,6 +2123,8 @@ export function createTopDashboardFrameBridgeScript(
       }
     } else if (data.type === 'upload-files') {
       void uploadManagementFiles(data);
+    } else if (data.type === 'cancel-upload' && data.requestId === managementUploadRequestId) {
+      managementUploadController?.abort();
     }
   });
 

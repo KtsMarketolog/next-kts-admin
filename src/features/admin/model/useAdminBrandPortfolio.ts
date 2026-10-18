@@ -5,9 +5,12 @@ import { useState } from 'react';
 import { emptyBrand, emptyBrandCategory } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
 import { reorderByDrop } from '@/features/admin/model/reorder';
+import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
 import type { Brand, BrandCategory } from '@/features/admin/types';
 
-export function useAdminBrandPortfolio({ setBusy, showStatus, reloadAdminData }: AdminCrudHookOptions) {
+export function useAdminBrandPortfolio(options: AdminCrudHookOptions) {
+  const { showStatus } = options;
+  const perform = useAdminContentAction(options);
   const [brandCategories, setBrandCategories] = useState<BrandCategory[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandCategoryDraft, setBrandCategoryDraft] = useState(emptyBrandCategory);
@@ -28,24 +31,15 @@ export function useAdminBrandPortfolio({ setBusy, showStatus, reloadAdminData }:
   };
 
   const persistBrandCategoryOrder = async (orderedCategories: BrandCategory[]) => {
-    setBusy(true);
-    const responses = await Promise.all(
-      orderedCategories.map((category) =>
-        fetch(`/api/admin/brand-categories/${category.id}`, {
+    await perform({ requests: orderedCategories.map((category) => ({ url: `/api/admin/brand-categories/${category.id}`, init: {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(category),
-        }),
-      ),
-    );
-    setBusy(false);
-
-    const saved = responses.every((res) => res.ok);
-    showStatus(saved ? 'Очередность категорий брендов сохранена' : 'Не удалось сохранить очередность категорий брендов');
-    if (saved) await reloadAdminData();
+        } })), success: 'Очередность категорий брендов сохранена', failure: 'Не удалось сохранить очередность категорий брендов' });
   };
 
   const moveBrandCategory = async (draggedId: number, targetId: number) => {
+    if (options.actionLock?.current) return;
     const normalized = reorderByDrop(brandCategories, draggedId, targetId);
     if (!normalized) return;
     setBrandCategories(normalized);
@@ -58,45 +52,32 @@ export function useAdminBrandPortfolio({ setBusy, showStatus, reloadAdminData }:
       return;
     }
 
-    setBusy(true);
-    const res = await fetch('/api/admin/brand-categories', {
+    await perform({ requests: [{ url: '/api/admin/brand-categories', init: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...brandCategoryDraft, sortOrder: brandCategories.length + 1 }),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Категория брендов добавлена' : 'Не удалось добавить категорию брендов');
-    if (res.ok) {
+    } }], success: 'Категория брендов добавлена', failure: 'Не удалось добавить категорию брендов', onSaved: () => {
       setBrandCategoryCreated(true);
       window.setTimeout(() => setBrandCategoryCreated(false), 2000);
       setBrandCategoryDraft(emptyBrandCategory);
-      await reloadAdminData();
-    }
+    } });
   };
 
   const saveBrandCategory = async (category: BrandCategory) => {
-    setBusy(true);
-    const res = await fetch(`/api/admin/brand-categories/${category.id}`, {
+    await perform({ requests: [{ url: `/api/admin/brand-categories/${category.id}`, init: {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(category),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Категория брендов сохранена' : 'Не удалось сохранить категорию брендов');
-    if (res.ok) {
+    } }], success: 'Категория брендов сохранена', failure: 'Не удалось сохранить категорию брендов', onSaved: () => {
       setSavedBrandCategoryId(category.id);
       window.setTimeout(() => setSavedBrandCategoryId((current) => (current === category.id ? null : current)), 2000);
-      await reloadAdminData();
-    }
+    } });
   };
 
   const deleteBrandCategoryItem = async (id: number) => {
     if (!confirm('Удалить категорию брендов? Все бренды внутри нее тоже удалятся.')) return;
-    setBusy(true);
-    const res = await fetch(`/api/admin/brand-categories/${id}`, { method: 'DELETE' });
-    setBusy(false);
-    showStatus(res.ok ? 'Категория брендов удалена' : 'Не удалось удалить категорию брендов');
-    if (res.ok) await reloadAdminData();
+    await perform({ requests: [{ url: `/api/admin/brand-categories/${id}`, init: { method: 'DELETE' } }],
+      success: 'Категория брендов удалена', failure: 'Не удалось удалить категорию брендов' });
   };
 
   const createBrand = async () => {
@@ -106,43 +87,30 @@ export function useAdminBrandPortfolio({ setBusy, showStatus, reloadAdminData }:
     }
 
     const categoryBrands = brands.filter((brand) => brand.categoryId === brandDraft.categoryId);
-    setBusy(true);
-    const res = await fetch('/api/admin/brands', {
+    await perform({ requests: [{ url: '/api/admin/brands', init: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...brandDraft, sortOrder: categoryBrands.length + 1 }),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Бренд добавлен' : 'Не удалось добавить бренд');
-    if (res.ok) {
+    } }], success: 'Бренд добавлен', failure: 'Не удалось добавить бренд', onSaved: () => {
       setBrandDraft({ ...emptyBrand, categoryId: brandDraft.categoryId });
-      await reloadAdminData();
-    }
+    } });
   };
 
   const saveBrand = async (brand: Brand) => {
-    setBusy(true);
-    const res = await fetch(`/api/admin/brands/${brand.id}`, {
+    await perform({ requests: [{ url: `/api/admin/brands/${brand.id}`, init: {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(brand),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Бренд сохранен' : 'Не удалось сохранить бренд');
-    if (res.ok) {
+    } }], success: 'Бренд сохранен', failure: 'Не удалось сохранить бренд', onSaved: () => {
       setSavedBrandId(brand.id);
       window.setTimeout(() => setSavedBrandId((current) => (current === brand.id ? null : current)), 2000);
-      await reloadAdminData();
-    }
+    } });
   };
 
   const deleteBrand = async (id: number) => {
     if (!confirm('Удалить бренд?')) return;
-    setBusy(true);
-    const res = await fetch(`/api/admin/brands/${id}`, { method: 'DELETE' });
-    setBusy(false);
-    showStatus(res.ok ? 'Бренд удален' : 'Не удалось удалить бренд');
-    if (res.ok) await reloadAdminData();
+    await perform({ requests: [{ url: `/api/admin/brands/${id}`, init: { method: 'DELETE' } }],
+      success: 'Бренд удален', failure: 'Не удалось удалить бренд' });
   };
 
   return {

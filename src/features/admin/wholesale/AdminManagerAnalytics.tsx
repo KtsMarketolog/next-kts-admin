@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import styles from '@/app/admin/admin.module.scss';
+import { adminRequest } from '../shared/adminRequest';
 
 import {
   ClientsTable,
@@ -81,10 +82,11 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setLoading(true);
     setError('');
 
-    fetch(`/api/admin/wholesale/managers/${managerId}/analytics?period=${period}`, { cache: 'no-store' })
+    adminRequest(`/api/admin/wholesale/managers/${managerId}/analytics?period=${period}`, { cache: 'no-store', signal: controller.signal }, { timeoutMs: 60_000 })
       .then(async (res) => {
         if (!res.ok) throw new Error('Не удалось загрузить аналитику');
         return (await res.json()) as ManagerAnalytics;
@@ -101,6 +103,7 @@ export function AdminManagerAnalytics({ managerId }: AdminManagerAnalyticsProps)
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [managerId, period]);
 

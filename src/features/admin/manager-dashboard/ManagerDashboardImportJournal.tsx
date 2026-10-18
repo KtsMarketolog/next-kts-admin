@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { adminRequest } from '@/features/admin/shared/adminRequest';
 
 import { isPersonalDashboardImportCursor, PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE } from '@/shared/lib/managerDashboardImportPagination';
 
@@ -47,7 +48,7 @@ export function ManagerDashboardImportJournal({ imports, nextCursor: initialCurs
     setLoading(true);
     setError('');
     try {
-      const response = await fetch(`/api/admin/manager-dashboard/imports?before=${encodeURIComponent(nextCursor)}`, {
+      const response = await adminRequest(`/api/admin/manager-dashboard/imports?before=${encodeURIComponent(nextCursor)}`, {
         cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
       });
       if (controller.signal.aborted) return;

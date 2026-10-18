@@ -1,4 +1,6 @@
-export const EMPLOYEE_REQUEST_TIMEOUT_MS = 20_000;
+import { ADMIN_REQUEST_TIMEOUT_MS, runWithRequestTimeout } from './adminRequest';
+
+export const EMPLOYEE_REQUEST_TIMEOUT_MS = ADMIN_REQUEST_TIMEOUT_MS;
 export const EMPLOYEE_UNKNOWN_OUTCOME = 'Ответ сервера не получен. Изменение могло сохраниться. Обновите список и проверьте результат перед повторной попыткой.';
 
 export class EmployeeRequestError extends Error {
@@ -10,32 +12,19 @@ export class EmployeeRequestError extends Error {
 
 /** Includes response-body reading in the deadline; never retries a mutation automatically. */
 export async function employeeRequest<T>(url: string, init: RequestInit = {}, options: { mutation?: boolean; timeoutMs?: number } = {}): Promise<T> {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  init.signal?.addEventListener('abort', abort, { once: true });
-  if (init.signal?.aborted) controller.abort();
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
-      (async () => {
-        const response = await fetch(url, { ...init, cache: 'no-store', signal: controller.signal });
-        const data = await response.json();
-        if (!response.ok) {
-          if (options.mutation && response.status >= 500) throw new EmployeeRequestError(EMPLOYEE_UNKNOWN_OUTCOME, response.status);
-          throw new EmployeeRequestError(typeof data?.error === 'string' ? data.error : 'Не удалось выполнить запрос', response.status);
-        }
-        return data as T;
-      })(),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { controller.abort(); reject(new Error('Request timeout')); }, options.timeoutMs ?? EMPLOYEE_REQUEST_TIMEOUT_MS);
-      }),
-    ]);
+    return await runWithRequestTimeout(async (signal) => {
+      const response = await fetch(url, { ...init, cache: 'no-store', signal });
+      const data = await response.json();
+      if (!response.ok) {
+        if (options.mutation && response.status >= 500) throw new EmployeeRequestError(EMPLOYEE_UNKNOWN_OUTCOME, response.status);
+        throw new EmployeeRequestError(typeof data?.error === 'string' ? data.error : 'Не удалось выполнить запрос', response.status);
+      }
+      return data as T;
+    }, { ...options, signal: init.signal });
   } catch (error) {
     if (error instanceof EmployeeRequestError) throw error;
     throw new EmployeeRequestError(options.mutation ? EMPLOYEE_UNKNOWN_OUTCOME : 'Не удалось получить ответ сервера. Повторите запрос.');
-  } finally {
-    clearTimeout(timer);
-    init.signal?.removeEventListener('abort', abort);
   }
 }
 

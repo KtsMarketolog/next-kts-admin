@@ -11,6 +11,7 @@ type WholesalePriceListScreenProps = {
   status: string;
   priceLists: PriceList[];
   copiedToken: string | null;
+  busy?: boolean;
   onBack: () => void;
   onAdminBack: () => void;
   onManagersBack: () => void;
@@ -31,6 +32,7 @@ export function WholesalePriceListScreen({
   status,
   priceLists,
   copiedToken,
+  busy = false,
   onBack,
   onAdminBack,
   onManagersBack,
@@ -73,6 +75,7 @@ export function WholesalePriceListScreen({
 
       <WholesalePriceListCards
         priceLists={priceLists}
+        busy={busy}
         copiedToken={copiedToken}
         emptyText={emptyText}
         onEdit={onEdit}

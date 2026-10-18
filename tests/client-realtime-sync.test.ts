@@ -213,7 +213,7 @@ test('clients mount starts one initial GET and background refresh preserves draf
   let drafts: Record<number, ClientDraft> = {};
   let managerLoads = 0;
   const loadClients = executeCallback<(preserve?: boolean, signal?: AbortSignal) => Promise<void>>(declaration.initializer.arguments[0], parsed.source, {
-    fetch: (_url: string, options: { signal?: AbortSignal }) => new Promise((resolve) => { requests.push({ resolve, signal: options.signal }); }),
+    request: (_url: string, options: { signal?: AbortSignal }) => new Promise((resolve) => { requests.push({ resolve, signal: options.signal }); }),
     companiesRef, mutationRef, dataGeneration, toDraft, readApiError,
     setCompanies: () => {},
     setCompanyDrafts: (update: (current: Record<number, ClientDraft>) => Record<number, ClientDraft>) => { drafts = update(drafts); },

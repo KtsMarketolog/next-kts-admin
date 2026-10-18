@@ -47,6 +47,7 @@ test('reports catalog renders authorized static sections and does not fetch TOP 
         },
         'next/link': {default: Link}, 'next/navigation': {useRouter: () => ({})},
         '@/app/admin/admin.module.scss': {default: {}},
+        '@/features/admin/shared/useAdminRequestScope': {useAdminRequestScope: () => ({request: async (url: string) => {requests.push(url); return Response.json({blocks: []});}, isActive: () => true})},
         './DashboardDataDates': {DashboardDataDates}, '@/shared/lib/dashboardDates': dates,
       }, {fetch: async (url: string) => {requests.push(url); return Response.json({blocks: []}); }},
     );

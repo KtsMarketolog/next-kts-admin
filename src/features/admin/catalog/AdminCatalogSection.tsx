@@ -1,6 +1,8 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { AdminRequestError, ADMIN_UPLOAD_TIMEOUT_MS } from '../shared/adminRequest';
+import { useAdminRequestScope } from '../shared/useAdminRequestScope';
 
 import { productPayload } from './AdminCatalogHelpers';
 import { AdminCatalogView } from './AdminCatalogView';
@@ -26,6 +28,9 @@ async function readError(response: Response, fallback: string) {
 }
 
 export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
+  const { request, isActive } = useAdminRequestScope();
+  const busyRef = useRef(false);
+  const catalogReadRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [stats, setStats] = useState<CatalogStats | null>(null);
@@ -41,7 +46,10 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const [stockLogs, setStockLogs] = useState<StockImportLog[]>([]);
   const [stockHistoryExpanded, setStockHistoryExpanded] = useState(false);
 
-  const loadCatalog = useCallback(async (nextSearch = '', nextFilters: CatalogFilters = EMPTY_FILTERS) => {
+  const loadCatalog = useCallback(async (nextSearch = '', nextFilters: CatalogFilters = EMPTY_FILTERS, propagateError = false) => {
+    catalogReadRef.current?.abort();
+    const controller = new AbortController();
+    catalogReadRef.current = controller;
     setLoading(true);
     const params = new URLSearchParams({
       limit: String(CATALOG_PRODUCT_PAGE_LIMIT),
@@ -52,36 +60,66 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       brand: nextFilters.brand,
     });
     try {
-      const response = await fetch(`/api/admin/catalog/products?${params.toString()}`, { cache: 'no-store' });
+      const response = await request(`/api/admin/catalog/products?${params.toString()}`, { cache: 'no-store', signal: controller.signal });
       if (!response.ok) {
-        showStatus(await readError(response, 'Не удалось загрузить каталог'));
-        return;
+        throw new Error(await readError(response, 'Не удалось загрузить каталог'));
       }
       const data = await response.json();
-      setProducts(Array.isArray(data.products) ? data.products : []);
+      if (!Array.isArray(data.products)) throw new Error('Каталог получен не полностью. Повторите загрузку.');
+      if (controller.signal.aborted) return;
+      setProducts(data.products);
       setStats(data.stats ?? null);
       setFilterOptions({
         categories: Array.isArray(data.filterOptions?.categories) ? data.filterOptions.categories : [],
         subcategories: Array.isArray(data.filterOptions?.subcategories) ? data.filterOptions.subcategories : [],
         brands: Array.isArray(data.filterOptions?.brands) ? data.filterOptions.brands : [],
       });
-    } catch {
-      showStatus('Не удалось загрузить каталог');
+    } catch (error) {
+      if (propagateError) throw error;
+      if (!controller.signal.aborted && isActive()) {
+        showStatus(error instanceof Error ? error.message : 'Не удалось загрузить каталог');
+      }
     } finally {
-      setLoading(false);
+      if (catalogReadRef.current === controller) setLoading(false);
     }
-  }, [showStatus]);
+  }, [isActive, request, showStatus]);
 
   useEffect(() => {
     void loadCatalog('');
   }, [loadCatalog]);
 
   const loadStockLogs = useCallback(async () => {
-    const response = await fetch('/api/admin/stock-import/logs?limit=10', { cache: 'no-store' });
+    const response = await request('/api/admin/stock-import/logs?limit=10', { cache: 'no-store' });
     if (!response.ok) throw new Error('Не удалось обновить отображение журнала импорта');
     const data = await response.json();
     setStockLogs(Array.isArray(data.logs) ? data.logs : []);
-  }, []);
+  }, [request]);
+
+  const runMutation = async (id: string, action: () => Promise<void>) => {
+    // State alone does not stop two clicks before React renders the disabled button.
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusyId(id);
+    try {
+      await action();
+    } catch (error) {
+      if (!isActive()) return;
+      showStatus(error instanceof AdminRequestError ? error.message : 'Не удалось получить подтверждение операции. Изменения могли сохраниться. Обновите данные перед повторной попыткой.');
+    } finally {
+      busyRef.current = false;
+      setBusyId(null);
+    }
+  };
+
+  const refreshAfterSave = async (success: string, nextSearch = search) => {
+    try {
+      await loadCatalog(nextSearch, filters, true);
+      showStatus(success);
+    } catch {
+      if (!isActive()) return;
+      showStatus(`${success}, но список не обновился. Обновите каталог; повторно сохранять не нужно.`);
+    }
+  };
 
   useEffect(() => {
     void loadStockLogs().catch(() => {});
@@ -114,29 +152,28 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
 
     const formData = new FormData();
     formData.append('file', file);
-    setBusyId('import');
-    const response = await fetch('/api/admin/catalog/import', { method: 'POST', body: formData });
-    setBusyId(null);
+    await runMutation('import', async () => {
+      const response = await request('/api/admin/catalog/import', { method: 'POST', body: formData }, { timeoutMs: ADMIN_UPLOAD_TIMEOUT_MS });
 
-    if (!response.ok) {
-      showStatus(await readError(response, 'Не удалось загрузить Excel'));
-      return;
-    }
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось загрузить Excel'));
+        return;
+      }
 
-    const data = await response.json();
-    const result = data.result;
-    const summary = `Загружено: ${result?.importedProducts ?? 0}; категорий: ${result?.categories ?? 0}; подкатегорий: ${result?.subcategories ?? 0}; брендов: ${result?.brands ?? 0}`;
-    setImportResult(summary);
-    setFileName('');
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    await loadCatalog('', filters);
-    showStatus('Каталог загружен из Excel');
+      const data = await response.json();
+      const result = data.result;
+      if (!result) throw new Error('Missing import result');
+      const summary = `Загружено: ${result.importedProducts ?? 0}; категорий: ${result.categories ?? 0}; подкатегорий: ${result.subcategories ?? 0}; брендов: ${result.brands ?? 0}`;
+      setImportResult(summary);
+      setFileName('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      await refreshAfterSave('Каталог загружен из Excel', '');
+    });
   };
 
   const checkStockEmail = async () => {
-    setBusyId('stock-email');
-    try {
-      const response = await fetch('/api/admin/stock-import/check-email', { method: 'POST' });
+    await runMutation('stock-email', async () => {
+      const response = await request('/api/admin/stock-import/check-email', { method: 'POST' }, { timeoutMs: ADMIN_UPLOAD_TIMEOUT_MS });
 
       if (!response.ok) {
         showStatus(await readError(response, 'Не удалось проверить почту с остатками'));
@@ -154,6 +191,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       await loadStockLogs().catch(() => {
         warnings.push('Результат проверки получен, но список журнала не обновился. Обновите страницу; повторно импортировать файл не нужно.');
       });
+      if (!isActive()) return;
       const statusWithWarnings = (message: string) => showStatus([message, ...warnings].join(' '));
       if (!data.processed) {
         const skipped = data.skipped ?? {};
@@ -187,74 +225,65 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
         : result?.status === 'failed'
           ? `Остатки не изменены. Результат проверки записан в журнал; ошибок: ${result?.failedRows ?? 0}, не найдено: ${result?.notFoundRows ?? 0}.`
           : `Остатки сохранены: ${result?.updatedRows ?? 0}, ошибок: ${result?.failedRows ?? 0}.`);
-    } catch {
-      showStatus('Не удалось получить результат проверки почты. Проверьте журнал импорта: запрос мог завершиться сохранением.');
-    } finally {
-      setBusyId(null);
-    }
+    });
   };
 
   const createProduct = async () => {
-    setBusyId('new');
-    const response = await fetch('/api/admin/catalog/products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(productPayload(draft)),
-    });
-    setBusyId(null);
+    await runMutation('new', async () => {
+      const response = await request('/api/admin/catalog/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(productPayload(draft)),
+      });
 
-    if (!response.ok) {
-      showStatus(await readError(response, 'Не удалось добавить товар'));
-      return;
-    }
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось добавить товар'));
+        return;
+      }
 
-    const data = await response.json();
-    if (data.product) {
+      const data = await response.json();
+      if (!data.product) throw new Error('Missing saved product');
       setProducts((current) => [data.product, ...current].slice(0, CATALOG_PRODUCT_PAGE_LIMIT));
       setDraft(EMPTY_DRAFT);
       markSaved('new');
-      void loadCatalog(search, filters);
-      showStatus('Товар добавлен');
-    }
+      await refreshAfterSave('Товар добавлен');
+    });
   };
 
   const saveProduct = async (product: CatalogProduct) => {
-    setBusyId(String(product.id));
-    const response = await fetch(`/api/admin/catalog/products/${product.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(productPayload(product)),
-    });
-    setBusyId(null);
+    await runMutation(String(product.id), async () => {
+      const response = await request(`/api/admin/catalog/products/${product.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(productPayload(product)),
+      });
 
-    if (!response.ok) {
-      showStatus(await readError(response, 'Не удалось сохранить товар'));
-      return;
-    }
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось сохранить товар'));
+        return;
+      }
 
-    const data = await response.json();
-    if (data.product) {
+      const data = await response.json();
+      if (!data.product) throw new Error('Missing saved product');
       setProducts((current) => current.map((item) => (item.id === product.id ? data.product : item)));
       markSaved(String(product.id));
-      void loadCatalog(search, filters);
-      showStatus('Товар сохранён');
-    }
+      await refreshAfterSave('Товар сохранён');
+    });
   };
 
   const deleteProduct = async (product: CatalogProduct) => {
     if (!window.confirm(`Удалить товар "${product.title}"?`)) return;
-    setBusyId(String(product.id));
-    const response = await fetch(`/api/admin/catalog/products/${product.id}`, { method: 'DELETE' });
-    setBusyId(null);
+    await runMutation(String(product.id), async () => {
+      const response = await request(`/api/admin/catalog/products/${product.id}`, { method: 'DELETE' });
 
-    if (!response.ok) {
-      showStatus(await readError(response, 'Не удалось удалить товар'));
-      return;
-    }
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось удалить товар'));
+        return;
+      }
 
-    setProducts((current) => current.filter((item) => item.id !== product.id));
-    void loadCatalog(search, filters);
-    showStatus('Товар удалён');
+      setProducts((current) => current.filter((item) => item.id !== product.id));
+      await refreshAfterSave('Товар удалён');
+    });
   };
 
   const visibleStockLogs = stockHistoryExpanded ? stockLogs : stockLogs.slice(0, 1);

@@ -12,6 +12,8 @@ import { useAdminGroupCompanies } from '@/features/admin/model/useAdminGroupComp
 import { useAdminNews } from '@/features/admin/model/useAdminNews';
 import { useAdminPriceGroups } from '@/features/admin/model/useAdminPriceGroups';
 import { useAdminSlides } from '@/features/admin/model/useAdminSlides';
+import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
+import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
 import { AdminTopDashboardCatalog } from '@/features/admin/top-dashboard/AdminTopDashboardCatalog';
 import { AdminTopDashboardSection } from '@/features/admin/top-dashboard/AdminTopDashboardSection';
@@ -26,7 +28,7 @@ import { AdminSiteContent } from './AdminSiteContent';
 import { AdminSiteSidebar } from './AdminSiteSidebar';
 import { AdminTopbar } from './AdminTopbar';
 import { fetchAdminSessionWithRetry, normalizeSessionRole } from './adminSessionClient';
-import { uploadAdminImage } from './adminUploadClient';
+import { uploadAdminImage, type AdminUploadKind } from './adminUploadClient';
 import { ADMIN_SECTIONS, type AdminArea, isManagerRole } from './adminPanelConfig';
 import styles from './admin.module.scss';
 
@@ -94,6 +96,10 @@ export default function AdminPanel({
   const [address, setAddress] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const contentActionLock = useRef(false);
+  const { request } = useAdminRequestScope();
+  const [contentLoaded, setContentLoaded] = useState(false);
+  const [contentLoadError, setContentLoadError] = useState('');
   const [savedSetting, setSavedSetting] = useState<SettingKey | null>(null);
   const loadAdminDataRef = useRef<() => Promise<void>>(async () => {});
   const authenticatedRef = useRef(Boolean(initialSession));
@@ -105,20 +111,23 @@ export default function AdminPanel({
     ? matchedTopDashboardBlockId
     : initialTopDashboardBlockId;
 
-  const showStatus = (message: string) => {
+  const showStatus = useCallback((message: string) => {
     setStatus(message);
     window.setTimeout(() => {
       setStatus((current) => (current === message ? '' : current));
-    }, 2000);
-  };
+    }, 8000);
+  }, []);
 
   const reloadAdminData = useCallback(() => loadAdminDataRef.current(), []);
+  const uploadImage = useCallback((file: File, kind?: AdminUploadKind) => uploadAdminImage(file, kind, request), [request]);
 
-  const slideAdmin = useAdminSlides({ setBusy, showStatus, reloadAdminData });
-  const newsAdmin = useAdminNews({ setBusy, showStatus, reloadAdminData });
-  const groupCompanyAdmin = useAdminGroupCompanies({ setBusy, showStatus, reloadAdminData });
-  const brandAdmin = useAdminBrandPortfolio({ setBusy, showStatus, reloadAdminData });
-  const priceGroupAdmin = useAdminPriceGroups({ setBusy, showStatus, reloadAdminData });
+  const contentOptions = { setBusy, showStatus, reloadAdminData, actionLock: contentActionLock };
+  const performContentAction = useAdminContentAction(contentOptions);
+  const slideAdmin = useAdminSlides(contentOptions);
+  const newsAdmin = useAdminNews(contentOptions);
+  const groupCompanyAdmin = useAdminGroupCompanies(contentOptions);
+  const brandAdmin = useAdminBrandPortfolio(contentOptions);
+  const priceGroupAdmin = useAdminPriceGroups(contentOptions);
   const { setSlides } = slideAdmin;
   const { setNews } = newsAdmin;
   const { setGroupCompanies } = groupCompanyAdmin;
@@ -176,12 +185,12 @@ export default function AdminPanel({
 
   const loadAdminData = useCallback(async () => {
     const [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes] = await Promise.all([
-      fetch('/api/admin/settings', { cache: 'no-store' }),
-      fetch('/api/admin/slides', { cache: 'no-store' }),
-      fetch('/api/admin/news', { cache: 'no-store' }),
-      fetch('/api/admin/group-companies', { cache: 'no-store' }),
-      fetch('/api/admin/brand-categories', { cache: 'no-store' }),
-      fetch('/api/admin/price-groups', { cache: 'no-store' }),
+      request('/api/admin/settings', { cache: 'no-store' }),
+      request('/api/admin/slides', { cache: 'no-store' }),
+      request('/api/admin/news', { cache: 'no-store' }),
+      request('/api/admin/group-companies', { cache: 'no-store' }),
+      request('/api/admin/brand-categories', { cache: 'no-store' }),
+      request('/api/admin/price-groups', { cache: 'no-store' }),
     ]);
 
     const responses = [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes];
@@ -210,7 +219,7 @@ export default function AdminPanel({
         );
         setAuthenticated(Boolean(nextRole));
       }
-      return;
+      throw new Error('Не удалось загрузить данные: проверьте авторизацию и права доступа');
     }
 
     if (responses.some((response) => !response.ok)) {
@@ -218,7 +227,7 @@ export default function AdminPanel({
         'Failed to load admin data',
         responses.map((response) => response.status).join(', '),
       );
-      return;
+      throw new Error('Не удалось загрузить данные сайта. Изменения в форме сохранены.');
     }
 
     const settings = await settingsRes.json();
@@ -227,6 +236,9 @@ export default function AdminPanel({
     const groupCompanyData = await groupCompaniesRes.json();
     const brandData = await brandsRes.json();
     const priceGroupData = await priceGroupsRes.json();
+    if (![slideData.slides, newsData.news, groupCompanyData.companies, brandData.categories, brandData.brands, priceGroupData.groups].every(Array.isArray)) {
+      throw new Error('Сервер вернул неполные данные сайта. Обновите страницу перед сохранением.');
+    }
     const nextBrandCategories = Array.isArray(brandData.categories) ? brandData.categories : [];
 
     setPhone(settings.phone ?? '');
@@ -240,7 +252,9 @@ export default function AdminPanel({
     setPriceGroups(Array.isArray(priceGroupData.groups) ? priceGroupData.groups : []);
     setBrandDraft((current) => ({ ...current, categoryId: current.categoryId || nextBrandCategories[0]?.id || 0 }));
     setAuthenticated(true);
-  }, [setBrandCategories, setBrandDraft, setBrands, setGroupCompanies, setNews, setPriceGroups, setSlides]);
+    setContentLoaded(true);
+    setContentLoadError('');
+  }, [request, setBrandCategories, setBrandDraft, setBrands, setGroupCompanies, setNews, setPriceGroups, setSlides]);
 
   useEffect(() => {
     loadAdminDataRef.current = loadAdminData;
@@ -309,6 +323,7 @@ export default function AdminPanel({
           }
           void loadAdminData().catch((error) => {
             console.error('Failed to load admin data after session check', error);
+            setContentLoadError(error instanceof Error ? error.message : 'Не удалось загрузить данные сайта');
           });
         } else {
           setSessionRole(null);
@@ -406,20 +421,17 @@ export default function AdminPanel({
   }, [authenticated, router, sessionReady]);
 
   const saveInfo = async (target: SettingKey) => {
-    setBusy(true);
-    const res = await fetch('/api/admin/settings', {
+    if (!contentLoaded) return;
+    await performContentAction({ requests: [{ url: '/api/admin/settings', init: {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone, email, address }),
-    });
-    setBusy(false);
-    showStatus(res.ok ? 'Информация сохранена' : 'Не удалось сохранить информацию');
-    if (res.ok) {
+    } }], success: 'Информация сохранена', failure: 'Не удалось сохранить информацию', refresh: false, onSaved: () => {
       setSavedSetting(target);
       window.setTimeout(() => {
         setSavedSetting((current) => (current === target ? null : current));
       }, 2000);
-    }
+    } });
   };
 
 
@@ -498,13 +510,18 @@ export default function AdminPanel({
           switchArea('home');
         }}
         onLogout={async () => {
-          await fetch('/api/admin/logout', { method: 'POST' });
-          setSessionRole(null);
-          setReportSession(null);
-          setCanAccessTopDashboard(false);
-          setCanManageTopDashboard(false);
-          setAuthenticated(false);
-          setSessionReady(true);
+          try {
+            const response = await request('/api/admin/logout', { method: 'POST' });
+            if (!response.ok) throw new Error('Не удалось завершить сеанс. Повторите выход.');
+            setSessionRole(null);
+            setReportSession(null);
+            setCanAccessTopDashboard(false);
+            setCanManageTopDashboard(false);
+            setAuthenticated(false);
+            setSessionReady(true);
+          } catch (error) {
+            showStatus(error instanceof Error ? error.message : 'Не удалось завершить сеанс');
+          }
         }}
       />
 
@@ -560,7 +577,7 @@ export default function AdminPanel({
 
       {activeArea === 'clients' &&
         (clientDetailId ? (
-          <AdminClientDetailSection clientId={clientDetailId} onBack={() => router.push('/admin/clients', { scroll: false })} />
+          <AdminClientDetailSection key={clientDetailId} clientId={clientDetailId} onBack={() => router.push('/admin/clients', { scroll: false })} />
         ) : (
           <AdminClientsSection onBack={() => switchArea('home')} />
         ))}
@@ -570,12 +587,16 @@ export default function AdminPanel({
           <AdminSiteSidebar activeSection={activeSection} onSwitchSection={switchSection} />
 
           <div className={styles.content}>
+            {contentLoadError && <p role="alert">{contentLoadError}</p>}
+            {!contentLoaded && <p>Данные сайта ещё не загружены. Сохранение недоступно.
+              <button type="button" className={styles.secondary} onClick={() => void loadAdminData().catch((error) => setContentLoadError(error instanceof Error ? error.message : 'Не удалось загрузить данные сайта'))}>Повторить загрузку</button>
+            </p>}
             <AdminSiteContent
               activeSection={activeSection}
               phone={phone}
               email={email}
               address={address}
-              busy={busy}
+              busy={busy || !contentLoaded}
               savedSetting={savedSetting}
               slideAdmin={slideAdmin}
               newsAdmin={newsAdmin}
@@ -586,7 +607,7 @@ export default function AdminPanel({
               onEmailChange={setEmail}
               onAddressChange={setAddress}
               onSaveInfo={saveInfo}
-              uploadImage={uploadAdminImage}
+              uploadImage={uploadImage}
               showStatus={showStatus}
             />
           </div>

@@ -5,6 +5,7 @@ import ts from 'typescript';
 
 import { emptyEditor } from '../src/features/admin/wholesale/AdminWholesaleEditorModel';
 import { readApiError } from '../src/features/admin/wholesale/AdminWholesaleApiModel';
+import { AdminRequestError, ADMIN_UNKNOWN_OUTCOME } from '../src/features/admin/shared/adminRequest';
 
 // Execute the real save callback, isolating React state and HTTP only.
 const source = ts.createSourceFile('gateway.tsx', readFileSync(new URL(
@@ -35,6 +36,8 @@ function harness(status: number) {
   const savingRef = { current: false };
   const bindings = {
     editor, editorReady: true, screen: 'edit', editId: 42, savingRef, canManageWholesale: true,
+    editorKey: 'edit:42', viewKeyRef: { current: 'edit:42' }, isActive: () => true,
+    AdminRequestError, ADMIN_UNKNOWN_OUTCOME,
     clientCompanies: [{ id: 1, title: 'Synthetic company' }],
     catalogDiscountBaseByKey: new Map([['4:base', {}]]),
     setBusy: (value: boolean) => { busy = value; },
@@ -42,7 +45,7 @@ function harness(status: number) {
     setEditorSaveConflict: (value: boolean) => { conflict = value; },
     showStatus: () => {}, readApiError,
     router: { push: () => { navigated = true; } }, editorBackHref: '/admin/wholesale',
-    fetch: async (_url: string, options: { body: string }) => {
+    request: async (_url: string, options: { body: string }) => {
       sent.push(JSON.parse(options.body));
       return Response.json(status === 409 ? { error: 'Данные уже изменены другим пользователем', code: 'RECORD_VERSION_CONFLICT' }
         : { ok: true, revision: '8' }, { status });
