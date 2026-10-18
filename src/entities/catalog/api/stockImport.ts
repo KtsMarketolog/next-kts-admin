@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 
 import { ensureSiteSchema } from '@/shared/lib/db';
 import { query, tryAcquireSessionAdvisoryLock, withTransaction } from '@/shared/lib/db/client';
+import { withCatalogStockWrite } from '@/shared/lib/db/catalogStockWrite';
 import { runPostCommitTasks } from '@/shared/lib/postCommitTasks';
 
 import { ensureCatalogSchema } from './catalogDb';
@@ -46,6 +47,10 @@ const MAX_SKIP_SAMPLES = 5;
 const DEFAULT_MAIL_SCAN_LIMIT = 300;
 const DEFAULT_STOCK_ALLOWED_FROM = ['saunakva@yandex.ru'];
 
+declare global {
+  var __ktsStockImportSchemaReady: Promise<void> | undefined;
+}
+
 type StockEmailCandidate = {
   uid: number | string;
   uidNumber: number;
@@ -64,7 +69,7 @@ function pushError(errors: StockImportError[], error: StockImportError) {
 async function ensureStockImportSchema() {
   await ensureCatalogSchema();
   await ensureSiteSchema();
-  await query(`
+  globalThis.__ktsStockImportSchemaReady ??= withCatalogStockWrite((client) => client.query(`
     alter table catalog_products add column if not exists stock integer not null default 0;
     alter table catalog_products add column if not exists stock_volzhsk integer not null default 0;
     alter table catalog_products add column if not exists stock_moscow integer not null default 0;
@@ -106,7 +111,11 @@ async function ensureStockImportSchema() {
     create index if not exists catalog_products_stock_article_norm_idx
       on catalog_products (lower(trim(coalesce(article, ''))));
     create index if not exists stock_import_logs_created_idx on stock_import_logs(created_at desc);
-  `);
+  `), 'schema').then(() => undefined).catch((error) => {
+    globalThis.__ktsStockImportSchemaReady = undefined;
+    throw error;
+  });
+  await globalThis.__ktsStockImportSchemaReady;
 }
 
 async function saveImportLog(client: PoolClient, result: Omit<StockImportResult, 'logId'>) {
@@ -242,11 +251,9 @@ async function importStockFromExcelBufferLocked(input: StockWorkbookInput): Prom
     let rows: ReturnType<typeof parseStockWorkbook>;
     try { rows = parseStockWorkbook(input.buffer); }
     catch (error) { throw new StockWorkbookValidationError(error instanceof Error ? error.message : 'Невозможно прочитать Excel-файл остатков'); }
-    const errors: StockImportError[] = [];
+    const validationErrors: StockImportError[] = [];
     let totalRows = 0;
-    let updatedRows = 0;
-    let notFoundRows = 0;
-    let failedRows = 0;
+    let invalidRows = 0;
     const stockByArticle = new Map<string, AggregatedStock>();
     const invalidArticles = new Set<string>();
 
@@ -263,12 +270,12 @@ async function importStockFromExcelBufferLocked(input: StockWorkbookInput): Prom
       totalRows += 1;
       const articleKey = article.toLowerCase();
       if (stock === null) {
-        failedRows += 1;
+        invalidRows += 1;
         // A partial warehouse aggregate is not a complete replacement snapshot.
         // Keep every prior stock field for this SKU, regardless of row ordering.
         invalidArticles.add(articleKey);
         stockByArticle.delete(articleKey);
-        pushError(errors, { row: rowNumber, name: article, error: 'Сейчас не является целым неотрицательным числом. Остатки по этому артикулу не изменены.' });
+        pushError(validationErrors, { row: rowNumber, name: article, error: 'Сейчас не является целым неотрицательным числом. Остатки по этому артикулу не изменены.' });
         continue;
       }
       if (invalidArticles.has(articleKey)) continue;
@@ -284,7 +291,13 @@ async function importStockFromExcelBufferLocked(input: StockWorkbookInput): Prom
       stockByArticle.set(articleKey, aggregated);
     }
 
-    result = await withTransaction(async (client) => {
+    result = await withCatalogStockWrite(async (client) => {
+      // A deadlock/serialization retry starts a fresh database attempt. Keep
+      // its counters/errors local, so rolled-back work cannot inflate the log.
+      const errors = [...validationErrors];
+      let updatedRows = 0;
+      let notFoundRows = 0;
+      let failedRows = invalidRows;
       const receiptKeys = input.mailReceiptKeys ?? [];
       if (receiptKeys.length) {
         const previous = await client.query<{ result: StockImportResult }>(`
@@ -368,7 +381,7 @@ async function importStockFromExcelBufferLocked(input: StockWorkbookInput): Prom
       // superseded older mail. They commit with the stock changes and result.
       await recordMailReceipts(client, status === 'failed' ? receiptKeys.slice(0, 1) : receiptKeys, logId);
       return { logId, ...withoutId, saved: true };
-    }, { trackCommitOutcome: true });
+    }, 'import');
     return result;
   } finally {
     attachWarnings(result, await runPostCommitTasks([{

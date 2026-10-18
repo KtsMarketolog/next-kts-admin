@@ -886,6 +886,6 @@ export async function applySchemaMigrations() {
         `insert into schema_migrations (id, description) values ($1, $2)`,
         [migration.id, migration.description],
       );
-    });
+    }, { profile: 'schema' });
   }
 }

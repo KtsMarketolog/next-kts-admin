@@ -33,6 +33,7 @@ function gate() {
 
 let compiledImporter: Promise<string> | undefined;
 async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-release'; legacyBusy?: boolean; messages?: Message[]; failMoveAndFlags?: boolean; commitUnknownOnce?: boolean } = {}) {
+  delete globalThis.__ktsStockImportSchemaReady;
   // Bundle only in memory. DB and mail dependencies are replaced at resolution,
   // not through environment credentials; the fixture cannot open a real socket.
   compiledImporter ??= build({
@@ -113,7 +114,7 @@ async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-releas
   };
   const database = {
     query, ensureSiteSchema: async () => {}, ensureCatalogSchema: async () => {},
-    withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>, txOptions?: { trackCommitOutcome?: boolean }) => {
+    withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>, txOptions?: { trackCommitOutcome?: boolean; profile?: string }) => {
       const oldUpdates = updates;
       const oldReceipts = [...receipts.entries()];
       const oldLogs = [...logs.entries()];
@@ -125,7 +126,7 @@ async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-releas
         logs.clear(); oldLogs.forEach(([id, log]) => logs.set(id, log));
         throw error;
       }
-      if (commitUnknown && txOptions?.trackCommitOutcome) {
+      if (commitUnknown && txOptions?.trackCommitOutcome && txOptions.profile === 'import') {
         commitUnknown = false;
         throw new Error('Synthetic COMMIT result unknown');
       }

@@ -1,4 +1,4 @@
-import { query } from '@/shared/lib/db';
+import { withCatalogStockWrite } from '@/shared/lib/db/catalogStockWrite';
 
 declare global {
   var __ktsCatalogSchemaReady: Promise<void> | undefined;
@@ -7,7 +7,7 @@ declare global {
 export function ensureCatalogSchema() {
   // Route bundles share one process-wide migration promise so concurrent first
   // requests cannot run DDL against the same catalog tables in different orders.
-  globalThis.__ktsCatalogSchemaReady ??= query(`
+  globalThis.__ktsCatalogSchemaReady ??= withCatalogStockWrite((client) => client.query(`
     create table if not exists catalog_categories (
       id bigserial primary key,
       strapi_id integer unique,
@@ -138,7 +138,7 @@ export function ensureCatalogSchema() {
       on catalog_products using gin (to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(article, '') || ' ' || coalesce(model, '')));
     create index if not exists catalog_products_stock_title_norm_idx
       on catalog_products (lower(trim(regexp_replace(replace(title, chr(160), ' '), $$\s+$$, ' ', 'g'))));
-  `)
+  `), 'schema')
     .then(() => undefined)
     .catch((error) => {
       globalThis.__ktsCatalogSchemaReady = undefined;

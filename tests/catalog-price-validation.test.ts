@@ -37,6 +37,7 @@ function coreWithoutIo() {
     '../src/entities/catalog/api/catalogAdmin/core.ts', {
       '@/shared/lib/db': { ensureSiteSchema: forbidden('site schema') },
       '@/shared/lib/db/client': { query: forbidden('query'), withTransaction: forbidden('transaction') },
+      '@/shared/lib/db/catalogStockWrite': { withCatalogStockWrite: forbidden('catalog transaction') },
       '../catalogDb': { ensureCatalogSchema: forbidden('catalog schema') },
       './helpers': helpers,
       './productQueries': { getCatalogAdminProductById: forbidden('product read') },

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import * as outcome from '../src/shared/lib/db/transactionOutcome';
+import * as policy from '../src/shared/lib/db/transactionPolicy';
 import { runPostCommitTasks } from '../src/shared/lib/postCommitTasks';
 
 function database(options: { fail?: string; rollbackCommand?: boolean } = {}) {
@@ -18,7 +19,7 @@ function database(options: { fail?: string; rollbackCommand?: boolean } = {}) {
   }).outputText;
   const testModule = { exports: {} as typeof import('../src/shared/lib/db/client') };
   new Function('require', 'module', 'exports', 'globalThis', 'process', compiled)(
-    (name: string) => name === 'pg' ? {} : outcome,
+    (name: string) => name === 'pg' ? {} : name === './transactionPolicy' ? policy : outcome,
     testModule, testModule.exports, { __ktsPgPool: { connect: async () => client } }, { env: { DATABASE_URL: 'synthetic' } },
   );
   return { ...testModule.exports, commands, releases };
@@ -27,7 +28,7 @@ function database(options: { fail?: string; rollbackCommand?: boolean } = {}) {
 test('confirmed transaction returns callback result and releases normally', async () => {
   const db = database();
   assert.equal(await db.withTransaction(async () => 7, { trackCommitOutcome: true }), 7);
-  assert.deepEqual(db.commands, ['begin', 'commit']);
+  assert.deepEqual(db.commands.filter((sql) => !sql.startsWith('SET LOCAL')), ['begin', 'commit']);
   assert.deepEqual(db.releases, [false]);
 });
 
@@ -35,7 +36,7 @@ test('business error rolls back and retains original error', async () => {
   const db = database();
   const failure = new Error('Synthetic business error');
   await assert.rejects(db.withTransaction(async () => { throw failure; }, { trackCommitOutcome: true }), (error) => error === failure);
-  assert.deepEqual(db.commands, ['begin', 'rollback']);
+  assert.deepEqual(db.commands.filter((sql) => !sql.startsWith('SET LOCAL')), ['begin', 'rollback']);
 });
 
 test('lost COMMIT acknowledgement is unknown, not a claim of failed save', async () => {
@@ -69,6 +70,25 @@ test('uncertain advisory unlock discards its session and release remains idempot
   await assert.rejects(release(), /Synthetic/);
   await release();
   assert.deepEqual(db.releases, [true]);
+});
+
+test('session callback unlock failure discards connection without losing committed callback result', async () => {
+  const db = database({ fail: 'unlock' });
+  assert.equal(await db.withSessionAdvisoryLock('synthetic', async () => 7), 7);
+  assert.deepEqual(db.releases, [true]);
+});
+
+test('session callback error retains its identity when unlock also fails', async () => {
+  const db = database({ fail: 'unlock' });
+  const failure = new Error('Synthetic callback failure');
+  await assert.rejects(db.withSessionAdvisoryLock('synthetic', async () => { throw failure; }), (error) => error === failure);
+  assert.deepEqual(db.releases, [true]);
+});
+
+test('successful session callback unlock releases connection normally', async () => {
+  const db = database();
+  assert.equal(await db.withSessionAdvisoryLock('synthetic', async () => 7), 7);
+  assert.deepEqual(db.releases, [false]);
 });
 
 test('secondary failures are isolated and return only safe warnings', async () => {

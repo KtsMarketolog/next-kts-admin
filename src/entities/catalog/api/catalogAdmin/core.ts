@@ -1,7 +1,8 @@
 import type { PoolClient } from 'pg';
 
 import { ensureSiteSchema } from '@/shared/lib/db';
-import { query, withTransaction } from '@/shared/lib/db/client';
+import { query } from '@/shared/lib/db/client';
+import { withCatalogStockWrite } from '@/shared/lib/db/catalogStockWrite';
 
 import { ensureCatalogSchema } from '../catalogDb';
 import { cacheKey, normalizeCatalogPrice, normalizeCatalogPriceFields, normalizeStockValue, normalizeText, slugify, uniqueSlug } from './helpers';
@@ -540,7 +541,7 @@ export async function createCatalogAdminProduct(input: CatalogProductInput) {
   await ensureCatalogSchema();
   await ensureSiteSchema();
 
-  const id = await withTransaction(async (client) => {
+  const id = await withCatalogStockWrite(async (client) => {
     const count = await client.query<{ count: string }>('select count(*)::text as count from catalog_products');
     return insertCatalogProduct(client, createCache(), normalized, Number(count.rows[0]?.count ?? 0));
   });
@@ -555,7 +556,7 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
   await ensureCatalogSchema();
   await ensureSiteSchema();
 
-  await withTransaction(async (client) => {
+  await withCatalogStockWrite(async (client) => {
     const existing = await client.query<{ id: string; sort_order: string }>(
       `select id::text, coalesce((
          select sort_order::text from wholesale_products where catalog_product_id = $1 limit 1
@@ -636,9 +637,12 @@ export async function deleteCatalogAdminProduct(id: number) {
   await ensureSiteSchema();
   const normalizedId = Number(id);
   if (!Number.isInteger(normalizedId) || normalizedId <= 0) throw new Error('Некорректный товар');
-  await withTransaction(async (client) => {
-    await client.query(`update wholesale_products set is_active = false, updated_at = now() where catalog_product_id = $1`, [normalizedId]);
+  await withCatalogStockWrite(async (client) => {
+    // Match imports/edits: catalog first, wholesale second. Keep wholesale
+    // rows and price-list overrides; only the explicitly deleted catalog row
+    // is removed, exactly as before.
     await client.query(`delete from catalog_products where id = $1`, [normalizedId]);
+    await client.query(`update wholesale_products set is_active = false, updated_at = now() where catalog_product_id = $1`, [normalizedId]);
   });
 }
 
@@ -648,7 +652,7 @@ export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promi
   await ensureCatalogSchema();
   await ensureSiteSchema();
 
-  await withTransaction(async (client) => {
+  await withCatalogStockWrite(async (client) => {
     const cache = createCache();
     const existingProducts = await getExistingCatalogProducts(client);
     const touchedProductIds = new Set<number>();
@@ -744,7 +748,7 @@ export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promi
           ),
           updated_at = now()
     `);
-  });
+  }, 'import');
 
   const stats = await getCatalogAdminStats();
   return {

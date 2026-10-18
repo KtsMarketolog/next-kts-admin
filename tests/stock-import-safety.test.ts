@@ -64,7 +64,8 @@ const originalStocks: StockState[] = [
 const require = createRequire(import.meta.url);
 let compiledImporter: Promise<string> | undefined;
 
-async function importerWithSyntheticDatabase(stocks = originalStocks, options: { failLog?: boolean; failRelease?: boolean } = {}) {
+async function importerWithSyntheticDatabase(stocks = originalStocks, options: { failLog?: boolean; failRelease?: boolean; retryAfterLog?: boolean } = {}) {
+  delete globalThis.__ktsStockImportSchemaReady;
   // Compile the real importer in memory. Every schema/DB dependency is replaced;
   // only xlsx may be loaded by the sandboxed module, so no mail/DB connection is possible.
   compiledImporter ??= build({
@@ -82,6 +83,7 @@ async function importerWithSyntheticDatabase(stocks = originalStocks, options: {
   const writes: number[] = [];
   let logCount = 0;
   let inTransaction = false;
+  let retried = false;
   const query = async (sql: string, params: unknown[] = []) => {
     assert.doesNotMatch(sql, /\b(?:delete\s+from|update|insert\s+into)\s+wholesale_price_lists\b/i, 'stock import must never change old price lists');
     if (/^\s*insert into stock_import_logs/.test(sql)) {
@@ -105,18 +107,32 @@ async function importerWithSyntheticDatabase(stocks = originalStocks, options: {
   const database = {
     ensureSiteSchema: async () => {}, ensureCatalogSchema: async () => {}, query,
     tryAcquireSessionAdvisoryLock: async () => async () => { if (options.failRelease) throw new Error('Synthetic unlock failure'); },
-    withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>) => {
+    withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>, txOptions?: { profile?: string; retryOnConflict?: boolean }) => {
       const oldCatalog = [...catalog.entries()].map(([id, stock]) => [id, { ...stock }] as const);
       const oldWholesale = [...wholesale.entries()].map(([id, stock]) => [id, { ...stock }] as const);
       const oldLogs = logCount;
       const oldWrites = writes.length;
       inTransaction = true;
-      try { return await callback({ query }); }
-      catch (error) {
+      const restore = () => {
         catalog.clear(); oldCatalog.forEach(([id, stock]) => catalog.set(id, stock));
         wholesale.clear(); oldWholesale.forEach(([id, stock]) => wholesale.set(id, stock));
         logCount = oldLogs;
         writes.length = oldWrites;
+      };
+      try {
+        const result = await callback({ query });
+        if (options.retryAfterLog && !retried && txOptions?.profile === 'import') {
+          assert.equal(txOptions.retryOnConflict, true);
+          retried = true;
+          restore();
+          // The transaction runner's SQLSTATE/rollback handling has separate
+          // tests. Exercise the importer's real callback a second time here.
+          return await callback({ query });
+        }
+        return result;
+      }
+      catch (error) {
+        restore();
         throw error;
       } finally { inTransaction = false; }
     },
@@ -210,4 +226,23 @@ test('ambiguous catalog SKU keeps all matching products unchanged', async () => 
   assert.deepEqual(h.writes, []);
   assert.deepEqual([...h.catalog.values()], stocks);
   assert.deepEqual([...h.wholesale.values()], stocks);
+});
+
+test('a repeated stock transaction starts with fresh counters and errors instead of counting rolled-back work', async () => {
+  const duplicate = { ...originalStocks[0], id: 3, article: 'DUPLICATE' };
+  const h = await importerWithSyntheticDatabase([...originalStocks, duplicate, { ...duplicate, id: 4 }], { retryAfterLog: true });
+  const result = await h.run([
+    ['Артикул', 'Сейчас'], ['BAD-SKU', 'invalid'], ['GOOD-SKU', 12], ['MISSING', 3], ['DUPLICATE', 4],
+  ]);
+  assert.equal(result.totalRows, 4);
+  assert.equal(result.updatedRows, 1);
+  assert.equal(result.notFoundRows, 1);
+  assert.equal(result.failedRows, 2);
+  assert.equal(result.errors.length, 3);
+  assert.equal(result.status, 'partial_success');
+  assert.equal(result.saved, true);
+  assert.equal(h.logCount, 1);
+  assert.deepEqual(h.writes, [2]);
+  assert.equal(h.catalog.get(2)?.stock, 12);
+  assert.deepEqual(h.catalog.get(1), originalStocks[0]);
 });

@@ -1,4 +1,4 @@
-import { query } from './client';
+import { query, withTransaction } from './client';
 import { applySchemaMigrations } from './migrations';
 import { seedBrandPortfolio, seedGroupCompanies, seedHeroSlides, seedNewsItems, seedSiteSettings } from './schemaSeeds';
 
@@ -19,7 +19,9 @@ export function markSiteSchemaReady() {
 }
 
 async function ensureSiteSchemaInternal() {
-  await query(`
+  // Only the pure-SQL bootstrap is replayable. Keep seeds and individual
+  // migrations below outside this callback (they manage their own transactions).
+  await withTransaction((client) => client.query(`
     create table if not exists site_settings (
       key text primary key,
       value text not null,
@@ -596,7 +598,7 @@ async function ensureSiteSchemaInternal() {
     create index if not exists security_audit_events_entity_idx on security_audit_events(entity_type, entity_id, created_at desc);
     create index if not exists rate_limit_buckets_reset_idx on rate_limit_buckets(reset_at);
     create index if not exists stock_import_logs_created_idx on stock_import_logs(created_at desc);
-  `);
+  `), { profile: 'schema', retryOnConflict: true, trackCommitOutcome: true });
 
   await query(`alter table hero_slides add column if not exists tablet_image_url text`);
   await query(`alter table hero_slides add column if not exists mobile_image_url text`);
