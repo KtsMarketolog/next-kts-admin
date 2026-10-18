@@ -76,6 +76,13 @@ test('plain and gzip TOP uploads persist metadata dates without treating filenam
   }
 });
 
+test('date inspection ignores oversized metadata values and unrelated long keys without changing the snapshot', () => {
+  const longKey = 'business-'.repeat(1000);
+  assert.equal(inspect(JSON.stringify({ [longKey]: { metadata: { savedAt: '2026-10-01' } }, meta: { dataAsOf: '2026-10-02' } })), '2026-10-02');
+  assert.equal(inspect(JSON.stringify({ dataAsOf: ' '.repeat(300) + '2026-10-02', meta: { asOf: '2026-10-03' } })), '2026-10-03');
+  assert.equal(inspect('{"meta":{"dataAsOf":"2026-10-02"},"meta":"not metadata"}'), null);
+});
+
 test('dates migration only adds nullable metadata and does not invent dates for existing snapshots', async () => {
   let sql = '';
   await applyDashboardDatesMigration({ query: async (text: string) => { sql = text; } } as never);

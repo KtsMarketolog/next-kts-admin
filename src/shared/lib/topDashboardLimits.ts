@@ -19,6 +19,19 @@ export const TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_BYTES =
   TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_MEGABYTES * 1024 * 1024;
 export const TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL = '2 ГБ';
 
+// Technical resource budgets, not a business schema. Unknown sections/fields
+// are allowed. Measured snapshots use depth <= 8 and strings below 3 KiB;
+// leave ample headroom for future exports and large tables.
+export const TOP_DASHBOARD_JSON_RESOURCE_LIMITS = {
+  maxStringBytes: 8 * 1024 * 1024,
+  maxKeyBytes: 64 * 1024,
+  maxNumberBytes: 1024,
+  maxDepth: 128,
+  maxTokens: 1_000_000_000,
+  // Active scanner/parser time only: slow network uploads do not consume it.
+  maxProcessingMs: 120_000,
+} as const;
+
 // Unchanged per-block disk safety cap. Protected current/previous data pairs for
 // retained HTMLs must fit together; uploads reject rather than evict rollback data.
 export const TOP_DASHBOARD_DATA_STORAGE_LIMIT_BYTES = TOP_DASHBOARD_DATA_STORED_MAX_BYTES * 3;

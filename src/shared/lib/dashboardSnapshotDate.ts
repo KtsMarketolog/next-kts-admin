@@ -19,7 +19,12 @@ export function createDashboardSnapshotDateInspector() {
     }
     if (token === TokenType.COLON) return;
     if (parent?.object && parent.expectsKey && token === TokenType.STRING) {
-      parent.key = typeof value === 'string' ? value : null;
+      const metadataLevel = parent.path.length === 0
+        || (parent.path.length === 1 && CONTAINERS.has(parent.path[0]));
+      // Uploaded fields stay intact. This metadata-only observer needs none
+      // of the arbitrary/large business keys in rows or nested sections.
+      parent.key = metadataLevel && typeof value === 'string'
+        && (DATE_KEYS.includes(value) || CONTAINERS.has(value)) ? value : null;
       parent.expectsKey = false;
       return;
     }
@@ -28,7 +33,8 @@ export function createDashboardSnapshotDateInspector() {
       for (const key of dates.keys()) if (key.startsWith(`${path[0]}.`)) dates.delete(key);
     }
     if ((path.length === 1 || (path.length === 2 && CONTAINERS.has(path[0]))) && DATE_KEYS.includes(path.at(-1)!)) {
-      dates.set(path.join('.'), token === TokenType.STRING ? normalizeDashboardDataDate(value) : null);
+      dates.set(path.join('.'), token === TokenType.STRING && typeof value === 'string' && value.length <= 256
+        ? normalizeDashboardDataDate(value) : null);
     }
     if (token === TokenType.LEFT_BRACE || token === TokenType.LEFT_BRACKET) {
       // Keep only small path keys; no snapshot data or financial rows are retained.

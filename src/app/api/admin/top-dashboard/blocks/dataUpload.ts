@@ -1,5 +1,8 @@
 import { createHash } from 'crypto';
 import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { createGunzip } from 'zlib';
 import {
   JSONParser,
@@ -16,9 +19,15 @@ import {
   TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES,
   TOP_DASHBOARD_DATA_MULTIPART_MAX_MEGABYTES,
   TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
+  TOP_DASHBOARD_JSON_RESOURCE_LIMITS,
 } from '@/shared/lib/topDashboardLimits';
 import type { PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
 import { createDashboardSnapshotDateInspector } from '@/shared/lib/dashboardSnapshotDate';
+import {
+  createSnapshotJsonResourceGuard,
+  SNAPSHOT_JSON_PROCESSING_CHUNK_BYTES,
+  SnapshotJsonResourceError,
+} from '@/shared/lib/snapshotJsonResourceGuard';
 
 import { parsePositiveId } from './routeUtils';
 import {
@@ -138,6 +147,7 @@ type JsonStreamInspector = {
   decoder: TextDecoder;
   signature: SnapshotSignatureTracker;
   dates: ReturnType<typeof createDashboardSnapshotDateInspector>;
+  resources: ReturnType<typeof createSnapshotJsonResourceGuard>;
 };
 
 const SNAPSHOT_SIGNATURE_KEYS = new Set([
@@ -191,7 +201,13 @@ function recordTopLevelField(
 ) {
   if (!tracker.key || !SNAPSHOT_SIGNATURE_KEYS.has(tracker.key)) return;
   const field = tokenSnapshotField(token, value);
-  if (field) tracker.fields.set(tracker.key, field);
+  if (field) {
+    // Only the short format identifier is used as text. Keep types, not large
+    // arbitrary strings attached to recognized signature fields.
+    tracker.fields.set(tracker.key, field.kind === 'string'
+      ? { kind: 'string', value: tracker.key === 'format' && field.value.length <= 64 ? field.value : '' }
+      : field);
+  }
 }
 
 function inspectSnapshotSignatureToken(
@@ -278,7 +294,7 @@ function inspectSnapshotSignatureToken(
 
   if (tracker.state === 'key') {
     if (token === TokenType.STRING) {
-      tracker.key = value as string;
+      tracker.key = SNAPSHOT_SIGNATURE_KEYS.has(value as string) ? value as string : null;
       tracker.state = 'colon';
     } else if (token === TokenType.RIGHT_BRACE) {
       tracker.depth = 0;
@@ -340,6 +356,7 @@ function createJsonStreamInspector(): JsonStreamInspector {
     dates,
     decoder: new TextDecoder('utf-8', { fatal: true }),
     signature,
+    resources: createSnapshotJsonResourceGuard(TOP_DASHBOARD_JSON_RESOURCE_LIMITS),
   };
 }
 
@@ -349,22 +366,26 @@ function writeJsonInspectionChunk(inspector: JsonStreamInspector, chunk: Buffer)
     throw new Error(UNCOMPRESSED_TOO_LARGE);
   }
 
-  try {
-    inspector.decoder.decode(chunk, { stream: true });
-  } catch {
-    throw new Error(INVALID_UTF8);
-  }
-
-  inspector.parser.write(chunk);
+  // Scan before the tokenizer can accumulate an entire string/key/number.
+  inspector.resources.write(chunk, (slice) => {
+    try {
+      inspector.decoder.decode(slice, { stream: true });
+    } catch {
+      throw new Error(INVALID_UTF8);
+    }
+    inspector.parser.write(slice);
+  });
 }
 
 function finishJsonInspection(inspector: JsonStreamInspector): JsonInspection {
-  try {
-    inspector.decoder.decode();
-  } catch {
-    throw new Error(INVALID_UTF8);
-  }
-  if (!inspector.parser.isEnded) inspector.parser.end();
+  inspector.resources.finish(() => {
+    try {
+      inspector.decoder.decode();
+    } catch {
+      throw new Error(INVALID_UTF8);
+    }
+    if (!inspector.parser.isEnded) inspector.parser.end();
+  });
   return {
     size: inspector.size,
     dataAsOf: inspector.dates.result(),
@@ -376,71 +397,75 @@ function finishJsonInspection(inspector: JsonStreamInspector): JsonInspection {
   };
 }
 
-function inspectJsonBuffer(bytes: Buffer) {
-  const inspector = createJsonStreamInspector();
-  for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {
-    writeJsonInspectionChunk(inspector, bytes.subarray(offset, offset + 64 * 1024));
-  }
-  return finishJsonInspection(inspector);
+function inspectJsonBuffer(bytes: Buffer, signal?: AbortSignal) {
+  return inspectJsonReadable(Readable.from([bytes]), false, MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES, signal);
 }
 
 async function inspectJsonReadable(
-  readable: NodeJS.ReadableStream,
+  source: Readable,
+  isGzip: boolean,
   maxUncompressedBytes = MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES,
+  signal?: AbortSignal,
 ) {
   const inspector = createJsonStreamInspector();
-  for await (const chunk of readable) {
-    const bytes = Buffer.isBuffer(chunk)
-      ? chunk
-      : typeof chunk === 'string'
-        ? Buffer.from(chunk)
-        : Buffer.from(chunk as Uint8Array);
-    if (inspector.size + bytes.length > maxUncompressedBytes) {
-      throw new Error(UNCOMPRESSED_TOO_LARGE);
+  let lastYieldAt = performance.now();
+  const inspect = async (readable: AsyncIterable<Buffer | Uint8Array | string>) => {
+    for await (const chunk of readable) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (inspector.size + bytes.length > maxUncompressedBytes) {
+        throw new Error(UNCOMPRESSED_TOO_LARGE);
+      }
+      for (let offset = 0; offset < bytes.length; offset += SNAPSHOT_JSON_PROCESSING_CHUNK_BYTES) {
+        signal?.throwIfAborted();
+        writeJsonInspectionChunk(inspector, bytes.subarray(offset, offset + SNAPSHOT_JSON_PROCESSING_CHUNK_BYTES));
+        if (performance.now() - lastYieldAt >= 8) {
+          // A large valid table must not monopolize the web server event loop.
+          await yieldToEventLoop();
+          lastYieldAt = performance.now();
+        }
+      }
     }
-    writeJsonInspectionChunk(inspector, bytes);
-  }
+  };
+  // Pipeline forwards read/decompression errors and destroys all streams on
+  // rejection/abort, before the caller discards its new temporary upload.
+  if (isGzip) await pipeline(source, createGunzip(), inspect, { signal });
+  else await pipeline(source, inspect, { signal });
   return finishJsonInspection(inspector);
 }
 
 export async function inspectGzipJsonWithLimit(
   bytes: Buffer,
   maxUncompressedBytes = MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES,
+  signal?: AbortSignal,
 ) {
-  return new Promise<JsonInspection>((resolve, reject) => {
-    const gunzip = createGunzip();
-    const inspector = createJsonStreamInspector();
-    let settled = false;
+  return inspectJsonReadable(Readable.from([bytes]), true, maxUncompressedBytes, signal);
+}
 
-    const fail = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
+function jsonInspectionErrorResponse(error: unknown, isGzip: boolean) {
+  if (error instanceof SnapshotJsonResourceError) {
+    const reasons: Record<SnapshotJsonResourceError['code'], string> = {
+      JSON_STRING_TOO_LARGE: 'одно значение JSON превышает безопасный размер 8 МБ',
+      JSON_KEY_TOO_LARGE: 'название одного поля JSON превышает безопасный размер 64 КБ',
+      JSON_NUMBER_TOO_LARGE: 'числовое значение JSON содержит слишком много символов',
+      JSON_TOO_DEEP: 'структура JSON содержит больше 128 уровней вложенности',
+      JSON_TOO_COMPLEX: 'JSON содержит чрезмерное количество элементов',
+      JSON_PROCESSING_LIMIT: 'проверка JSON превысила безопасное время обработки',
     };
-
-    gunzip.on('data', (chunk: Buffer) => {
-      try {
-        if (inspector.size + chunk.length > maxUncompressedBytes) {
-          throw new Error(UNCOMPRESSED_TOO_LARGE);
-        }
-        writeJsonInspectionChunk(inspector, chunk);
-      } catch (error) {
-        gunzip.destroy(error instanceof Error ? error : new Error('Invalid JSON'));
-      }
-    });
-    gunzip.once('error', fail);
-    gunzip.once('end', () => {
-      if (settled) return;
-      try {
-        const inspection = finishJsonInspection(inspector);
-        settled = true;
-        resolve(inspection);
-      } catch (error) {
-        fail(error instanceof Error ? error : new Error('Invalid JSON'));
-      }
-    });
-    gunzip.end(bytes);
-  });
+    return Response.json({
+      error: `Файл не загружен: ${reasons[error.code]}. Проверьте экспорт снимка. Предыдущий снимок не изменён.`,
+      code: error.code,
+    }, { status: 413 });
+  }
+  if (error instanceof Error && error.message === UNCOMPRESSED_TOO_LARGE) {
+    return errorResponse(`Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL}`, 413);
+  }
+  if (error instanceof Error && error.message === INVALID_UTF8) {
+    return errorResponse('Файл данных должен быть сохранён в кодировке UTF-8');
+  }
+  if (error instanceof TokenizerError || error instanceof TokenParserError || !isGzip) {
+    return errorResponse('В файле данных содержится некорректный JSON');
+  }
+  return errorResponse('Файл .json.gz повреждён или не является корректным gzip-архивом');
 }
 
 function fieldIs(signature: SnapshotSignature, key: string, kind: SnapshotField['kind']) {
@@ -576,37 +601,12 @@ export async function readTopDashboardDataUpload(
   }
 
   let inspection: JsonInspection;
-  if (isGzip) {
-    try {
-      inspection = await inspectGzipJsonWithLimit(bytes);
-    } catch (error) {
-      if (error instanceof Error && error.message === UNCOMPRESSED_TOO_LARGE) {
-        return {
-          error: errorResponse(
-            `Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL}`,
-            413,
-          ),
-        };
-      }
-      if (error instanceof Error && error.message === INVALID_UTF8) {
-        return { error: errorResponse('Файл данных должен быть сохранён в кодировке UTF-8') };
-      }
-      if (error instanceof TokenizerError || error instanceof TokenParserError) {
-        return { error: errorResponse('В файле данных содержится некорректный JSON') };
-      }
-      return {
-        error: errorResponse('Файл .json.gz повреждён или не является корректным gzip-архивом'),
-      };
-    }
-  } else {
-    try {
-      inspection = inspectJsonBuffer(bytes);
-    } catch (error) {
-      if (error instanceof Error && error.message === INVALID_UTF8) {
-        return { error: errorResponse('Файл данных должен быть сохранён в кодировке UTF-8') };
-      }
-      return { error: errorResponse('В файле данных содержится некорректный JSON') };
-    }
+  try {
+    inspection = isGzip
+      ? await inspectGzipJsonWithLimit(bytes, MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES, request.signal)
+      : await inspectJsonBuffer(bytes, request.signal);
+  } catch (error) {
+    return { error: jsonInspectionErrorResponse(error, isGzip) };
   }
 
   const snapshotFormat = detectSnapshotFormat(inspection.signature, expectedFormat);
@@ -665,30 +665,10 @@ export async function readTopDashboardDataStreamUpload(
   let inspection: JsonInspection;
   try {
     const source = createReadStream(pending.temporaryPath);
-    inspection = await inspectJsonReadable(isGzip ? source.pipe(createGunzip()) : source);
+    inspection = await inspectJsonReadable(source, isGzip, MAX_TOP_DASHBOARD_DATA_UNCOMPRESSED_BYTES, request.signal);
   } catch (error) {
     await pending.discard();
-    if (error instanceof Error && error.message === UNCOMPRESSED_TOO_LARGE) {
-      return {
-        error: errorResponse(
-          `Распакованный файл данных должен быть не больше ${TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL}`,
-          413,
-        ),
-      };
-    }
-    if (error instanceof Error && error.message === INVALID_UTF8) {
-      return { error: errorResponse('Файл данных должен быть сохранён в кодировке UTF-8') };
-    }
-    if (!isGzip && (error instanceof TokenizerError || error instanceof TokenParserError)) {
-      return { error: errorResponse('В файле данных содержится некорректный JSON') };
-    }
-    return {
-      error: errorResponse(
-        isGzip
-          ? 'Файл .json.gz повреждён или не является корректным gzip-архивом'
-          : 'В файле данных содержится некорректный JSON',
-      ),
-    };
+    return { error: jsonInspectionErrorResponse(error, isGzip) };
   }
 
   const snapshotFormat = detectSnapshotFormat(inspection.signature, expectedFormat);
