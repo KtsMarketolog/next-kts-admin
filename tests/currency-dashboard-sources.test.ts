@@ -13,6 +13,17 @@ const daily = (date = '30.09.2026') => `<ValCurs Date="${date}">${[
 const history = (nominal = 1) => `<ValCurs><Record Date="02.01.2026"><Nominal>${nominal}</Nominal><Value>85,5</Value></Record><Record Date="30.09.2026"><Nominal>${nominal}</Nominal><Value>86,5</Value></Record></ValCurs>`;
 const dailyResponse = (url: URL) => new Response(daily(url.searchParams.get('date_req')?.replaceAll('/', '.') ?? '30.09.2026'));
 
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+const futures = (price: number) => ({
+  securities: { columns: ['SECID', 'ASSETCODE', 'LASTTRADEDATE', 'PREVSETTLEPRICE'], data: [['CEZ6', 'COPPER', '2026-12-17', price - 10]] },
+  marketdata: { columns: ['SECID', 'LAST', 'UPDATETIME', 'TRADEDATE', 'TIME'], data: [['CEZ6', price, '08:15:10', '2026-09-30', '08:15:10']] },
+});
+
 function client(fetcher: (url: URL, init?: RequestInit) => Promise<Response>, seed?: { value: unknown; fetchedAt: string }) {
   const cache = new Map<string, { value: unknown; fetchedAt: string }>();
   if (seed) cache.set('currency:cbr-daily', seed);
@@ -93,6 +104,90 @@ test('fresh persisted cache avoids requests; force refresh and concurrent calls 
   assert.equal(count, 2);
   assert.equal(a._currencySource.fetchedAt, NOW.toISOString());
   assert.deepEqual(a, b);
+});
+
+test('08:30 forced futures observation cannot join an ordinary request still reading fresh cache', async () => {
+  const cacheRead = deferred();
+  const cached = { value: futures(12000), fetchedAt: '2026-09-30T05:29:55.000Z' };
+  let requests = 0;
+  const writes: string[] = [];
+  const get = createCurrencySourceClient({
+    now: () => NOW,
+    readCache: async () => { await cacheRead.promise; return cached; },
+    writeCache: async (key) => { writes.push(key); },
+    fetch: async () => { requests++; return Response.json(futures(12500)); },
+  });
+  const ordinary = get('moex-futures');
+  const forced = get('moex-futures', {}, { force: true });
+  const sameForced = get('moex-futures', {}, { force: true });
+  cacheRead.resolve();
+  const [a, b, c] = await Promise.all([ordinary, forced, sameForced]);
+  assert.equal(a._currencySource.fetchedAt, cached.fetchedAt);
+  assert.deepEqual(a.marketdata, cached.value.marketdata);
+  assert.equal(b._currencySource.fetchedAt, NOW.toISOString());
+  assert.equal(b._currencySource.stale, false);
+  assert.deepEqual(b.marketdata, futures(12500).marketdata);
+  assert.deepEqual(b, c);
+  assert.equal(requests, 1, 'forced callers share one live fetch independently of the cache reader');
+  assert.deepEqual(writes, ['currency:moex-futures'], 'both modes keep the existing persisted cache key');
+});
+
+test('finishing an ordinary reader does not remove an in-flight forced refresh or make ordinary readers wait', async (t) => {
+  const cacheRead = deferred();
+  const network = deferred();
+  t.after(() => { cacheRead.resolve(); network.resolve(); });
+  const cached = { value: futures(12000), fetchedAt: '2026-09-30T05:29:55.000Z' };
+  let requests = 0;
+  const get = createCurrencySourceClient({
+    now: () => NOW,
+    readCache: async () => { await cacheRead.promise; return cached; },
+    writeCache: async () => {},
+    fetch: async () => { requests++; await network.promise; return Response.json(futures(12500)); },
+  });
+  const ordinary = get('moex-futures');
+  const forced = get('moex-futures', {}, { force: true });
+  cacheRead.resolve();
+  await ordinary;
+  const forcedAgain = get('moex-futures', {}, { force: true });
+  let ordinaryFinished = false;
+  const ordinaryAgain = get('moex-futures').then((value) => { ordinaryFinished = true; return value; });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(ordinaryFinished, true, 'cache readers remain independent of the slow upstream request');
+  assert.equal(requests, 1, 'ordinary cleanup must not discard the forced in-flight entry');
+  network.resolve();
+  const [a, b, c] = await Promise.all([forced, forcedAgain, ordinaryAgain]);
+  assert.deepEqual(a, b);
+  assert.deepEqual(a.marketdata, futures(12500).marketdata);
+  assert.equal(c._currencySource.fetchedAt, cached.fetchedAt);
+});
+
+test('forced futures retry bypasses an ordinary stale fallback after a shared failed forced fetch', async () => {
+  const cached = { value: futures(12000), fetchedAt: '2026-09-30T05:29:00.000Z' };
+  let requests = 0;
+  const writes: string[] = [];
+  const get = createCurrencySourceClient({
+    now: () => NOW, readCache: async () => cached,
+    writeCache: async (key) => { writes.push(key); },
+    fetch: async () => {
+      requests++;
+      if (requests === 1) throw new Error('temporary upstream failure');
+      return Response.json(futures(12500));
+    },
+  });
+  const [first, shared] = await Promise.all([
+    get('moex-futures', {}, { force: true }), get('moex-futures', {}, { force: true }),
+  ]);
+  assert.deepEqual(first, shared);
+  assert.equal(first._currencySource.stale, true);
+  assert.equal(first._currencySource.fetchedAt, cached.fetchedAt);
+  assert.equal(requests, 1);
+  const [ordinary, recovered] = await Promise.all([get('moex-futures'), get('moex-futures', {}, { force: true })]);
+  assert.equal(ordinary._currencySource.stale, true);
+  assert.equal(ordinary._currencySource.fetchedAt, cached.fetchedAt);
+  assert.equal(recovered._currencySource.stale, false);
+  assert.equal(recovered._currencySource.fetchedAt, NOW.toISOString());
+  assert.equal(requests, 2);
+  assert.deepEqual(writes, ['currency:moex-futures']);
 });
 
 test('persisted CBR daily cache expires at ten minutes and concurrent readers share its refresh', async () => {

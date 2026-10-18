@@ -370,10 +370,14 @@ export function createCurrencySourceClient(deps: SourceDependencies) {
       throw new CurrencySourceError('INVALID_CURRENCY_SOURCE_PARAMS');
     }
     const key = `currency:${kind}${kind === 'moex-candles' ? `:${String(params.secid).toLowerCase()}:${range!.from}:${range!.till}` : ''}`;
+    // A forced observation (notably the 08:30 baseline) must not inherit an
+    // ordinary reader's cache hit or failure cooldown. Keep the persisted cache
+    // shared, but only coalesce callers with the same freshness requirement.
+    const pendingKey = `${key}:${options.force ? 'forced' : 'ordinary'}`;
     const filterHistory = (result: CurrencySourceResult): CurrencySourceResult => kind === 'cbr-history' && object(result.data)
       ? { ...result, data: Object.fromEntries(Object.entries(result.data).filter(([date]) => date >= range!.from && date <= range!.till)) }
       : result;
-    if (pending.has(key)) return filterHistory(await pending.get(key)!);
+    if (pending.has(pendingKey)) return filterHistory(await pending.get(pendingKey)!);
     const task = (async () => {
       const cached = await deps.readCache(key);
       const decorate = (value: Record<string, unknown>, fetchedAt: string, stale: boolean): CurrencySourceResult => ({
@@ -398,8 +402,8 @@ export function createCurrencySourceClient(deps: SourceDependencies) {
         throw new CurrencySourceError('CURRENCY_SOURCE_UNAVAILABLE');
       }
     })();
-    pending.set(key, task);
-    try { return filterHistory(await task); } finally { pending.delete(key); }
+    pending.set(pendingKey, task);
+    try { return filterHistory(await task); } finally { pending.delete(pendingKey); }
   };
 }
 

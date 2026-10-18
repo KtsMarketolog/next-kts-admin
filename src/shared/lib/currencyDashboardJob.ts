@@ -13,11 +13,6 @@ function positive(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function minuteInMoscow(now: Date) {
-  const clock = new Date(now.getTime() + 3 * 60 * 60_000);
-  return clock.getUTCHours() * 60 + clock.getUTCMinutes();
-}
-
 function quoteTimestamp(tradeDate: unknown, time: unknown) {
   if (!validCurrencyDate(tradeDate) ||
       typeof time !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(time)) return null;
@@ -88,6 +83,7 @@ export type CurrencyDashboardJobResult = {
 
 type JobDependencies = {
   now: () => Date;
+  sleep?: (milliseconds: number) => Promise<void>;
   acquireLock: () => Promise<null | (() => Promise<void>)>;
   getSource: typeof getCurrencySource;
   getBaselines: typeof getCurrencyBaselines;
@@ -96,7 +92,11 @@ type JobDependencies = {
   getPremium: () => Promise<number | undefined>;
 };
 
+const BASELINE_MAX_ATTEMPTS = 3;
+const BASELINE_RETRY_DELAY_MS = 5_000;
+
 export function createCurrencyDashboardJob(deps: JobDependencies) {
+  const sleep = deps.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   return async function run(): Promise<CurrencyDashboardJobResult> {
     const now = deps.now();
     const date = currencyMoscowDate(now);
@@ -107,50 +107,83 @@ export function createCurrencyDashboardJob(deps: JobDependencies) {
     if (!release) return { ...result, skipped: 'running' };
     try {
       const baselines = await deps.getBaselines();
-      const current = baselines[date] ?? {};
-      const captureWindow = minuteInMoscow(now) === 8 * 60 + 30;
+      let current = baselines[date] ?? {};
+      const windowStart = Date.parse(`${date}T08:30:00+03:00`);
+      const windowEnd = windowStart + 60_000;
+      const inCaptureWindow = (value: Date) => value.getTime() >= windowStart && value.getTime() < windowEnd;
+      const complete = () => Boolean(current.COPPER && current.BR);
       const readSource = async (kind: CurrencySourceKind, force = false): Promise<CurrencySourceResult | null> => {
+        // Retries replace this source's status, but cannot conceal another source's failure.
+        const record = (status: CurrencyDashboardJobResult['sources'][number]) => {
+          const index = result.sources.findIndex((source) => source.kind === kind);
+          if (index < 0) result.sources.push(status);
+          else result.sources[index] = status;
+        };
         try {
           const data = await deps.getSource(kind, {}, { force });
-          result.sources.push({ kind, ...data._currencySource });
-          if (data._currencySource.stale) result.ok = false;
+          record({ kind, ...data._currencySource });
           return data;
         } catch {
-          result.ok = false;
-          result.sources.push({ kind, stale: true, error: 'Источник недоступен' });
+          record({ kind, stale: true, error: 'Источник недоступен' });
           return null;
         }
       };
       // Do not make baseline capture wait for the first historical CBR import.
       const background = Promise.all((['cbr-daily', 'cbr-history', 'cbr-base-history', 'copper', 'moex-currency', 'world'] as const).map((kind) => readSource(kind)));
-      const futures = await readSource('moex-futures', captureWindow && (!current.COPPER || !current.BR));
-      const capturedAt = deps.now();
-      if (current.COPPER && current.BR) {
-        result.baseline.status = 'already-captured';
-      } else if (captureWindow && minuteInMoscow(capturedAt) === 8 * 60 + 30 && currencyMoscowDate(capturedAt) === date) {
-        const fetched = futures ? new Date(futures._currencySource.fetchedAt) : null;
-        // Old cache is never passed off as a fresh 08:30 server observation.
-        if (futures && !futures._currencySource.stale && fetched && currencyMoscowDate(fetched) === date && minuteInMoscow(fetched) === 510) {
-          const chosen = selectCurrencyFutures(futures, date, current);
-          const premium = await deps.getPremium();
-          const added: CurrencyBaselineDay = {};
-          for (const asset of ['COPPER', 'BR'] as const) {
-            if (current[asset] || !chosen[asset]) continue;
-            const baseline = currencyBaselineFromQuote(chosen[asset]!, capturedAt, premium);
-            if (baseline) added[asset] = baseline;
+      try {
+        if (complete()) {
+          result.baseline.status = 'already-captured';
+          await readSource('moex-futures');
+        } else if (inCaptureWindow(now)) {
+          for (let attempt = 0; attempt < BASELINE_MAX_ATTEMPTS; attempt++) {
+            // Acquiring the lock, reading the baseline or a previous attempt may have taken time.
+            if (!inCaptureWindow(deps.now())) break;
+            const futures = await readSource('moex-futures', true);
+            const capturedAt = deps.now();
+            if (!inCaptureWindow(capturedAt)) break;
+            const fetchedAt = futures ? Date.parse(futures._currencySource.fetchedAt) : NaN;
+            // Old cache, future timestamps and responses completed after 08:30 cannot be
+            // relabelled as this minute's observation. Delayed real trades remain explicit.
+            if (futures && !futures._currencySource.stale && Number.isFinite(fetchedAt) &&
+                fetchedAt >= windowStart && fetchedAt <= capturedAt.getTime()) {
+              let chosen: ReturnType<typeof selectCurrencyFutures> = {};
+              try { chosen = selectCurrencyFutures(futures, date, current); } catch { /* Retry an unusable response inside the window. */ }
+              const added: CurrencyBaselineDay = {};
+              for (const asset of ['COPPER', 'BR'] as const) {
+                const quote = chosen[asset];
+                if (current[asset] || !quote) continue;
+                // A future LAST must not become an immutable 08:30 price, even with a stale label.
+                if (quote.last !== null && quote.quoteAt && Date.parse(quote.quoteAt) > capturedAt.getTime()) continue;
+                const baseline = currencyBaselineFromQuote(quote, capturedAt);
+                if (baseline) added[asset] = baseline;
+              }
+              if (Object.keys(added).length) {
+                if (added.COPPER) {
+                  const premium = await deps.getPremium();
+                  if (premium !== undefined) added.COPPER.premium = premium;
+                }
+                // Persist each valid asset immediately; retries only fill what is still missing.
+                current = await deps.saveBaseline(date, added);
+                result.baseline.capturedAssets.push(...Object.keys(added) as Asset[]);
+                if (complete()) break;
+              }
+            }
+            if (attempt + 1 >= BASELINE_MAX_ATTEMPTS) break;
+            const retryAt = deps.now();
+            if (!inCaptureWindow(retryAt) || retryAt.getTime() + BASELINE_RETRY_DELAY_MS >= windowEnd) break;
+            await sleep(BASELINE_RETRY_DELAY_MS);
           }
-          if (Object.keys(added).length) {
-            await deps.saveBaseline(date, added);
-            result.baseline.capturedAssets = Object.keys(added) as Asset[];
-            result.baseline.status = 'captured';
-          } else result.baseline.status = 'unavailable';
-        } else result.baseline.status = 'unavailable';
-      } else if (minuteInMoscow(capturedAt) > 510) {
-        // A restarted server cannot truthfully reconstruct an 08:30 quote from a later LAST.
-        result.baseline.status = 'missed';
+          result.baseline.status = complete() ? 'captured' : deps.now().getTime() >= windowEnd ? 'missed' : 'unavailable';
+        } else {
+          await readSource('moex-futures');
+          // A restarted server cannot truthfully reconstruct an 08:30 quote from a later LAST.
+          if (deps.now().getTime() >= windowEnd) result.baseline.status = 'missed';
+        }
+      } finally {
+        // Keep the cross-worker lock until background requests finish, including save failures.
+        await background;
       }
-      await background;
-      if (result.baseline.status === 'unavailable' || result.baseline.status === 'missed') result.ok = false;
+      result.ok = !result.sources.some((source) => source.stale) && result.baseline.status !== 'unavailable' && result.baseline.status !== 'missed';
       await deps.saveStatus(result);
       return result;
     } finally { await release(); }
