@@ -64,7 +64,7 @@ const originalStocks: StockState[] = [
 const require = createRequire(import.meta.url);
 let compiledImporter: Promise<string> | undefined;
 
-async function importerWithSyntheticDatabase(stocks = originalStocks) {
+async function importerWithSyntheticDatabase(stocks = originalStocks, options: { failLog?: boolean; failRelease?: boolean } = {}) {
   // Compile the real importer in memory. Every schema/DB dependency is replaced;
   // only xlsx may be loaded by the sandboxed module, so no mail/DB connection is possible.
   compiledImporter ??= build({
@@ -80,8 +80,15 @@ async function importerWithSyntheticDatabase(stocks = originalStocks) {
   const catalog = new Map(stocks.map((stock) => [stock.id, { ...stock }]));
   const wholesale = new Map(stocks.map((stock) => [stock.id, { ...stock }]));
   const writes: number[] = [];
+  let logCount = 0;
+  let inTransaction = false;
   const query = async (sql: string, params: unknown[] = []) => {
     assert.doesNotMatch(sql, /\b(?:delete\s+from|update|insert\s+into)\s+wholesale_price_lists\b/i, 'stock import must never change old price lists');
+    if (/^\s*insert into stock_import_logs/.test(sql)) {
+      assert.equal(inTransaction, true, 'stock result log belongs to the inventory transaction');
+      if (options.failLog) throw new Error('Synthetic stock log failure');
+      logCount += 1;
+    }
     if (sql.includes('select id::text') && sql.includes('from catalog_products')) {
       const rows = [...catalog.values()].filter(({ article }) => article.toLowerCase() === String(params[0]).toLowerCase()).map(({ id }) => ({ id: String(id) }));
       return { rowCount: rows.length, rows };
@@ -97,17 +104,32 @@ async function importerWithSyntheticDatabase(stocks = originalStocks) {
   };
   const database = {
     ensureSiteSchema: async () => {}, ensureCatalogSchema: async () => {}, query,
-    tryAcquireSessionAdvisoryLock: async () => async () => {},
-    withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>) => callback({ query }),
+    tryAcquireSessionAdvisoryLock: async () => async () => { if (options.failRelease) throw new Error('Synthetic unlock failure'); },
+    withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>) => {
+      const oldCatalog = [...catalog.entries()].map(([id, stock]) => [id, { ...stock }] as const);
+      const oldWholesale = [...wholesale.entries()].map(([id, stock]) => [id, { ...stock }] as const);
+      const oldLogs = logCount;
+      const oldWrites = writes.length;
+      inTransaction = true;
+      try { return await callback({ query }); }
+      catch (error) {
+        catalog.clear(); oldCatalog.forEach(([id, stock]) => catalog.set(id, stock));
+        wholesale.clear(); oldWholesale.forEach(([id, stock]) => wholesale.set(id, stock));
+        logCount = oldLogs;
+        writes.length = oldWrites;
+        throw error;
+      } finally { inTransaction = false; }
+    },
   };
   const loaded = { exports: {} as { importStockFromExcelBuffer: (input: { buffer: Buffer; fileName: string }) => Promise<StockImportResult> } };
   new Function('require', 'module', 'exports', await compiledImporter)((name: string) => {
     if (name === 'synthetic-stock-database') return database;
-    assert.equal(name, 'xlsx', 'unexpected dependency must not reach real infrastructure');
+    assert.ok(['xlsx', 'node:crypto'].includes(name), 'unexpected dependency must not reach real infrastructure');
     return require(name);
   }, loaded, loaded.exports);
   return {
     catalog, wholesale, writes,
+    get logCount() { return logCount; },
     run: (rows: unknown[][]) => loaded.exports.importStockFromExcelBuffer({ buffer: workbook(rows), fileName: 'Synthetic.xlsx' }),
   };
 }
@@ -118,6 +140,26 @@ test('unknown quantity header rejects the real stock importer before any invento
   assert.deepEqual(h.writes, []);
   assert.deepEqual([...h.catalog.values()], originalStocks);
   assert.deepEqual([...h.wholesale.values()], originalStocks);
+});
+
+test('a stock result log failure rolls back catalog and wholesale stock together', async () => {
+  const h = await importerWithSyntheticDatabase(originalStocks, { failLog: true });
+  await assert.rejects(h.run([['Артикул', 'Сейчас'], ['GOOD-SKU', 12]]), /Synthetic stock log/);
+  assert.deepEqual([...h.catalog.values()], originalStocks);
+  assert.deepEqual([...h.wholesale.values()], originalStocks);
+  assert.equal(h.logCount, 0);
+  assert.deepEqual(h.writes, []);
+});
+
+test('failed advisory unlock cannot turn committed stock and result log into failure', async () => {
+  const h = await importerWithSyntheticDatabase(originalStocks, { failRelease: true });
+  const result = await h.run([['Артикул', 'Сейчас'], ['GOOD-SKU', 12]]);
+  assert.equal(result.saved, true);
+  assert.equal(result.status, 'success');
+  assert.equal(result.warnings?.[0]?.code, 'stock_lock_cleanup_failed');
+  assert.equal(h.catalog.get(2)?.stock, 12);
+  assert.equal(h.wholesale.get(2)?.stock, 12);
+  assert.equal(h.logCount, 1);
 });
 
 for (const badFirst of [false, true]) {

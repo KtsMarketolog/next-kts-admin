@@ -1,5 +1,9 @@
+import type { PoolClient } from 'pg';
+
 import type { AdminSession } from '../adminAuth';
 import { query, withTransaction } from './client';
+import { writeClientCompanyPriceListAssignments } from './clientCompanyPriceListAssignments';
+import { revokeClientUserSessions } from './clientSessionsRepo';
 import { ensureSiteSchema } from './schema';
 
 export type {
@@ -30,30 +34,38 @@ import {
   type ClientCompanyRow,
 } from './clientCompaniesRepo.helpers';
 
-async function assertManagerRole(id: number | null, role: 'manager' | 'support_manager') {
-  if (!id) return;
-  const result = await query<{ id: string }>(
-    `select id::text
+async function assertManagerAssignments(
+  assignments: { managerId: number | null; supportManagerId: number | null },
+  client?: Pick<PoolClient, 'query'>,
+) {
+  const db = client ?? { query };
+  const ids = [assignments.managerId, assignments.supportManagerId].filter((id) => id !== null);
+  if (!ids.length) return;
+  // Same manager -> company -> price lock order as price-list saves.
+  const result = await db.query<{ id: string; role: string; is_active: boolean }>(
+    `select id::text, role, is_active
      from wholesale_managers
-     where id = $1 and role = $2 and is_active = true
-     limit 1`,
-    [id, role],
+     where id = any($1::bigint[]) order by id${client ? ' for share' : ''}`,
+    [ids],
   );
-  if (!result.rows[0]) {
-    throw new Error(role === 'manager' ? 'Менеджер по развитию не найден' : 'Менеджер по сопровождению не найден');
+  for (const [id, role] of [[assignments.managerId, 'manager'], [assignments.supportManagerId, 'support_manager']] as const) {
+    if (id && !result.rows.some((row) => Number(row.id) === id && row.role === role && row.is_active)) {
+      throw new Error(role === 'manager' ? 'Менеджер по развитию не найден' : 'Менеджер по сопровождению не найден');
+    }
   }
 }
 
-export async function assertClientCompanyVisible(id: number, session: AdminSession) {
-  if (canSeeAllClients(session)) return;
+export async function assertClientCompanyVisible(id: number, session: AdminSession, client?: Pick<PoolClient, 'query'>) {
+  if (!client && canSeeAllClients(session)) return;
+  const db = client ?? { query };
   const managerId = session.managerId ?? 0;
-  const result = await query<{ id: string }>(
+  const result = await db.query<{ id: string }>(
     `select id::text
      from client_companies
      where id = $1
-       and (manager_id = $2 or support_manager_id = $2)
-     limit 1`,
-    [id, managerId],
+       and ($3::boolean or manager_id = $2 or support_manager_id = $2)
+     limit 1${client ? ' for update' : ''}`,
+    [id, managerId, canSeeAllClients(session)],
   );
   if (!result.rows[0]) throw new Error('Компания клиента не найдена');
 }
@@ -144,10 +156,9 @@ export async function getClientCompanies(session: AdminSession): Promise<ClientC
 export async function createClientCompany(input: ClientCompanyInput, session: AdminSession): Promise<ClientCompany> {
   await ensureSiteSchema();
   const assignments = await normalizeManagerAssignments(input, session);
-  await assertManagerRole(assignments.managerId, 'manager');
-  await assertManagerRole(assignments.supportManagerId, 'support_manager');
 
   return withTransaction(async (client) => {
+    await assertManagerAssignments(assignments, client);
     const result = await client.query<ClientCompanyRow>(
       `insert into client_companies (
          title, inn, kpp, contact_name, email, phone, address, note,
@@ -220,7 +231,7 @@ export async function createClientCompany(input: ClientCompanyInput, session: Ad
       passwordChangedAt: primaryUser.rows[0]?.password_changed_at ?? '',
       displayPassword: primaryUser.rows[0]?.display_password ?? '',
     };
-  });
+  }, { trackCommitOutcome: true });
 }
 
 export async function updateClientCompany(
@@ -229,12 +240,12 @@ export async function updateClientCompany(
   session: AdminSession,
 ): Promise<ClientCompany> {
   await ensureSiteSchema();
-  await assertClientCompanyVisible(id, session);
   const assignments = await normalizeManagerAssignments(input, session);
-  await assertManagerRole(assignments.managerId, 'manager');
-  await assertManagerRole(assignments.supportManagerId, 'support_manager');
 
   return withTransaction(async (client) => {
+    await assertManagerAssignments(assignments, client);
+    // Permission cannot become stale between checking and updating ownership.
+    await assertClientCompanyVisible(id, session, client);
     const result = await client.query<ClientCompanyRow>(
       `update client_companies
        set title = $2,
@@ -317,7 +328,7 @@ export async function updateClientCompany(
        where company_id = $1`,
       [id],
     );
-    return {
+    const company = {
       ...mapClientCompany(result.rows[0]),
       userCount: Number(userCount.rows[0]?.count ?? 0),
       clientLogin: userCount.rows[0]?.login ?? '',
@@ -325,7 +336,12 @@ export async function updateClientCompany(
       passwordChangedAt: userCount.rows[0]?.password_changed_at ?? '',
       displayPassword: userCount.rows[0]?.display_password ?? '',
     };
-  });
+    await writeClientCompanyPriceListAssignments(client, id, assignments);
+    if (input.passwordHash && company.clientUserId) {
+      await revokeClientUserSessions(company.clientUserId, client);
+    }
+    return company;
+  }, { trackCommitOutcome: true });
 }
 
 export async function updateClientCompanyManagerAssignments(
@@ -336,8 +352,7 @@ export async function updateClientCompanyManagerAssignments(
   await ensureSiteSchema();
   await assertClientCompanyVisible(id, session);
   const assignments = await normalizeManagerAssignments(input, session);
-  await assertManagerRole(assignments.managerId, 'manager');
-  await assertManagerRole(assignments.supportManagerId, 'support_manager');
+  await assertManagerAssignments(assignments);
 
   await query(
     `update client_companies
@@ -351,9 +366,9 @@ export async function updateClientCompanyManagerAssignments(
 
 export async function deleteClientCompany(id: number, session: AdminSession): Promise<ClientCompany> {
   await ensureSiteSchema();
-  await assertClientCompanyVisible(id, session);
 
   return withTransaction(async (client) => {
+    await assertClientCompanyVisible(id, session, client);
     const result = await client.query<ClientCompanyRow>(
       `select
          cc.id::text,
@@ -407,7 +422,7 @@ export async function deleteClientCompany(id: number, session: AdminSession): Pr
     const company = mapClientCompany(result.rows[0]);
     await client.query(`delete from client_companies where id = $1`, [id]);
     return company;
-  });
+  }, { trackCommitOutcome: true });
 }
 
 export async function getClientUserByLogin(login: string): Promise<ClientPortalUserAuth | null> {

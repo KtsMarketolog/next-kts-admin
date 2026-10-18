@@ -13,6 +13,9 @@ export type StockImportError = {
 };
 
 export type StockImportResult = {
+  saved?: boolean;
+  warnings?: Array<{ code: string; message: string }>;
+  alreadyApplied?: boolean;
   logId: number | null;
   fileName: string;
   emailFrom: string;
@@ -40,6 +43,7 @@ export type StockEmailSkipSample = {
 };
 
 export type StockEmailImportResult = {
+  warnings?: Array<{ code: string; message: string }>;
   status: 'completed' | 'busy';
   processed: number;
   result: StockImportResult | null;

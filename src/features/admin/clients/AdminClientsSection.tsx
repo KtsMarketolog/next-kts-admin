@@ -8,6 +8,7 @@ import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 
 import { AdminClientCompanyCard } from './AdminClientCompanyCard';
 import { AdminClientCreateForm } from './AdminClientCreateForm';
+import { submitClientMutation } from './clientMutation';
 import {
   emptyDraft,
   readApiError,
@@ -22,6 +23,8 @@ import {
 export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const [companies, setCompanies] = useState<ClientCompany[]>([]);
   const companiesRef = useRef<ClientCompany[]>([]);
+  const mutationRef = useRef(false);
+  const dataGeneration = useRef(0);
   const [managers, setManagers] = useState<Manager[]>([]);
   const [draft, setDraft] = useState<ClientDraft>(emptyDraft);
   const [companyDrafts, setCompanyDrafts] = useState<Record<number, ClientDraft>>({});
@@ -49,10 +52,12 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   };
 
   const loadClients = useCallback(async (preserveDrafts = false, signal?: AbortSignal) => {
+    if (mutationRef.current) return;
+    const generation = dataGeneration.current;
     const response = await fetch('/api/admin/clients', { cache: 'no-store', signal });
     if (!response.ok) throw new Error(await readApiError(response, 'Не удалось загрузить клиентов'));
     const data = await response.json();
-    if (signal?.aborted) return;
+    if (signal?.aborted || generation !== dataGeneration.current) return;
     const nextCompanies = Array.isArray(data.companies) ? data.companies : [];
     const previousCompanies = new Map(companiesRef.current.map((company) => [company.id, company]));
     companiesRef.current = nextCompanies;
@@ -112,6 +117,31 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     }));
   };
 
+  // Use the transaction's returned row, not a second request that can fail after save.
+  const acceptSavedCompany = (company: ClientCompany) => {
+    const existing = companiesRef.current.some((item) => item.id === company.id);
+    const nextCompanies = existing
+      ? companiesRef.current.map((item) => item.id === company.id ? company : item)
+      : [company, ...companiesRef.current];
+    companiesRef.current = nextCompanies;
+    setCompanies(nextCompanies);
+    setCompanyDrafts((current) => ({ ...current, [company.id]: toDraft(company) }));
+  };
+
+  const startMutation = () => {
+    if (mutationRef.current) return false;
+    mutationRef.current = true;
+    dataGeneration.current += 1;
+    setBusy(true);
+    return true;
+  };
+
+  const finishMutation = () => {
+    dataGeneration.current += 1;
+    mutationRef.current = false;
+    setBusy(false);
+  };
+
   const createCompany = async () => {
     if (!draft.title.trim()) {
       showStatus('Введите название компании');
@@ -127,22 +157,21 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     }
     if (!validateClientPassword(draft.password.trim())) return;
 
-    setBusy(true);
-    const response = await fetch('/api/admin/clients', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(draft),
-    });
-    setBusy(false);
-
-    if (!response.ok) {
-      showStatus(await readApiError(response, 'Не удалось добавить компанию'));
-      return;
+    if (!startMutation()) return;
+    try {
+      const result = await submitClientMutation('/api/admin/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      });
+      setDraft(emptyDraft);
+      if (result.company) acceptSavedCompany(result.company);
+      setStatus(['Компания клиента добавлена.', ...result.warnings].join(' '));
+    } catch (error) {
+      setStatus(readApiErrorFallback(error, 'Не удалось подтвердить добавление компании'));
+    } finally {
+      finishMutation();
     }
-
-    setDraft(emptyDraft);
-    showStatus('Компания клиента добавлена');
-    await loadClients();
   };
 
   const saveCompany = async (companyId: number) => {
@@ -164,37 +193,36 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     }
     if (nextPassword && !validateClientPassword(nextPassword)) return;
 
-    setBusy(true);
-    const response = await fetch(`/api/admin/clients/${companyId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...nextDraft, password: nextPassword }),
-    });
-    setBusy(false);
-
-    if (!response.ok) {
-      showStatus(await readApiError(response, 'Не удалось сохранить компанию'));
-      return;
-    }
-
-    if (nextPassword) {
-      setClientPasswordDrafts((current) => {
-        const next = { ...current };
-        delete next[companyId];
-        return next;
+    if (!startMutation()) return;
+    try {
+      const result = await submitClientMutation(`/api/admin/clients/${companyId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...nextDraft, password: nextPassword }),
       });
-      setClientPasswordEditIds((current) => {
-        const next = { ...current };
-        delete next[companyId];
-        return next;
-      });
+      if (result.company) acceptSavedCompany(result.company);
+      if (nextPassword) {
+        setClientPasswordDrafts((current) => {
+          const next = { ...current };
+          delete next[companyId];
+          return next;
+        });
+        setClientPasswordEditIds((current) => {
+          const next = { ...current };
+          delete next[companyId];
+          return next;
+        });
+      }
+      setSavedCompanyId(companyId);
+      setStatus(['Компания клиента сохранена.', ...result.warnings].join(' '));
+      window.setTimeout(() => {
+        setSavedCompanyId((current) => (current === companyId ? null : current));
+      }, 2200);
+    } catch (error) {
+      setStatus(readApiErrorFallback(error, 'Не удалось подтвердить сохранение компании'));
+    } finally {
+      finishMutation();
     }
-    setSavedCompanyId(companyId);
-    showStatus('Компания клиента сохранена');
-    await loadClients();
-    window.setTimeout(() => {
-      setSavedCompanyId((current) => (current === companyId ? null : current));
-    }, 2200);
   };
 
   const deleteCompany = async (company: ClientCompany) => {
@@ -203,37 +231,37 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     );
     if (!confirmed) return;
 
-    setBusy(true);
-    const response = await fetch(`/api/admin/clients/${company.id}`, { method: 'DELETE' });
-    setBusy(false);
-
-    if (!response.ok) {
-      showStatus(await readApiError(response, 'Не удалось удалить клиента'));
-      return;
+    if (!startMutation()) return;
+    try {
+      const result = await submitClientMutation(`/api/admin/clients/${company.id}`, { method: 'DELETE' });
+      companiesRef.current = companiesRef.current.filter((item) => item.id !== company.id);
+      setCompanies(companiesRef.current);
+      setClientPasswordDrafts((current) => {
+        const next = { ...current };
+        delete next[company.id];
+        return next;
+      });
+      setClientPasswordEditIds((current) => {
+        const next = { ...current };
+        delete next[company.id];
+        return next;
+      });
+      setCompanyDrafts((current) => {
+        const next = { ...current };
+        delete next[company.id];
+        return next;
+      });
+      setExpandedCompanyIds((current) => {
+        const next = { ...current };
+        delete next[company.id];
+        return next;
+      });
+      setStatus(['Клиент удалён.', ...result.warnings].join(' '));
+    } catch (error) {
+      setStatus(readApiErrorFallback(error, 'Не удалось подтвердить удаление клиента'));
+    } finally {
+      finishMutation();
     }
-
-    setClientPasswordDrafts((current) => {
-      const next = { ...current };
-      delete next[company.id];
-      return next;
-    });
-    setClientPasswordEditIds((current) => {
-      const next = { ...current };
-      delete next[company.id];
-      return next;
-    });
-    setCompanyDrafts((current) => {
-      const next = { ...current };
-      delete next[company.id];
-      return next;
-    });
-    setExpandedCompanyIds((current) => {
-      const next = { ...current };
-      delete next[company.id];
-      return next;
-    });
-    showStatus('Клиент удален');
-    await loadClients();
   };
 
   const toggleCompanyExpanded = (companyId: number) => {
@@ -249,6 +277,18 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     });
   };
 
+  const refreshClients = async () => {
+    setBusy(true);
+    try {
+      await loadClients(true);
+      setStatus('Список обновлён. Несохранённые изменения в формах оставлены.');
+    } catch (error) {
+      setStatus(readApiErrorFallback(error, 'Не удалось обновить список клиентов'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -256,12 +296,15 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
           <p>Личный кабинет</p>
           <h2>Клиенты</h2>
         </div>
+        <button className={styles.secondary} disabled={busy} onClick={refreshClients}>
+          Обновить список
+        </button>
         <button className={styles.secondary} onClick={onBack}>
           Вернуться в панель управления
         </button>
       </div>
 
-      {status ? <p className={styles.status}>{status}</p> : null}
+      {status ? <p role="status" className={styles.status}>{status}</p> : null}
 
       <AdminClientCreateForm
         draft={draft}

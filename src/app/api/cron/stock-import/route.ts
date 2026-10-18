@@ -4,6 +4,8 @@ import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidat
 import { importStockFromEmail } from '@/entities/catalog/api/stockImport';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getClientIp } from '@/shared/lib/rateLimit';
+import { runPostCommitTasks } from '@/shared/lib/postCommitTasks';
+import { TransactionCommitUnknownError } from '@/shared/lib/db/transactionOutcome';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -43,10 +45,11 @@ export async function POST(request: Request) {
 
   try {
     const result = await importStockFromEmail();
-    if ((result.result?.updatedRows ?? 0) > 0) {
-      revalidatePublicCatalog();
-    }
-    await recordSecurityEvent({
+    const warnings = await runPostCommitTasks([
+      ...((result.result?.updatedRows ?? 0) > 0 ? [{
+        code: 'stock_catalog_refresh_failed', message: 'Остатки сохранены, но обновление отображения каталога требует повторения.', run: () => revalidatePublicCatalog(),
+      }] : []),
+      { code: 'stock_security_audit_failed', message: 'Результат проверки сохранён, но запись в журнал безопасности требует повторения.', run: () => recordSecurityEvent({
       eventType: 'stock_import_check_email',
       actorType: 'system',
       entityType: 'stock_import',
@@ -63,10 +66,11 @@ export async function POST(request: Request) {
         updatedRows: result.result?.updatedRows,
         failedRows: result.result?.failedRows,
       },
-    });
-    return Response.json(result);
+      }, { required: true }) },
+    ]);
+    return Response.json({ ...result, warnings: [...(result.warnings ?? []), ...warnings] });
   } catch (error) {
-    await recordSecurityEvent({
+    await runPostCommitTasks([{ code: 'stock_failure_audit_failed', message: 'Не удалось записать ошибку проверки почты в журнал безопасности.', run: () => recordSecurityEvent({
       eventType: 'stock_import_check_email_failed',
       actorType: 'system',
       entityType: 'stock_import',
@@ -77,7 +81,10 @@ export async function POST(request: Request) {
         source: 'cron',
         error: error instanceof Error ? error.message : 'unknown',
       },
-    });
-    return Response.json({ error: error instanceof Error ? error.message : 'Failed to check stock email' }, { status: 400 });
+    }, { required: true }) }]);
+    if (error instanceof TransactionCommitUnknownError) {
+      return Response.json({ saved: null, code: error.code, error: 'Не удалось подтвердить сохранение остатков. Проверьте журнал импорта. Следующая проверка почты сверит квитанцию и не применит уже сохранённое письмо заново.' }, { status: 503 });
+    }
+    return Response.json({ saved: false, error: error instanceof Error ? error.message : 'Failed to check stock email' }, { status: 400 });
   }
 }

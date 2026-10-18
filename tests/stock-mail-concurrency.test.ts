@@ -12,7 +12,7 @@ type Importer = {
   importStockFromEmail(): Promise<StockEmailImportResult>;
   importStockFromExcelBuffer(input: { buffer: Buffer; fileName: string }): Promise<StockImportResult>;
 };
-type Stage = 'connect' | 'mailbox' | 'search' | 'fetch' | 'parse' | 'write' | 'move' | 'flags' | 'logout' | 'close';
+type Stage = 'connect' | 'mailbox' | 'search' | 'fetch' | 'parse' | 'write' | 'log' | 'receipt' | 'move' | 'flags' | 'logout' | 'close';
 type Message = { uid: number; buffer: Buffer };
 
 function workbook(quantityHeader = 'Сейчас') {
@@ -32,7 +32,7 @@ function gate() {
 }
 
 let compiledImporter: Promise<string> | undefined;
-async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-release'; legacyBusy?: boolean; messages?: Message[] } = {}) {
+async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-release'; legacyBusy?: boolean; messages?: Message[]; failMoveAndFlags?: boolean; commitUnknownOnce?: boolean } = {}) {
   // Bundle only in memory. DB and mail dependencies are replaced at resolution,
   // not through environment credentials; the fixture cannot open a real socket.
   compiledImporter ??= build({
@@ -67,13 +67,30 @@ async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-releas
   let legacyReleases = 0;
   let clients = 0;
   let updates = 0;
+  const receipts = new Map<string, number>();
+  const logs = new Map<number, StockImportResult>();
+  let commitUnknown = options.commitUnknownOnce === true;
   async function step(stage: Stage) {
     events.push(stage);
     await hooks.get(stage)?.();
-    if (options.fail === stage) throw new Error(`Synthetic ${stage} failure`);
+    if (options.fail === stage || options.failMoveAndFlags && (stage === 'move' || stage === 'flags')) throw new Error(`Synthetic ${stage} failure`);
   }
   const query = async (sql: string, params: unknown[] = []) => {
     assert.doesNotMatch(sql, /\b(?:delete\s+from|update|insert\s+into)\s+wholesale_price_lists\b/i);
+    if (sql.includes('from stock_import_mail_receipts receipts')) {
+      const logId = receipts.get(String(params[0]));
+      return { rowCount: logId ? 1 : 0, rows: logId ? [{ result: logs.get(logId) }] : [] };
+    }
+    if (/^\s*insert into stock_import_mail_receipts/.test(sql)) {
+      await step('receipt');
+      for (const key of params[0] as string[]) if (!receipts.has(key)) receipts.set(key, Number(params[1]));
+    }
+    if (/^\s*insert into stock_import_logs/.test(sql)) {
+      await step('log');
+      const id = logs.size + 1;
+      logs.set(id, { logId: id, fileName: String(params[0]), emailFrom: String(params[1]), emailSubject: String(params[2]), status: params[3] as StockImportResult['status'], totalRows: Number(params[4]), updatedRows: Number(params[5]), notFoundRows: Number(params[6]), failedRows: Number(params[7]), errors: JSON.parse(String(params[8])) });
+      return { rowCount: 1, rows: [{ id: String(id) }] };
+    }
     if (/^\s*delete from stock_import_locks/.test(sql) && sql.includes('locked_at <')) {
       if (legacyExpired) legacyHeld = false;
     } else if (/^\s*insert into stock_import_locks/.test(sql)) {
@@ -96,7 +113,24 @@ async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-releas
   };
   const database = {
     query, ensureSiteSchema: async () => {}, ensureCatalogSchema: async () => {},
-    withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>) => callback({ query }),
+    withTransaction: async (callback: (client: { query: typeof query }) => Promise<unknown>, txOptions?: { trackCommitOutcome?: boolean }) => {
+      const oldUpdates = updates;
+      const oldReceipts = [...receipts.entries()];
+      const oldLogs = [...logs.entries()];
+      let result: unknown;
+      try { result = await callback({ query }); }
+      catch (error) {
+        updates = oldUpdates;
+        receipts.clear(); oldReceipts.forEach(([key, id]) => receipts.set(key, id));
+        logs.clear(); oldLogs.forEach(([id, log]) => logs.set(id, log));
+        throw error;
+      }
+      if (commitUnknown && txOptions?.trackCommitOutcome) {
+        commitUnknown = false;
+        throw new Error('Synthetic COMMIT result unknown');
+      }
+      return result;
+    },
     async tryAcquireSessionAdvisoryLock(name: string) {
       lockNames.push(name);
       events.push('session-acquire');
@@ -111,6 +145,7 @@ async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-releas
     },
   };
   class ImapFlow {
+    mailbox = { uidValidity: BigInt(123) };
     constructor() {
       clients += 1;
       events.push('constructor');
@@ -162,14 +197,14 @@ async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-releas
     new Function('require', 'module', 'exports', code)((name: string) => {
       if (name === 'synthetic-stock-database') return database;
       if (name === 'synthetic-stock-mail') return mail;
-      assert.equal(name, 'xlsx', 'no unexpected dependency may reach real infrastructure');
+      assert.ok(['xlsx', 'node:crypto'].includes(name), 'no unexpected dependency may reach real infrastructure');
       return require(name);
     }, loaded, loaded.exports);
     return loaded.exports;
   }
   const compiled = await compiledImporter;
   return {
-    first: loadWorker(compiled), second: loadWorker(compiled), hooks, events, moves, flags, lockNames, messages,
+    first: loadWorker(compiled), second: loadWorker(compiled), hooks, events, moves, flags, lockNames, messages, receipts, logs,
     get state() { return { sessionHeld, legacyHeld, sessionReleases, legacyReleases, clients, updates }; },
     expireLegacyRow() { legacyHeld = false; },
     ageLegacyRowPastTtl() { legacyExpired = true; },
@@ -258,7 +293,7 @@ test('legacy workbook contention returns busy without moving candidate or supers
   assert.deepEqual(h.moves, [{ uid: 101, folder: 'Processed' }, { uid: 100, folder: 'Processed' }]);
 });
 
-for (const stage of ['constructor', 'connect', 'mailbox', 'search', 'fetch', 'parse', 'write', 'mailbox-release', 'close'] as const) {
+for (const stage of ['constructor', 'connect', 'mailbox', 'search', 'fetch', 'parse', 'write', 'log', 'receipt'] as const) {
   test(`stock email releases the common lock after ${stage} failure`, async () => {
     const h = await harness({ fail: stage });
     await assert.rejects(h.first.importStockFromEmail(), /Synthetic/);
@@ -267,7 +302,8 @@ for (const stage of ['constructor', 'connect', 'mailbox', 'search', 'fetch', 'pa
     assert.equal(h.state.sessionReleases, 1);
     if (stage !== 'constructor') assert.ok(h.events.includes('close'));
     if (['search', 'fetch', 'parse', 'write', 'mailbox-release', 'close'].includes(stage)) assert.ok(h.events.includes('mailbox-release'));
-    if (stage !== 'write') assert.equal(h.moves.some(({ folder }) => folder === 'ImportErrors'), false);
+    assert.equal(h.moves.some(({ folder }) => folder === 'ImportErrors'), false, 'infrastructure failures must not classify a workbook as invalid');
+    assert.equal(h.state.updates, 0);
   });
 }
 
@@ -276,6 +312,51 @@ test('logout failure still closes the mail connection and releases the common lo
   assert.equal((await h.first.importStockFromEmail()).processed, 1);
   assert.equal(h.state.sessionHeld, false);
   assert.deepEqual(h.events.slice(-3), ['logout', 'close', 'session-release']);
+});
+
+for (const stage of ['mailbox-release', 'close'] as const) {
+  test(`post-commit ${stage} failure reports a warning without losing successful import`, async () => {
+    const h = await harness({ fail: stage });
+    const result = await h.first.importStockFromEmail();
+    assert.equal(result.result?.saved, true);
+    assert.equal(result.result?.status, 'success');
+    assert.equal(result.warnings?.length, 1);
+    assert.equal(h.state.updates, 1);
+    assert.equal(h.state.sessionHeld, false);
+  });
+}
+
+test('failed MOVE and Seen after commit return saved warning and retry never reapplies selected or superseded snapshots', async () => {
+  const h = await harness({ failMoveAndFlags: true, messages: [{ uid: 100, buffer: workbook() }, { uid: 101, buffer: workbook() }] });
+  const first = await h.first.importStockFromEmail();
+  assert.equal(first.result?.saved, true);
+  assert.equal(first.warnings?.length, 2);
+  assert.equal(h.state.updates, 1);
+  assert.equal(h.logs.size, 1);
+  assert.equal(h.receipts.size, 2);
+  const second = await h.second.importStockFromEmail();
+  assert.equal(second.result?.alreadyApplied, true);
+  assert.equal(h.state.updates, 1);
+  h.messages.delete(101); // simulate successful later archival of the newest mail
+  const older = await h.first.importStockFromEmail();
+  assert.equal(older.result?.alreadyApplied, true);
+  assert.equal(h.state.updates, 1, 'superseded mail must not roll back a newer imported snapshot');
+  assert.equal(h.logs.size, 1);
+  assert.equal(h.state.sessionHeld, false);
+});
+
+test('a lost COMMIT acknowledgement leaves email intact and the next scan recovers its receipt without another stock update', async () => {
+  const h = await harness({ commitUnknownOnce: true });
+  await assert.rejects(h.first.importStockFromEmail(), /COMMIT result unknown/);
+  assert.deepEqual(h.moves, [], 'uncertain commit is not a malformed file');
+  assert.equal(h.state.sessionHeld, false);
+  assert.equal(h.state.updates, 1, 'simulated database commit already persisted');
+  const recovered = await h.second.importStockFromEmail();
+  assert.equal(recovered.result?.alreadyApplied, true);
+  assert.equal(recovered.result?.saved, true);
+  assert.equal(h.state.updates, 1);
+  assert.equal(h.logs.size, 1);
+  assert.deepEqual(h.moves, [{ uid: 101, folder: 'Processed' }]);
 });
 
 test('an actually invalid workbook retains existing ImportErrors behavior and releases both locks', async () => {

@@ -1,4 +1,5 @@
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import { TransactionCommitUnknownError } from './transactionOutcome';
 
 declare global {
   var __ktsPgPool: Pool | undefined;
@@ -39,18 +40,31 @@ export async function query<T extends QueryResultRow = QueryResultRow>(text: str
   return getPool().query<T>(text, params);
 }
 
-export async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>) {
+export async function withTransaction<T>(
+  callback: (client: PoolClient) => Promise<T>,
+  options: { trackCommitOutcome?: boolean } = {},
+) {
   const client = await getPool().connect();
+  let committing = false;
+  let discard = false;
   try {
     await client.query('begin');
     const result = await callback(client);
-    await client.query('commit');
+    committing = true;
+    const commit = await client.query('commit');
+    committing = false;
+    if (options.trackCommitOutcome && commit.command === 'ROLLBACK') {
+      throw new Error('Транзакция отменена. Изменения не сохранены.');
+    }
     return result;
   } catch (error) {
-    await client.query('rollback').catch(() => {});
+    discard = committing;
+    await client.query('rollback').catch(() => { discard = true; });
+    // A lost COMMIT acknowledgement does not establish whether it committed.
+    if (committing && options.trackCommitOutcome) throw new TransactionCommitUnknownError();
     throw error;
   } finally {
-    client.release();
+    client.release(discard);
   }
 }
 
@@ -66,7 +80,7 @@ export async function tryAcquireSessionAdvisoryLock(lockName: string) {
       return null;
     }
   } catch (error) {
-    client.release();
+    client.release(true);
     throw error;
   }
 
@@ -74,10 +88,15 @@ export async function tryAcquireSessionAdvisoryLock(lockName: string) {
   return async () => {
     if (released) return;
     released = true;
+    let discard = false;
     try {
       await client.query(`select pg_advisory_unlock(hashtext($1::text))`, [lockName]);
+    } catch (error) {
+      discard = true;
+      throw error;
     } finally {
-      client.release();
+      // An uncertain unlock must not return a session-owned lock to the pool.
+      client.release(discard);
     }
   };
 }

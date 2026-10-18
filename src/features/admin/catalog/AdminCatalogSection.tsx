@@ -78,13 +78,13 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
 
   const loadStockLogs = useCallback(async () => {
     const response = await fetch('/api/admin/stock-import/logs?limit=10', { cache: 'no-store' });
-    if (!response.ok) return;
-    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error('Не удалось обновить отображение журнала импорта');
+    const data = await response.json();
     setStockLogs(Array.isArray(data.logs) ? data.logs : []);
   }, []);
 
   useEffect(() => {
-    void loadStockLogs();
+    void loadStockLogs().catch(() => {});
   }, [loadStockLogs]);
 
   const markSaved = (id: string) => {
@@ -135,48 +135,63 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
 
   const checkStockEmail = async () => {
     setBusyId('stock-email');
-    const response = await fetch('/api/admin/stock-import/check-email', { method: 'POST' });
-    setBusyId(null);
+    try {
+      const response = await fetch('/api/admin/stock-import/check-email', { method: 'POST' });
 
-    if (!response.ok) {
-      showStatus(await readError(response, 'Не удалось проверить почту с остатками'));
-      return;
-    }
-
-    const data = await response.json();
-    if (data.status === 'busy') {
-      showStatus('Импорт остатков уже выполняется. Повторная проверка пропущена; письма не изменены.');
-      return;
-    }
-    await loadStockLogs();
-    if (!data.processed) {
-      const skipped = data.skipped ?? {};
-      const firstSample = Array.isArray(skipped.samples) ? skipped.samples[0] : null;
-      const checkedMessages = Number(data.checkedMessages ?? 0);
-      const settings = data.settings ?? {};
-      if (checkedMessages > 0 && firstSample?.reason === 'sender') {
-        showStatus(
-          `Найдено писем: ${checkedMessages}, но отправитель не разрешён: ${firstSample?.from || 'не указан'}. Добавьте его в STOCK_MAIL_ALLOWED_FROM.`,
-        );
+      if (!response.ok) {
+        showStatus(await readError(response, 'Не удалось проверить почту с остатками'));
         return;
       }
-      if (checkedMessages > 0 && firstSample?.reason === 'subject') {
-        showStatus(`Найдено писем: ${checkedMessages}, но тема не содержит "${settings.subjectPart}".`);
-        return;
-      }
-      if (checkedMessages > 0 && firstSample?.reason === 'attachment') {
-        const files = Array.isArray(firstSample?.attachments) ? firstSample.attachments.filter(Boolean).join(', ') : '';
-        showStatus(
-          `Найдено писем: ${checkedMessages}, но нет подходящего .xlsx с префиксом "${settings.filePrefix || 'Остатки'}"${files ? `; вложения: ${files}` : ''}.`,
-        );
-        return;
-      }
-      showStatus('Новых писем с остатками нет');
-      return;
-    }
 
-    const result = data.result;
-    showStatus(`Остатки обновлены: ${result?.updatedRows ?? 0}, ошибок: ${result?.failedRows ?? 0}`);
+      const data = await response.json();
+      if (data.status === 'busy') {
+        showStatus('Импорт остатков уже выполняется. Повторная проверка пропущена; письма не изменены.');
+        return;
+      }
+      const warnings = Array.isArray(data.warnings)
+        ? data.warnings.map((warning: { message?: string }) => warning.message).filter((message: unknown): message is string => typeof message === 'string')
+        : [];
+      await loadStockLogs().catch(() => {
+        warnings.push('Результат проверки получен, но список журнала не обновился. Обновите страницу; повторно импортировать файл не нужно.');
+      });
+      const statusWithWarnings = (message: string) => showStatus([message, ...warnings].join(' '));
+      if (!data.processed) {
+        const skipped = data.skipped ?? {};
+        const firstSample = Array.isArray(skipped.samples) ? skipped.samples[0] : null;
+        const checkedMessages = Number(data.checkedMessages ?? 0);
+        const settings = data.settings ?? {};
+        if (checkedMessages > 0 && firstSample?.reason === 'sender') {
+          statusWithWarnings(
+            `Найдено писем: ${checkedMessages}, но отправитель не разрешён: ${firstSample?.from || 'не указан'}. Добавьте его в STOCK_MAIL_ALLOWED_FROM.`,
+          );
+          return;
+        }
+        if (checkedMessages > 0 && firstSample?.reason === 'subject') {
+          statusWithWarnings(`Найдено писем: ${checkedMessages}, но тема не содержит "${settings.subjectPart}".`);
+          return;
+        }
+        if (checkedMessages > 0 && firstSample?.reason === 'attachment') {
+          const files = Array.isArray(firstSample?.attachments) ? firstSample.attachments.filter(Boolean).join(', ') : '';
+          statusWithWarnings(
+            `Найдено писем: ${checkedMessages}, но нет подходящего .xlsx с префиксом "${settings.filePrefix || 'Остатки'}"${files ? `; вложения: ${files}` : ''}.`,
+          );
+          return;
+        }
+        statusWithWarnings('Новых писем с остатками нет');
+        return;
+      }
+
+      const result = data.result;
+      statusWithWarnings(result?.alreadyApplied
+        ? 'Это письмо уже обработано. Остатки повторно не изменялись.'
+        : result?.status === 'failed'
+          ? `Остатки не изменены. Результат проверки записан в журнал; ошибок: ${result?.failedRows ?? 0}, не найдено: ${result?.notFoundRows ?? 0}.`
+          : `Остатки сохранены: ${result?.updatedRows ?? 0}, ошибок: ${result?.failedRows ?? 0}.`);
+    } catch {
+      showStatus('Не удалось получить результат проверки почты. Проверьте журнал импорта: запрос мог завершиться сохранением.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const createProduct = async () => {

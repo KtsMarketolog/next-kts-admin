@@ -14,6 +14,7 @@ import {
 import { trackAnalyticsEvent } from '../analyticsRepo';
 import { query, withTransaction } from '../client';
 import { assertClientCompanyVisible } from '../clientCompaniesRepo';
+import { writeClientCompanyPriceListAssignments } from '../clientCompanyPriceListAssignments';
 import { ensureSiteSchema } from '../schema';
 import {
   actionEventType,
@@ -705,14 +706,7 @@ export async function updateWholesalePriceListManagerAssignmentsForClientCompany
   if (!Number.isInteger(companyId) || companyId <= 0) return;
   if (session) await assertClientCompanyVisible(companyId, session);
 
-  await query(
-    `update wholesale_price_lists
-     set manager_id = $2,
-         support_manager_id = $3,
-         updated_at = now()
-     where client_company_id = $1`,
-    [companyId, input.managerId, input.supportManagerId],
-  );
+  await writeClientCompanyPriceListAssignments({ query }, companyId, input);
 }
 
 export async function deleteWholesalePriceList(id: number, session?: AdminSession | null) {

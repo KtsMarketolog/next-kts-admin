@@ -2,6 +2,7 @@ import { importStockFromEmail } from '../src/entities/catalog/api/stockImport';
 
 async function main() {
   const result = await importStockFromEmail();
+  for (const warning of result.warnings ?? []) console.warn(`${warning.code}: ${warning.message}`);
 
   if (result.status === 'busy') {
     console.log('Импорт остатков уже выполняется. Повторная проверка пропущена; письма не изменены.');
@@ -17,6 +18,7 @@ async function main() {
   console.log(
     [
       `Импорт остатков: ${importResult.status}`,
+      ...(importResult.alreadyApplied ? ['письмо уже обработано; остатки повторно не изменялись'] : []),
       `файл: ${importResult.fileName}`,
       `строк: ${importResult.totalRows}`,
       `обновлено: ${importResult.updatedRows}`,

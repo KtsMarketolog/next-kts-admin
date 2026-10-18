@@ -208,11 +208,13 @@ test('clients mount starts one initial GET and background refresh preserves draf
   assert.ok(declaration && ts.isVariableDeclaration(declaration) && declaration.initializer && ts.isCallExpression(declaration.initializer));
   const requests: Array<{ resolve: (value: unknown) => void; signal?: AbortSignal }> = [];
   const companiesRef = { current: [] as ClientCompany[] };
+  const mutationRef = { current: false };
+  const dataGeneration = { current: 0 };
   let drafts: Record<number, ClientDraft> = {};
   let managerLoads = 0;
   const loadClients = executeCallback<(preserve?: boolean, signal?: AbortSignal) => Promise<void>>(declaration.initializer.arguments[0], parsed.source, {
     fetch: (_url: string, options: { signal?: AbortSignal }) => new Promise((resolve) => { requests.push({ resolve, signal: options.signal }); }),
-    companiesRef, toDraft, readApiError,
+    companiesRef, mutationRef, dataGeneration, toDraft, readApiError,
     setCompanies: () => {},
     setCompanyDrafts: (update: (current: Record<number, ClientDraft>) => Record<number, ClientDraft>) => { drafts = update(drafts); },
   });
@@ -235,10 +237,20 @@ test('clients mount starts one initial GET and background refresh preserves draf
   await env.flush();
   assert.equal(drafts[1].title, 'Unsaved local name');
   assert.equal(drafts[2].title, 'Updated 2');
+  // A GET started before a save must not restore the old password/ownership DTO.
+  const staleRefresh = loadClients(true);
+  dataGeneration.current += 1;
+  requests[2].resolve(response(companies));
+  await staleRefresh;
+  assert.equal(drafts[2].title, 'Updated 2');
+  mutationRef.current = true;
+  await loadClients(true);
+  assert.equal(requests.length, 3, 'Background reloads are skipped during a mutation');
+  mutationRef.current = false;
   await env.advance(15_000);
   for (const cleanup of cleanups) cleanup?.();
-  assert.equal(requests[2].signal?.aborted, true);
-  requests[2].resolve(response(companies));
+  assert.equal(requests[3].signal?.aborted, true);
+  requests[3].resolve(response(companies));
   await env.flush();
   assert.equal(drafts[2].title, 'Updated 2', 'late responses after unmount must not update state');
   assert.equal(env.timers.size, 0);

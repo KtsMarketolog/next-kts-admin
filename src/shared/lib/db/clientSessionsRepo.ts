@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'crypto';
+import type { PoolClient } from 'pg';
 
 import { hashSensitiveValue, safeHeaderValue } from '../securityHash';
 import { query } from './client';
@@ -121,9 +122,10 @@ export async function revokeStoredClientSession(token: string) {
   );
 }
 
-export async function revokeClientUserSessions(clientUserId: number) {
-  await ensureSiteSchema();
-  await query(
+export async function revokeClientUserSessions(clientUserId: number, client?: Pick<PoolClient, 'query'>) {
+  if (!client) await ensureSiteSchema();
+  const db = client ?? { query };
+  await db.query(
     `update client_sessions
      set revoked_at = coalesce(revoked_at, now())
      where client_user_id = $1 and revoked_at is null`,

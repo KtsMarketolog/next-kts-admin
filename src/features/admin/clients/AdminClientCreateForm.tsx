@@ -21,7 +21,7 @@ export function AdminClientCreateForm({
   onCreate,
 }: AdminClientCreateFormProps) {
   return (
-    <div className={styles.clientCreateCard}>
+    <fieldset disabled={busy} className={styles.clientCreateCard} style={{ minWidth: 0 }}>
       <label>
         <span>Компания</span>
         <input value={draft.title} onChange={(event) => onChange({ title: event.target.value })} />
@@ -67,6 +67,6 @@ export function AdminClientCreateForm({
       <button disabled={busy} onClick={onCreate}>
         Добавить клиента
       </button>
-    </div>
+    </fieldset>
   );
 }

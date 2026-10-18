@@ -7,6 +7,8 @@ import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
+import { runPostCommitTasks } from '@/shared/lib/postCommitTasks';
+import { TransactionCommitUnknownError } from '@/shared/lib/db/transactionOutcome';
 
 function managerIdFromBody(value: unknown) {
   const managerId = Number(value);
@@ -69,24 +71,37 @@ export async function POST(request: Request) {
 
   try {
     const company = await createClientCompany(input, session);
-    publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id });
-    await recordSecurityEvent({
-      eventType: 'client_company_created',
-      actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
-      adminUserId: session.adminUserId,
-      managerId: session.managerId,
-      sessionId: session.sessionId,
-      entityType: 'client_company',
-      entityId: company.id,
-      ip: getClientIp(request),
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer'),
-      metadata: { title: company.title, managerId: company.managerId, supportManagerId: company.supportManagerId },
-    });
-    return Response.json({ company });
+    const warnings = await runPostCommitTasks([
+      {
+        code: 'CLIENT_REALTIME_UNAVAILABLE',
+        message: 'Клиент создан, но уведомление других открытых страниц не отправлено. Обновите их вручную.',
+        run: () => publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id }),
+      },
+      {
+        code: 'CLIENT_CREATE_AUDIT_UNAVAILABLE',
+        message: 'Клиент создан, но запись о создании в журнал не добавлена. Требуется повторить журналирование.',
+        run: () => recordSecurityEvent({
+          eventType: 'client_company_created',
+          actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
+          adminUserId: session.adminUserId,
+          managerId: session.managerId,
+          sessionId: session.sessionId,
+          entityType: 'client_company',
+          entityId: company.id,
+          ip: getClientIp(request),
+          userAgent: request.headers.get('user-agent'),
+          referer: request.headers.get('referer'),
+          metadata: { title: company.title, managerId: company.managerId, supportManagerId: company.supportManagerId },
+        }, { required: true }),
+      },
+    ]);
+    return Response.json({ company, saved: true, warnings });
   } catch (error) {
+    if (error instanceof TransactionCommitUnknownError) {
+      return Response.json({ saved: null, code: 'COMMIT_OUTCOME_UNKNOWN', error: 'Не удалось подтвердить результат сохранения. Обновите данные перед повторной попыткой.' }, { status: 503 });
+    }
     return Response.json(
-      { error: error instanceof Error ? error.message : 'Не удалось добавить компанию клиента' },
+      { saved: false, error: error instanceof Error ? error.message : 'Не удалось добавить компанию клиента' },
       { status: 400 },
     );
   }

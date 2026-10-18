@@ -69,7 +69,7 @@ export function AdminClientCompanyCard({
       </div>
 
       {isExpanded ? (
-        <>
+        <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <div className={styles.clientCompanyGrid}>
             <label>
               <span>Компания</span>
@@ -173,7 +173,7 @@ export function AdminClientCompanyCard({
               Удалить
             </button>
           </div>
-        </>
+        </fieldset>
       ) : null}
     </article>
   );

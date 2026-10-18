@@ -2,9 +2,7 @@ import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireEmployee } from '@/shared/lib/adminAuth';
 import {
   deleteClientCompany,
-  revokeClientUserSessions,
   updateClientCompany,
-  updateWholesalePriceListManagerAssignmentsForClientCompany,
   type ClientCompanyInput,
 } from '@/shared/lib/db';
 import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
@@ -13,6 +11,8 @@ import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
+import { runPostCommitTasks } from '@/shared/lib/postCommitTasks';
+import { TransactionCommitUnknownError } from '@/shared/lib/db/transactionOutcome';
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -75,45 +75,54 @@ export async function PUT(request: Request, context: Context) {
   try {
     const company = await updateClientCompany(numericId, input, session);
     const actorType = session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager';
-    await updateWholesalePriceListManagerAssignmentsForClientCompany(
-      company.id,
-      { managerId: company.managerId, supportManagerId: company.supportManagerId },
-      session,
-    );
-    publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id });
-    if (password && company.clientUserId) {
-      await revokeClientUserSessions(company.clientUserId);
-      await recordSecurityEvent({
-        eventType: 'password_changed',
-        actorType,
-        adminUserId: session.adminUserId,
-        managerId: session.managerId,
-        sessionId: session.sessionId,
-        entityType: 'client_user',
-        entityId: company.clientUserId,
-        ip: getClientIp(request),
-        userAgent: request.headers.get('user-agent'),
-        referer: request.headers.get('referer'),
-        metadata: { companyId: company.id, title: company.title, source: 'admin_clients' },
-      });
-    }
-    await recordSecurityEvent({
-      eventType: 'client_company_updated',
-      actorType,
-      adminUserId: session.adminUserId,
-      managerId: session.managerId,
-      sessionId: session.sessionId,
-      entityType: 'client_company',
-      entityId: company.id,
-      ip: getClientIp(request),
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer'),
-      metadata: { title: company.title, managerId: company.managerId, supportManagerId: company.supportManagerId },
-    });
-    return Response.json({ company });
+    const warnings = await runPostCommitTasks([
+      {
+        code: 'CLIENT_REALTIME_UNAVAILABLE',
+        message: 'Клиент сохранён, но уведомление других открытых страниц не отправлено. Обновите их вручную.',
+        run: () => publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id }),
+      },
+      ...(password && company.clientUserId ? [{
+        code: 'CLIENT_PASSWORD_AUDIT_UNAVAILABLE',
+        message: 'Пароль сохранён, но запись о его смене в журнал не добавлена. Требуется повторить журналирование.',
+        run: () => recordSecurityEvent({
+          eventType: 'password_changed',
+          actorType,
+          adminUserId: session.adminUserId,
+          managerId: session.managerId,
+          sessionId: session.sessionId,
+          entityType: 'client_user',
+          entityId: company.clientUserId,
+          ip: getClientIp(request),
+          userAgent: request.headers.get('user-agent'),
+          referer: request.headers.get('referer'),
+          metadata: { companyId: company.id, title: company.title, source: 'admin_clients' },
+        }, { required: true }),
+      }] : []),
+      {
+        code: 'CLIENT_UPDATE_AUDIT_UNAVAILABLE',
+        message: 'Клиент сохранён, но запись об изменении в журнал не добавлена. Требуется повторить журналирование.',
+        run: () => recordSecurityEvent({
+          eventType: 'client_company_updated',
+          actorType,
+          adminUserId: session.adminUserId,
+          managerId: session.managerId,
+          sessionId: session.sessionId,
+          entityType: 'client_company',
+          entityId: company.id,
+          ip: getClientIp(request),
+          userAgent: request.headers.get('user-agent'),
+          referer: request.headers.get('referer'),
+          metadata: { title: company.title, managerId: company.managerId, supportManagerId: company.supportManagerId },
+        }, { required: true }),
+      },
+    ]);
+    return Response.json({ company, saved: true, warnings });
   } catch (error) {
+    if (error instanceof TransactionCommitUnknownError) {
+      return Response.json({ saved: null, code: 'COMMIT_OUTCOME_UNKNOWN', error: 'Не удалось подтвердить результат сохранения. Обновите данные перед повторной попыткой.' }, { status: 503 });
+    }
     return Response.json(
-      { error: error instanceof Error ? error.message : 'Не удалось сохранить компанию клиента' },
+      { saved: false, error: error instanceof Error ? error.message : 'Не удалось сохранить компанию клиента' },
       { status: 400 },
     );
   }
@@ -136,24 +145,37 @@ export async function DELETE(request: Request, context: Context) {
 
   try {
     const company = await deleteClientCompany(numericId, session);
-    publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id });
-    await recordSecurityEvent({
-      eventType: 'client_company_deleted',
-      actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
-      adminUserId: session.adminUserId,
-      managerId: session.managerId,
-      sessionId: session.sessionId,
-      entityType: 'client_company',
-      entityId: company.id,
-      ip: getClientIp(request),
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer'),
-      metadata: { title: company.title, userCount: company.userCount },
-    });
-    return Response.json({ ok: true });
+    const warnings = await runPostCommitTasks([
+      {
+        code: 'CLIENT_REALTIME_UNAVAILABLE',
+        message: 'Клиент удалён, но уведомление других открытых страниц не отправлено. Обновите их вручную.',
+        run: () => publishClientRealtimeEvent({ type: 'client.updated', companyId: company.id }),
+      },
+      {
+        code: 'CLIENT_DELETE_AUDIT_UNAVAILABLE',
+        message: 'Клиент удалён, но запись об удалении в журнал не добавлена. Требуется повторить журналирование.',
+        run: () => recordSecurityEvent({
+          eventType: 'client_company_deleted',
+          actorType: session.role === 'admin' ? 'admin' : session.role === 'wholesale_admin' ? 'wholesale_admin' : 'manager',
+          adminUserId: session.adminUserId,
+          managerId: session.managerId,
+          sessionId: session.sessionId,
+          entityType: 'client_company',
+          entityId: company.id,
+          ip: getClientIp(request),
+          userAgent: request.headers.get('user-agent'),
+          referer: request.headers.get('referer'),
+          metadata: { title: company.title, userCount: company.userCount },
+        }, { required: true }),
+      },
+    ]);
+    return Response.json({ ok: true, saved: true, warnings });
   } catch (error) {
+    if (error instanceof TransactionCommitUnknownError) {
+      return Response.json({ saved: null, code: 'COMMIT_OUTCOME_UNKNOWN', error: 'Не удалось подтвердить результат удаления. Обновите данные перед повторной попыткой.' }, { status: 503 });
+    }
     return Response.json(
-      { error: error instanceof Error ? error.message : 'Не удалось удалить компанию клиента' },
+      { saved: false, error: error instanceof Error ? error.message : 'Не удалось удалить компанию клиента' },
       { status: 400 },
     );
   }
