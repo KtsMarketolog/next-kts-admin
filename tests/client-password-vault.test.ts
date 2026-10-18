@@ -67,7 +67,7 @@ test('migration bounds each batch and clears copies without rewriting authentica
       return { rows: [] };
     }
     if (sql.startsWith('select')) {
-      assert.match(sql, /order by id limit \$2 for update/);
+      assert.match(sql, /order by client_users\.id limit \$2 for update/);
       assert.equal(args[1], 50);
       cursors.push(String(args[0]));
       return { rows: rows.filter((row) => BigInt(row.id) > BigInt(String(args[0])) && row.display_password).slice(0, Number(args[1])).map((row) => ({ ...row })) };

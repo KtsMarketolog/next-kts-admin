@@ -14,7 +14,7 @@ export async function applyClientPasswordMigration(client: PoolClient) {
     }>(`select id::text, password_hash, password_ciphertext,
           case when char_length(display_password) <= 200 then display_password else null end as display_password
         from client_users where id > $1::bigint and display_password <> ''
-        order by id limit $2 for update`, [lastId, BATCH_SIZE]);
+        order by client_users.id limit $2 for update`, [lastId, BATCH_SIZE]);
     if (!result.rows.length) break;
     for (const row of result.rows) {
       const ciphertext = await resolveClientPasswordCiphertext({

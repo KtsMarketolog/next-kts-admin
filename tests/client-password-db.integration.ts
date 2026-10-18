@@ -179,6 +179,32 @@ test('client password vault preserves accounts and enforces current scoped revea
       assert.deepEqual(await Promise.all(fixtureIds.map(stored)), after);
     });
 
+    await t.test('migration visits all 82 mixed-width numeric IDs across multiple batches', async () => {
+      // A temporary pre-upgrade table shadows the application table only on this
+      // transaction connection. IDs 1..82 expose ORDER BY id::text alias bugs.
+      await withTransaction(async (client) => {
+        await client.query(`create temporary table client_users (
+          id bigint primary key, password_hash text not null,
+          display_password text not null default '', password_ciphertext text
+        ) on commit drop`);
+        await client.query(`insert into client_users (id, password_hash, display_password)
+          select id, $1, $2 from generate_series(1, 82) as id`, [hash, oldPassword]);
+        await applyClientPasswordMigration(client);
+        const rows = (await client.query<{ id: string; password_hash: string; display_password: string; password_ciphertext: string }>(
+          'select id::text, password_hash, display_password, password_ciphertext from client_users order by client_users.id',
+        )).rows;
+        assert.equal(rows.length, 82);
+        for (const [index, row] of rows.entries()) {
+          assert.equal(Number(row.id), index + 1);
+          assert.equal(row.password_hash, hash);
+          assert.equal(row.display_password, '');
+          assert.equal(decryptClientPassword(row.password_ciphertext, hash), oldPassword);
+        }
+        await applyClientPasswordMigration(client);
+        assert.deepEqual((await client.query('select id::text, password_hash, display_password, password_ciphertext from client_users order by client_users.id')).rows, rows);
+      });
+    });
+
     await t.test('bad encryption configuration rolls back migration and regular writes without losing plaintext or login', async () => {
       await query('alter table client_users drop constraint client_users_display_password_empty');
       await query('update client_users set display_password=$2, password_ciphertext=null where id=$1', [userId, newPassword]);

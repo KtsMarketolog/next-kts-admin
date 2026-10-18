@@ -69,6 +69,22 @@ jobs:
           set -euo pipefail
           npm run lint
           npm test
+          # Exercise legacy password migration against real PostgreSQL, including
+          # numeric IDs crossing batch boundaries; mocks cannot catch SQL aliases.
+          KTS_TEST_PG_BIN="$(pg_config --bindir 2>/dev/null || true)"
+          if [ ! -x "$KTS_TEST_PG_BIN/initdb" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y postgresql
+            # A runner may have pg_config from a client-only package/version.
+            for KTS_PG_CANDIDATE in /usr/lib/postgresql/*/bin; do
+              if [ -x "$KTS_PG_CANDIDATE/initdb" ]; then
+                KTS_TEST_PG_BIN="$KTS_PG_CANDIDATE"
+              fi
+            done
+          fi
+          test -x "$KTS_TEST_PG_BIN/initdb"
+          export KTS_TEST_PG_BIN
+          bash scripts/test-client-password-postgres.sh
           node --import tsx tests/dashboard-usage-cron.http.integration.ts
           node --test ops/backup/tests/*.test.cjs
           npx tsc --noEmit --incremental false
