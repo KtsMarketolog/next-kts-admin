@@ -19,14 +19,12 @@ export async function PUT(request: Request, { params }: Params) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return Response.json({ error: 'Invalid slide' }, { status: 400 });
   }
-  // Reordering must not submit or overwrite another row's unsaved content.
+  // Old tabs must not split a reorder into independent writes.
   if (Object.keys(body).length === 1 && Object.prototype.hasOwnProperty.call(body, 'sortOrder')) {
     if (!Number.isInteger(body.sortOrder) || body.sortOrder < 0 || body.sortOrder > 2_147_483_647) {
       return Response.json({ error: 'Invalid sort order' }, { status: 400 });
     }
-    await updateHeroSlide(slideId, { sortOrder: body.sortOrder });
-    revalidatePath('/');
-    return Response.json({ ok: true });
+    return Response.json({ error: 'Обновите страницу: порядок теперь сохраняется одной операцией.', code: 'ATOMIC_REORDER_REQUIRED' }, { status: 409 });
   }
   await updateHeroSlide(slideId, {
     title: typeof body.title === 'string' ? body.title.trim() : undefined,
@@ -39,7 +37,6 @@ export async function PUT(request: Request, { params }: Params) {
     popupTitle: typeof body.popupTitle === 'string' && body.popupTitle.trim() ? body.popupTitle.trim() : null,
     popupText: typeof body.popupText === 'string' && body.popupText.trim() ? body.popupText.trim() : null,
     linkUrl: typeof body.linkUrl === 'string' && body.linkUrl.trim() ? body.linkUrl.trim() : null,
-    sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : undefined,
     isActive: typeof body.isActive === 'boolean' ? body.isActive : undefined,
   });
 

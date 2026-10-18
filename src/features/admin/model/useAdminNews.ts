@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 
 import { emptyNews } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
-import { reorderByDrop } from '@/features/admin/model/reorder';
+import { readConfirmedOrder, reorderByDrop, reorderRequest } from '@/features/admin/model/reorder';
 import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
 import { readSavedContentItem } from '@/features/admin/model/adminContentRead';
 import { useAdminDraft, useAdminDraftCollection } from '@/features/admin/model/useAdminDraftState';
@@ -30,15 +30,14 @@ export function useAdminNews(options: AdminCrudHookOptions) {
   };
 
   const persistNewsOrder = async (orderedNews: News[]) => {
-    await perform({ requests: orderedNews.map((item) => ({ url: `/api/admin/news/${item.id}`, init: {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sortOrder: item.sortOrder }),
-        } })), success: 'Очередность новостей сохранена', failure: 'Не удалось сохранить очередность новостей',
-      onConfirmed: (_response, index) => {
-        const saved = orderedNews[index];
-        const submitted = news.find((item) => item.id === saved.id);
-        if (submitted) collection.accept(submitted, saved, ['sortOrder']);
+    await perform({ requests: [reorderRequest('/api/admin/news', orderedNews)], success: 'Очередность новостей сохранена', failure: 'Не удалось сохранить очередность новостей',
+      onSaved: async (responses, signal) => {
+        const warnings = await readConfirmedOrder(responses[0], orderedNews, signal);
+        for (const saved of orderedNews) {
+          const submitted = news.find((item) => item.id === saved.id);
+          if (submitted) collection.accept(submitted, saved, ['sortOrder']);
+        }
+        if (warnings.length) return `Очередность новостей сохранена. ${warnings.join(' ')}`;
       } });
   };
 

@@ -25,6 +25,14 @@ window.fetch=async(url,init={})=>{
   if(window.failRead)return Response.json({error:'offline'},{status:503});
   return Response.json(url==='/api/admin/price-groups'?{groups:window.server.groups}:window.server);
  }
+ if(url==='/api/admin/brand-categories/reorder'){
+  if(window.pauseOrder)await new Promise(resolve=>{window.releaseOrder=resolve});
+  if(window.orderFailure==='rejected')return Response.json({error:'Order rejected'},{status:500});
+  if(window.orderFailure==='conflict')return Response.json({error:'Collection changed'},{status:409});
+  window.server.categories=window.server.categories.map(row=>({...row,sortOrder:body.items.find(item=>item.id===row.id).sortOrder}));
+  const items=window.orderFailure==='malformed'?body.items.slice(0,1):window.orderFailure==='duplicate'?[body.items[0],body.items[0]]:body.items;
+  return Response.json({ok:true,items,warnings:window.orderFailure==='warning'?[{code:'cache',message:'Cache refresh pending'}]:undefined});
+ }
  const categoryMatch=url.match(/brand-categories\\/(\\d+)$/),brandMatch=url.match(/brands\\/(\\d+)$/);
  if(method==='PUT'&&categoryMatch){
   const id=Number(categoryMatch[1]);
@@ -78,7 +86,7 @@ async function main() {
     for (const engineName of ['chromium', 'webkit']) {
       const browser = await playwright[engineName].launch({ headless: true });
       try {
-        for (const scenario of ['save-brand', 'late-brand', 'create-brand', 'create-category', 'reorder', 'partial-reorder', 'reorder-clean', 'partial-reorder-clean', 'delete-category', 'save-price', 'saved-refresh-failed']) {
+        for (const scenario of ['save-brand', 'late-brand', 'create-brand', 'create-category', 'reorder', 'rejected-reorder', 'conflict-reorder', 'malformed-reorder', 'duplicate-reorder', 'late-reorder', 'warning-reorder', 'reorder-clean', 'rejected-reorder-clean', 'delete-category', 'save-price', 'saved-refresh-failed']) {
           const page = await browser.newPage();
           await page.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
           await page.goto(origin);
@@ -111,7 +119,14 @@ async function main() {
             await page.waitForFunction(() => JSON.parse(document.querySelector('#state')!.textContent!).categoryDraft.title === ' New category ');
             await page.evaluate(async () => { await (window as any).model.brands.createBrandCategoryItem(); });
           } else if (scenario.includes('reorder')) {
-            await page.evaluate(async (partial: boolean) => { const w = window as any; if (partial) w.failCategory = 1; await w.model.brands.moveBrandCategory(2, 1); }, scenario.startsWith('partial-'));
+            if (scenario === 'late-reorder') {
+              await page.evaluate(() => { const w = window as any; w.pauseOrder = true; void w.model.brands.moveBrandCategory(2, 1); void w.model.brands.moveBrandCategory(2, 1); });
+              await page.waitForFunction(() => Boolean((window as any).releaseOrder));
+              assert.deepEqual(JSON.parse(await page.locator('#state').innerText()).categories.map((row: { id: number }) => row.id), [1, 2], 'no optimistic order change');
+              await page.evaluate(() => { const w = window as any; w.model.brands.updateBrandCategory(1, { title: 'Typed during reorder' }); w.releaseOrder(); });
+            } else {
+              await page.evaluate(async (mode: string) => { const w = window as any; w.orderFailure = mode; await Promise.all([w.model.brands.moveBrandCategory(2, 1), w.model.brands.moveBrandCategory(2, 1)]); }, scenario.split('-')[0]);
+            }
           } else if (scenario === 'delete-category') {
             await page.evaluate(() => { const w = window as any; w.model.brands.updateBrand(1, { categoryId: 2 }); w.model.brands.updateBrand(2, { categoryId: 1 }); });
             await page.waitForFunction(() => JSON.parse(document.querySelector('#state')!.textContent!).brands[0].categoryId === 2);
@@ -130,12 +145,15 @@ async function main() {
           if (scenario === 'create-brand') { assert.equal(state.brands.length, 3); assert.equal(state.brandDraft.name, 'Next brand draft'); assert.equal(state.brandDraft.imageUrl, ''); assert.equal(state.brandDraft.categoryId, 1); }
           if (scenario === 'create-category') { assert.equal(state.categories.length, 3); assert.equal(state.categoryDraft.title, ''); assert.equal(state.categories.find((row: { id: number }) => row.id === 3).title, 'New category'); }
           if (scenario.includes('reorder')) {
-            assert.deepEqual(calls.map((call) => Object.keys(call.body)), [['sortOrder'], ['sortOrder']]);
-            assert.equal(state.categories[0].id, 2);
-            assert.equal(state.categories.find((row: { id: number }) => row.id === 1).title, cleanReorder ? 'One' : 'Keep category draft');
+            assert.equal(calls.length, 1, 'one atomic request even for double click');
+            assert.deepEqual(calls[0].body, { items: [{ id: 2, sortOrder: 1 }, { id: 1, sortOrder: 2 }] });
+            const acknowledged = ['reorder', 'reorder-clean', 'late-reorder', 'warning-reorder'].includes(scenario);
+            assert.deepEqual(state.categories.map((row: { id: number }) => row.id), acknowledged ? [2, 1] : [1, 2]);
+            assert.equal(state.categories.find((row: { id: number }) => row.id === 1).title, cleanReorder ? 'One' : scenario === 'late-reorder' ? 'Typed during reorder' : 'Keep category draft');
             assert.equal(await page.evaluate(() => (window as any).server.categories.find((row: any) => row.id === 1).title), 'One');
-            if (scenario.startsWith('partial-')) assert.match(await page.locator('#status').innerText(), /не полностью/);
-            assert.equal(state.brandDirty, cleanReorder ? Number(scenario.startsWith('partial-')) : 3, 'only unconfirmed order or existing text edits stay dirty');
+            if (['malformed-reorder', 'duplicate-reorder'].includes(scenario)) assert.match(await page.locator('#status').innerText(), /не подтвердил/);
+            if (scenario === 'warning-reorder') assert.match(await page.locator('#status').innerText(), /Cache refresh pending/);
+            assert.equal(state.brandDirty, cleanReorder ? 0 : 3, 'order operation never changes content dirty state');
           }
           if (scenario === 'delete-category') { assert.deepEqual(state.brands.map((row: { id: number }) => row.id), [2]); assert.equal(state.brands[0].categoryId, 1); assert.equal(state.categories.length, 1); }
           if (scenario === 'save-price') { assert.equal(state.prices[0].imageUrl, '/new-first.png'); assert.equal(state.priceDirty, 1); assert.equal(state.brandDirty, 3); }

@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 
 import { emptyGroupCompany } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
-import { reorderByDrop } from '@/features/admin/model/reorder';
+import { readConfirmedOrder, reorderByDrop, reorderRequest } from '@/features/admin/model/reorder';
 import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
 import { readSavedContentItem } from '@/features/admin/model/adminContentRead';
 import { useAdminDraft, useAdminDraftCollection } from '@/features/admin/model/useAdminDraftState';
@@ -30,15 +30,14 @@ export function useAdminGroupCompanies(options: AdminCrudHookOptions) {
   };
 
   const persistGroupCompanyOrder = async (orderedCompanies: GroupCompany[]) => {
-    await perform({ requests: orderedCompanies.map((company) => ({ url: `/api/admin/group-companies/${company.id}`, init: {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sortOrder: company.sortOrder }),
-        } })), success: 'Очередность группы компаний сохранена', failure: 'Не удалось сохранить очередность группы компаний',
-      onConfirmed: (_response, index) => {
-        const saved = orderedCompanies[index];
-        const submitted = groupCompanies.find((item) => item.id === saved.id);
-        if (submitted) collection.accept(submitted, saved, ['sortOrder']);
+    await perform({ requests: [reorderRequest('/api/admin/group-companies', orderedCompanies)], success: 'Очередность группы компаний сохранена', failure: 'Не удалось сохранить очередность группы компаний',
+      onSaved: async (responses, signal) => {
+        const warnings = await readConfirmedOrder(responses[0], orderedCompanies, signal);
+        for (const saved of orderedCompanies) {
+          const submitted = groupCompanies.find((item) => item.id === saved.id);
+          if (submitted) collection.accept(submitted, saved, ['sortOrder']);
+        }
+        if (warnings.length) return `Очередность группы компаний сохранена. ${warnings.join(' ')}`;
       } });
   };
 

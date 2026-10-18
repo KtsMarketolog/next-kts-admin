@@ -3,18 +3,18 @@
 import { useEffect, useRef } from 'react';
 
 import type { AdminCrudHookOptions } from './hookTypes';
+import { ContentOrderAcknowledgementError } from './reorder';
 import { adminRequest, runWithRequestTimeout } from '@/features/admin/shared/adminRequest';
 
 type ContentRequest = { url: string; init: RequestInit };
 type ContentAction = {
-  requests: ContentRequest[];
+  requests: [ContentRequest];
   success: string;
   failure: string;
-  onSaved?: (responses: Response[], signal: AbortSignal) => void | Promise<void>;
-  onConfirmed?: (response: Response, index: number, signal: AbortSignal) => void | Promise<void>;
+  onSaved?: (responses: Response[], signal: AbortSignal) => void | string | Promise<void | string>;
 };
 
-/** One content mutation at a time, including all requests in a reorder batch. */
+/** One mutation request per action; multi-row operations must be atomic on the server. */
 export function useAdminContentAction({ setBusy, showStatus, actionLock }: AdminCrudHookOptions) {
   const localLock = useRef(false);
   const lock = actionLock ?? localLock;
@@ -29,7 +29,7 @@ export function useAdminContentAction({ setBusy, showStatus, actionLock }: Admin
     };
   }, []);
 
-  return async ({ requests, success, failure, onSaved, onConfirmed }: ContentAction) => {
+  return async ({ requests, success, failure, onSaved }: ContentAction) => {
     if (lock.current || !mounted.current) return false;
     lock.current = true;
     const controller = new AbortController();
@@ -37,38 +37,25 @@ export function useAdminContentAction({ setBusy, showStatus, actionLock }: Admin
     setBusy(true);
     let confirmed = false;
     try {
-      // allSettled is intentional: one rejected request must not unlock the
-      // reorder controls while sibling writes are still in flight.
-      const results = await Promise.allSettled(requests.map(({ url, init }) =>
-        adminRequest(url, { ...init, signal: controller.signal }, { mutation: true })));
+      const { url, init } = requests[0];
+      const response = await adminRequest(url, { ...init, signal: controller.signal }, { mutation: true });
       if (!mounted.current || controller.signal.aborted) return false;
-      const saved = results.filter((result) => result.status === 'fulfilled' && result.value.ok).length;
-      if (onConfirmed) {
-        for (const [index, result] of results.entries()) {
-          if (result.status === 'fulfilled' && result.value.ok) {
-            await runWithRequestTimeout((signal) => Promise.resolve(onConfirmed(result.value.clone(), index, signal)), { signal: controller.signal });
-          }
-        }
-      }
-      if (saved !== results.length) {
-        if (results.length > 1) {
-          showStatus(`Порядок сохранён не полностью: подтверждено ${saved} из ${results.length}. Часть изменений могла сохраниться. Обновите страницу и проверьте порядок перед повторной отправкой.`);
-        } else {
-          const result = results[0];
-          if (result?.status === 'rejected') {
-            showStatus(result.reason instanceof Error ? result.reason.message : failure);
-          } else if (result?.status === 'fulfilled') {
-            const data = await result.value.json().catch(() => null);
-            showStatus(typeof data?.error === 'string' ? data.error : failure);
-          } else showStatus(failure);
-        }
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        showStatus(typeof data?.error === 'string' ? data.error : failure);
         return false;
       }
       confirmed = true;
-      if (onSaved) await runWithRequestTimeout((signal) => Promise.resolve(onSaved(results.map((result) => (result as PromiseFulfilledResult<Response>).value), signal)), { signal: controller.signal });
-      if (mounted.current) showStatus(success);
+      const message = onSaved ? await runWithRequestTimeout((signal) => Promise.resolve(onSaved([response], signal)), { signal: controller.signal }) : undefined;
+      if (mounted.current) showStatus(message || success);
       return true;
     } catch (error) {
+      if (error instanceof ContentOrderAcknowledgementError) {
+        if (mounted.current && !controller.signal.aborted) {
+          showStatus('Сервер не подтвердил новый порядок. Он мог сохраниться. Обновите страницу и проверьте порядок перед повторением.');
+        }
+        return false;
+      }
       if (mounted.current && !controller.signal.aborted) {
         showStatus(confirmed
           ? `${success}. Не удалось обновить список. Изменения уже сохранены; обновите страницу, не повторяя сохранение.`

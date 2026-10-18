@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 
 import { emptySlide } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
-import { reorderByDrop } from '@/features/admin/model/reorder';
+import { readConfirmedOrder, reorderByDrop, reorderRequest } from '@/features/admin/model/reorder';
 import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
 import { readSavedContentItem } from '@/features/admin/model/adminContentRead';
 import { useAdminDraft, useAdminDraftCollection } from '@/features/admin/model/useAdminDraftState';
@@ -73,15 +73,14 @@ export function useAdminSlides(options: AdminCrudHookOptions) {
   };
 
   const persistSlideOrder = async (orderedSlides: Slide[]) => {
-    await perform({ requests: orderedSlides.map((slide) => ({ url: `/api/admin/slides/${slide.id}`, init: {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sortOrder: slide.sortOrder }),
-        } })), success: 'Очередность слайдов сохранена', failure: 'Не удалось сохранить очередность слайдов',
-      onConfirmed: (_response, index) => {
-        const saved = orderedSlides[index];
-        const submitted = slides.find((item) => item.id === saved.id);
-        if (submitted) collection.accept(submitted, saved, ['sortOrder']);
+    await perform({ requests: [reorderRequest('/api/admin/slides', orderedSlides)], success: 'Очередность слайдов сохранена', failure: 'Не удалось сохранить очередность слайдов',
+      onSaved: async (responses, signal) => {
+        const warnings = await readConfirmedOrder(responses[0], orderedSlides, signal);
+        for (const saved of orderedSlides) {
+          const submitted = slides.find((item) => item.id === saved.id);
+          if (submitted) collection.accept(submitted, saved, ['sortOrder']);
+        }
+        if (warnings.length) return `Очередность слайдов сохранена. ${warnings.join(' ')}`;
       } });
   };
 

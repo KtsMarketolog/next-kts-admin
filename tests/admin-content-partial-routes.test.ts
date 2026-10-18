@@ -42,13 +42,13 @@ const orderedResources = [
 ] as const;
 
 for (const [resource, writer] of orderedResources) {
-  test(`${resource}: explicit order-only update writes no content fields`, async () => {
+  test(`${resource}: old per-row reorder is refused without any write`, async () => {
     const api = route(`${resource}/[id]`, writer);
     const response = await api.run({ sortOrder: 3 });
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { ok: true });
-    assert.deepEqual(api.writes, [[17, { sortOrder: 3 }]]);
-    assert.deepEqual(api.revalidated, ['/']);
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, 'ATOMIC_REORDER_REQUIRED');
+    assert.deepEqual(api.writes, []);
+    assert.deepEqual(api.revalidated, []);
   });
 
   test(`${resource}: order-only requests require a bounded integer without coercion`, async () => {
@@ -61,7 +61,8 @@ for (const [resource, writer] of orderedResources) {
     }
     for (const value of [0, 2_147_483_647]) {
       const api = route(`${resource}/[id]`, writer);
-      assert.equal((await api.run({ sortOrder: value })).status, 200);
+      assert.equal((await api.run({ sortOrder: value })).status, 409);
+      assert.deepEqual(api.writes, []);
     }
   });
 
@@ -88,26 +89,26 @@ test('slide full update retains whitespace normalization and explicit nullable f
   assert.deepEqual(api.writes, [[17, {
     title: 'Title', imageUrl: '/image.png', tabletImageUrl: null, mobileImageUrl: null,
     popupImageUrl: null, popupTabletImageUrl: null, popupMobileImageUrl: null,
-    popupTitle: 'Popup', popupText: null, linkUrl: null, sortOrder: 7, isActive: false,
+    popupTitle: 'Popup', popupText: null, linkUrl: null, isActive: false,
   }]]);
 });
 
 test('news full update retains the existing field contract', async () => {
   const api = route('news/[id]', 'updateNewsItem');
   assert.equal((await api.run({ title: ' News ', imageUrl: ' /news.png ', date: ' Today ', linkUrl: ' /news ', sortOrder: '7', isActive: false })).status, 200);
-  assert.deepEqual(api.writes, [[17, { title: 'News', imageUrl: '/news.png', date: 'Today', linkUrl: '/news', sortOrder: 7, isActive: false }]]);
+  assert.deepEqual(api.writes, [[17, { title: 'News', imageUrl: '/news.png', date: 'Today', linkUrl: '/news', isActive: false }]]);
 });
 
 test('company full update retains link normalization', async () => {
   const api = route('group-companies/[id]', 'updateGroupCompany');
   assert.equal((await api.run({ imageUrl: ' /company.png ', linkUrl: ' example.test ', sortOrder: '7', isActive: false })).status, 200);
-  assert.deepEqual(api.writes, [[17, { imageUrl: '/company.png', linkUrl: 'https://example.test', sortOrder: 7, isActive: false }]]);
+  assert.deepEqual(api.writes, [[17, { imageUrl: '/company.png', linkUrl: 'https://example.test', isActive: false }]]);
 });
 
 test('brand category full update retains field normalization', async () => {
   const api = route('brand-categories/[id]', 'updateBrandCategory');
   assert.equal((await api.run({ key: ' key ', title: ' Category ', sortOrder: '7', isActive: false })).status, 200);
-  assert.deepEqual(api.writes, [[17, { key: 'key', title: 'Category', sortOrder: 7, isActive: false }]]);
+  assert.deepEqual(api.writes, [[17, { key: 'key', title: 'Category', isActive: false }]]);
 });
 
 for (const key of ['phone', 'email', 'address'] as const) {

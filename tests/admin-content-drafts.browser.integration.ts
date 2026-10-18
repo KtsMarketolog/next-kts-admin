@@ -1,5 +1,6 @@
 /** Real React draft-isolation acceptance with synthetic data; never contacts production. */
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -31,7 +32,15 @@ window.fetch=async(url,init={})=>{
   return Response.json({[config[selected].key]:window.server[selected]});
  }
  if(window.defer)await new Promise(resolve=>window.resume=resolve);
- if(window.partial && id===2)return Response.json({error:'Order rejected'}, {status:500});
+ if(parts[4]==='reorder'){
+  if(window.orderFailure==='rejected')return Response.json({error:'Order rejected'}, {status:500});
+  if(window.orderFailure==='conflict')return Response.json({error:'Collection changed'}, {status:409});
+  if(window.orderFailure==='network')throw new TypeError('Offline');
+  if(window.orderFailure==='timeout')return new Promise(()=>{});
+  window.server[selected]=window.server[selected].map(row=>({...row,sortOrder:body.items.find(item=>item.id===row.id).sortOrder}));
+  const items=window.orderFailure==='malformed'?body.items.slice(0,1):window.orderFailure==='duplicate'?[body.items[0],body.items[0]]:body.items;
+  return Response.json({ok:true,items,warnings:window.orderFailure==='warning'?[{code:'cache',message:'Cache refresh pending'}]:undefined});
+ }
  if(method==='DELETE'){window.server[selected]=window.server[selected].filter(row=>row.id!==id);return Response.json({ok:true});}
  const normalized=Object.fromEntries(Object.entries(body).map(([key,value])=>[key,typeof value==='string'?value.trim():value]));
  if(method==='POST'){window.server[selected].push({...normalized,id:3});return Response.json({id:3});}
@@ -53,7 +62,7 @@ function App(){
   <button disabled={busy} onClick={()=>void form[settings.save](rows.find(row=>row.id===1))}>Save one</button>
   <button disabled={busy} onClick={()=>void form[settings.create]()}>Create</button>
   <button disabled={busy} onClick={()=>void form[settings.remove](1)}>Delete one</button>
-  <button disabled={busy} onClick={()=>void form[settings.move](1,2)}>Move</button>
+  <button disabled={busy} onClick={()=>{void form[settings.move](1,2);void form[settings.move](1,2);}}>Move</button>
   <p role="status">{message}</p><pre id="state">{JSON.stringify({busy,...state})}</pre>
  </>;
 }
@@ -75,6 +84,11 @@ async function main() {
   const bundle = await build({ absWorkingDir: root, stdin: { contents: fixture, resolveDir: root, loader: 'tsx' },
     bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     alias: { '@': path.join(root, 'src') }, define: { 'process.env.NODE_ENV': '"test"' },
+    plugins: [{ name: 'short-test-deadline', setup(plugin) {
+      plugin.onLoad({ filter: /\/adminRequest\.ts$/ }, async (args) => ({
+        contents: (await readFile(args.path, 'utf8')).replace('ADMIN_REQUEST_TIMEOUT_MS = 20_000', 'ADMIN_REQUEST_TIMEOUT_MS = 750'), loader: 'ts',
+      }));
+    } }],
   });
   const server = createServer((request, response) => {
     if (request.url === '/app.js') response.writeHead(200, { 'content-type': 'text/javascript' }).end(bundle.outputFiles[0].contents);
@@ -91,7 +105,7 @@ async function main() {
       try {
         for (const kind of ['slides', 'news', 'companies']) {
           const field = kind === 'companies' ? 'linkUrl' : 'title';
-          for (const scenario of ['save', 'typing-during-save', 'create', 'delete', 'reorder', 'partial-reorder', 'read-fails']) {
+          for (const scenario of ['save', 'typing-during-save', 'create', 'delete', 'reorder', 'rejected-reorder', 'conflict-reorder', 'network-reorder', 'timeout-reorder', 'malformed-reorder', 'duplicate-reorder', 'late-reorder', 'warning-reorder', 'read-fails']) {
             const page = await browser.newPage();
             await page.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
             await page.goto(`${origin}/?kind=${kind}`);
@@ -100,13 +114,14 @@ async function main() {
             await page.getByLabel('New draft', { exact: true }).fill('Keep new');
             await page.getByLabel('Other section', { exact: true }).fill('Keep cross section');
 
-            if (scenario === 'typing-during-save' || scenario === 'create') await page.evaluate('window.defer=true');
-            if (scenario === 'partial-reorder') await page.evaluate('window.partial=true');
+            if (scenario === 'typing-during-save' || scenario === 'create' || scenario === 'late-reorder') await page.evaluate('window.defer=true');
+            if (scenario.endsWith('-reorder')) await page.evaluate((mode: string) => { (window as any).orderFailure = mode; }, scenario.split('-')[0]);
             if (scenario === 'read-fails') await page.evaluate('window.failRead=true');
             const button = scenario === 'create' ? 'Create' : scenario === 'delete' ? 'Delete one' : scenario.includes('reorder') ? 'Move' : 'Save one';
             await page.getByRole('button', { name: button, exact: true }).click();
-            if (scenario === 'typing-during-save' || scenario === 'create') {
+            if (scenario === 'typing-during-save' || scenario === 'create' || scenario === 'late-reorder') {
               await page.waitForFunction('typeof window.resume === "function"');
+              if (scenario === 'late-reorder') assert.deepEqual((JSON.parse(await page.locator('#state').textContent()) as DraftState)[kind].rows.map(({ id }) => id), [1, 2], 'no optimistic reorder');
               await page.getByLabel(scenario === 'create' ? 'New draft' : 'Row 1', { exact: true }).fill('Newer typing');
               await page.evaluate('window.defer=false;window.resume()');
             }
@@ -119,15 +134,18 @@ async function main() {
             assert.equal(await page.evaluate('window.reloads'), 0, 'never broad reload');
             const calls = await page.evaluate('window.calls') as Array<{ url: string; method: string; body: Record<string, unknown> | null }>;
             if (scenario.includes('reorder')) {
-              assert.equal(calls.length, 2);
-              assert.ok(calls.every((call) => call.method === 'PUT' && Object.keys(call.body ?? {}).join(',') === 'sortOrder'));
-              assert.equal(rows.find((row) => row.id === 1)?.[field], ' Saved A ');
-              if (scenario === 'reorder') assert.deepEqual(rows.map((row) => row.id), [2, 1]);
-              else {
-                assert.match(await page.getByRole('status').textContent(), /подтверждено 1 из 2/);
-                assert.equal(rows.find((row) => row.id === 1)?.sortOrder, 2);
-                assert.equal(rows.find((row) => row.id === 2)?.sortOrder, 2, 'failed reorder is not optimistically acknowledged');
-              }
+              assert.equal(calls.length, 1, 'one atomic request, including duplicate click or unknown outcome');
+              assert.equal(calls[0].url, `/api/admin/${kind === 'companies' ? 'group-companies' : kind}/reorder`);
+              assert.equal(calls[0].method, 'PUT');
+              assert.deepEqual(calls[0].body, { items: [{ id: 2, sortOrder: 1 }, { id: 1, sortOrder: 2 }] });
+              assert.equal(rows.find((row) => row.id === 1)?.[field], scenario === 'late-reorder' ? 'Newer typing' : ' Saved A ');
+              const acknowledged = ['reorder', 'late-reorder', 'warning-reorder'].includes(scenario);
+              assert.deepEqual(rows.map((row) => row.id), acknowledged ? [2, 1] : [1, 2]);
+              assert.equal(state[kind].dirtyCount, 3, 'acknowledge order only; all text drafts remain');
+              assert.equal(await page.evaluate((name: string) => (window as any).server[name][0].title, kind), 'Original', 'server content unchanged by order request');
+              if (scenario === 'warning-reorder') assert.match(await page.getByRole('status').textContent(), /Cache refresh pending/);
+              if (['malformed-reorder', 'duplicate-reorder'].includes(scenario)) assert.match(await page.getByRole('status').textContent(), /не подтвердил/);
+              if (['network-reorder', 'timeout-reorder'].includes(scenario)) assert.match(await page.getByRole('status').textContent(), /могло сохраниться/);
             } else if (scenario === 'create') {
               assert.equal(rows.find((row) => row.id === 3)?.[field], 'Keep new');
               assert.equal(state[kind].draft[field], 'Newer typing');

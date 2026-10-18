@@ -31,9 +31,7 @@ export async function PUT(request: Request, context: Context) {
     if (!Number.isInteger(body.sortOrder) || body.sortOrder < 0 || body.sortOrder > 2_147_483_647) {
       return Response.json({ error: 'Invalid sort order' }, { status: 400 });
     }
-    await updateGroupCompany(numericId, { sortOrder: body.sortOrder });
-    revalidatePath('/');
-    return Response.json({ ok: true });
+    return Response.json({ error: 'Обновите страницу: порядок теперь сохраняется одной операцией.', code: 'ATOMIC_REORDER_REQUIRED' }, { status: 409 });
   }
   const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl.trim() : '';
   const linkUrl = normalizeLinkUrl(body.linkUrl);
@@ -42,7 +40,6 @@ export async function PUT(request: Request, context: Context) {
   await updateGroupCompany(numericId, {
     imageUrl,
     linkUrl,
-    sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : undefined,
     isActive: typeof body.isActive === 'boolean' ? body.isActive : undefined,
   });
 

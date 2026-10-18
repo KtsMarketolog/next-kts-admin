@@ -48,6 +48,7 @@ function fixture(hookName: string, options: { fetch: typeof fetch; reload?: () =
   const load = (name: string): State => {
     if (name in cache) return cache[name] as State;
     const filename = name.startsWith('@/') ? `src/${name.slice(2)}.ts` : `src/features/admin/model/${name}.ts`;
+    if (filename in cache) return cache[filename] as State;
     const source = readFileSync(filename, 'utf8');
     const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
     const exports: State = {};
@@ -62,6 +63,7 @@ function fixture(hookName: string, options: { fetch: typeof fetch; reload?: () =
       exports.runWithRequestTimeout = (work: unknown, requestOptions: State) => originalRun(work, { ...requestOptions, timeoutMs: options.timeoutMs ?? 20 });
     }
     cache[name] = exports;
+    cache[filename] = exports;
     return exports;
   };
   const hook = load(hookName)[hookName] as (options: State) => Form;
@@ -154,26 +156,76 @@ for (const [hook, save, draft] of cases) {
   });
 }
 
-test('slide reorder waits for every write, keeps lock while sibling is pending, and describes partial success', async () => {
-  let finish!: (value: Response) => void;
-  let calls = 0;
-  const view = fixture('useAdminSlides', { timeoutMs: 1000, fetch: async () => {
-    calls++;
-    if (calls === 1) throw new TypeError('offline');
-    return new Promise((resolve) => { finish = resolve; });
-  } });
-  view.render().setSlides([{ id: 1, sortOrder: 1 }, { id: 2, sortOrder: 2 }]);
-  const form = view.render();
-  const pending = form.moveSlide(1, 2);
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.deepEqual(view.busy, [true]);
-  await form.saveSlide({ id: 1 });
-  assert.equal(calls, 2, 'save cannot overlap a reorder');
-  finish(Response.json({ ok: true }));
-  await pending;
-  assert.deepEqual(view.busy, [true, false]);
-  assert.match(view.messages[0], /подтверждено 1 из 2/);
-});
+const reorders = [
+  ['useAdminSlides', 'setSlides', 'slides', 'moveSlide', 'updateSlide', '/api/admin/slides/reorder'],
+  ['useAdminNews', 'setNews', 'news', 'moveNews', 'updateNews', '/api/admin/news/reorder'],
+  ['useAdminGroupCompanies', 'setGroupCompanies', 'groupCompanies', 'moveGroupCompany', 'updateGroupCompany', '/api/admin/group-companies/reorder'],
+  ['useAdminBrandPortfolio', 'setBrandCategories', 'brandCategories', 'moveBrandCategory', 'updateBrandCategory', '/api/admin/brand-categories/reorder'],
+] as const;
+const originalOrder = [{ id: 1, sortOrder: 1, title: 'One' }, { id: 2, sortOrder: 2, title: 'Two' }];
+const requestedOrder = [{ id: 2, sortOrder: 1 }, { id: 1, sortOrder: 2 }];
+
+for (const [hook, hydrate, rowsKey, move, update, endpoint] of reorders) {
+  test(`${hook}: one atomic reorder, no optimistic update, shared lock and late text draft preserved`, async () => {
+    let finish!: (value: Response) => void;
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const view = fixture(hook, { timeoutMs: 1000, fetch: async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Promise((resolve) => { finish = resolve; });
+    } });
+    view.render()[hydrate](originalOrder);
+    view.render()[update](2, { title: 'Other draft' });
+    const form = view.render();
+    const pending = form[move](1, 2);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.deepEqual(view.busy, [true]);
+    await form[move](1, 2);
+    assert.deepEqual(calls, [{ url: endpoint, body: { items: requestedOrder } }]);
+    assert.deepEqual((view.render()[rowsKey] as unknown as typeof originalOrder).map(({ id }) => id), [1, 2]);
+    view.render()[update](1, { title: 'Typed while saving' });
+    finish(Response.json({ ok: true, items: requestedOrder }));
+    await pending;
+    const rows = view.render()[rowsKey] as unknown as typeof originalOrder;
+    assert.deepEqual(rows.map(({ id }) => id), [2, 1]);
+    assert.equal(rows[0].title, 'Other draft');
+    assert.equal(rows[1].title, 'Typed while saving');
+    assert.deepEqual(view.busy, [true, false]);
+    assert.equal(view.sharedLock.current, false);
+    assert.equal(view.render().dirtyCount as unknown, 2);
+  });
+
+  for (const scenario of ['rejected', 'conflict', 'commit-unknown', 'network', 'timeout', 'invalid-json', 'missing-ack', 'truncated-ack', 'duplicate-ack', 'wrong-position', 'extra-item']) {
+    test(`${hook}: ${scenario} never acknowledges part of an order or retries`, async () => {
+      let calls = 0;
+      const view = fixture(hook, { fetch: async () => {
+        calls++;
+        if (scenario === 'rejected') return Response.json({ error: 'Order rejected' }, { status: 500 });
+        if (scenario === 'conflict') return Response.json({ error: 'Collection changed' }, { status: 409 });
+        if (scenario === 'commit-unknown') return Response.json({ code: 'COMMIT_OUTCOME_UNKNOWN', saveState: 'unknown', error: 'Commit outcome unknown; verify before retrying' }, { status: 503 });
+        if (scenario === 'network') throw new TypeError('offline');
+        if (scenario === 'timeout') return new Promise(() => {});
+        if (scenario === 'invalid-json') return new Response('{broken', { status: 200 });
+        const items = scenario === 'truncated-ack' ? requestedOrder.slice(0, 1)
+          : scenario === 'duplicate-ack' ? [requestedOrder[0], requestedOrder[0]]
+          : scenario === 'wrong-position' ? originalOrder
+          : scenario === 'extra-item' ? [...requestedOrder, { id: 3, sortOrder: 3 }]
+          : undefined;
+        return Response.json({ ok: true, items });
+      } });
+      view.render()[hydrate](originalOrder);
+      await view.render()[move](1, 2);
+      assert.deepEqual(view.render()[rowsKey], originalOrder);
+      assert.equal(view.render().dirtyCount as unknown, 0);
+      assert.equal(calls, 1);
+      assert.deepEqual(view.busy, [true, false]);
+      assert.equal(view.sharedLock.current, false);
+      assert.ok(view.messages.length > 0);
+      if (scenario === 'network' || scenario === 'timeout') assert.match(view.messages[0], /могло сохраниться/);
+      if (scenario === 'commit-unknown') assert.match(view.messages[0], /Commit outcome unknown/);
+      if (scenario.includes('ack') || ['invalid-json', 'wrong-position', 'extra-item'].includes(scenario)) assert.match(view.messages[0], /не подтвердил.*мог сохраниться/);
+    });
+  }
+}
 
 test('creation network failure retains the original draft and never reloads', async () => {
   let reloads = 0;

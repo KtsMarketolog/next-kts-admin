@@ -5,7 +5,7 @@ import { useCallback, useState } from 'react';
 import { readSavedContentItem } from '@/features/admin/model/adminContentRead';
 import { emptyBrand, emptyBrandCategory } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
-import { reorderByDrop } from '@/features/admin/model/reorder';
+import { readConfirmedOrder, reorderByDrop, reorderRequest } from '@/features/admin/model/reorder';
 import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
 import { useAdminDraft, useAdminDraftCollection } from '@/features/admin/model/useAdminDraftState';
 import type { Brand, BrandCategory } from '@/features/admin/types';
@@ -39,20 +39,16 @@ export function useAdminBrandPortfolio(options: AdminCrudHookOptions) {
 
   const persistBrandCategoryOrder = async (orderedCategories: BrandCategory[], originalCategories: BrandCategory[]) => {
     await perform({
-      requests: orderedCategories.map((category) => ({
-        url: `${portfolioEndpoint}/${category.id}`,
-        init: {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sortOrder: category.sortOrder }),
-        },
-      })),
+      requests: [reorderRequest(portfolioEndpoint, orderedCategories)],
       success: 'Очередность категорий брендов сохранена',
       failure: 'Не удалось сохранить очередность категорий брендов',
-      onConfirmed: (_response, index) => {
-        const saved = orderedCategories[index];
-        const submitted = originalCategories.find((category) => category.id === saved.id)!;
-        categories.accept(submitted, saved, ['sortOrder']);
+      onSaved: async (responses, signal) => {
+        const warnings = await readConfirmedOrder(responses[0], orderedCategories, signal);
+        for (const saved of orderedCategories) {
+          const submitted = originalCategories.find((category) => category.id === saved.id)!;
+          categories.accept(submitted, saved, ['sortOrder']);
+        }
+        if (warnings.length) return `Очередность категорий брендов сохранена. ${warnings.join(' ')}`;
       },
     });
   };
@@ -61,7 +57,6 @@ export function useAdminBrandPortfolio(options: AdminCrudHookOptions) {
     if (options.actionLock?.current) return;
     const normalized = reorderByDrop(brandCategories, draggedId, targetId);
     if (!normalized) return;
-    normalized.forEach((category) => categories.update(category.id, { sortOrder: category.sortOrder }));
     await persistBrandCategoryOrder(normalized, brandCategories);
   };
 
