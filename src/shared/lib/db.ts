@@ -193,7 +193,7 @@ export {
   WHOLESALE_PRICE_WORKFLOW_STATUSES,
 } from './wholesalePriceWorkflowStatus';
 export type { WholesalePriceWorkflowStatus } from './wholesalePriceWorkflowStatus';
-export { getPublicWholesalePriceList, getPublicWholesaleRequestItems } from './db/wholesaleRepo';
+export { getPublicWholesalePriceList, getPublicWholesalePriceListMetadata, getPublicWholesalePriceListRevision, getPublicWholesaleRequestItems } from './db/wholesaleRepo';
 export type {
   PublicWholesaleCategory,
   PublicWholesalePriceList,

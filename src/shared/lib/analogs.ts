@@ -160,8 +160,22 @@ function normalizeRefrigerant(value: string | null | undefined) {
   return value?.trim() || null;
 }
 
+// Knowledge-base alias arrays are immutable module data. Normalize each once,
+// rather than repeating Unicode/case normalization for every catalogue product.
+// Weak keys retain no user queries or per-price results.
+const normalizedAliasesByList = new WeakMap<string[], string[]>();
+
+function normalizedAliasesFor(aliases: string[]) {
+  let normalized = normalizedAliasesByList.get(aliases);
+  if (!normalized) {
+    normalized = aliases.map(normalizeAnalogTerm).filter(Boolean);
+    normalizedAliasesByList.set(aliases, normalized);
+  }
+  return normalized;
+}
+
 function aliasScore(aliases: string[], normalizedQuery: string) {
-  const normalizedAliases = aliases.map(normalizeAnalogTerm).filter(Boolean);
+  const normalizedAliases = normalizedAliasesFor(aliases);
   if (normalizedAliases.some((alias) => alias === normalizedQuery)) return 2;
   if (
     normalizedQuery.length >= 4 &&

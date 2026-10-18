@@ -1,7 +1,11 @@
-import { query } from './client';
+import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 import { buildPriceListAnalogLinks, type PriceListAnalogLink } from '../analogs';
 import { resolveWholesaleStockDisplayMode, type WholesaleStockDisplayMode } from '../wholesaleStockDisplay';
+import { normalizePublicWholesalePriceToken } from './wholesalePriceTelemetryRepo';
+import { readPublicWholesalePriceRevision, type PriceReadQuery } from './wholesalePriceRevision';
+import { createPriceReadCache } from '../priceReadCache';
+import { createPricePerformanceTrace, type PricePerformanceTrace } from '../pricePerformance';
 
 export type PublicWholesaleVariant = {
   priceItemId: number;
@@ -44,6 +48,8 @@ export type PublicWholesaleCategory = {
 };
 
 export type PublicWholesalePriceList = {
+  /** Exact source snapshot version, for derived export caches; never a write revision. */
+  cacheRevision?: string;
   id: number;
   clientCompanyId: number | null;
   title: string;
@@ -64,6 +70,8 @@ export type PublicWholesalePriceList = {
   showStockText: boolean;
   categories: PublicWholesaleCategory[];
 };
+
+export type PublicWholesalePriceMetadata = Omit<PublicWholesalePriceList, 'categories' | 'cacheRevision'>;
 
 type PriceListRow = {
   id: string;
@@ -130,12 +138,15 @@ export type PublicWholesaleRequestItem = {
   priceCny: string | null;
 };
 
-export async function getPublicWholesalePriceList(token: string): Promise<PublicWholesalePriceList | null> {
+export async function getPublicWholesalePriceListMetadata(token: string): Promise<PublicWholesalePriceMetadata | null> {
+  const normalizedToken = normalizePublicWholesalePriceToken(token);
+  if (!normalizedToken) return null;
   await ensureSiteSchema();
-  const normalizedToken = token.trim();
-  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(normalizedToken)) return null;
+  return readPublicWholesalePriceMetadata(normalizedToken, query);
+}
 
-  const priceList = await query<PriceListRow>(
+async function readPublicWholesalePriceMetadata(normalizedToken: string, runQuery: PriceReadQuery): Promise<PublicWholesalePriceMetadata | null> {
+  const priceList = await runQuery<PriceListRow>(
     `select
        pl.id::text,
        pl.client_company_id::text,
@@ -166,7 +177,37 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
   const priceListRow = priceList.rows[0];
   if (!priceListRow) return null;
 
-  const items = await query<PriceItemRow>(
+  return {
+    id: Number(priceListRow.id),
+    clientCompanyId: priceListRow.client_company_id ? Number(priceListRow.client_company_id) : null,
+    title: priceListRow.title,
+    token: priceListRow.token,
+    clientName: priceListRow.client_name,
+    managerId: priceListRow.manager_id ? Number(priceListRow.manager_id) : null,
+    managerName: priceListRow.manager_name ?? '',
+    managerEmail: priceListRow.manager_email ?? '',
+    managerPhone: priceListRow.manager_phone ?? '',
+    supportManagerId: priceListRow.support_manager_id ? Number(priceListRow.support_manager_id) : null,
+    supportManagerName: priceListRow.support_manager_name ?? '',
+    supportManagerEmail: priceListRow.support_manager_email ?? '',
+    supportManagerPhone: priceListRow.support_manager_phone ?? '',
+    validUntil: priceListRow.valid_until,
+    updatedAt: priceListRow.updated_at,
+    showRetailPrices: priceListRow.show_retail_prices,
+    showStock: priceListRow.show_stock !== false,
+    showStockText: priceListRow.show_stock_text === true,
+  };
+}
+
+export async function getPublicWholesalePriceListRevision(token: string): Promise<string | null> {
+  const normalizedToken = normalizePublicWholesalePriceToken(token);
+  if (!normalizedToken) return null;
+  await ensureSiteSchema();
+  return readPublicWholesalePriceRevision(normalizedToken, query);
+}
+
+async function readPublicWholesalePriceItems(token: string, runQuery: PriceReadQuery) {
+  const items = await runQuery<PriceItemRow>(
     `select
        i.id::text as item_id,
        c.id::text as category_id,
@@ -243,13 +284,16 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
        and p.is_active = true
        and (v.id is null or v.is_active = true)
      order by c.sort_order asc nulls last, c.id asc nulls last, p.sort_order asc, p.id asc, i.sort_order asc, v.sort_order asc nulls last`,
-    [normalizedToken],
+    [token],
   );
+  return items.rows;
+}
 
+function assemblePublicWholesalePriceList(metadata: PublicWholesalePriceMetadata, rows: PriceItemRow[], includeAnalogs: boolean, trace: PricePerformanceTrace): PublicWholesalePriceList {
   const categoriesById = new Map<number, PublicWholesaleCategory>();
   const productKeyByCategory = new Map<string, PublicWholesaleProduct>();
 
-  for (const row of items.rows) {
+  for (const row of rows) {
     const categoryId = Number(row.category_id ?? 0);
     const categoryKey = Number.isFinite(categoryId) && categoryId > 0 ? categoryId : 0;
     let category = categoriesById.get(categoryKey);
@@ -281,8 +325,8 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
         unit: row.unit,
         isExpected: Boolean(row.is_expected),
         stockDisplayMode: resolveWholesaleStockDisplayMode({
-          globalShowNumbers: priceListRow.show_stock !== false,
-          globalShowText: priceListRow.show_stock_text === true,
+          globalShowNumbers: metadata.showStock,
+          globalShowText: metadata.showStockText,
           groupShowNumbers: row.group_show_stock_numbers,
           groupShowText: row.group_show_stock_text,
         }),
@@ -309,33 +353,78 @@ export async function getPublicWholesalePriceList(token: string): Promise<Public
     });
   }
 
-  const allProducts = Array.from(categoriesById.values()).flatMap((category) => category.products);
-  const analogLinks = buildPriceListAnalogLinks(allProducts);
-  for (const product of allProducts) {
-    product.analogs = analogLinks.get(product.id) ?? [];
+  if (includeAnalogs) {
+    const allProducts = Array.from(categoriesById.values()).flatMap((category) => category.products);
+    const analogLinks = trace.measureSync('analogs', () => buildPriceListAnalogLinks(allProducts));
+    for (const product of allProducts) {
+      product.analogs = analogLinks.get(product.id) ?? [];
+    }
   }
 
   return {
-    id: Number(priceListRow.id),
-    clientCompanyId: priceListRow.client_company_id ? Number(priceListRow.client_company_id) : null,
-    title: priceListRow.title,
-    token: priceListRow.token,
-    clientName: priceListRow.client_name,
-    managerId: priceListRow.manager_id ? Number(priceListRow.manager_id) : null,
-    managerName: priceListRow.manager_name ?? '',
-    managerEmail: priceListRow.manager_email ?? '',
-    managerPhone: priceListRow.manager_phone ?? '',
-    supportManagerId: priceListRow.support_manager_id ? Number(priceListRow.support_manager_id) : null,
-    supportManagerName: priceListRow.support_manager_name ?? '',
-    supportManagerEmail: priceListRow.support_manager_email ?? '',
-    supportManagerPhone: priceListRow.support_manager_phone ?? '',
-    validUntil: priceListRow.valid_until,
-    updatedAt: priceListRow.updated_at,
-    showRetailPrices: priceListRow.show_retail_prices,
-    showStock: priceListRow.show_stock !== false,
-    showStockText: priceListRow.show_stock_text === true,
+    ...metadata,
     categories: Array.from(categoriesById.values()),
   };
+}
+
+const publicPriceCache = createPriceReadCache<PublicWholesalePriceList | null>({
+  maxEntries: 8, maxBytes: 32 * 1024 * 1024, ttlMs: 5 * 60_000,
+});
+
+function freezePrice(value: PublicWholesalePriceList) {
+  // Shared cached objects cannot be changed accidentally by another reader.
+  const freeze = (object: object) => {
+    for (const child of Object.values(object)) if (child && typeof child === 'object') freeze(child);
+    Object.freeze(object);
+  };
+  freeze(value);
+  return value;
+}
+
+export async function getPublicWholesalePriceList(token: string, options: { includeAnalogs?: boolean } = {}): Promise<PublicWholesalePriceList | null> {
+  const trace = createPricePerformanceTrace('price_read');
+  try {
+    const normalizedToken = normalizePublicWholesalePriceToken(token);
+    if (!normalizedToken) { trace.finish(404); return null; }
+    // Access is always checked live, including warm-cache hits and revoked links.
+    const metadata = await trace.measure('access', () => getPublicWholesalePriceListMetadata(normalizedToken));
+    if (!metadata) { trace.finish(404); return null; }
+    const revision = await trace.measure('revision', () => getPublicWholesalePriceListRevision(normalizedToken));
+    if (!revision) { trace.finish(404); return null; }
+    const includeAnalogs = options.includeAnalogs !== false;
+    const key = `${normalizedToken}:${revision}:${includeAnalogs ? 'page' : 'export'}`;
+    const price = await publicPriceCache.read(key, async () => {
+      const snapshot = await withTransaction(async (client) => {
+        // No row locks or source writes. A concurrent manager save/import cannot
+        // produce a half-old/half-new result stamped with the wrong revision.
+        await client.query('set transaction isolation level repeatable read read only');
+        const runQuery: PriceReadQuery = (sql, params) => client.query(sql, params);
+        const currentMetadata = await trace.measure('snapshot_access', () => readPublicWholesalePriceMetadata(normalizedToken, runQuery));
+        if (!currentMetadata) return null;
+        const currentRevision = await trace.measure('snapshot_revision', () => readPublicWholesalePriceRevision(normalizedToken, runQuery));
+        if (!currentRevision) return null;
+        const rows = await trace.measure('items', () => readPublicWholesalePriceItems(normalizedToken, runQuery));
+        return { metadata: currentMetadata, revision: currentRevision, rows };
+      });
+      if (!snapshot) return null;
+      // Release the database connection BEFORE CPU-heavy assembly and analogs.
+      return trace.measureSync('assembly', () => freezePrice({
+        ...assemblePublicWholesalePriceList(snapshot.metadata, snapshot.rows, includeAnalogs, trace),
+        cacheRevision: snapshot.revision,
+      }));
+    }, (state) => trace.measureSync(`cache_${state}`, () => undefined));
+    // Also recheck after waiting for another request or a long cold calculation.
+    const stillAccessible = await trace.measure('access_recheck', () => getPublicWholesalePriceListMetadata(normalizedToken));
+    // A token may have been reassigned while the old price was being built.
+    // Existence alone is not enough: never deliver the previous owner's data.
+    const accessiblePrice = price && stillAccessible?.id === price.id && price.token === normalizedToken
+      ? price : null;
+    trace.finish(accessiblePrice ? 200 : 404);
+    return accessiblePrice;
+  } catch (error) {
+    trace.finish('error');
+    throw error;
+  }
 }
 
 export async function getPublicWholesaleRequestItems(token: string, itemIds: number[]) {

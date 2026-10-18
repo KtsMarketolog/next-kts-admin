@@ -1,6 +1,8 @@
 import { getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
-import { getPublicWholesalePriceList, trackAnalyticsEvent } from '@/shared/lib/db';
+import { getPublicWholesalePriceList, getPublicWholesalePriceListMetadata, getPublicWholesalePriceListRevision, trackAnalyticsEvent } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
+import { createPriceExportCoordinator, createPriceExportMemoryCache } from '@/shared/lib/priceExportCache';
+import { createPricePerformanceTrace } from '@/shared/lib/pricePerformance';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
 import { formatWholesaleStockLabel, hasVisibleWholesaleStock } from '@/shared/lib/wholesaleStockDisplay';
@@ -23,6 +25,8 @@ const EXCEL_SESSION_LIMIT = 30;
 const EXCEL_USER_LIMIT = 60;
 const EXCEL_GLOBAL_LIMIT = 500;
 const MAX_PRICE_EXPORT_ROWS = 15_000;
+const excelCache = createPriceExportMemoryCache(24, 32 * 1024 * 1024);
+const getExcelExport = createPriceExportCoordinator({ maxConcurrent: 3, ...excelCache });
 
 function getHeaderIp(headersList: Headers) {
   const forwardedFor = headersList.get('x-forwarded-for')?.split(',')[0]?.trim();
@@ -244,12 +248,22 @@ function countPriceExportRows(priceList: PublicPriceList) {
 }
 
 export async function GET(request: Request, context: Context) {
-  const { token } = await context.params;
-  const priceList = await getPublicWholesalePriceList(token);
-  if (!priceList) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (countPriceExportRows(priceList) > MAX_PRICE_EXPORT_ROWS) {
-    return Response.json({ error: 'Price export is too large' }, { status: 413 });
+  const trace = createPricePerformanceTrace('excel');
+  let status = 500;
+  try {
+    const response = await downloadExcel(request, context, trace);
+    status = response.status;
+    response.headers.set('Server-Timing', trace.header());
+    return response;
+  } finally {
+    trace.finish(status);
   }
+}
+
+async function downloadExcel(request: Request, context: Context, trace: ReturnType<typeof createPricePerformanceTrace>) {
+  const { token } = await context.params;
+  const priceList = await trace.measure('access', () => getPublicWholesalePriceListMetadata(token));
+  if (!priceList) return Response.json({ error: 'Not found' }, { status: 404, headers: { 'Cache-Control': 'private, no-store' } });
 
   const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
   const sessionId = publicSession.sessionId;
@@ -261,22 +275,48 @@ export async function GET(request: Request, context: Context) {
     actorUserId && actorType !== 'client'
       ? `excel:user:${actorUserId}`
       : `excel:price:${priceList.id}:session:${sessionId}`;
-  const [mainLimit, globalLimit] = await Promise.all([
-    checkDbRateLimit(limitKey, actorUserId ? EXCEL_USER_LIMIT : EXCEL_SESSION_LIMIT, EXCEL_LIMIT_WINDOW_MS),
-    checkDbRateLimit('excel:global', EXCEL_GLOBAL_LIMIT, EXCEL_LIMIT_WINDOW_MS),
-  ]);
-
-  if (!mainLimit.allowed || !globalLimit.allowed) {
-    const retryAfter = Math.max(mainLimit.retryAfter, globalLimit.retryAfter);
+  const mainLimit = await trace.measure('limit_actor', () =>
+    checkDbRateLimit(limitKey, actorUserId ? EXCEL_USER_LIMIT : EXCEL_SESSION_LIMIT, EXCEL_LIMIT_WINDOW_MS));
+  const limit = mainLimit.allowed
+    ? await trace.measure('limit_global', () => checkDbRateLimit('excel:global', EXCEL_GLOBAL_LIMIT, EXCEL_LIMIT_WINDOW_MS))
+    : mainLimit;
+  if (!limit.allowed) {
     const response = Response.json(
       { error: 'Too many Excel downloads' },
-      { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+      { status: 429, headers: { 'Retry-After': String(limit.retryAfter), 'Cache-Control': 'private, no-store' } },
     );
     applySessionCookie(response.headers, publicSession);
     return response;
   }
 
-  const excel = new TextEncoder().encode(createExcelXml(priceList));
+  const revision = await trace.measure('revision', () => getPublicWholesalePriceListRevision(token));
+  if (!revision) return Response.json({ error: 'Not found' }, { status: 404, headers: { 'Cache-Control': 'private, no-store' } });
+  const result = await trace.measure('export', () => getExcelExport({ priceListId: priceList.id, revision }, async () => {
+    const fullPrice = await trace.measure('products', () => getPublicWholesalePriceList(token, { includeAnalogs: false }));
+    if (!fullPrice || fullPrice.id !== priceList.id || fullPrice.token !== token) return { kind: 'missing' };
+    if (trace.measureSync('row_count', () => countPriceExportRows(fullPrice)) > MAX_PRICE_EXPORT_ROWS) return { kind: 'too-large' };
+    const bytes = trace.measureSync('render_excel', () => Buffer.from(createExcelXml(fullPrice), 'utf8'));
+    const currentRevision = await trace.measure('access_recheck', () => getPublicWholesalePriceListRevision(token));
+    if (!currentRevision) return { kind: 'missing' };
+    return { kind: 'ready', bytes, cacheable: fullPrice.cacheRevision === revision && currentRevision === revision };
+  }, trace.measure));
+  if (result.kind !== 'ready') {
+    const status = result.kind === 'missing' ? 404 : result.kind === 'too-large' ? 413 : 429;
+    const error = result.kind === 'missing' ? 'Not found' : result.kind === 'too-large' ? 'Price export is too large' : 'Excel generation is busy';
+    const response = Response.json({ error }, {
+      status,
+      headers: { 'Cache-Control': 'private, no-store', ...(result.kind === 'busy' ? { 'Retry-After': '15' } : {}) },
+    });
+    applySessionCookie(response.headers, publicSession);
+    return response;
+  }
+  const excel = result.bytes;
+  const currentPrice = await trace.measure('delivery_access', () => getPublicWholesalePriceListMetadata(token));
+  if (!currentPrice || currentPrice.id !== priceList.id || currentPrice.token !== token) {
+    const response = Response.json({ error: 'Not found' }, { status: 404, headers: { 'Cache-Control': 'private, no-store' } });
+    applySessionCookie(response.headers, publicSession);
+    return response;
+  }
 
   await trackAnalyticsEvent({
     eventType: 'public_price_excel_downloaded',
@@ -319,6 +359,7 @@ export async function GET(request: Request, context: Context) {
     'Content-Type': 'application/vnd.ms-excel; charset=utf-8',
     'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${safeFilename(priceList.title) || `price-${priceList.id}`}.xls`)}`,
     'Cache-Control': 'private, no-store',
+    'X-Price-Export-Cache': result.cache,
   });
   applySessionCookie(headers, publicSession);
 

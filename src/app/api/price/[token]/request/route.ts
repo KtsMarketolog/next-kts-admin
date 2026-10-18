@@ -2,12 +2,13 @@ import nodemailer from 'nodemailer';
 
 import {
   createClientPriceRequest,
-  getPublicWholesalePriceList,
+  getPublicWholesalePriceListMetadata,
   getPublicWholesaleRequestItems,
   trackAnalyticsEvent,
 } from '@/shared/lib/db';
 import { PUBLIC_PRICE_SESSION_COOKIE, applySessionCookie, getOrCreateSessionCookie } from '@/shared/lib/publicSession';
 import { checkDbRateLimit } from '@/shared/lib/rateLimit';
+import { createPricePerformanceTrace } from '@/shared/lib/pricePerformance';
 
 type Context = {
   params: Promise<{ token: string }>;
@@ -62,6 +63,30 @@ function jsonWithSession(body: unknown, init: ResponseInit, session: ReturnType<
   const response = Response.json(body, init);
   applySessionCookie(response.headers, session);
   return response;
+}
+
+async function readRequestBody(request: Request): Promise<{ body: unknown; tooLarge: boolean }> {
+  if (!request.body) return { body: null, tooLarge: false };
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {});
+        return { body: null, tooLarge: true };
+      }
+      chunks.push(part.value);
+    }
+    return { body: JSON.parse(Buffer.concat(chunks, size).toString('utf8')), tooLarge: false };
+  } catch {
+    return { body: null, tooLarge: false };
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function normalizeItems(input: unknown): RequestItemInput[] | null {
@@ -214,7 +239,7 @@ function priceRequestRecipients(managerEmails: string[]) {
   });
 }
 
-export async function POST(request: Request, context: Context) {
+async function submitRequest(request: Request, context: Context, trace: ReturnType<typeof createPricePerformanceTrace>) {
   const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
   const contentLength = Number(request.headers.get('content-length') ?? 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
@@ -222,28 +247,39 @@ export async function POST(request: Request, context: Context) {
   }
 
   const { token } = await context.params;
-  const priceList = await getPublicWholesalePriceList(token);
+  const priceList = await trace.measure('access', () => getPublicWholesalePriceListMetadata(token));
   if (!priceList) return jsonWithSession({ ok: false, error: 'NOT_FOUND' }, { status: 404 }, publicSession);
 
-  const [sessionLimit, globalLimit] = await Promise.all([
+  const sessionLimit = await trace.measure('session_limit', () =>
     checkDbRateLimit(
       `public_price_request:token:${priceList.token}:session:${publicSession.sessionId}`,
       REQUEST_SESSION_LIMIT,
       REQUEST_LIMIT_WINDOW_MS,
     ),
-    checkDbRateLimit('public_price_request:global', REQUEST_GLOBAL_LIMIT, REQUEST_LIMIT_WINDOW_MS),
-  ]);
-
-  if (!sessionLimit.allowed || !globalLimit.allowed) {
-    const retryAfter = Math.max(sessionLimit.retryAfter, globalLimit.retryAfter);
+  );
+  if (!sessionLimit.allowed) {
     return jsonWithSession(
       { ok: false, error: 'TOO_MANY_REQUESTS' },
-      { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+      { status: 429, headers: { 'Retry-After': String(sessionLimit.retryAfter) } },
       publicSession,
     );
   }
 
-  const body = await request.json().catch(() => null);
+  const globalLimit = await trace.measure('global_limit', () =>
+    checkDbRateLimit('public_price_request:global', REQUEST_GLOBAL_LIMIT, REQUEST_LIMIT_WINDOW_MS),
+  );
+  if (!globalLimit.allowed) {
+    return jsonWithSession(
+      { ok: false, error: 'TOO_MANY_REQUESTS' },
+      { status: 429, headers: { 'Retry-After': String(globalLimit.retryAfter) } },
+      publicSession,
+    );
+  }
+
+  const { body, tooLarge } = await trace.measure('body', () => readRequestBody(request));
+  if (tooLarge) {
+    return jsonWithSession({ ok: false, error: 'BODY_TOO_LARGE' }, { status: 413 }, publicSession);
+  }
   const bodyRecord = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
   const requestedItems = normalizeItems(bodyRecord?.items);
   const comment = normalizeComment(bodyRecord?.comment);
@@ -254,44 +290,46 @@ export async function POST(request: Request, context: Context) {
   const rubConversion = normalizeRubConversion(bodyRecord?.rubConversion, requestedItemIds);
 
   const itemIds = requestedItems.map((item) => item.id);
-  const dbItems = await getPublicWholesaleRequestItems(priceList.token, itemIds);
+  const dbItems = await trace.measure('items', () => getPublicWholesaleRequestItems(priceList.token, itemIds));
   if (dbItems.length !== itemIds.length) {
     return jsonWithSession({ ok: false, error: 'INVALID_ITEMS' }, { status: 400 }, publicSession);
   }
 
-  const dbItemsById = new Map(dbItems.map((item) => [item.id, item]));
-  const rows = requestedItems.map((item) => {
-    const dbItem = dbItemsById.get(item.id);
-    if (!dbItem) throw new Error('Validated item disappeared');
-    const shouldConvertToRub = rubConversion?.itemIds.has(item.id) === true;
-    const currencyPrices = [
-      { amount: parseMoneyValue(dbItem.priceEur), currency: 'EUR' },
-      { amount: parseMoneyValue(dbItem.priceRub), currency: 'RUB' },
-      { amount: parseMoneyValue(dbItem.priceCny), currency: 'CNY' },
-    ]
-      .filter((price): price is { amount: number; currency: string } => price.amount !== null)
-      .map((price): RequestPrice => {
-        const convertedRubAmount = shouldConvertToRub ? getConvertedRubAmount(price, rubConversion) : null;
-        return {
-          amount: price.amount,
-          currency: price.currency,
-          lineTotal: price.amount * item.quantity,
-          convertedRubAmount,
-          convertedRubLineTotal: convertedRubAmount !== null ? convertedRubAmount * item.quantity : null,
-        };
-      });
-    const fallbackPrice = parseMoneyValue(dbItem.wholesalePrice);
-    const prices =
-      currencyPrices.length > 0
-        ? currencyPrices
-        : fallbackPrice
-          ? [{ amount: fallbackPrice, currency: '', lineTotal: fallbackPrice * item.quantity, convertedRubAmount: null, convertedRubLineTotal: null }]
-          : [];
-    return {
-      ...dbItem,
-      quantity: item.quantity,
-      prices,
-    };
+  const rows = trace.measureSync('pricing', () => {
+    const dbItemsById = new Map(dbItems.map((item) => [item.id, item]));
+    return requestedItems.map((item) => {
+      const dbItem = dbItemsById.get(item.id);
+      if (!dbItem) throw new Error('Validated item disappeared');
+      const shouldConvertToRub = rubConversion?.itemIds.has(item.id) === true;
+      const currencyPrices = [
+        { amount: parseMoneyValue(dbItem.priceEur), currency: 'EUR' },
+        { amount: parseMoneyValue(dbItem.priceRub), currency: 'RUB' },
+        { amount: parseMoneyValue(dbItem.priceCny), currency: 'CNY' },
+      ]
+        .filter((price): price is { amount: number; currency: string } => price.amount !== null)
+        .map((price): RequestPrice => {
+          const convertedRubAmount = shouldConvertToRub ? getConvertedRubAmount(price, rubConversion) : null;
+          return {
+            amount: price.amount,
+            currency: price.currency,
+            lineTotal: price.amount * item.quantity,
+            convertedRubAmount,
+            convertedRubLineTotal: convertedRubAmount !== null ? convertedRubAmount * item.quantity : null,
+          };
+        });
+      const fallbackPrice = parseMoneyValue(dbItem.wholesalePrice);
+      const prices =
+        currencyPrices.length > 0
+          ? currencyPrices
+          : fallbackPrice
+            ? [{ amount: fallbackPrice, currency: '', lineTotal: fallbackPrice * item.quantity, convertedRubAmount: null, convertedRubLineTotal: null }]
+            : [];
+      return {
+        ...dbItem,
+        quantity: item.quantity,
+        prices,
+      };
+    });
   });
 
   const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
@@ -363,7 +401,7 @@ export async function POST(request: Request, context: Context) {
       })
       .join('');
 
-    await transporter.sendMail({
+    await trace.measure('delivery', () => transporter.sendMail({
       from: mailFrom,
       to: mailTo,
       subject,
@@ -409,12 +447,13 @@ export async function POST(request: Request, context: Context) {
         `\n\nИтого позиций: ${totalQuantity}\nИтого сумма: ${totalPriceLabel}\n` +
         (hasConvertedRubValues ? `Итого в рублях по пересчету: ${formatConvertedRubAmount(totalConvertedRub)}\n` : '') +
         (convertedBreakdownLabel ? `В пересчет вошло: ${convertedBreakdownLabel}\n` : ''),
-    });
+    }));
 
-    if (priceList.clientCompanyId) {
+    const clientCompanyId = priceList.clientCompanyId;
+    if (clientCompanyId) {
       try {
-        await createClientPriceRequest({
-          companyId: priceList.clientCompanyId,
+        await trace.measure('history', () => createClientPriceRequest({
+          companyId: clientCompanyId,
           priceListId: priceList.id,
           token: priceList.token,
           priceTitle: priceList.title,
@@ -442,14 +481,14 @@ export async function POST(request: Request, context: Context) {
               convertedRubLineTotal: price.convertedRubLineTotal,
             })),
           })),
-        });
+        }));
       } catch (historyError) {
         console.error('PUBLIC_PRICE_REQUEST_HISTORY_FAILED', historyError);
       }
     }
 
     try {
-      await trackAnalyticsEvent({
+      await trace.measure('analytics', () => trackAnalyticsEvent({
         eventType: 'public_price_request_sent',
         actorType: 'client',
         managerId: priceList.managerId,
@@ -486,7 +525,7 @@ export async function POST(request: Request, context: Context) {
               .map((price) => ({ sourceCurrency: price.currency, amount: Math.round(price.convertedRubLineTotal ?? 0) })),
           })),
         },
-      });
+      }));
     } catch (analyticsError) {
       console.error('PUBLIC_PRICE_REQUEST_ANALYTICS_FAILED', analyticsError);
     }
@@ -495,5 +534,18 @@ export async function POST(request: Request, context: Context) {
   } catch (error) {
     console.error('PUBLIC_PRICE_REQUEST_FAILED', error);
     return jsonWithSession({ ok: false, error: 'MAIL_FAILED' }, { status: 500 }, publicSession);
+  }
+}
+
+export async function POST(request: Request, context: Context) {
+  const trace = createPricePerformanceTrace('request');
+  try {
+    const response = await submitRequest(request, context, trace);
+    trace.finish(response.status);
+    response.headers.set('Server-Timing', trace.header());
+    return response;
+  } catch (error) {
+    trace.finish(500);
+    throw error;
   }
 }
