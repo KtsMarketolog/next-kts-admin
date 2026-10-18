@@ -19,6 +19,7 @@ import {
   activatePersonalDashboardHtml, createPersonalDashboardHtml, deletePersonalDashboardHtml, getPersonalDashboardHtml,
   getPersonalDashboardSnapshot, getPersonalDashboardStatus, importPersonalDashboardSnapshot,
   getPersonalDashboardReviewOverview, getPersonalDashboardReviewHtml, getPersonalDashboardReviewSnapshot,
+  getPersonalDashboardReportDates,
   listPersonalDashboardAdmin, listPersonalDashboardImports, recordPersonalDashboardImportFailure,
 } from '../src/shared/lib/db/managerDashboardRepo';
 import { getManagerEmailHash, inspectPersonalSnapshot, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
@@ -37,6 +38,8 @@ import { drainDashboardFileCleanup } from '../src/shared/lib/dashboardFileCleanu
 import { getAccessUsers } from '../src/shared/lib/db/adminUsersRepo';
 import { currentAccessUserRevision, updateCurrentAccessUser as updateAccessUser } from './helpers/access-user-revision-fixtures';
 import { getDashboardAudience, setDashboardAudience } from '../src/shared/lib/db/dashboardAccessRepo';
+import { getDashboardReportDates } from '../src/shared/lib/db/dashboardReportDatesRepo';
+import type { AdminSession } from '../src/shared/lib/adminAuth';
 
 function guard() {
   assert.equal(process.env.KTS_PERSONAL_TEST, '1', 'Isolated integration tests require KTS_PERSONAL_TEST=1');
@@ -1306,6 +1309,232 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
       assert.equal((await query('select id from personal_dashboard_snapshots where admin_user_id=$1',[recipient.id])).rowCount,0);
       assert.equal((await query('select admin_user_id from personal_dashboard_imports where id=$1',[third.id])).rows[0].admin_user_id,null);
       await assertLegacy();
+    });
+
+    await t.test('report dates use the same current recipients and bindings as the personal dashboard', async (datesTest) => {
+      const managerIds: number[] = [];
+      const adminIds: number[] = [];
+      const timestamp = (minute: number) => `2040-01-01T08:${String(minute).padStart(2, '0')}:00.000Z`;
+      const makeManager = async (label: string, role = 'manager', personalAccess = true, email?: string) => {
+        const result = await manager(`dates-${label}`, role, true, email, personalAccess);
+        managerIds.push(result.id);
+        return result;
+      };
+      const makeAdmin = async (role: 'admin' | 'admintop' | 'top', id?: number) => {
+        const suffix = randomUUID();
+        const email = `dates-${role}-${suffix}@example.test`;
+        const values = [`dates-${suffix}`, email, `Synthetic dates ${role}`, role];
+        const result = id === undefined
+          ? await query<{ id: string }>('insert into admin_users(login,email,name,role) values($1,$2,$3,$4) returning id::text', values)
+          : await query<{ id: string }>('insert into admin_users(login,email,name,role,id) values($1,$2,$3,$4,$5) returning id::text', [...values, id]);
+        const adminUserId = Number(result.rows[0].id);
+        adminIds.push(adminUserId);
+        const sessionId = randomUUID();
+        await query(`insert into admin_sessions(id,session_hash,role,admin_user_id,expires_at)
+          values($1,$2,$3,$4,now()+interval '1 hour')`, [sessionId, randomUUID(), role, adminUserId]);
+        return { id: adminUserId, email, session: { role, adminUserId, sessionId } satisfies AdminSession };
+      };
+      const snapshot = async (email: string, minute: number, issuedOffset = -1) => {
+        const result = await importFile(bytes(email, issuedOffset));
+        assert.equal(result.status, 'imported');
+        assert.ok(result.snapshotId);
+        await query('update personal_dashboard_snapshots set received_at=$2 where id=$1', [result.snapshotId, timestamp(minute)]);
+        return result.snapshotId;
+      };
+      const assertSnapshotDates = async (session: AdminSession, audience: PersonalDashboardAudience, snapshotId: number | null) => {
+        const actual = await getPersonalDashboardReportDates(session, audience);
+        if (snapshotId === null) {
+          assert.equal(actual.dataUploadedAt, null);
+          assert.equal(actual.dataAsOf, null);
+        } else {
+          const expected = (await query<{ received_at: string; issued: string }>(
+            'select received_at::text,issued::text from personal_dashboard_snapshots where id=$1', [snapshotId])).rows[0];
+          assert.ok(actual.dataUploadedAt);
+          assert.equal(new Date(actual.dataUploadedAt).toISOString(), new Date(expected.received_at).toISOString());
+          assert.equal(actual.dataAsOf, expected.issued, 'The issue date belongs to the selected upload, not a separate maximum');
+        }
+        return actual;
+      };
+      const assertVisibleGroupDates = async (session: AdminSession, audience: PersonalDashboardAudience) => {
+        const group = (await listPersonalDashboardAdmin()).groups.find((item) => item.audience === audience)!;
+        const snapshots = group.managers.flatMap((item) => item.snapshot ? [item.snapshot] : []);
+        snapshots.sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt));
+        const actual = await assertSnapshotDates(session, audience, snapshots[0]?.id ?? null);
+        const publication = await getPersonalDashboardHtml(undefined, false, audience);
+        assert.equal(actual.htmlPublishedAt && new Date(actual.htmlPublishedAt).toISOString(),
+          publication?.firstPublishedAt ? new Date(publication.firstPublishedAt).toISOString() : null);
+        return snapshots[0]?.id ?? null;
+      };
+      try {
+        await datesTest.test('admin aggregates exclude revoked, inactive and wrong-role recipients, and include eligible leaders', async () => {
+          const admin = await makeAdmin('admin');
+          const adminTop = await makeAdmin('admintop');
+          const visible = await makeManager('visible');
+          const newerHidden = await makeManager('newer-hidden');
+          const support = await makeManager('support', 'support_manager');
+          const visibleSnapshot = await snapshot(visible.email, 10, -1);
+          const hiddenSnapshot = await snapshot(newerHidden.email, 20, -2);
+          const supportSnapshot = await snapshot(support.email, 25, -3);
+          assert.equal(await assertVisibleGroupDates(admin.session, 'development'), hiddenSnapshot);
+          assert.equal(await assertVisibleGroupDates(adminTop.session, 'support'), supportSnapshot);
+
+          await employeeAccess(newerHidden.id, []);
+          assert.equal(await assertVisibleGroupDates(admin.session, 'development'), visibleSnapshot);
+          await employeeAccess(newerHidden.id, ['manager:development']);
+          await query('update wholesale_managers set is_active=false where id=$1', [newerHidden.id]);
+          assert.equal(await assertVisibleGroupDates(adminTop.session, 'development'), visibleSnapshot);
+          await query("update wholesale_managers set is_active=true,role='support_manager' where id=$1", [newerHidden.id]);
+          assert.equal(await assertVisibleGroupDates(admin.session, 'development'), visibleSnapshot);
+          assert.equal(await assertVisibleGroupDates(adminTop.session, 'support'), supportSnapshot,
+            'A stale development grant does not make a changed-role employee visible in support');
+
+          const leaderSnapshot = await snapshot(adminTop.email, 30, -4);
+          assert.equal(await assertVisibleGroupDates(admin.session, 'development'), leaderSnapshot);
+          await query('update admin_users set is_active=false where id=$1', [adminTop.id]);
+          assert.equal(await assertVisibleGroupDates(admin.session, 'development'), visibleSnapshot);
+          await query('update admin_users set is_active=true where id=$1', [adminTop.id]);
+          await query('update personal_dashboard_snapshots set expires=$2 where id=$1', [leaderSnapshot, day(-1)]);
+          assert.equal(await assertVisibleGroupDates(admin.session, 'development'), leaderSnapshot,
+            'Expiration does not erase the date of the still-active saved snapshot');
+          await query('update admin_users set email=$2 where id=$1', [adminTop.id, `changed-${adminTop.email}`]);
+          assert.equal(await assertVisibleGroupDates(admin.session, 'development'), visibleSnapshot);
+          await query('update admin_users set email=$2 where id=$1', [adminTop.id, adminTop.email]);
+        });
+
+        await datesTest.test('all-employees effective grants include new recipients but not explicit exclusions', async () => {
+          const admin = await makeAdmin('admin');
+          for (const [role, audience] of [['manager', 'development'], ['support_manager', 'support']] as const) {
+            const key = `manager:${audience}`;
+            const previous = await getDashboardAudience(key);
+            const originalIds = previous.users.filter((user) => user.checked && user.eligible).map((user) => user.id);
+            await setDashboardAudience(key, originalIds, previous.version, 'all');
+            try {
+              const inherited = await makeManager(`inherited-${audience}`, role, false);
+              const imported = await snapshot(inherited.email, 40, -5);
+              assert.equal(await assertVisibleGroupDates(admin.session, audience), imported);
+              await employeeAccess(inherited.id, []);
+              assert.notEqual(await assertVisibleGroupDates(admin.session, audience), imported,
+                'An exclusion from inherited access must also exclude the aggregate date');
+              await employeeAccess(inherited.id, [key]);
+              assert.equal(await assertVisibleGroupDates(admin.session, audience), imported);
+              await query('update wholesale_managers set is_active=false where id=$1', [inherited.id]);
+              assert.notEqual(await assertVisibleGroupDates(admin.session, audience), imported);
+            } finally {
+              const current = await getDashboardAudience(key);
+              await setDashboardAudience(key, originalIds, current.version, previous.mode);
+            }
+          }
+        });
+
+        await datesTest.test('MR and MS dates require their own current role, effective grant and unique matching email', async () => {
+          for (const [role, audience, otherRole, otherAudience] of [
+            ['manager', 'development', 'support_manager', 'support'],
+            ['support_manager', 'support', 'manager', 'development'],
+          ] as const) {
+            const owner = await makeManager(`own-${audience}`, role);
+            const other = await makeManager(`own-other-${audience}`, role);
+            const ownSnapshot = await snapshot(owner.email, 41, -6);
+            await snapshot(other.email, 42, -1);
+            const session: AdminSession = { role, managerId: owner.id, sessionId: randomUUID(),
+              dashboardAccess: [`manager:${audience}`, `manager:${otherAudience}`] };
+            await assertSnapshotDates(session, audience, ownSnapshot);
+            await assertSnapshotDates(session, otherAudience, null);
+            await query('update personal_dashboard_snapshots set expires=$2 where id=$1', [ownSnapshot, day(-1)]);
+            await assertSnapshotDates(session, audience, ownSnapshot);
+
+            await employeeAccess(owner.id, []);
+            await assertSnapshotDates(session, audience, null);
+            await employeeAccess(owner.id, [`manager:${audience}`]);
+            await query('update wholesale_managers set role=$2 where id=$1', [owner.id, otherRole]);
+            await assertSnapshotDates(session, audience, null);
+            await query('update wholesale_managers set role=$2,is_active=false where id=$1', [owner.id, role]);
+            await assertSnapshotDates(session, audience, null);
+            await query('update wholesale_managers set is_active=true,email=$2 where id=$1', [owner.id, `changed-${owner.email}`]);
+            await assertSnapshotDates(session, audience, null);
+            await query("update wholesale_managers set email='' where id=$1", [owner.id]);
+            await assertSnapshotDates(session, audience, null);
+            await query('update wholesale_managers set email=$2 where id=$1', [owner.id, owner.email]);
+            const duplicate = await makeManager(`hidden-email-${audience}`, otherRole, false, `\u00a0${owner.email.toUpperCase()}\u00a0`);
+            await assertSnapshotDates(session, audience, null);
+            await query('update wholesale_managers set is_active=false where id=$1', [duplicate.id]);
+            await assertSnapshotDates(session, audience, ownSnapshot);
+            const catalog = (await getDashboardReportDates(session)).find((entry) => entry.key === `manager:${audience}`);
+            assert.ok(catalog);
+            const { key, ...catalogDates } = catalog;
+            assert.equal(key, `manager:${audience}`);
+            assert.deepEqual(catalogDates, await getPersonalDashboardReportDates(session, audience));
+          }
+          for (const role of ['wholesale_admin', 'purchaser'] as const) {
+            const session: AdminSession = { role, adminUserId: adminIds[0], sessionId: randomUUID(),
+              dashboardAccess: ['manager:development', 'manager:support'] };
+            await assertSnapshotDates(session, 'development', null);
+            await assertSnapshotDates(session, 'support', null);
+          }
+        });
+
+        await datesTest.test('TOP dates cover visible MR and only its own leader snapshot, with current review authority', async () => {
+          const sameIdManager = await makeManager('top-id-namespace');
+          const top = await makeAdmin('top', sameIdManager.id);
+          const otherTop = await makeAdmin('top');
+          const ownManagerSnapshot = await snapshot(sameIdManager.email, 50, -7);
+          const unrelatedLeaderSnapshot = await snapshot(otherTop.email, 59, -8);
+          assert.equal((await getPersonalDashboardStatus({ source: 'admin', id: top.id })).snapshot, null);
+          assert.equal((await getPersonalDashboardReviewOverview({ adminUserId: top.id, sessionId: top.session.sessionId })).managers
+            .some((item) => item.id === sameIdManager.id), true);
+          await assertSnapshotDates(top.session, 'development', ownManagerSnapshot);
+          await assertSnapshotDates(top.session, 'support', null);
+
+          const hiddenManager = await makeManager('top-hidden-manager', 'manager', false);
+          const hiddenManagerSnapshot = await snapshot(hiddenManager.email, 54, -6);
+          await assertSnapshotDates(top.session, 'development', ownManagerSnapshot);
+          await employeeAccess(hiddenManager.id, ['manager:development']);
+          await assertSnapshotDates(top.session, 'development', hiddenManagerSnapshot);
+          await employeeAccess(hiddenManager.id, []);
+          await assertSnapshotDates(top.session, 'development', ownManagerSnapshot);
+          await employeeAccess(hiddenManager.id, ['manager:development']);
+          await query('update wholesale_managers set is_active=false where id=$1', [hiddenManager.id]);
+          await assertSnapshotDates(top.session, 'development', ownManagerSnapshot);
+          await query("update wholesale_managers set is_active=true,role='support_manager' where id=$1", [hiddenManager.id]);
+          await assertSnapshotDates(top.session, 'development', ownManagerSnapshot);
+
+          const leaderSnapshot = await snapshot(top.email, 55, -9);
+          await assertSnapshotDates(top.session, 'development', leaderSnapshot);
+          assert.notEqual(leaderSnapshot, unrelatedLeaderSnapshot);
+          const catalog = (await getDashboardReportDates(top.session)).find((entry) => entry.key === 'manager:development');
+          assert.ok(catalog);
+          const { key, ...catalogDates } = catalog;
+          assert.equal(key, 'manager:development');
+          assert.deepEqual(catalogDates, await getPersonalDashboardReportDates(top.session, 'development'));
+
+          await query('update admin_users set email=$2 where id=$1', [top.id, `changed-${top.email}`]);
+          await assertSnapshotDates(top.session, 'development', ownManagerSnapshot);
+          await query('update admin_users set email=$2 where id=$1', [top.id, top.email]);
+          const duplicate = await makeManager('top-hidden-email', 'support_manager', false, ` ${top.email.toUpperCase()} `);
+          await assertSnapshotDates(top.session, 'development', ownManagerSnapshot);
+          await query('update wholesale_managers set is_active=false where id=$1', [duplicate.id]);
+          await assertSnapshotDates(top.session, 'development', leaderSnapshot);
+
+          const denied = async () => assert.rejects(getPersonalDashboardReportDates(top.session, 'development'), { code: 'REVIEW_FORBIDDEN' });
+          for (const sql of [
+            'update admin_users set is_active=false where id=$1',
+            "update admin_users set role='purchaser' where id=$1",
+            "update admin_users set password_changed_at=now()+interval '1 second' where id=$1",
+            "update admin_sessions set role='admintop' where admin_user_id=$1",
+            'update admin_sessions set revoked_at=now() where admin_user_id=$1',
+            "update admin_sessions set expires_at=now()-interval '1 second' where admin_user_id=$1",
+          ]) {
+            await query(sql, [top.id]);
+            await denied();
+            await query("update admin_users set role='top',is_active=true,password_changed_at=null where id=$1", [top.id]);
+            await query("update admin_sessions set role='top',revoked_at=null,expires_at=now()+interval '1 hour' where admin_user_id=$1", [top.id]);
+          }
+          await assert.rejects(getPersonalDashboardReportDates({ ...top.session, sessionId: randomUUID() }, 'development'), { code: 'REVIEW_FORBIDDEN' });
+          await assertSnapshotDates(top.session, 'development', leaderSnapshot);
+        });
+      } finally {
+        await query('delete from admin_users where id=any($1::bigint[])', [adminIds]);
+        await query('delete from wholesale_managers where id=any($1::bigint[])', [managerIds]);
+      }
     });
   } finally {
     await globalThis.__ktsPgPool?.end();

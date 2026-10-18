@@ -2,7 +2,7 @@ import type { AdminSession } from '../adminAuth';
 import { getReportEntries } from '../dashboardAccess';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
-import { getPersonalDashboardStatus } from './managerDashboardRepo';
+import { getPersonalDashboardReportDates } from './managerDashboardRepo';
 
 export type DashboardReportDates = {
   key: string; dataUploadedAt: string | null; dataAsOf: string | null; htmlPublishedAt: string | null;
@@ -37,28 +37,6 @@ export async function getDashboardReportDates(session: AdminSession): Promise<Da
       return { ...empty, dataUploadedAt: row?.data_uploaded_at ?? null, dataAsOf: row?.data_as_of ?? null, htmlPublishedAt: row?.html_published_at ?? null };
     }
     const audience = key === 'manager:development' ? 'development' : 'support';
-    const canSeeGroup = session.role === 'admin' || session.role === 'admintop';
-    // An extra group checkbox does not give a manager another group's private snapshot dates.
-    const ownAudience = session.role === 'manager' ? 'development' : session.role === 'support_manager' ? 'support' : null;
-    const managerId = ownAudience === audience ? session.managerId ?? null : null;
-    const result = await query<DatesRow>(`select html.first_published_at::text as html_published_at,
-      latest.received_at::text as data_uploaded_at, latest.issued::text as data_as_of
-      from personal_dashboard_html_state state
-      left join personal_dashboard_html_versions html on html.id=state.active_version_id
-      left join lateral (
-        select snapshot.received_at, snapshot.issued from personal_dashboard_snapshot_state snapshots
-        join personal_dashboard_snapshots snapshot on snapshot.id=snapshots.active_snapshot_id and snapshot.manager_id=snapshots.manager_id
-        join wholesale_managers manager on manager.id=snapshots.manager_id
-        where ($2::boolean and coalesce(nullif(manager.role,''),'manager')=$3)
-        order by snapshot.received_at desc limit 1
-      ) latest on true where state.audience=$1`, [audience, canSeeGroup, audience === 'development' ? 'manager' : 'support_manager']);
-    const row = result.rows[0];
-    const leaderId = key === 'manager:development' && session.role === 'top' ? session.adminUserId : null;
-    if (!canSeeGroup && (managerId || leaderId)) {
-      const personal = await getPersonalDashboardStatus(leaderId ? { source: 'admin', id: leaderId } : managerId!);
-      const snapshot = personal.bindingStatus === 'matched' ? personal.snapshot : null;
-      return { ...empty, dataUploadedAt: snapshot?.receivedAt ?? null, dataAsOf: snapshot?.issued ?? null, htmlPublishedAt: row?.html_published_at ?? null };
-    }
-    return { ...empty, dataUploadedAt: row?.data_uploaded_at ?? null, dataAsOf: row?.data_as_of ?? null, htmlPublishedAt: row?.html_published_at ?? null };
+    return { key, ...await getPersonalDashboardReportDates(session, audience) };
   }));
 }

@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 
+import type { AdminSession } from '../adminAuth';
+import { canViewDashboardKey, hasDashboardManagementRight } from '../dashboardPermissions';
 import { getPersonalDashboardAudience, parsePersonalDashboardAudience, type PersonalDashboardAudience } from '../managerDashboardAudience';
 import { canReceiveLeaderPersonalSnapshot, type PersonalDashboardRecipient } from '../managerDashboardRecipients';
 export type { PersonalDashboardRecipient } from '../managerDashboardRecipients';
@@ -196,6 +198,21 @@ async function currentRecipients(client: PoolClient): Promise<RecipientRow[]> {
     from admin_users order by id`);
   return [...managers.rows, ...admins.rows];
 }
+
+/** Caller holds DASHBOARD_ACCESS_LOCK before taking the account table locks. */
+async function currentRecipientViewContext(client: PoolClient) {
+  const all = await currentRecipients(client);
+  const grants = await client.query<{manager_id: string; key: string}>(`select manager_id::text,key
+    from dashboard_effective_view_grants where manager_id is not null and key in ('manager:development','manager:support')`);
+  return { all, managerGrants: new Set(grants.rows.map((row) => `${row.manager_id}:${row.key}`)) };
+}
+
+/** One visibility rule for management, TOP team review and catalog date aggregation. */
+function visiblePersonalRecipients(all: RecipientRow[], managerGrants: ReadonlySet<string>, audience: PersonalDashboardAudience, includeLeaders: boolean) {
+  return all.filter((recipient) => recipient.is_active && (recipient.source === 'admin'
+    ? includeLeaders && audience === 'development' && canReceiveLeaderPersonalSnapshot(recipient.role)
+    : getPersonalDashboardAudience(recipient.role) === audience && managerGrants.has(`${recipient.id}:manager:${audience}`)));
+}
 async function authorizeRecipientAccount(client: PoolClient, recipient: PersonalDashboardRecipient) {
   const recipients = await currentRecipients(client);
   const account = recipients.find((row) => row.source === recipient.source && Number(row.id) === recipient.id);
@@ -278,12 +295,8 @@ async function personalReviewContext(client: PoolClient, viewer: PersonalDashboa
     for share of s,u`, [viewer.sessionId, viewer.adminUserId]);
   if (!authority.rowCount) throw new PersonalDashboardError('REVIEW_FORBIDDEN', 'Нет доступа к просмотру отчётов МР');
   // Access changes and recipient role/email changes cannot race the ensuing data read.
-  const all = await currentRecipients(client);
-  const grants = await client.query<{manager_id: string}>(`select manager_id::text from dashboard_effective_view_grants
-    where key='manager:development' and manager_id is not null`);
-  const granted = new Set(grants.rows.map((row) => row.manager_id));
-  const recipients = all.filter((manager) => manager.source === 'manager' && manager.is_active
-    && getPersonalDashboardAudience(manager.role) === 'development' && granted.has(manager.id));
+  const { all, managerGrants } = await currentRecipientViewContext(client);
+  const recipients = visiblePersonalRecipients(all, managerGrants, 'development', false);
   const selected = managerId === undefined ? null : recipients.find((manager) => Number(manager.id) === managerId);
   if (managerId !== undefined && !selected) throw new PersonalDashboardError('REVIEW_NOT_FOUND', 'Отчёт МР недоступен');
   return { recipients, all, selected };
@@ -357,6 +370,63 @@ export async function getPersonalDashboardReviewSnapshot(viewer: PersonalDashboa
       throw new PersonalDashboardError('SNAPSHOT_INTEGRITY', 'Не удалось проверить целостность снимка');
     }
     return { bytes: row.encrypted_payload, originalName: row.original_name, email: binding.email };
+  });
+}
+
+export type PersonalDashboardReportDates = {
+  dataUploadedAt: string | null; dataAsOf: string | null; htmlPublishedAt: string | null;
+};
+
+/** Date-only read of the same recipients visible in the report, never snapshot contents/history. */
+export async function getPersonalDashboardReportDates(session: AdminSession, requestedAudience: PersonalDashboardAudience): Promise<PersonalDashboardReportDates> {
+  const audience = checkedAudience(requestedAudience);
+  const empty: PersonalDashboardReportDates = { dataUploadedAt: null, dataAsOf: null, htmlPublishedAt: null };
+  if (!canViewDashboardKey(session, `manager:${audience}`)) return empty;
+  await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    let all: RecipientRow[];
+    let recipients: RecipientRow[];
+    if (session.role === 'top') {
+      // Reuse the persisted TOP authority and team scope, not a second approximation of its rights.
+      const context = await personalReviewContext(client, { adminUserId: session.adminUserId!, sessionId: session.sessionId! });
+      all = context.all;
+      recipients = [...context.recipients, ...all.filter((recipient) => recipient.source === 'admin'
+        && Number(recipient.id) === session.adminUserId && recipient.is_active && recipient.role === 'top')];
+    } else {
+      await client.query('select pg_advisory_xact_lock_shared(hashtext($1))', [DASHBOARD_ACCESS_LOCK]);
+      const context = await currentRecipientViewContext(client);
+      all = context.all;
+      const group = visiblePersonalRecipients(all, context.managerGrants, audience, true);
+      recipients = hasDashboardManagementRight(session, `manager:${audience}`) ? group
+        : group.filter((recipient) => recipient.source === 'manager' && Number(recipient.id) === session.managerId);
+    }
+    const html = await client.query<{first_published_at: string | null}>(`select v.first_published_at::text
+      from personal_dashboard_html_state st join personal_dashboard_html_versions v
+        on v.id=st.active_version_id and v.audience=st.audience where st.audience=$1`, [audience]);
+    const dates = { ...empty, htmlPublishedAt: html.rows[0]?.first_published_at ?? null };
+    // Hidden accounts still participate in collision detection. Visibility is not ownership.
+    const allBindings = bindings(all);
+    const hashes = new Map<string, string>();
+    const managerIds: string[] = [], adminIds: string[] = [];
+    for (const recipient of recipients) {
+      if (!recipient.email.trim()) continue;
+      const hash = getManagerEmailHash(recipient.email);
+      const binding = resolvePersonalDashboardRecipient(allBindings, hash);
+      if (binding.recipient?.source !== recipient.source || binding.recipient.id !== Number(recipient.id)) continue;
+      hashes.set(`${recipient.source}:${recipient.id}`, hash);
+      (recipient.source === 'manager' ? managerIds : adminIds).push(recipient.id);
+    }
+    if (!hashes.size) return dates;
+    const snapshots = await client.query<{
+      manager_id: string | null; admin_user_id: string | null; email_hash: string; received_at: string; issued: string;
+    }>(`select s.manager_id::text,s.admin_user_id::text,s.email_hash,s.received_at::text,s.issued::text
+      from personal_dashboard_snapshot_state st join personal_dashboard_snapshots s
+        on ${SNAPSHOT_OWNER_JOIN} and s.id=st.active_snapshot_id
+      where s.manager_id=any($1::bigint[]) or s.admin_user_id=any($2::bigint[])
+      order by s.received_at desc,s.id desc`, [managerIds, adminIds]);
+    const latest = snapshots.rows.find((snapshot) => hashes.get(snapshot.manager_id !== null
+      ? `manager:${snapshot.manager_id}` : `admin:${snapshot.admin_user_id}`) === snapshot.email_hash);
+    return { ...dates, dataUploadedAt: latest?.received_at ?? null, dataAsOf: latest?.issued ?? null };
   });
 }
 
@@ -575,12 +645,10 @@ export async function listPersonalDashboardImports(before: string | null = null)
 export async function listPersonalDashboardAdmin() {
   await ensureSiteSchema();
   return withTransaction(async (client) => {
+    await client.query('select pg_advisory_xact_lock_shared(hashtext($1))', [DASHBOARD_ACCESS_LOCK]);
     const state = await client.query<HtmlStateRow & { audience: PersonalDashboardAudience }>(`select audience,active_version_id::text,previous_version_id::text from personal_dashboard_html_state order by id`);
     const versions = await client.query<HtmlRow>(`select ${HTML_SELECT} from personal_dashboard_html_versions v order by v.id desc`);
-    const recipients = await currentRecipients(client);
-    const grants = await client.query<{manager_id: string; key: string}>(`select manager_id::text,key
-      from dashboard_effective_view_grants where manager_id is not null and key in ('manager:development','manager:support')`);
-    const managerGrants = new Set(grants.rows.map((row) => `${row.manager_id}:${row.key}`));
+    const { all: recipients, managerGrants } = await currentRecipientViewContext(client);
     const snapshots = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT} from personal_dashboard_snapshot_state st
       join personal_dashboard_snapshots s on ${SNAPSHOT_OWNER_JOIN} and s.id=st.active_snapshot_id`);
     const importPage = await readPersonalDashboardImportPage(client);
@@ -596,10 +664,7 @@ export async function listPersonalDashboardAdmin() {
           htmlVersions: versions.rows.filter((row) => row.audience === audience).map((row) => mapHtml(row, activeId)),
           activeHtmlVersionId: idOrNull(activeId),
           previousHtmlVersionId: idOrNull(groupState?.previous_version_id ?? null),
-          managers: recipients.filter((recipient) => recipient.is_active && (recipient.source === 'admin'
-            // These roles already have inherited/management MR access; do not change their grants.
-            ? audience === 'development' && canReceiveLeaderPersonalSnapshot(recipient.role)
-            : getPersonalDashboardAudience(recipient.role) === audience && managerGrants.has(`${recipient.id}:manager:${audience}`)))
+          managers: visiblePersonalRecipients(recipients, managerGrants, audience, true)
             .sort((left, right) => left.name.localeCompare(right.name, 'ru') || left.source.localeCompare(right.source) || Number(left.id) - Number(right.id))
             .map((recipient) => {
             const binding = recipient.email.trim() ? resolvePersonalDashboardRecipient(recipientBindings, getManagerEmailHash(recipient.email)) : null;

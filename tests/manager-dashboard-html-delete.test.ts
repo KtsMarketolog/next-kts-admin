@@ -6,6 +6,7 @@ import ts from 'typescript';
 
 import * as audience from '../src/shared/lib/managerDashboardAudience';
 import * as recipients from '../src/shared/lib/managerDashboardRecipients';
+import * as permissions from '../src/shared/lib/dashboardPermissions';
 import * as domain from '../src/shared/lib/managerDashboardDomain';
 import * as pagination from '../src/shared/lib/managerDashboardImportPagination';
 import * as security from '../src/shared/lib/managerDashboardSecurity';
@@ -88,6 +89,7 @@ function repository(options: { deleteFails?: boolean; emptyDelete?: boolean; mis
       'node:crypto': crypto,
       '../managerDashboardAudience': audience,
       '../managerDashboardRecipients': recipients,
+      '../dashboardPermissions': permissions,
       '../managerDashboardDomain': domain,
       '../managerDashboardImportPagination': pagination,
       './dashboardAccessRepo': { DASHBOARD_ACCESS_LOCK: 'kts:dashboard-view-grants' },

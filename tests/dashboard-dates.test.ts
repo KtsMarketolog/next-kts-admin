@@ -14,16 +14,17 @@ import type { AdminSession } from '../src/shared/lib/adminAuth';
 
 function reportDatesHarness(bindingStatus = 'matched') {
   const calls: Array<{sql: string; params: unknown[]}> = [];
-  const personalIds: Array<number | { source: 'admin'; id: number }> = [];
+  const personalScopes: Array<{session: AdminSession; audience: string}> = [];
   const modules: Record<string, unknown> = {
     '../dashboardAccess': {getReportEntries}, './schema': {ensureSiteSchema: async () => {}},
     './client': {query: async (sql: string, params: unknown[] = []) => {
       calls.push({sql, params});
       return {rows: [{html_published_at: '2026-10-01T07:00:00Z', data_uploaded_at: null, data_as_of: null}]};
     }},
-    './managerDashboardRepo': {getPersonalDashboardStatus: async (managerId: number | { source: 'admin'; id: number }) => {
-      personalIds.push(managerId);
-      return {bindingStatus, snapshot: {receivedAt: '2026-10-07T05:30:00Z', issued: '2026-10-06'}};
+    './managerDashboardRepo': {getPersonalDashboardReportDates: async (session: AdminSession, audience: string) => {
+      personalScopes.push({session, audience});
+      return {dataUploadedAt: bindingStatus === 'matched' ? '2026-10-07T05:30:00Z' : null,
+        dataAsOf: bindingStatus === 'matched' ? '2026-10-06' : null, htmlPublishedAt: '2026-10-01T07:00:00Z'};
     }},
   };
   const source = readFileSync(new URL('../src/shared/lib/db/dashboardReportDatesRepo.ts', import.meta.url), 'utf8');
@@ -32,7 +33,7 @@ function reportDatesHarness(bindingStatus = 'matched') {
   new Function('require', 'module', 'exports', code)((key: string) => {
     assert.ok(key in modules, `Unexpected dependency ${key}`); return modules[key];
   }, loaded, loaded.exports);
-  return {read: loaded.exports.getDashboardReportDates, calls, personalIds};
+  return {read: loaded.exports.getDashboardReportDates, calls, personalScopes};
 }
 
 function inspect(json: string) {
@@ -108,8 +109,8 @@ test('special report dates respect explicit report grants and never disclose ano
   assert.deepEqual(dates.map(({key}) => key), ['manager:development']);
   assert.equal(dates[0].dataUploadedAt, '2026-10-07T05:30:00Z');
   assert.equal(dates[0].dataAsOf, '2026-10-06');
-  assert.deepEqual(own.personalIds, [71]);
-  assert.deepEqual(own.calls[0].params, ['development', false, 'manager']);
+  assert.deepEqual(own.personalScopes, [{session: {...session, dashboardAccess: ['manager:development', 'manager:support']}, audience: 'development'}]);
+  assert.deepEqual(own.calls, [], 'personal report dates must not duplicate the recipient scope in catalog SQL');
 });
 
 test('a missing or ambiguous personal email binding hides retained private snapshot dates', async () => {
@@ -123,10 +124,11 @@ test('a missing or ambiguous personal email binding hides retained private snaps
   }
 });
 
-test('TOP catalog dates describe their own admin snapshot, never a same-ID manager', async () => {
+test('TOP catalog dates delegate their full verified identity to the shared report scope', async () => {
   const harness = reportDatesHarness();
   const dates = await harness.read({ role: 'top', adminUserId: 71, managerId: 71, sessionId: 'synthetic' });
   const mr = dates.find((entry) => entry.key === 'manager:development');
   assert.equal(mr?.dataUploadedAt, '2026-10-07T05:30:00Z');
-  assert.deepEqual(harness.personalIds, [{ source: 'admin', id: 71 }]);
+  assert.deepEqual(harness.personalScopes, [{session: { role: 'top', adminUserId: 71, managerId: 71, sessionId: 'synthetic' }, audience: 'development'}]);
+  assert.deepEqual(harness.calls, []);
 });
