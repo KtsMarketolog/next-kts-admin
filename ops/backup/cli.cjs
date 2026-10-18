@@ -6,7 +6,7 @@ const DAY = 86400000;
 const ERRORS = Object.freeze({
   NO_BACKUPS: 'No completed project backups',
   PREDEPLOY_POLICY_PENDING: 'Predeploy cloud policy must be explicitly agreed before deployment',
-  PREDEPLOY_RETENTION_POLICY: 'Predeploy retention mode must be required or deferred; deferral requires verified cloud backup',
+  PREDEPLOY_RETENTION_POLICY: 'Predeploy retention mode must be required or deferred; deferral requires required or explicit local-only policy',
   PRUNE_UNCONFIRMED: 'Expired backup sets retained because cloud verification is unconfirmed',
   PRUNE_TRANSACTION_INVALID: 'Interrupted retention cleanup failed its guards; all remaining files preserved',
   BACKUP_STALE: 'Latest backup is older than 30 hours',
@@ -217,15 +217,18 @@ async function staleTemporary(ctx, now = Date.now()) {
 }
 async function main(action = process.argv[2]) {
   const ctx = await context({database:['capture','daily','predeploy'].includes(action)});
-  if(action === 'predeploy' && !['required','warn'].includes(ctx.config.predeployCloudPolicy)) throw fail('PREDEPLOY_POLICY_PENDING');
+  if(action === 'predeploy' && !['required','warn','local-only'].includes(ctx.config.predeployCloudPolicy)) throw fail('PREDEPLOY_POLICY_PENDING');
+  const localOnlyPredeploy = action === 'predeploy' && ctx.config.predeployCloudPolicy === 'local-only';
   if(action === 'predeploy' && (
     ![undefined,'required','deferred'].includes(ctx.config.predeployCloudRetention)
-    || (ctx.config.predeployCloudRetention === 'deferred' && ctx.config.predeployCloudPolicy !== 'required')
+    || (ctx.config.predeployCloudRetention === 'deferred' && !['required','local-only'].includes(ctx.config.predeployCloudPolicy))
   )) throw fail('PREDEPLOY_RETENTION_POLICY');
   // A power loss can persist unlink operations out of order. Finish authorized
   // cleanup before sync sees a half-removed manifest/receipt pair. Checks remain
   // read-only; recovery removes only the already journaled, non-newest set.
-  if(['daily','predeploy','sync','prune'].includes(action)) {
+  // Explicit local-only predeploy never resumes deletion, including an old
+  // authorized cleanup journal. Leave all historical sets untouched.
+  if(['daily','predeploy','sync','prune'].includes(action) && !localOnlyPredeploy) {
     failurePhase = 'RETENTION_RECOVERY'; await resumePruneTransaction(ctx);
   }
   await capacity(ctx);
@@ -236,6 +239,11 @@ async function main(action = process.argv[2]) {
       await verifyLocal(ctx,manifest);
       await state(ctx,'capture',{ok:true,id:manifest.id});
       log('Local backup verified: '+manifest.id);
+      if(localOnlyPredeploy) {
+        await state(ctx,'predeploy',{ok:true,policy:'local-only',id:manifest.id,localVerified:true,cloud:'skipped'});
+        log('WARNING: explicit local-only predeploy; fresh local backup verified. Cloud access and all retention cleanup skipped. This is not cloud backup health or protection against loss of this server.');
+        return;
+      }
     } catch(error) { await state(ctx,'capture',{ok:false}); throw error; }
     if(action === 'capture') return;
     failurePhase = 'UPLOAD';

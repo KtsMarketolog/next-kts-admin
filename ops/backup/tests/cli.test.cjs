@@ -30,11 +30,14 @@ function cloudSuccess(now = Date.now()) {
   } };
 }
 
-async function loadWith(commonMock, cloudMock, captureMock, now, fsMock) {
+async function loadWith(commonMock, cloudMock, captureMock, now, fsMock, loaded = []) {
   const code = await fs.readFile(path.join(__dirname, '../cli.cjs'), 'utf8');
   const moduleObject = { exports: {} };
-  const req = (name) => name === './common.cjs' ? {...common,...commonMock} : name === './cloud.cjs' ? cloudMock
-    : name === './capture.cjs' ? captureMock : name === 'node:fs/promises' && fsMock ? fsMock : require(name);
+  const req = (name) => {
+    loaded.push(name);
+    return name === './common.cjs' ? {...common,...commonMock} : name === './cloud.cjs' ? cloudMock
+      : name === './capture.cjs' ? captureMock : name === 'node:fs/promises' && fsMock ? fsMock : require(name);
+  };
   const Clock = now === undefined ? Date : class extends Date { static now() { return now; } };
   vm.runInNewContext(code, { require: req, module: moduleObject, process, Date: Clock }, { filename: 'cli.cjs' });
   return moduleObject.exports;
@@ -110,21 +113,24 @@ test('logs allow only fixed codes, never dependency messages or arbitrary codes'
 });
 
 async function policyCase(t, policy, captureFails, cloudFails, oldUnsent = false, options = {}) {
-  const f = await fixture(t), logs = [], states = [], calls = { capture: 0, cloud: 0, capacity:0, cloudActions:[] };
+  const f = await fixture(t), logs = [], states = [], loaded = [], calls = { capture: 0, cloud: 0, capacity:0, verified:0, manifests:0, cloudActions:[] };
+  if(options.pendingPrune) await f.write('prune-in-progress',{invalid:'must remain untouched'});
   const newest = { id: ID, createdAt: new Date().toISOString(), artifacts: [] };
   const old = { id: 'old', createdAt: new Date(Date.now() - 16 * DAY).toISOString(), artifacts: [] };
   const api = await loadWith({
     context: async () => ({ root: f.root, config: { predeployCloudPolicy: policy,
       ...(Object.hasOwn(options,'retention') ? {predeployCloudRetention:options.retention} : {}) } }),
-    capacity: async () => { calls.capacity++; },
-    manifests: async () => oldUnsent ? [old, newest] : [newest], verifyLocal: async () => {}, privateFile: common.privateFile,
+    capacity: async () => { calls.capacity++; if(options.capacityFails) throw new Error('capacity failed'); },
+    manifests: async () => { calls.manifests++; return oldUnsent ? [old, newest] : [newest]; },
+    verifyLocal: async (_,manifest) => { calls.verified++; assert.equal(manifest,newest); if(options.verificationFails) throw new Error('checksum failed'); }, privateFile: common.privateFile,
     atomicJson: async (filename, value) => states.push([filename, value]), log: (message) => logs.push(message), ID: common.ID,
   }, {
     sync: async (_, __, syncOptions) => { calls.cloud++; calls.cloudActions.push(syncOptions?.action); if (cloudFails) throw new Error('SECRET_TOKEN'); }, validReceipt: async () => false,
-  }, { capture: async () => { calls.capture++; if (captureFails) throw new Error('SECRET_TOKEN'); return newest; } });
+  }, { capture: async () => { calls.capture++; if (captureFails) throw new Error('SECRET_TOKEN'); return newest; } }, undefined, undefined, loaded);
   let error;
   try { await api.main(options.action || 'predeploy'); } catch (caught) { error = caught; }
-  return { error, logs, states, calls };
+  if(options.pendingPrune) assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.root,'state/prune-in-progress.json'),'utf8')),{invalid:'must remain untouched'});
+  return { error, logs, states, calls, loaded };
 }
 
 test('pending policy stops before capture; required cloud failure stops deploy', async (t) => {
@@ -150,8 +156,62 @@ test('agreed warn policy permits local-only deployment while retaining unsent hi
   assert.equal((await policyCase(t, 'required', false, false)).error, undefined);
 });
 
+test('explicit local-only predeploy verifies the fresh capture without loading cloud or resuming any retention', async t => {
+  for(const retention of [undefined,'required','deferred']) {
+    const result = await policyCase(t,'local-only',false,true,true,{retention,pendingPrune:true});
+    assert.equal(result.error,undefined);
+    assert.equal(result.calls.capture,1); assert.equal(result.calls.verified,1); assert.equal(result.calls.capacity,1);
+    assert.equal(result.calls.manifests,0); assert.equal(result.calls.cloud,0);
+    assert.equal(result.loaded.includes('./cloud.cjs'),false);
+    assert.equal(result.states.some(([name]) => name.endsWith('cloud.json')),false);
+    assert.equal(result.states.some(([name]) => name.endsWith('restore-cloud.json')),false);
+    const evidence = result.states.find(([name]) => name.endsWith('predeploy.json'))?.[1];
+    assert.equal(evidence?.id,ID); assert.equal(evidence?.localVerified,true);
+    assert.equal(evidence?.policy,'local-only'); assert.equal(evidence?.cloud,'skipped');
+    assert.ok(result.logs.some(line => line.includes('not cloud backup health')));
+  }
+});
+
+test('local-only predeploy fails closed on capture, verification, capacity or malformed policy', async t => {
+  for(const [captureFails,options] of [[true,{}],[false,{verificationFails:true}],[false,{capacityFails:true}]]) {
+    const result = await policyCase(t,'local-only',captureFails,false,false,options);
+    assert.ok(result.error); assert.equal(result.loaded.includes('./cloud.cjs'),false);
+    assert.equal(result.states.some(([name,value]) => name.endsWith('predeploy.json') && value.ok),false);
+  }
+  for(const policy of [undefined,null,'','local','local-only ','LOCAL-ONLY']) {
+    const result = await policyCase(t,policy,false,false);
+    assert.equal(result.error?.code,'PREDEPLOY_POLICY_PENDING'); assert.equal(result.calls.capture,0);
+    assert.equal(result.calls.capacity,0); assert.equal(result.states.length,0);
+  }
+});
+
+test('local-only policy does not change daily or explicit sync cloud requirements', async t => {
+  for(const action of ['daily','sync']) {
+    const result = await policyCase(t,'local-only',false,true,false,{action,retention:'deferred'});
+    assert.ok(result.error); assert.equal(result.calls.cloud,1);
+    assert.equal(result.loaded.includes('./cloud.cjs'),true);
+    assert.ok(result.states.some(([name,value]) => name.endsWith('cloud.json') && value.ok === false));
+    assert.equal(result.states.some(([name]) => name.endsWith('predeploy.json')),false);
+  }
+});
+
+test('local-only predeploy evidence cannot make the independent cloud health check pass', async t => {
+  const f = await fixture(t), loaded = [];
+  await f.write('capture',{ok:true,id:ID});
+  await f.write('predeploy',{ok:true,id:ID,policy:'local-only',localVerified:true,cloud:'skipped'});
+  const manifest = {id:ID,createdAt:new Date().toISOString()};
+  let verifiedCloud = 0;
+  const ctx = {root:f.root,config:{predeployCloudPolicy:'local-only'},run:async(command,args) => ({
+    stdout:command.endsWith('loginctl') ? 'yes' : args.includes('show') ? 'success' : '',
+  })};
+  const api = await loadWith({context:async()=>ctx,capacity:async()=>{},manifests:async()=>[manifest],
+    verifyLocal:async()=>{},log:()=>{}}, {verify:async()=>{verifiedCloud++;throw new Error('cloud unavailable');}}, {}, undefined, undefined, loaded);
+  await assert.rejects(api.main('check'),/cloud unavailable/);
+  assert.equal(verifiedCloud,1); assert.equal(loaded.includes('./cloud.cjs'),true);
+});
+
 test('predeploy validates unknown and warn-plus-deferred retention modes before capacity, capture, or state writes', async t => {
-  for (const [policy, retention] of [['required','unknown'],['required',null],['required',''],['warn','deferred']]) {
+  for (const [policy, retention] of [['required','unknown'],['required',null],['required',''],['warn','deferred'],['local-only','unknown'],['local-only',null]]) {
     const result = await policyCase(t,policy,false,false,false,{retention});
     assert.equal(result.error?.code,'PREDEPLOY_RETENTION_POLICY');
     assert.equal(result.calls.capacity,0);

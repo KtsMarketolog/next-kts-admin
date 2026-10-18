@@ -2,7 +2,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { atomicJson, privateFile, PROJECT, ROOT } = require('./common.cjs');
-const { validateConfiguration } = require('./cloud.cjs');
 
 const CONFIG_DIR = '/home/kts/.config/kts-backup';
 const CONFIG_FILE = CONFIG_DIR + '/config.json';
@@ -41,8 +40,8 @@ function candidate(config, args) {
       || Object.entries(AUDITED).some(([key, value]) => config[key] !== value)) {
     throw fail('CONFIGURE_PROJECT_GUARD');
   }
-  if (args.length === 2 && args[0] === 'policy' && args[1] === 'required') {
-    return { ...config, predeployCloudPolicy: 'required' };
+  if (args.length === 2 && args[0] === 'policy' && ['required', 'local-only'].includes(args[1])) {
+    return { ...config, predeployCloudPolicy: args[1] };
   }
   if (args.length === 2 && args[0] === 'predeploy-retention' && ['deferred', 'required'].includes(args[1])) {
     if (args[1] === 'deferred' && (config.predeployCloudPolicy !== 'required'
@@ -86,6 +85,7 @@ function candidate(config, args) {
 function validatePrivateConfiguration(next, command) {
   const deferPredeploy = command === 'predeploy-retention' && next.predeployCloudRetention === 'deferred';
   if (command !== 'cloud' && command !== 'retention' && !deferPredeploy) return;
+  const { validateConfiguration } = require('./cloud.cjs');
   const ctx = { config: next, root: ROOT,
     run: () => { throw fail('CONFIGURE_PRIVATE_AWS_INVALID'); } };
   // Validate the existing private uploader profile before enabling any operation.
@@ -136,9 +136,13 @@ async function configure(args = process.argv.slice(2)) {
   if (args[0] === 'predeploy-retention') {
     return next.predeployCloudRetention === 'deferred'
       ? 'Predeploy cloud retention deferred until explicitly restored; fresh local and cloud backup verification remains required'
-      : 'Predeploy cloud retention required; full cloud rotation checks restored';
+      : next.predeployCloudPolicy === 'local-only'
+        ? 'Predeploy cloud retention configured: required; it applies when explicit local-only policy is restored to required'
+        : 'Predeploy cloud retention required; full cloud rotation checks restored';
   }
-  return args[0] === 'policy' ? 'Predeploy policy configured: required'
+  return args[0] === 'policy' ? (next.predeployCloudPolicy === 'local-only'
+    ? 'Predeploy policy configured: local-only until explicitly restored; fresh verified local backup required, all cloud access and retention cleanup skipped for predeploy only. No protection against loss of the server'
+    : 'Predeploy policy configured: required; fresh verified local and cloud backup required')
     : args[0] === 'retention' ? 'Cloud count retention configured: 5 copies; local retention: 14 days. Cloud policy and deletion access still require operational verification'
       : 'Cloud configuration enabled after local private-profile validation';
 }

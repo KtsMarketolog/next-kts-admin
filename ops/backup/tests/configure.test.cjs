@@ -30,6 +30,17 @@ test('policy command changes only the approved policy', async () => {
   }
 });
 
+test('explicit local-only policy and reversal preserve all cloud, retention, and other settings', async () => {
+  const original = await example();
+  original.predeployCloudRetention = 'deferred';
+  const next = candidate(original,['policy','local-only']);
+  assert.deepEqual(next,{...original,predeployCloudPolicy:'local-only'});
+  assert.deepEqual(candidate(next,['policy','required']),{...original,predeployCloudPolicy:'required'});
+  for(const args of [['policy','local'],['policy','local-only '],['policy','local-only','extra']]) {
+    assert.throws(() => candidate(original,args),{code:'CONFIGURE_USAGE'});
+  }
+});
+
 test('cloud command pins project, profile, endpoint and audited filesystem paths', async () => {
   const config = await example(), next = candidate(config, ['cloud', BUCKET, KEY]);
   assert.equal(next.cloudApproved, true); assert.equal(config.cloudApproved, false);
@@ -135,7 +146,7 @@ async function commissioning(options = {}) {
   const config = await example();
   options.mutateConfig?.(config);
   const original = JSON.stringify(config), writes = [], accesses = [];
-  let reads = 0, validations = 0;
+  let reads = 0, validations = 0, cloudLoads = 0;
   const mockedFs = {
     lstat: async (filename) => ({ isDirectory: () => true, isSymbolicLink: () => options.symlink === filename,
       uid: 1001, mode: options.worldReadable ? 0o755 : 0o700 }),
@@ -156,8 +167,10 @@ async function commissioning(options = {}) {
     if (options.badCredentials || options.failAtValidation === validations) throw new Error('SECRET_EXAMPLE');
     return true;
   } };
-  const req = (name) => name === 'node:fs/promises' ? mockedFs : name === './common.cjs' ? common
-    : name === './cloud.cjs' ? cloud : require(name);
+  const req = (name) => {
+    if(name === './cloud.cjs') { cloudLoads++; return cloud; }
+    return name === 'node:fs/promises' ? mockedFs : name === './common.cjs' ? common : require(name);
+  };
   const moduleObject = { exports: {} };
   vm.runInNewContext(await fs.readFile(path.join(__dirname, '../configure.cjs'), 'utf8'), {
     require: req, module: moduleObject, console,
@@ -166,7 +179,7 @@ async function commissioning(options = {}) {
   let error, result;
   try { result = await moduleObject.exports.configure(options.args ?? ['cloud', BUCKET, KEY]); }
   catch (caught) { error = caught; }
-  return { error, result, writes, accesses, validations, originalConfig: config };
+  return { error, result, writes, accesses, validations, cloudLoads, originalConfig: config };
 }
 
 test('commissioning validates private AWS files before one atomic fixed-path write', async () => {
@@ -196,6 +209,24 @@ test('policy commissioning does not read AWS credentials or enable cloud', async
   assert.equal(result.error, undefined); assert.equal(result.validations, 0);
   assert.equal(result.writes[0].value.cloudApproved, false);
   assert.equal(result.writes[0].value.predeployCloudPolicy, 'required');
+});
+
+test('local-only commissioning never loads cloud and keeps deferred retention even with unusable credentials', async () => {
+  const options = {args:['policy','local-only'],badCredentials:true,
+    mutateConfig:(config) => { config.predeployCloudRetention = 'deferred'; config.predeployCloudPolicy = 'required'; }};
+  const result = await commissioning(options);
+  assert.equal(result.error,undefined); assert.equal(result.validations,0); assert.equal(result.cloudLoads,0);
+  assert.equal(result.writes.length,1); assert.equal(result.writes[0].filename,FILE);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.writes[0].value)),{...result.originalConfig,predeployCloudPolicy:'local-only'});
+  assert.match(result.result,/all cloud access and retention cleanup skipped for predeploy only/);
+  for(const additional of [{concurrentChange:true},{rootUser:true},{worldReadable:true},{symlink:DIRECTORY}]) {
+    const rejected = await commissioning({...options,...additional});
+    assert.ok(rejected.error); assert.equal(rejected.writes.length,0); assert.equal(rejected.cloudLoads,0);
+  }
+  const restored = await commissioning({args:['policy','required'],badCredentials:true,
+    mutateConfig:(config) => { config.predeployCloudPolicy = 'local-only'; config.predeployCloudRetention = 'deferred'; }});
+  assert.equal(restored.error,undefined); assert.equal(restored.cloudLoads,0);
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.writes[0].value)),{...restored.originalConfig,predeployCloudPolicy:'required'});
 });
 
 test('count commissioning validates both uses of the existing profile before persisting approval', async () => {
