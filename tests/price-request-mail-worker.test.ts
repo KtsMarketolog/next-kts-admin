@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import ts from 'typescript';
 import * as crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { drainPriceRequestMail } from '../src/shared/lib/priceRequestMailWorker';
 import type { ClaimedPriceRequestMail } from '../src/shared/lib/db/priceRequestOutboxRepo';
 
@@ -57,21 +58,32 @@ test('unknown SMTP failures are sanitized and long outages still attempt deliver
   assert.equal(deferred, 'DELIVERY_FAILED');
 });
 
-function smtpHarness(mode: 'accepted' | 'rejected' | 'timeout', configured = true) {
+function smtpHarness(mode: 'accepted' | 'rejected' | 'timeout', configured = true, failConnect = false) {
   const sent: Array<Record<string, unknown>> = [];
   let closes = 0;
   let transportOptions: Record<string, unknown> | null = null;
   let timeout: (() => void) | null = null;
+  let connectTimeout: (() => void) | null = null;
+  let socketCreations = 0;
+  const socket = Object.assign(new EventEmitter(), { destroyed: false, destroy() { this.destroyed = true; return this; } });
   const output = { exports: {} };
   const code = ts.transpileModule(readFileSync(new URL('../src/shared/lib/priceRequestMailWorker.ts', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText;
   vm.runInNewContext(code, { module: output, exports: output.exports, console,
     process: { env: configured ? { SMTP_USER: 'synthetic@example.test', SMTP_PASSWORD: 'synthetic-only', SMTP_HOST: 'smtp.invalid' } : {} },
-    setTimeout: (callback: () => void, duration: number) => { assert.equal(duration, 15_000); timeout = callback; return 1; },
+    setTimeout: (callback: () => void, duration: number) => {
+      if (duration === 5_000) { connectTimeout = callback; return 2; }
+      assert.equal(duration, 15_000); timeout = callback; return 1;
+    },
     clearTimeout: () => {},
     require: (name: string) => {
       if (name === './db/priceRequestOutboxRepo') return {};
+      if (name === 'node:net') return { createConnection: () => {
+        socketCreations++;
+        if (failConnect) throw new Error('Synthetic invalid SMTP port');
+        return socket;
+      } };
       assert.equal(name, 'nodemailer');
       return { createTransport: (options: Record<string, unknown>) => {
         transportOptions = options;
@@ -84,7 +96,12 @@ function smtpHarness(mode: 'accepted' | 'rejected' | 'timeout', configured = tru
     },
   });
   return { send: (output.exports as { sendPriceRequestMail: (item: ClaimedPriceRequestMail) => Promise<void> }).sendPriceRequestMail,
-    sent, get closes() { return closes; }, get options() { return transportOptions; }, expire: () => timeout?.() };
+    sent, socket, get socketCreations() { return socketCreations; }, get closes() { return closes; },
+    get options() { return transportOptions; }, expire: () => timeout?.(), expireConnect: () => connectTimeout?.(),
+    getSocket: (callback: (error: { code?: string } | null, options?: unknown) => void) => {
+      (transportOptions?.getSocket as (_: object, done: typeof callback) => void)({}, callback);
+    },
+  };
 }
 
 test('SMTP has bounded deadlines, stable Message-ID, per-recipient envelope and cleanup', async () => {
@@ -106,6 +123,49 @@ test('SMTP has bounded deadlines, stable Message-ID, per-recipient envelope and 
   const unconfigured = smtpHarness('accepted', false);
   await assert.rejects(unconfigured.send(mail), { code: 'ECONFIG' });
   assert.equal(unconfigured.sent.length, 0);
+});
+
+test('SMTP deadline cancels a pending DNS/connect provider and prevents late connections', async () => {
+  const harness = smtpHarness('timeout');
+  const pending = harness.send(mail);
+  const callbacks: Array<{ code?: string } | null> = [];
+  harness.getSocket((error) => { callbacks.push(error); });
+  assert.equal(harness.socketCreations, 1);
+  harness.expire();
+  await assert.rejects(pending, { code: 'ETIMEDOUT' });
+  assert.equal(harness.socket.destroyed, true);
+  assert.equal(callbacks.length, 1);
+  assert.equal(callbacks[0]?.code, 'ETIMEDOUT');
+  harness.socket.emit('connect');
+  assert.doesNotThrow(() => harness.socket.emit('error', new Error('Late DNS failure')));
+  assert.equal(callbacks.length, 1, 'late connect cannot hand a socket to SMTP');
+  harness.getSocket((error) => { assert.equal(error?.code, 'ETIMEDOUT'); });
+  assert.equal(harness.socketCreations, 1, 'late MIME preparation cannot open another socket');
+});
+
+test('synchronous socket configuration errors reach SMTP callback rather than escaping MIME preparation', async () => {
+  const harness = smtpHarness('timeout', true, true);
+  const pending = harness.send(mail);
+  let callbacks = 0;
+  assert.doesNotThrow(() => harness.getSocket((error) => {
+    callbacks++; assert.equal(error?.code, 'ECONFIG');
+  }));
+  assert.equal(callbacks, 1);
+  harness.expire();
+  await assert.rejects(pending, { code: 'ETIMEDOUT' });
+});
+
+test('SMTP connect timeout destroys its owned socket and settles the provider once', async () => {
+  const harness = smtpHarness('timeout');
+  const pending = harness.send(mail);
+  let callbacks = 0;
+  harness.getSocket((error) => { callbacks++; assert.equal(error?.code, 'ETIMEDOUT'); });
+  harness.expireConnect();
+  assert.equal(harness.socket.destroyed, true);
+  harness.socket.emit('connect');
+  harness.expire();
+  await assert.rejects(pending, { code: 'ETIMEDOUT' });
+  assert.equal(callbacks, 1);
 });
 
 test('cron authenticates before draining and returns no SMTP data on failures', async () => {
