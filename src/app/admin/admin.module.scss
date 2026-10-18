@@ -188,3 +188,23 @@
     padding-top: $apx-m-8;
   }
 }
+
+.draftNotice {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e7c76d;
+  border-radius: 0.5rem;
+  background: #fff8e5;
+  color: #644500;
+  line-height: 1.5;
+}
+
+.draftBadge {
+  display: block;
+  width: fit-content;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  background: #fff0ba;
+  color: #644500;
+  font-weight: 600;
+}

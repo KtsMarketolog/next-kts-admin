@@ -18,15 +18,16 @@ import {useAdminBrandPortfolio} from './src/features/admin/model/useAdminBrandPo
 import {useAdminGroupCompanies} from './src/features/admin/model/useAdminGroupCompanies';
 import {useAdminPriceGroups} from './src/features/admin/model/useAdminPriceGroups';
 const params=new URLSearchParams(location.search), mode=params.get('mode'), kind=params.get('kind');
-window.calls=[];window.signals=[];
-window.fetch=async (url,init={})=>{window.calls.push(url);window.signals.push(init.signal);
+window.calls=[];window.signals=[];window.reloads=0;
+window.fetch=async (url,init={})=>{window.calls.push({url,method:init.method||'GET'});window.signals.push(init.signal);
  if(mode==='network')throw new TypeError('Offline');
  if(mode==='headers-hang')return new Promise(()=>{});
  if(mode==='body-hang')return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('{'));}}));
+ if(mode==='refresh-fail'&&(!init.method||init.method==='GET'))throw new TypeError('Scoped read offline');
  return Response.json({ok:true});
 };
 function Form(){const[busy,setBusy]=useState(false),[message,showStatus]=useState(''),[text,setText]=useState('Original draft');
- const actionLock=useRef(false), options={setBusy,showStatus,actionLock,reloadAdminData:async()=>{if(mode==='refresh-fail')throw new Error('Reload offline');}};
+ const actionLock=useRef(false), options={setBusy,showStatus,actionLock,reloadAdminData:async()=>{window.reloads++;throw new Error('Broad reload is forbidden');}};
  const forms={slides:useAdminSlides(options),news:useAdminNews(options),brands:useAdminBrandPortfolio(options),companies:useAdminGroupCompanies(options),priceGroups:useAdminPriceGroups(options)};
  const saveNames={slides:'saveSlide',news:'saveNews',brands:'saveBrand',companies:'saveGroupCompany',priceGroups:'savePriceGroup'};
  const save=()=>forms[kind][saveNames[kind]]({id:1,title:text,name:text,imageUrl:'/fixture.png',categoryId:1});
@@ -77,7 +78,11 @@ async function main() {
             await page.getByRole('status').filter({ hasText: mode === 'refresh-fail' ? 'Изменения уже сохранены' : 'могло сохраниться' }).waitFor();
             assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isEnabled(), true);
             assert.equal(await page.getByLabel('Draft').inputValue(), 'Keep my draft');
-            assert.equal(await page.evaluate(() => (window as unknown as { calls: string[] }).calls.length), 1);
+            const calls = await page.evaluate(() => (window as unknown as { calls: Array<{ url: string; method: string }> }).calls);
+            assert.equal(calls.length, mode === 'refresh-fail' ? 2 : 1);
+            assert.equal(calls.filter((call: { method: string }) => call.method !== 'GET').length, 1, 'no duplicate write or automatic mutation retry');
+            assert.equal(calls.filter((call: { method: string }) => call.method === 'GET').length, mode === 'refresh-fail' ? 1 : 0);
+            assert.equal(await page.evaluate(() => (window as unknown as { reloads: number }).reloads), 0, 'no cross-section reload');
             if (mode.endsWith('hang')) assert.equal(await page.evaluate(() => (window as unknown as { signals: AbortSignal[] }).signals[0].aborted), true);
             await page.close(); tested++;
           }

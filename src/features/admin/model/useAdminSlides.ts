@@ -1,25 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { emptySlide } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
 import { reorderByDrop } from '@/features/admin/model/reorder';
 import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
+import { readSavedContentItem } from '@/features/admin/model/adminContentRead';
+import { useAdminDraft, useAdminDraftCollection } from '@/features/admin/model/useAdminDraftState';
 import type { Slide } from '@/features/admin/types';
+
+const slideKey = (slide: Slide) => slide.id;
 
 export function useAdminSlides(options: AdminCrudHookOptions) {
   const { showStatus } = options;
   const perform = useAdminContentAction(options);
-  const [slides, setSlides] = useState<Slide[]>([]);
-  const [draft, setDraft] = useState(emptySlide);
+  const collection = useAdminDraftCollection(slideKey, options.draftScope && `${options.draftScope}:slides`);
+  const creation = useAdminDraft(emptySlide, options.draftScope && `${options.draftScope}:new-slide`);
+  const slides = useMemo(() => [...collection.items].sort((a, b) => a.sortOrder - b.sortOrder), [collection.items]);
+  const draft = creation.value;
   const [savedSlideId, setSavedSlideId] = useState<number | null>(null);
   const [draggedSlideId, setDraggedSlideId] = useState<number | null>(null);
 
   const nextSlideOrder = slides.length + 1;
 
   const updateSlide = (id: number, patch: Partial<Slide>) => {
-    setSlides((current) => current.map((slide) => (slide.id === id ? { ...slide, ...patch } : slide)));
+    collection.update(id, patch);
   };
 
   const saveSlide = async (slide: Slide) => {
@@ -27,7 +33,10 @@ export function useAdminSlides(options: AdminCrudHookOptions) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(slide),
-    } }], success: 'Слайд сохранен', failure: 'Не удалось сохранить слайд', onSaved: () => {
+    } }], success: 'Слайд сохранен', failure: 'Не удалось сохранить слайд', onSaved: async (_responses, signal) => {
+      const saved = await readSavedContentItem<Slide>('/api/admin/slides', 'slides', (item) => item.id === slide.id, signal);
+      signal.throwIfAborted();
+      collection.accept(slide, saved);
       setSavedSlideId(slide.id);
       window.setTimeout(() => {
         setSavedSlideId((current) => (current === slide.id ? null : current));
@@ -38,7 +47,8 @@ export function useAdminSlides(options: AdminCrudHookOptions) {
   const deleteSlide = async (id: number) => {
     if (!confirm('Удалить слайд?')) return;
     await perform({ requests: [{ url: `/api/admin/slides/${id}`, init: { method: 'DELETE' } }],
-      success: 'Слайд удален', failure: 'Не удалось удалить слайд' });
+      success: 'Слайд удален', failure: 'Не удалось удалить слайд',
+      onSaved: () => { collection.remove(id); } });
   };
 
   const createSlide = async () => {
@@ -47,12 +57,18 @@ export function useAdminSlides(options: AdminCrudHookOptions) {
       return;
     }
 
+    const submitted = draft;
     await perform({ requests: [{ url: '/api/admin/slides', init: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...draft, sortOrder: nextSlideOrder }),
-    } }], success: 'Слайд добавлен', failure: 'Не удалось добавить слайд', onSaved: () => {
-      setDraft(emptySlide);
+      body: JSON.stringify({ ...submitted, sortOrder: nextSlideOrder }),
+    } }], success: 'Слайд добавлен', failure: 'Не удалось добавить слайд', onSaved: async (responses, signal) => {
+      const result = await responses[0].json();
+      if (!Number.isSafeInteger(result?.id) || result.id <= 0) throw new Error('Ответ не содержит номер созданного слайда');
+      const saved = await readSavedContentItem<Slide>('/api/admin/slides', 'slides', (item) => item.id === result.id, signal);
+      signal.throwIfAborted();
+      collection.accept(saved, saved);
+      creation.resetAfterSave(submitted);
     } });
   };
 
@@ -60,23 +76,29 @@ export function useAdminSlides(options: AdminCrudHookOptions) {
     await perform({ requests: orderedSlides.map((slide) => ({ url: `/api/admin/slides/${slide.id}`, init: {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(slide),
-        } })), success: 'Очередность слайдов сохранена', failure: 'Не удалось сохранить очередность слайдов' });
+          body: JSON.stringify({ sortOrder: slide.sortOrder }),
+        } })), success: 'Очередность слайдов сохранена', failure: 'Не удалось сохранить очередность слайдов',
+      onConfirmed: (_response, index) => {
+        const saved = orderedSlides[index];
+        const submitted = slides.find((item) => item.id === saved.id);
+        if (submitted) collection.accept(submitted, saved, ['sortOrder']);
+      } });
   };
 
   const moveSlide = async (draggedId: number, targetId: number) => {
     if (options.actionLock?.current) return;
     const normalized = reorderByDrop(slides, draggedId, targetId);
     if (!normalized) return;
-    setSlides(normalized);
     await persistSlideOrder(normalized);
   };
 
   return {
     slides,
-    setSlides,
+    setSlides: collection.hydrate,
     draft,
-    setDraft,
+    setDraft: creation.setValue,
+    dirtyCount: collection.dirtyKeys.size + Number(creation.dirty),
+    dirtyKeys: collection.dirtyKeys,
     nextSlideOrder,
     savedSlideId,
     draggedSlideId,

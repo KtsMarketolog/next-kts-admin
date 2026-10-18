@@ -10,12 +10,12 @@ type ContentAction = {
   requests: ContentRequest[];
   success: string;
   failure: string;
-  onSaved?: () => void;
-  refresh?: boolean;
+  onSaved?: (responses: Response[], signal: AbortSignal) => void | Promise<void>;
+  onConfirmed?: (response: Response, index: number, signal: AbortSignal) => void | Promise<void>;
 };
 
 /** One content mutation at a time, including all requests in a reorder batch. */
-export function useAdminContentAction({ setBusy, showStatus, reloadAdminData, actionLock }: AdminCrudHookOptions) {
+export function useAdminContentAction({ setBusy, showStatus, actionLock }: AdminCrudHookOptions) {
   const localLock = useRef(false);
   const lock = actionLock ?? localLock;
   const active = useRef<AbortController | null>(null);
@@ -29,7 +29,7 @@ export function useAdminContentAction({ setBusy, showStatus, reloadAdminData, ac
     };
   }, []);
 
-  return async ({ requests, success, failure, onSaved, refresh = true }: ContentAction) => {
+  return async ({ requests, success, failure, onSaved, onConfirmed }: ContentAction) => {
     if (lock.current || !mounted.current) return false;
     lock.current = true;
     const controller = new AbortController();
@@ -43,6 +43,13 @@ export function useAdminContentAction({ setBusy, showStatus, reloadAdminData, ac
         adminRequest(url, { ...init, signal: controller.signal }, { mutation: true })));
       if (!mounted.current || controller.signal.aborted) return false;
       const saved = results.filter((result) => result.status === 'fulfilled' && result.value.ok).length;
+      if (onConfirmed) {
+        for (const [index, result] of results.entries()) {
+          if (result.status === 'fulfilled' && result.value.ok) {
+            await runWithRequestTimeout((signal) => Promise.resolve(onConfirmed(result.value.clone(), index, signal)), { signal: controller.signal });
+          }
+        }
+      }
       if (saved !== results.length) {
         if (results.length > 1) {
           showStatus(`Порядок сохранён не полностью: подтверждено ${saved} из ${results.length}. Часть изменений могла сохраниться. Обновите страницу и проверьте порядок перед повторной отправкой.`);
@@ -58,8 +65,7 @@ export function useAdminContentAction({ setBusy, showStatus, reloadAdminData, ac
         return false;
       }
       confirmed = true;
-      onSaved?.();
-      if (refresh) await runWithRequestTimeout(() => reloadAdminData(), { signal: controller.signal });
+      if (onSaved) await runWithRequestTimeout((signal) => Promise.resolve(onSaved(results.map((result) => (result as PromiseFulfilledResult<Response>).value), signal)), { signal: controller.signal });
       if (mounted.current) showStatus(success);
       return true;
     } catch (error) {

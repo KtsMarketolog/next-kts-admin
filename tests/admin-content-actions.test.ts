@@ -11,21 +11,38 @@ function fixture(hookName: string, options: { fetch: typeof fetch; reload?: () =
   const slots: unknown[] = [], cleanups: Array<() => void> = [];
   const busy: boolean[] = [], messages: string[] = [];
   const sharedLock = { current: false };
+  let needsRender = false;
+  const effectOnce = (effect: () => (() => void) | undefined) => {
+    const slot = cursor++;
+    if (!(slot in slots)) { slots[slot] = true; const cleanup = effect(); if (cleanup) cleanups.push(cleanup); }
+  };
+  const memo = (factory: () => unknown, dependencies: unknown[]) => {
+    const slot = cursor++;
+    const previous = slots[slot] as { value: unknown; dependencies: unknown[] } | undefined;
+    if (!previous || dependencies.some((dependency, index) => !Object.is(previous.dependencies[index], dependency))) {
+      slots[slot] = { value: factory(), dependencies };
+    }
+    return (slots[slot] as { value: unknown }).value;
+  };
   const react = {
     useState(initial: unknown) {
       const slot = cursor++;
-      if (!(slot in slots)) slots[slot] = initial;
-      return [slots[slot], (next: unknown) => { slots[slot] = typeof next === 'function' ? next(slots[slot]) : next; }];
+      if (!(slot in slots)) slots[slot] = typeof initial === 'function' ? initial() : initial;
+      return [slots[slot], (next: unknown) => {
+        const value = typeof next === 'function' ? next(slots[slot]) : next;
+        needsRender ||= !Object.is(value, slots[slot]);
+        slots[slot] = value;
+      }];
     },
+    useMemo: memo,
+    useCallback(callback: unknown, dependencies: unknown[]) { return memo(() => callback, dependencies); },
     useRef(initial: unknown) {
       const slot = cursor++;
       if (!(slot in slots)) slots[slot] = { current: initial };
       return slots[slot];
     },
-    useEffect(effect: () => (() => void) | undefined) {
-      const slot = cursor++;
-      if (!(slot in slots)) { slots[slot] = true; const cleanup = effect(); if (cleanup) cleanups.push(cleanup); }
-    },
+    useEffect: effectOnce,
+    useLayoutEffect: effectOnce,
   };
   const cache: State = { react };
   const load = (name: string): State => {
@@ -49,8 +66,14 @@ function fixture(hookName: string, options: { fetch: typeof fetch; reload?: () =
   };
   const hook = load(hookName)[hookName] as (options: State) => Form;
   const render = () => {
-    cursor = 0;
-    return hook({ actionLock: sharedLock, setBusy: (value: boolean) => busy.push(value), showStatus: (value: string) => messages.push(value), reloadAdminData: options.reload ?? (async () => {}) });
+    let form: Form, passes = 0;
+    do {
+      cursor = 0;
+      needsRender = false;
+      form = hook({ actionLock: sharedLock, setBusy: (value: boolean) => busy.push(value), showStatus: (value: string) => messages.push(value), reloadAdminData: options.reload ?? (async () => {}) });
+      assert.ok(++passes < 25, 'layout effects settle before user actions');
+    } while (needsRender);
+    return form;
   };
   return { render, busy, messages, sharedLock, unmount: () => cleanups.forEach((cleanup) => cleanup()) };
 }
@@ -81,12 +104,53 @@ for (const [hook, save, draft] of cases) {
     assert.deepEqual(view.busy, [true, false]);
     assert.match(view.messages[0], /проверьте результат/);
   });
-  test(`${hook}: confirmed save plus failed reload is not reported as failed save`, async () => {
-    const view = fixture(hook, { fetch: async () => Response.json({ ok: true }), reload: async () => { throw new Error('reload failed'); } });
+  test(`${hook}: stalled response body is bounded and a duplicate click cannot resend the write`, async () => {
+    let attempts = 0, signal: AbortSignal | undefined;
+    const view = fixture(hook, { fetch: async (_url, init) => {
+      attempts++; signal = init?.signal ?? undefined;
+      return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{')); } }));
+    } });
+    const form = view.render();
+    await Promise.all([form[save](draft), form[save](draft)]);
+    assert.equal(attempts, 1);
+    assert.equal(signal?.aborted, true);
+    assert.deepEqual(view.busy, [true, false]);
+    assert.equal(view.sharedLock.current, false);
+    assert.match(view.messages[0], /проверьте результат/);
+  });
+  test(`${hook}: confirmed save plus failed scoped read is not reported as failed save`, async () => {
+    let reads = 0, writes = 0, reloads = 0;
+    const view = fixture(hook, {
+      fetch: async (_url, init) => {
+        if (!init?.method || init.method === 'GET') { reads++; throw new Error('scoped read failed'); }
+        writes++; return Response.json({ ok: true });
+      },
+      reload: async () => { reloads++; },
+    });
     await view.render()[save](draft);
     assert.deepEqual(view.busy, [true, false]);
     assert.match(view.messages[0], /Изменения уже сохранены/);
     assert.doesNotMatch(view.messages[0], /^Не удалось сохранить/);
+    assert.equal(reads, 1);
+    assert.equal(writes, 1, 'failed read never retries a confirmed write');
+    assert.equal(reloads, 0, 'no cross-section reload');
+  });
+  test(`${hook}: confirmed save plus stalled scoped read releases busy and aborts the read`, async () => {
+    let reads = 0, writes = 0, readSignal: AbortSignal | undefined;
+    const view = fixture(hook, { fetch: async (_url, init) => {
+      if (!init?.method || init.method === 'GET') {
+        reads++; readSignal = init?.signal ?? undefined;
+        return new Promise(() => {});
+      }
+      writes++; return Response.json({ ok: true });
+    } });
+    await view.render()[save](draft);
+    assert.deepEqual(view.busy, [true, false]);
+    assert.equal(view.sharedLock.current, false);
+    assert.match(view.messages[0], /Изменения уже сохранены/);
+    assert.equal(reads, 1);
+    assert.equal(writes, 1);
+    assert.equal(readSignal?.aborted, true);
   });
 }
 
@@ -119,13 +183,6 @@ test('creation network failure retains the original draft and never reloads', as
   await view.render().createNews();
   assert.deepEqual(view.render().newsDraft, draft);
   assert.equal(reloads, 0);
-});
-
-test('confirmed save with a permanently stalled reload releases busy and warns instead of failing save', async () => {
-  const view = fixture('useAdminNews', { fetch: async () => Response.json({ ok: true }), reload: async () => new Promise(() => {}) });
-  await view.render().saveNews({ id: 1 });
-  assert.deepEqual(view.busy, [true, false]);
-  assert.match(view.messages[0], /Изменения уже сохранены/);
 });
 
 test('unmount aborts pending mutation and suppresses stale success callbacks', async () => {

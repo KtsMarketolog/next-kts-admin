@@ -17,7 +17,18 @@ export async function PUT(request: Request, context: Context) {
     return Response.json({ error: 'Invalid id' }, { status: 400 });
   }
 
-  const body = await request.json().catch(() => ({}));
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid news item' }, { status: 400 });
+  }
+  if (Object.keys(body).length === 1 && Object.prototype.hasOwnProperty.call(body, 'sortOrder')) {
+    if (!Number.isInteger(body.sortOrder) || body.sortOrder < 0 || body.sortOrder > 2_147_483_647) {
+      return Response.json({ error: 'Invalid sort order' }, { status: 400 });
+    }
+    await updateNewsItem(numericId, { sortOrder: body.sortOrder });
+    revalidatePath('/');
+    return Response.json({ ok: true });
+  }
   const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl.trim() : '';
   const title = typeof body.title === 'string' ? body.title.trim() : '';
   if (!imageUrl) return Response.json({ error: 'Image is required' }, { status: 400 });

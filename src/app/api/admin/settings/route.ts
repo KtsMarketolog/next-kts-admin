@@ -13,20 +13,22 @@ export async function PUT(request: Request) {
   const denied = await requireAdmin();
   if (denied) return denied;
 
-  const body = await request.json().catch(() => ({}));
-  const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
-  const email = typeof body.email === 'string' ? body.email.trim() : '';
-  const address = typeof body.address === 'string' ? body.address.trim() : '';
-  if (!phone) {
-    return Response.json({ error: 'Phone is required' }, { status: 400 });
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid settings' }, { status: 400 });
   }
-  if (!email) {
-    return Response.json({ error: 'Email is required' }, { status: 400 });
+  const settings: { phone?: string; email?: string; address?: string } = {};
+  const labels = { phone: 'Phone', email: 'Email', address: 'Address' };
+  for (const key of ['phone', 'email', 'address'] as const) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+    const value = typeof body[key] === 'string' ? body[key].trim() : '';
+    if (!value) return Response.json({ error: `${labels[key]} is required` }, { status: 400 });
+    settings[key] = value;
   }
-  if (!address) {
-    return Response.json({ error: 'Address is required' }, { status: 400 });
+  if (!Object.keys(settings).length) {
+    return Response.json({ error: 'No settings supplied' }, { status: 400 });
   }
 
-  await updateSiteSettings({ phone, email, address });
-  return Response.json({ phone, email, address });
+  await updateSiteSettings(settings);
+  return Response.json(settings);
 }

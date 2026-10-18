@@ -6,9 +6,10 @@ import styles from './admin.module.scss';
 type AdminSiteSidebarProps = {
   activeSection: AdminSection;
   onSwitchSection: (section: AdminSection) => void;
+  dirtySections?: Partial<Record<AdminSection, number>>;
 };
 
-export function AdminSiteSidebar({ activeSection, onSwitchSection }: AdminSiteSidebarProps) {
+export function AdminSiteSidebar({ activeSection, onSwitchSection, dirtySections = {} }: AdminSiteSidebarProps) {
   return (
     <aside className={styles.analyticsSidebar}>
       <div className={styles.analyticsSidebarHeader}>
@@ -25,6 +26,7 @@ export function AdminSiteSidebar({ activeSection, onSwitchSection }: AdminSiteSi
           >
             <span>{item.label}</span>
             <small>{item.description}</small>
+            {Boolean(dirtySections[item.value]) && <small className={styles.draftBadge}>Не сохранено: {dirtySections[item.value]}</small>}
           </button>
         ))}
       </nav>

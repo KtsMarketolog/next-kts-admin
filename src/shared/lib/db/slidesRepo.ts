@@ -80,6 +80,15 @@ export async function createHeroSlide(slide: Omit<HeroSlide, 'id'>) {
 
 export async function updateHeroSlide(id: number, slide: Partial<Omit<HeroSlide, 'id'>>) {
   await ensureSiteSchema();
+  if (Object.keys(slide).length === 1 && typeof slide.sortOrder === 'number') {
+    // The normal full-save query intentionally clears explicit nullable image
+    // fields. An order-only request must never run those assignments.
+    await query(
+      `update hero_slides set sort_order = $2, updated_at = now() where id = $1`,
+      [id, slide.sortOrder],
+    );
+    return;
+  }
   await query(
     `update hero_slides
      set title = coalesce($2, title),

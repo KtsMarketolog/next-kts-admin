@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { AdminDashboard } from '@/features/admin/dashboard/AdminDashboard';
 import { AnalogFinder } from '@/features/analogs/AnalogFinder';
@@ -13,6 +13,8 @@ import { useAdminNews } from '@/features/admin/model/useAdminNews';
 import { useAdminPriceGroups } from '@/features/admin/model/useAdminPriceGroups';
 import { useAdminSlides } from '@/features/admin/model/useAdminSlides';
 import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
+import { discardAdminDraftWorkspace, useAdminDraft } from '@/features/admin/model/useAdminDraftState';
+import { useAdminUnsavedChanges } from '@/features/admin/model/useAdminUnsavedChanges';
 import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
 import { AdminTopDashboardCatalog } from '@/features/admin/top-dashboard/AdminTopDashboardCatalog';
@@ -91,17 +93,20 @@ export default function AdminPanel({
   });
   const canAccessCatalog = canAccessReportsCatalog(reportSession);
   const [activeSection, setActiveSection] = useState<AdminSection>('info');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [address, setAddress] = useState('');
+  const draftScope = reportSession?.role === 'admin' ? `site-content:${reportSession.adminUserId ?? 'legacy-admin'}` : undefined;
+  const settingsDraft = useAdminDraft({ phone: '', email: '', address: '' }, draftScope && `${draftScope}:settings`);
+  const { phone, email, address } = settingsDraft.value;
+  const { hydrate: hydrateSettings } = settingsDraft;
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const contentActionLock = useRef(false);
-  const { request } = useAdminRequestScope();
+  const { request, isActive } = useAdminRequestScope();
   const [contentLoaded, setContentLoaded] = useState(false);
+  const contentLoadedRef = useRef(false);
+  const contentLoadingRef = useRef<Promise<void> | null>(null);
+  const contentScopeRef = useRef(draftScope);
   const [contentLoadError, setContentLoadError] = useState('');
   const [savedSetting, setSavedSetting] = useState<SettingKey | null>(null);
-  const loadAdminDataRef = useRef<() => Promise<void>>(async () => {});
   const authenticatedRef = useRef(Boolean(initialSession));
   const clientDetailMatch = /^\/admin\/clients\/(\d+)(?:\/)?$/.exec(pathname);
   const clientDetailId = clientDetailMatch ? Number(clientDetailMatch[1]) : null;
@@ -118,10 +123,9 @@ export default function AdminPanel({
     }, 8000);
   }, []);
 
-  const reloadAdminData = useCallback(() => loadAdminDataRef.current(), []);
   const uploadImage = useCallback((file: File, kind?: AdminUploadKind) => uploadAdminImage(file, kind, request), [request]);
 
-  const contentOptions = { setBusy, showStatus, reloadAdminData, actionLock: contentActionLock };
+  const contentOptions = { setBusy, showStatus, actionLock: contentActionLock, draftScope };
   const performContentAction = useAdminContentAction(contentOptions);
   const slideAdmin = useAdminSlides(contentOptions);
   const newsAdmin = useAdminNews(contentOptions);
@@ -131,15 +135,33 @@ export default function AdminPanel({
   const { setSlides } = slideAdmin;
   const { setNews } = newsAdmin;
   const { setGroupCompanies } = groupCompanyAdmin;
-  const { setBrandCategories, setBrands, setBrandDraft } = brandAdmin;
+  const { setBrandCategories, setBrands, initializeBrandDraft } = brandAdmin;
   const { setPriceGroups } = priceGroupAdmin;
+  const dirtySections: Partial<Record<AdminSection, number>> = {
+    info: Number(settingsDraft.dirty),
+    slider: slideAdmin.dirtyCount,
+    news: newsAdmin.dirtyCount,
+    groupCompanies: groupCompanyAdmin.dirtyCount,
+    brands: brandAdmin.dirtyCount,
+    priceGroups: priceGroupAdmin.dirtyCount,
+  };
+  const hasUnsaved = Object.values(dirtySections).some((count) => count > 0);
+  const { confirmLeave } = useAdminUnsavedChanges(hasUnsaved || busy);
+  useLayoutEffect(() => {
+    if (contentScopeRef.current === draftScope) return;
+    contentScopeRef.current = draftScope;
+    contentLoadedRef.current = false;
+    contentLoadingRef.current = null;
+    setContentLoaded(false);
+  }, [draftScope]);
 
   const switchSection = (section: AdminSection) => {
-    setActiveSection(section);
     if (section === 'users') {
+      if (!confirmLeave()) return;
       router.replace('/admin/site/users', { scroll: false });
       return;
     }
+    setActiveSection(section);
     const params = new URLSearchParams(searchParams.toString());
     params.delete('area');
     params.set('section', section);
@@ -147,6 +169,7 @@ export default function AdminPanel({
   };
 
   const switchArea = (area: AdminArea) => {
+    if (!confirmLeave()) return;
     if (area === 'top') {
       if (!canAccessCatalog) return;
       router.replace('/admin/top', { scroll: false });
@@ -184,81 +207,87 @@ export default function AdminPanel({
   };
 
   const loadAdminData = useCallback(async () => {
-    const [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes] = await Promise.all([
-      request('/api/admin/settings', { cache: 'no-store' }),
-      request('/api/admin/slides', { cache: 'no-store' }),
-      request('/api/admin/news', { cache: 'no-store' }),
-      request('/api/admin/group-companies', { cache: 'no-store' }),
-      request('/api/admin/brand-categories', { cache: 'no-store' }),
-      request('/api/admin/price-groups', { cache: 'no-store' }),
-    ]);
+    // Rechecking the session must not reload every editor after a save or tab switch.
+    if (!draftScope || contentLoadedRef.current) return;
+    if (contentLoadingRef.current) return contentLoadingRef.current;
+    const loading = (async () => {
+      const [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes] = await Promise.all([
+        request('/api/admin/settings', { cache: 'no-store' }),
+        request('/api/admin/slides', { cache: 'no-store' }),
+        request('/api/admin/news', { cache: 'no-store' }),
+        request('/api/admin/group-companies', { cache: 'no-store' }),
+        request('/api/admin/brand-categories', { cache: 'no-store' }),
+        request('/api/admin/price-groups', { cache: 'no-store' }),
+      ]);
 
-    const responses = [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes];
+      const responses = [settingsRes, slidesRes, newsRes, groupCompaniesRes, brandsRes, priceGroupsRes];
+      if (!isActive() || contentScopeRef.current !== draftScope) return;
 
-    if (responses.some((response) => response.status === 401 || response.status === 403)) {
-      const session = await fetchAdminSessionWithRetry().catch((error) => {
-        console.error('Failed to recheck admin session after protected data response', error);
-        return null;
-      });
+      if (responses.some((response) => response.status === 401 || response.status === 403)) {
+        const session = await fetchAdminSessionWithRetry().catch((error) => {
+          console.error('Failed to recheck admin session after protected data response', error);
+          return null;
+        });
 
-      if (!session?.authenticated) {
-        setSessionRole(null);
-        setReportSession(null);
-        setCanAccessTopDashboard(false);
-        setCanManageTopDashboard(false);
-        setAuthenticated(false);
-      } else {
-        const nextRole = normalizeSessionRole(session.role);
-        setSessionRole(nextRole);
-        setReportSession(nextRole ? {...session, role: nextRole} : null);
-        setCanAccessTopDashboard(
-          canRoleAccessTopDashboard(nextRole, session.dashboardAccess?.some((key)=>key.startsWith('top:')) || session.canManageTopDashboard),
-        );
-        setCanManageTopDashboard(
-          canRoleManageTopDashboard(nextRole, session.canManageTopDashboard),
-        );
-        setAuthenticated(Boolean(nextRole));
+        if (!session?.authenticated) {
+          setSessionRole(null);
+          setReportSession(null);
+          setCanAccessTopDashboard(false);
+          setCanManageTopDashboard(false);
+          setAuthenticated(false);
+        } else {
+          const nextRole = normalizeSessionRole(session.role);
+          setSessionRole(nextRole);
+          setReportSession(nextRole ? {...session, role: nextRole} : null);
+          setCanAccessTopDashboard(
+            canRoleAccessTopDashboard(nextRole, session.dashboardAccess?.some((key)=>key.startsWith('top:')) || session.canManageTopDashboard),
+          );
+          setCanManageTopDashboard(
+            canRoleManageTopDashboard(nextRole, session.canManageTopDashboard),
+          );
+          setAuthenticated(Boolean(nextRole));
+        }
+        throw new Error('Не удалось загрузить данные: проверьте авторизацию и права доступа');
       }
-      throw new Error('Не удалось загрузить данные: проверьте авторизацию и права доступа');
+
+      if (responses.some((response) => !response.ok)) {
+        console.error(
+          'Failed to load admin data',
+          responses.map((response) => response.status).join(', '),
+        );
+        throw new Error('Не удалось загрузить данные сайта. Изменения в форме сохранены.');
+      }
+
+      const settings = await settingsRes.json();
+      const slideData = await slidesRes.json();
+      const newsData = await newsRes.json();
+      const groupCompanyData = await groupCompaniesRes.json();
+      const brandData = await brandsRes.json();
+      const priceGroupData = await priceGroupsRes.json();
+      if (!isActive() || contentScopeRef.current !== draftScope) return;
+      if (![slideData.slides, newsData.news, groupCompanyData.companies, brandData.categories, brandData.brands, priceGroupData.groups].every(Array.isArray)) {
+        throw new Error('Сервер вернул неполные данные сайта. Обновите страницу перед сохранением.');
+      }
+      const nextBrandCategories = Array.isArray(brandData.categories) ? brandData.categories : [];
+
+      hydrateSettings({ phone: settings.phone ?? '', email: settings.email ?? '', address: settings.address ?? '' });
+      setSlides(Array.isArray(slideData.slides) ? slideData.slides : []);
+      setNews(Array.isArray(newsData.news) ? newsData.news : []);
+      setGroupCompanies(Array.isArray(groupCompanyData.companies) ? groupCompanyData.companies : []);
+      setBrandCategories(nextBrandCategories);
+      setBrands(Array.isArray(brandData.brands) ? brandData.brands : []);
+      setPriceGroups(Array.isArray(priceGroupData.groups) ? priceGroupData.groups : []);
+      initializeBrandDraft(nextBrandCategories[0]?.id || 0);
+      setAuthenticated(true);
+      contentLoadedRef.current = true;
+      setContentLoaded(true);
+      setContentLoadError('');
+    })();
+    contentLoadingRef.current = loading;
+    try { await loading; } finally {
+      if (contentLoadingRef.current === loading) contentLoadingRef.current = null;
     }
-
-    if (responses.some((response) => !response.ok)) {
-      console.error(
-        'Failed to load admin data',
-        responses.map((response) => response.status).join(', '),
-      );
-      throw new Error('Не удалось загрузить данные сайта. Изменения в форме сохранены.');
-    }
-
-    const settings = await settingsRes.json();
-    const slideData = await slidesRes.json();
-    const newsData = await newsRes.json();
-    const groupCompanyData = await groupCompaniesRes.json();
-    const brandData = await brandsRes.json();
-    const priceGroupData = await priceGroupsRes.json();
-    if (![slideData.slides, newsData.news, groupCompanyData.companies, brandData.categories, brandData.brands, priceGroupData.groups].every(Array.isArray)) {
-      throw new Error('Сервер вернул неполные данные сайта. Обновите страницу перед сохранением.');
-    }
-    const nextBrandCategories = Array.isArray(brandData.categories) ? brandData.categories : [];
-
-    setPhone(settings.phone ?? '');
-    setEmail(settings.email ?? '');
-    setAddress(settings.address ?? '');
-    setSlides(Array.isArray(slideData.slides) ? slideData.slides : []);
-    setNews(Array.isArray(newsData.news) ? newsData.news : []);
-    setGroupCompanies(Array.isArray(groupCompanyData.companies) ? groupCompanyData.companies : []);
-    setBrandCategories(nextBrandCategories);
-    setBrands(Array.isArray(brandData.brands) ? brandData.brands : []);
-    setPriceGroups(Array.isArray(priceGroupData.groups) ? priceGroupData.groups : []);
-    setBrandDraft((current) => ({ ...current, categoryId: current.categoryId || nextBrandCategories[0]?.id || 0 }));
-    setAuthenticated(true);
-    setContentLoaded(true);
-    setContentLoadError('');
-  }, [request, setBrandCategories, setBrandDraft, setBrands, setGroupCompanies, setNews, setPriceGroups, setSlides]);
-
-  useEffect(() => {
-    loadAdminDataRef.current = loadAdminData;
-  }, [loadAdminData]);
+  }, [draftScope, request, isActive, hydrateSettings, initializeBrandDraft, setBrandCategories, setBrands, setGroupCompanies, setNews, setPriceGroups, setSlides]);
 
   useEffect(() => {
     authenticatedRef.current = authenticated;
@@ -422,11 +451,15 @@ export default function AdminPanel({
 
   const saveInfo = async (target: SettingKey) => {
     if (!contentLoaded) return;
+    const submitted = settingsDraft.value;
     await performContentAction({ requests: [{ url: '/api/admin/settings', init: {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone, email, address }),
-    } }], success: 'Информация сохранена', failure: 'Не удалось сохранить информацию', refresh: false, onSaved: () => {
+      body: JSON.stringify({ [target]: submitted[target] }),
+    } }], success: 'Информация сохранена', failure: 'Не удалось сохранить информацию', onSaved: async ([response]) => {
+      const saved = await response.json();
+      if (typeof saved[target] !== 'string') throw new Error('Не удалось подтвердить сохранённое поле');
+      settingsDraft.accept(submitted, { ...submitted, [target]: saved[target] }, [target]);
       setSavedSetting(target);
       window.setTimeout(() => {
         setSavedSetting((current) => (current === target ? null : current));
@@ -510,9 +543,11 @@ export default function AdminPanel({
           switchArea('home');
         }}
         onLogout={async () => {
+          if (!confirmLeave()) return;
           try {
             const response = await request('/api/admin/logout', { method: 'POST' });
             if (!response.ok) throw new Error('Не удалось завершить сеанс. Повторите выход.');
+            if (draftScope) discardAdminDraftWorkspace(draftScope);
             setSessionRole(null);
             setReportSession(null);
             setCanAccessTopDashboard(false);
@@ -584,9 +619,12 @@ export default function AdminPanel({
 
       {activeArea === 'site' && (
         <div className={styles.adminShell}>
-          <AdminSiteSidebar activeSection={activeSection} onSwitchSection={switchSection} />
+          <AdminSiteSidebar activeSection={activeSection} onSwitchSection={switchSection} dirtySections={dirtySections} />
 
           <div className={styles.content}>
+            {hasUnsaved && <p role="status" className={styles.draftNotice}>
+              <strong>Есть несохранённые изменения.</strong> Разделы отмечены в меню. Можно переключаться между ними — черновики останутся в форме. Перед уходом сохраните нужные записи.
+            </p>}
             {contentLoadError && <p role="alert">{contentLoadError}</p>}
             {!contentLoaded && <p>Данные сайта ещё не загружены. Сохранение недоступно.
               <button type="button" className={styles.secondary} onClick={() => void loadAdminData().catch((error) => setContentLoadError(error instanceof Error ? error.message : 'Не удалось загрузить данные сайта'))}>Повторить загрузку</button>
@@ -603,9 +641,9 @@ export default function AdminPanel({
               groupCompanyAdmin={groupCompanyAdmin}
               brandAdmin={brandAdmin}
               priceGroupAdmin={priceGroupAdmin}
-              onPhoneChange={setPhone}
-              onEmailChange={setEmail}
-              onAddressChange={setAddress}
+              onPhoneChange={(value) => settingsDraft.setValue((current) => ({ ...current, phone: value }))}
+              onEmailChange={(value) => settingsDraft.setValue((current) => ({ ...current, email: value }))}
+              onAddressChange={(value) => settingsDraft.setValue((current) => ({ ...current, address: value }))}
               onSaveInfo={saveInfo}
               uploadImage={uploadImage}
               showStatus={showStatus}
