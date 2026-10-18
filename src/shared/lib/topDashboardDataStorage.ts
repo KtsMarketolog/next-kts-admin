@@ -81,6 +81,7 @@ export async function writeTopDashboardRequestToPendingFile(
   if (!request.body) {
     throw new TopDashboardDataStreamError('EMPTY', 'Upload body is empty');
   }
+  request.signal.throwIfAborted();
 
   const directory = await ensureTopDashboardDataStorage();
   const temporaryPath = path.join(directory, '.incoming', `${randomUUID()}.tmp`);
@@ -109,6 +110,7 @@ export async function writeTopDashboardRequestToPendingFile(
       Readable.fromWeb(request.body as import('node:stream/web').ReadableStream),
       meter,
       createWriteStream(temporaryPath, { flags: 'wx', mode: 0o600 }),
+      { signal: request.signal },
     );
   } catch (error) {
     await unlink(temporaryPath).catch(() => {});

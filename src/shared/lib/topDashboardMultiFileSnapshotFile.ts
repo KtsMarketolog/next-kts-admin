@@ -104,15 +104,19 @@ function validateRelativePath(value: string, encodedLength: number, fileName: st
 export async function inspectTopDashboardMultiFileSnapshotFile(
   filePath: string,
   fileSize: number,
+  signal?: AbortSignal,
 ): Promise<TopDashboardMultiFileSnapshotInspectionResult> {
+  signal?.throwIfAborted();
   const file = await open(filePath, 'r');
   try {
     const readAt = async (offset: number, length: number) => {
+      signal?.throwIfAborted();
       assertAvailable(offset, length, fileSize);
       const output = Buffer.allocUnsafe(length);
       let filled = 0;
       while (filled < length) {
         const { bytesRead } = await file.read(output, filled, length - filled, offset + filled);
+        signal?.throwIfAborted();
         if (bytesRead <= 0) throw snapshotError('INVALID_LENGTH', 'Бинарный контейнер обрезан');
         filled += bytesRead;
       }
@@ -122,6 +126,7 @@ export async function inspectTopDashboardMultiFileSnapshotFile(
       try {
         return decoder.decode(await readAt(offset, length));
       } catch (error) {
+        signal?.throwIfAborted();
         if (error instanceof TopDashboardMultiFileSnapshotError) throw error;
         throw snapshotError('INVALID_UTF8', `${label} содержит некорректный UTF-8`);
       }

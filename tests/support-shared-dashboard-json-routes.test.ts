@@ -7,6 +7,7 @@ import { PersonalDashboardError } from '../src/shared/lib/managerDashboardDomain
 import * as security from '../src/shared/lib/managerDashboardSecurity';
 import * as origin from '../src/shared/lib/originProtection';
 import * as dashboardAccess from '../src/shared/lib/dashboardAccess';
+import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
 
 function compile<T>(filename: string, modules: Record<string, unknown>): T {
   const code = ts.transpileModule(readFileSync(new URL(filename, import.meta.url), 'utf8'), {
@@ -23,6 +24,8 @@ function api(role: Role = 'admin', options: {
   sessionId?: string | null; inactive?: boolean; limited?: boolean; busy?: boolean;
   preflightError?: Error; prepareError?: Error; importError?: Error; duplicate?: boolean;
   missingSnapshot?: boolean; readError?: Error; grants?: string[];
+  prepare?: (request: Request) => Promise<void>; importDelayMs?: number; commitDelayMs?: number;
+  guardLimits?: {maxBytes?: number; idleTimeoutMs?: number; totalTimeoutMs?: number};
 } = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
   const uploadUsage: Array<Record<string, unknown>> = [];
@@ -46,7 +49,10 @@ function api(role: Role = 'admin', options: {
       '@/shared/lib/managerDashboardSecurity': security, '@/shared/lib/originProtection': origin,
     });
   const pending = {fileSize: 18, sha256: 'a'.repeat(64), firstBytes: Buffer.from('{"'), temporaryPath: '/synthetic',
-    commit: observe('commit', () => 'aa/file.bin'), discard: observe('discard'), preserve: observe('preserve')};
+    commit: observe('commit', async () => {
+      if (options.commitDelayMs) await new Promise((resolve) => setTimeout(resolve, options.commitDelayMs));
+      return 'aa/file.bin';
+    }), discard: observe('discard'), preserve: observe('preserve')};
   const snapshot = {id: 9, htmlVersionId: 8, originalName: 'маршруты.json', fileSize: 18, sha256: 'a'.repeat(64),
     savedAt: '2026-09-17T05:28:47.226Z', receivedAt: '2026-09-17', uploadedBy: 'admin:7', status: 'active'};
   const route = compile<typeof import('../src/app/api/admin/manager-dashboard/shared/json/route')>(
@@ -56,7 +62,8 @@ function api(role: Role = 'admin', options: {
       '@/shared/lib/managerDashboardSecurity': security, '../../_shared': base, '../_shared': shared,
       '@/shared/lib/db/supportSharedDashboardRepo': {
         assertSupportSharedJsonUploadTarget: observe('preflight', () => {if (options.preflightError) throw options.preflightError;}),
-        importSupportSharedDashboardJson: observe('import', () => {
+        importSupportSharedDashboardJson: observe('import', async () => {
+          if (options.importDelayMs) await new Promise((resolve) => setTimeout(resolve, options.importDelayMs));
           if (options.importError) throw options.importError;
           return {status: options.duplicate ? 'duplicate' : 'imported', snapshot, prunedStoragePaths: ['synthetic-pruned-file']};
         }),
@@ -67,9 +74,15 @@ function api(role: Role = 'admin', options: {
         }),
       },
       '@/shared/lib/supportSharedRoutePlannerData': {SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES: 16 * 1024 * 1024,
-        prepareSupportSharedRoutePlannerUpload: observe('prepare', () => {if (options.prepareError) throw options.prepareError; return {pending, savedAt: snapshot.savedAt};})},
+        prepareSupportSharedRoutePlannerUpload: observe('prepare', async (request) => {
+          if (options.prepareError) throw options.prepareError;
+          await options.prepare?.(request as Request);
+          return {pending, savedAt: snapshot.savedAt};
+        })},
       '@/shared/lib/topDashboardDataStorage': {deleteTopDashboardDataFiles: observe('prune')},
       '@/shared/lib/topDashboardUploadConcurrency': {acquireDistributedTopDashboardDataUploadSlot: observe('lock', () => options.busy ? null : observe('release'))},
+      '@/shared/lib/uploadRequestGuard': {...uploadRequestGuard,
+        createUploadRequestGuard: (request: Request, limits: {maxBytes: number}) => uploadRequestGuard.createUploadRequestGuard(request, {...limits, ...options.guardLimits})},
     });
   return {route, calls, snapshot, uploadUsage};
 }
@@ -156,6 +169,80 @@ test('invalid streamed JSON releases the cross-worker slot before returning the 
   const harness = api('admin', {prepareError: new PersonalDashboardError('INVALID_JSON_SNAPSHOT', 'Invalid')});
   assert.equal((await harness.route.POST(upload())).status, 400);
   assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'release']);
+});
+
+test('stalled shared uploads report the transport timeout even when the validator wraps the error', async () => {
+  let canceled = false;
+  const input = new Request(URL_ROOT, {method: 'POST', headers: upload().headers,
+    body: new ReadableStream({cancel() { canceled = true; }}), duplex: 'half',
+  } as RequestInit & {duplex: 'half'});
+  const harness = api('admin', {guardLimits: {idleTimeoutMs: 20, totalTimeoutMs: 2_000},
+    prepare: async (request) => {
+      try { await request.arrayBuffer(); }
+      catch { throw new PersonalDashboardError('INVALID_SNAPSHOT', 'Wrapped parser failure'); }
+    }});
+  const response = await harness.route.POST(input);
+  assert.equal(response.status, 408);
+  assert.equal((await response.json()).code, 'IDLE_TIMEOUT');
+  assert.equal(canceled, true);
+  assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'release']);
+  assert.equal(harness.uploadUsage.length, 0);
+});
+
+test('shared uploads reject actual oversize bodies independently of Content-Length and preserve publication', async () => {
+  const harness = api('admin', {guardLimits: {maxBytes: 4}, prepare: async (request) => { await request.arrayBuffer(); }});
+  const response = await harness.route.POST(upload({'content-length': '1'}));
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).code, 'TOO_LARGE');
+  assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'release']);
+  assert.equal(harness.uploadUsage.length, 0);
+});
+
+test('elapsed validation budget discards prepared bytes before commit and releases the slot once', async () => {
+  const harness = api('admin', {guardLimits: {idleTimeoutMs: 2_000, totalTimeoutMs: 20},
+    prepare: async () => { await new Promise((resolve) => setTimeout(resolve, 40)); }});
+  const response = await harness.route.POST(upload());
+  assert.equal(response.status, 408);
+  assert.equal((await response.json()).code, 'TOTAL_TIMEOUT');
+  assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'discard', 'release']);
+});
+
+test('shared upload keeps its global slot until aborted processing has completed cleanup', async () => {
+  let finishCleanup!: () => void;
+  const cleanup = new Promise<void>((resolve) => { finishCleanup = resolve; });
+  let observedAbort!: () => void;
+  const aborted = new Promise<void>((resolve) => { observedAbort = resolve; });
+  const harness = api('admin', {guardLimits: {idleTimeoutMs: 20, totalTimeoutMs: 2_000},
+    prepare: async (request) => {
+      try { await request.arrayBuffer(); }
+      catch (error) { observedAbort(); await cleanup; throw error; }
+    }});
+  const response = harness.route.POST(new Request(URL_ROOT, {method: 'POST', headers: upload().headers,
+    body: new ReadableStream(), duplex: 'half',
+  } as RequestInit & {duplex: 'half'}));
+  await aborted;
+  assert.equal(harness.calls.some((call) => call.name === 'release'), false);
+  finishCleanup();
+  assert.equal((await response).status, 408);
+  assert.equal(harness.calls.filter((call) => call.name === 'release').length, 1);
+  assert.equal(harness.calls.some((call) => call.name === 'import'), false);
+});
+
+test('deadline during file rename discards owned bytes without changing the active shared snapshot', async () => {
+  const harness = api('admin', {guardLimits: {idleTimeoutMs: 2_000, totalTimeoutMs: 20}, commitDelayMs: 40});
+  const response = await harness.route.POST(upload());
+  assert.equal(response.status, 408);
+  assert.equal((await response.json()).code, 'TOTAL_TIMEOUT');
+  assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'commit', 'discard', 'release']);
+  assert.equal(harness.uploadUsage.length, 0);
+});
+
+test('finished transport budget does not interrupt an already started commit', async () => {
+  const harness = api('admin', {guardLimits: {idleTimeoutMs: 2_000, totalTimeoutMs: 20}, importDelayMs: 40});
+  const response = await harness.route.POST(upload());
+  assert.equal(response.status, 201);
+  assert.equal(harness.calls.filter((call) => call.name === 'preserve').length, 1);
+  assert.equal(harness.calls.filter((call) => call.name === 'release').length, 1);
 });
 
 test('normal JSON GET permits management or explicitly assigned viewers and rejects personal manager selectors', async () => {

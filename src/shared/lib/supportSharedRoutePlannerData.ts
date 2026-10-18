@@ -233,13 +233,15 @@ export async function prepareSupportSharedRoutePlannerUpload(request: Request): 
     let transportSize = 0;
     const declaredSize = request.headers.get('content-length');
     if (declaredSize && (!/^\d+$/u.test(declaredSize) || Number(declaredSize) > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES)) tooLarge();
-    const input = Readable.from((async function* () {
-      for await (const chunk of source) {
-        transportSize += chunk.length;
-        if (transportSize > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES) tooLarge();
-        yield chunk;
-      }
-    })());
+    const input = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        try {
+          transportSize += chunk.length;
+          if (transportSize > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES) tooLarge();
+          callback(null, chunk);
+        } catch (error) { callback(uploadError(error)); }
+      },
+    });
     const validator = snapshotValidator();
     let savedAt: string | undefined;
     const checked = new Transform({
@@ -252,9 +254,11 @@ export async function prepareSupportSharedRoutePlannerUpload(request: Request): 
         catch (error) { callback(uploadError(error)); }
       },
     });
-    const copy = pipeline(input, createGunzip(), checked);
+    // Keep the original body inside the pipeline: aborting must settle both decompression
+    // and file writing before the route can release its shared upload slot.
+    const copy = pipeline(source, input, createGunzip(), checked, {signal: request.signal});
     const plainRequest = new Request('http://localhost/internal-route-planner-upload', {
-      method: 'POST', body: Readable.toWeb(checked) as ReadableStream<Uint8Array>, duplex: 'half',
+      method: 'POST', body: Readable.toWeb(checked) as ReadableStream<Uint8Array>, duplex: 'half', signal: request.signal,
     } as RequestInit & { duplex: 'half' });
     const write = writeTopDashboardRequestToPendingFile(plainRequest, SUPPORT_SHARED_JSON_MAX_BYTES)
       .then((file) => { pending = file; })

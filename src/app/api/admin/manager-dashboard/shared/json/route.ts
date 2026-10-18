@@ -10,6 +10,7 @@ import { PERSONAL_PRIVATE_HEADERS, parsePersonalDashboardId } from '@/shared/lib
 import { prepareSupportSharedRoutePlannerUpload, SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES } from '@/shared/lib/supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles, type PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
 import { acquireDistributedTopDashboardDataUploadSlot } from '@/shared/lib/topDashboardUploadConcurrency';
+import { createUploadRequestGuard } from '@/shared/lib/uploadRequestGuard';
 import { personalApiError, personalJson } from '../../_shared';
 import { requireSharedAccess, sharedQuery } from '../_shared';
 
@@ -43,6 +44,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   let releaseSlot: (() => Promise<void>) | null = null;
   let pending: PendingTopDashboardDataFile | undefined;
+  let uploadGuard: ReturnType<typeof createUploadRequestGuard> | undefined;
   let databaseAttempted = false;
   try {
     const access = await requireSharedAccess(request, true);
@@ -67,9 +69,15 @@ export async function POST(request: Request) {
     await assertSupportSharedJsonUploadTarget(htmlVersionId, expectedId);
     releaseSlot = await acquireDistributedTopDashboardDataUploadSlot();
     if (!releaseSlot) return personalJson({error: 'Уже выполняется загрузка данных; повторите после её завершения'}, 409);
-    const prepared = await prepareSupportSharedRoutePlannerUpload(request);
+    uploadGuard = createUploadRequestGuard(request, {maxBytes: SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES});
+    const prepared = await prepareSupportSharedRoutePlannerUpload(uploadGuard.request);
     pending = prepared.pending;
+    uploadGuard.assertActive();
     const storagePath = await pending.commit();
+    uploadGuard.assertActive();
+    // Once publication begins, its outcome must not be replaced by a transport timeout.
+    // The global slot remains held until the complete operation and cleanup have finished.
+    uploadGuard.dispose();
     databaseAttempted = true;
     const result = await importSupportSharedDashboardJson({htmlVersionId, expectedActiveSnapshotId: expectedId,
       originalName: filename, savedAt: prepared.savedAt, fileSize: pending.fileSize, sha256: pending.sha256, storagePath, actorId: access.actorId});
@@ -82,11 +90,13 @@ export async function POST(request: Request) {
     return personalJson({status: result.status, snapshot: result.snapshot,
       message: result.status === 'duplicate' ? 'Этот JSON уже загружен.' : 'JSON опубликован для всех менеджеров по сопровождению.'}, result.status === 'imported' ? 201 : 200);
   } catch (error) {
+    if (!databaseAttempted && uploadGuard?.error) return personalJson({error: uploadGuard.error.message, code: uploadGuard.error.code}, uploadGuard.error.status);
     // A connection failure around COMMIT has an unknown outcome. Preserve the private file for recovery,
     // rather than risking a successfully committed database reference pointing to deleted bytes.
     if (databaseAttempted && !(error instanceof PersonalDashboardError)) pending?.preserve();
     return personalApiError(error);
   } finally {
+    uploadGuard?.dispose();
     await pending?.discard().catch(() => { console.error('Shared route planner temporary cleanup failed'); });
     await releaseSlot?.().catch(() => { console.error('Shared route planner upload lock release failed'); });
   }

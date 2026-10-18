@@ -37,6 +37,13 @@ import {
 } from '@/shared/lib/topDashboardContentSecurity';
 import { acquireDistributedTopDashboardDataUploadSlot } from '@/shared/lib/topDashboardUploadConcurrency';
 import { detectTopDashboardUploadTargets } from '@/shared/lib/topDashboardUploadTargets';
+import {
+  TOP_DASHBOARD_DATA_MAX_BYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES,
+  TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
+  TOP_DASHBOARD_DATA_STORED_MAX_BYTES,
+} from '@/shared/lib/topDashboardLimits';
+import { createUploadRequestGuard } from '@/shared/lib/uploadRequestGuard';
 
 import {
   readTopDashboardDataStreamUpload,
@@ -195,7 +202,16 @@ export async function PUT(request: Request, context: Context) {
 
   let pendingFile: PendingTopDashboardDataFile | undefined;
   let databaseAttempted = false;
+  let uploadGuard: ReturnType<typeof createUploadRequestGuard> | undefined;
   try {
+    // Count actual transport bytes BEFORE formData() can accumulate them. The
+    // same deadline covers receiving and validation, without unlocking work
+    // that is still running. All exits await cleanup in finally below.
+    uploadGuard = createUploadRequestGuard(request, {
+      maxBytes: streamUpload
+        ? multiFileUpload ? TOP_DASHBOARD_DATA_STORED_MAX_BYTES : TOP_DASHBOARD_DATA_MAX_BYTES
+        : TOP_DASHBOARD_DATA_MULTIPART_MAX_BYTES + TOP_DASHBOARD_DATA_MULTIPART_OVERHEAD_BYTES,
+    });
     const overview = await getTopDashboardBlockOverview(blockId);
     const expectedActiveHtmlVersionId = overview.activeVersionId;
     if (!expectedActiveHtmlVersionId) {
@@ -260,13 +276,16 @@ export async function PUT(request: Request, context: Context) {
       : undefined;
     const parsed = multiFileUpload
       ? streamUpload
-        ? await readTopDashboardMultiFileDataStreamUpload(request)
-        : await readTopDashboardMultiFileDataUpload(request)
+        ? await readTopDashboardMultiFileDataStreamUpload(uploadGuard.request)
+        : await readTopDashboardMultiFileDataUpload(uploadGuard.request)
       : streamUpload
-        ? await readTopDashboardDataStreamUpload(request, expectedNativeFormat)
-        : await readTopDashboardDataUpload(request, expectedNativeFormat);
+        ? await readTopDashboardDataStreamUpload(uploadGuard.request, expectedNativeFormat)
+        : await readTopDashboardDataUpload(uploadGuard.request, expectedNativeFormat);
+    // Take ownership before checking the deadline so a just-finished parser's
+    // temporary file is also discarded if receiving/validation timed out.
+    if (parsed.parsed) pendingFile = parsed.parsed.upload.pendingFile;
+    uploadGuard.assertActive();
     if (parsed.error) return parsed.error;
-    pendingFile = parsed.parsed.upload.pendingFile;
 
     if (multiFileUpload) {
       if (
@@ -323,9 +342,14 @@ export async function PUT(request: Request, context: Context) {
       );
     }
 
+    uploadGuard.assertActive();
     if (pendingFile) {
       parsed.parsed.upload.storagePath = await pendingFile.commit();
     }
+    uploadGuard.assertActive();
+    // Persistence is transactional: never race COMMIT with a transport timer
+    // and report a failed upload after the new version may have been activated.
+    uploadGuard.dispose();
     const persistedUpload = { ...parsed.parsed.upload };
     delete persistedUpload.pendingFile;
     // Native reports share an extensible snapshot format. Bind accepted data to
@@ -392,6 +416,12 @@ export async function PUT(request: Request, context: Context) {
       },
     );
   } catch (error) {
+    if (!databaseAttempted && uploadGuard?.error) {
+      return Response.json(
+        { error: uploadGuard.error.message, code: uploadGuard.error.code },
+        { status: uploadGuard.error.status, headers: { 'Cache-Control': 'private, no-store' } },
+      );
+    }
     if (error instanceof TopDashboardStateConflictError) {
       return Response.json(
         {
@@ -428,6 +458,7 @@ export async function PUT(request: Request, context: Context) {
     console.error('Failed to upload TOP dashboard data', error);
     return Response.json({ error: 'Не удалось сохранить данные дашборда' }, { status: 500 });
   } finally {
+    uploadGuard?.dispose();
     await pendingFile?.discard().catch((error) => {
       console.error('Failed to discard temporary TOP dashboard data file', error);
     });

@@ -11,6 +11,8 @@ import * as access from '../src/shared/lib/dashboardAccess';
 import * as security from '../src/shared/lib/topDashboardContentSecurity';
 import * as officeView from '../src/shared/lib/dashboardOfficeView';
 import * as profitability from '../src/shared/lib/dashboardProfitabilityHtml';
+import * as dashboardLimits from '../src/shared/lib/topDashboardLimits';
+import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
 
 const purchaser = (keys: string[] = []): AdminSession => ({
@@ -122,6 +124,8 @@ function harness(relative: string, session: AdminSession | null, published = tru
     '@/shared/lib/originProtection': infrastructure,
     '@/shared/lib/rateLimit': infrastructure,
     '@/shared/lib/topDashboardUploadConcurrency': infrastructure,
+    '@/shared/lib/topDashboardLimits': dashboardLimits,
+    '@/shared/lib/uploadRequestGuard': uploadRequestGuard,
     '@/shared/lib/topDashboardUploadTargets': infrastructure,
     '@/shared/lib/topDashboardDataStorage': {
       async openTopDashboardDataFile() { calls.push('storage'); return Readable.from([Buffer.from('{}')]); },

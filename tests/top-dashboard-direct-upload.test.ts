@@ -24,6 +24,8 @@ import {
 } from '../src/shared/lib/db/topDashboardBlocksRepo';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 import * as contentSecurity from '../src/shared/lib/topDashboardContentSecurity';
+import * as dashboardLimits from '../src/shared/lib/topDashboardLimits';
+import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
 import {
   decodeTopDashboardMultiFileSnapshot,
   encodeTopDashboardMultiFileSnapshot,
@@ -329,6 +331,8 @@ function directRouteHarness(options: {
     '@/shared/lib/rateLimit': { getClientIp() { return '127.0.0.1'; } },
     '@/shared/lib/topDashboardDataStorage': {},
     '@/shared/lib/topDashboardContentSecurity': contentSecurity,
+    '@/shared/lib/topDashboardLimits': dashboardLimits,
+    '@/shared/lib/uploadRequestGuard': uploadRequestGuard,
     '@/shared/lib/topDashboardUploadConcurrency': {
       async acquireDistributedTopDashboardDataUploadSlot() {
         calls.push('slot'); return async () => { calls.push('release'); };

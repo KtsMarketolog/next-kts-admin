@@ -16,6 +16,8 @@ import * as routeUtils from '../src/app/api/admin/top-dashboard/blocks/routeUtil
 import * as streamUpload from '../src/app/api/admin/top-dashboard/blocks/streamDataUpload';
 import * as dashboardErrors from '../src/shared/lib/db/topDashboardDomain';
 import * as contentSecurity from '../src/shared/lib/topDashboardContentSecurity';
+import * as dashboardLimits from '../src/shared/lib/topDashboardLimits';
+import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 
 function bundle(extra: Record<string, unknown>) {
@@ -234,6 +236,8 @@ function dataRoute(profile: dataUpload.TopDashboardDataProfile) {
     '@/shared/lib/rateLimit': { getClientIp() { return '127.0.0.1'; } },
     '@/shared/lib/topDashboardDataStorage': {},
     '@/shared/lib/topDashboardContentSecurity': contentSecurity,
+    '@/shared/lib/topDashboardLimits': dashboardLimits,
+    '@/shared/lib/uploadRequestGuard': uploadRequestGuard,
     '@/shared/lib/topDashboardUploadConcurrency': {
       async acquireDistributedTopDashboardDataUploadSlot() {
         slots += 1;

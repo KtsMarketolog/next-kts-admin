@@ -72,6 +72,9 @@ export async function receiveTopDashboardDataStream(
       ),
     };
   } catch (error) {
+    // The route owns the transport guard and returns its safe timeout/abort
+    // response. Expected cancellation is not a storage/server failure.
+    if (request.signal.aborted) throw request.signal.reason;
     if (error instanceof TopDashboardDataStreamError) {
       if (error.code === 'TOO_LARGE') {
         return {

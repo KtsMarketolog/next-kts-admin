@@ -17,6 +17,7 @@ import {
   SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES,
 } from '../src/shared/lib/supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles } from '../src/shared/lib/topDashboardDataStorage';
+import { createUploadRequestGuard } from '../src/shared/lib/uploadRequestGuard';
 
 function snapshot(overrides: Record<string, unknown> = {}) {
   return {
@@ -100,6 +101,52 @@ test('supports one-byte transport chunks and valid UTC timestamps without millis
     const prepared = await prepareSupportSharedRoutePlannerUpload(streamed(Array.from(bytes, (byte) => Buffer.from([byte]))));
     assert.equal(prepared.savedAt, '2026-09-17T08:00:00Z');
     await prepared.pending.discard();
+  });
+});
+
+test('guarded shared uploads settle decompression and file cleanup on stalls, aborts and lying lengths', {timeout: 5_000}, async () => {
+  await inStorage(async (directory) => {
+    const existing = await prepareSupportSharedRoutePlannerUpload(request());
+    const existingPath = await existing.pending.commit();
+    existing.pending.preserve();
+    const previousBytes = await readFile(path.join(directory, existingPath));
+    const gzip = gzipSync(JSON.stringify(snapshot()));
+    for (const scenario of ['initial-stall', 'midstream-stall', 'disconnect', 'oversize'] as const) {
+      let canceled = false;
+      const abort = new AbortController();
+      const source = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (scenario === 'midstream-stall') controller.enqueue(gzip.subarray(0, gzip.length - 4));
+          if (scenario === 'oversize') controller.enqueue(gzip);
+        },
+        cancel() {
+          canceled = true;
+          // A broken producer must not keep the validated-file pipeline or slot alive.
+          return new Promise<void>(() => {});
+        },
+      });
+      const guarded = createUploadRequestGuard(new Request('http://localhost/upload', {
+        method: 'POST', headers: {'content-type': 'application/gzip', 'content-length': '1'},
+        body: source, signal: abort.signal, duplex: 'half',
+      } as RequestInit & {duplex: 'half'}), {
+        maxBytes: scenario === 'oversize' ? 16 : SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES,
+        idleTimeoutMs: 30, totalTimeoutMs: 2_000,
+      });
+      const abortTimer = scenario === 'disconnect' ? setTimeout(() => abort.abort(), 10) : undefined;
+      try {
+        await assert.rejects(prepareSupportSharedRoutePlannerUpload(guarded.request));
+        assert.equal(guarded.error?.code, scenario === 'oversize' ? 'TOO_LARGE' : scenario === 'disconnect' ? 'ABORTED' : 'IDLE_TIMEOUT');
+        assert.equal(canceled, true);
+        assert.deepEqual(await readdir(path.join(directory, '.incoming')), []);
+        assert.deepEqual(await readFile(path.join(directory, existingPath)), previousBytes);
+      } finally {
+        if (abortTimer !== undefined) clearTimeout(abortTimer);
+        guarded.dispose();
+      }
+      // The next valid upload still completes using the same storage.
+      const next = await prepareSupportSharedRoutePlannerUpload(request());
+      await next.pending.discard();
+    }
   });
 });
 

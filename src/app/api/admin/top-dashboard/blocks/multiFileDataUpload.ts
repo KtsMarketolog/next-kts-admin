@@ -262,6 +262,7 @@ export async function readTopDashboardMultiFileDataStreamUpload(
     validation = await inspectTopDashboardMultiFileSnapshotFile(
       pending.temporaryPath,
       pending.fileSize,
+      request.signal,
     );
   } catch (error) {
     // The route receives ownership only after this parser returns. Clean up an

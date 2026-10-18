@@ -19,6 +19,8 @@ import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 import * as contentSecurity from '../src/shared/lib/topDashboardContentSecurity';
 import { writeTopDashboardRequestToPendingFile } from '../src/shared/lib/topDashboardDataStorage';
 import { TOP_DASHBOARD_JSON_RESOURCE_LIMITS as limits } from '../src/shared/lib/topDashboardLimits';
+import * as dashboardLimits from '../src/shared/lib/topDashboardLimits';
+import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
 
 const url = 'https://kts-impex.ru/api/admin/top-dashboard/blocks/4/data';
 const modes = [
@@ -196,6 +198,8 @@ function dataRoute() {
     '@/shared/lib/rateLimit': { getClientIp() { return '127.0.0.1'; } },
     '@/shared/lib/topDashboardDataStorage': {},
     '@/shared/lib/topDashboardContentSecurity': contentSecurity,
+    '@/shared/lib/topDashboardLimits': dashboardLimits,
+    '@/shared/lib/uploadRequestGuard': uploadRequestGuard,
     '@/shared/lib/topDashboardUploadConcurrency': {
       async acquireDistributedTopDashboardDataUploadSlot() {
         slots += 1;
