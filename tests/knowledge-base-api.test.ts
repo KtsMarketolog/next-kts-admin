@@ -89,10 +89,11 @@ function uploadRequest() { return req(`/upload?parentId=19&operationId=${uuid}`,
   'x-kb-file-name': encodeURIComponent('doc.pdf'), 'x-kb-title': encodeURIComponent('Инструкция'), 'content-type': 'application/octet-stream',
 }); }
 
-test('KB read accepts all authenticated employee roles including TOP, while only Admin/Admin TOP manage or inspect people/statistics', async () => {
+test('KB read accepts all authenticated employee roles; Admin/Admin TOP/TOP manage and inspect people/statistics', async () => {
   for (const role of [...roles, null]) {
-    const h = harness({ role }); const manage = role === 'admin' || role === 'admintop';
+    const h = harness({ role }); const manage = role === 'admin' || role === 'admintop' || role === 'top';
     const read = await h.base.GET(req()); privateResponse(read); assert.equal(read.status, role ? 200 : 401, String(role));
+    if (role) assert.equal((await read.json()).canManage, manage);
     const post = await h.base.POST(req('', 'POST', { operationId: uuid, parentId: null, title: 'Section' }));
     privateResponse(post); assert.equal(post.status, manage ? 200 : role ? 403 : 401, String(role));
     for (const response of [await h.actors.GET(req('/employees')), await h.usage.GET(req('/usage'))]) {
@@ -101,8 +102,27 @@ test('KB read accepts all authenticated employee roles including TOP, while only
   }
 });
 
+test('KB upload, rename, ACL, archive and restore enforce the same three-role management boundary', async () => {
+  for (const role of [...roles, null]) {
+    const h = harness({ role });
+    const expectedStatus = role === 'admin' || role === 'admintop' || role === 'top' ? 200 : role ? 403 : 401;
+    for (const body of [
+      { expectedRevision: '1', title: 'Updated' },
+      { expectedRevision: '1', access: { mode: 'custom', actorKeys: ['manager:7'] } },
+      { expectedRevision: '1', archived: true },
+      { expectedRevision: '1', archived: false },
+    ]) {
+      const response = await h.patch.PATCH(req('/19', 'PATCH', body), context());
+      assert.equal(response.status, expectedStatus, String(role)); privateResponse(response);
+    }
+    const upload = await h.upload.POST(uploadRequest());
+    assert.equal(upload.status, expectedStatus, String(role)); privateResponse(upload);
+    if (expectedStatus !== 200) assert.deepEqual(h.calls, [], 'denied roles never reach repository/storage');
+  }
+});
+
 test('KB auth, origin and actor limits precede storage, metadata and mutations', async () => {
-  for (const options of [{ role: null }, { role: 'top' as const }, { limited: true }]) {
+  for (const options of [{ role: null }, { role: 'purchaser' as const }, { limited: true }]) {
     const h = harness(options); const response = await h.upload.POST(uploadRequest());
     assert.ok([401, 403, 429].includes(response.status)); privateResponse(response); assert.deepEqual(h.calls, []);
   }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
-import type { KnowledgeBaseAccess, KnowledgeBaseActor } from '@/shared/lib/knowledgeBase';
+import { isKnowledgeBaseManagementRole, type KnowledgeBaseAccess, type KnowledgeBaseActor } from '@/shared/lib/knowledgeBase';
 import { KB_API, kbRole, readKbResponse } from './knowledge-base-ui';
 import styles from './knowledge-base.module.scss';
 
@@ -42,7 +42,7 @@ export function KnowledgeBaseAccessEditor({ value, onChange, isRoot, disabled }:
         <option value="custom">Выбранные сотрудники</option>
       </select>
     </label>
-    <p className={styles.muted}>Админ и Админ ТОП всегда имеют доступ. {isRoot
+    <p className={styles.muted}>Админ, Админ ТОП и ТОП всегда имеют доступ. {isRoot
       ? 'Без выбранных сотрудников папку видят только они.'
       : 'Доступ к родительской папке обязателен. Отдельный список ниже может сузить, но не расширить его.'}</p>
     {value.mode === 'custom' && <>
@@ -65,7 +65,7 @@ export function KnowledgeBaseAccessEditor({ value, onChange, isRoot, disabled }:
       {error && <div role="alert" className={styles.error}>{error} <button type="button" onClick={() => setRefresh((n) => n + 1)}>Повторить</button></div>}
       <div className={styles.actors} aria-busy={loading}>
         {actors.map((actor) => {
-          const manages = actor.actorRole === 'admin' || actor.actorRole === 'admintop';
+          const manages = isKnowledgeBaseManagementRole(actor.actorRole);
           return <label key={actor.actorKey} className={styles.actor}><input type="checkbox" disabled={manages || disabled}
             checked={manages || value.actorKeys.includes(actor.actorKey)} onChange={(event) => onChange({ ...value,
               actorKeys: event.target.checked ? [...value.actorKeys, actor.actorKey] : value.actorKeys.filter((key) => key !== actor.actorKey) })} />

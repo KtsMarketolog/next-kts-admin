@@ -2,18 +2,24 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { assertKnowledgeBaseId, assertKnowledgeBaseRevision, assertKnowledgeBaseUuid, canAccessKnowledgeBase, canManageKnowledgeBase,
-  knowledgeBaseActorKey, parseKnowledgeBaseAccess, parseKnowledgeBaseSearch, parseKnowledgeBaseTitle,
+  knowledgeBaseActorKey, isKnowledgeBaseManagementRole, parseKnowledgeBaseAccess, parseKnowledgeBaseSearch, parseKnowledgeBaseTitle,
   KNOWLEDGE_BASE_MAX_FILE_BYTES } from '../src/shared/lib/knowledgeBase';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 
-test('knowledge base management is narrower than dashboard delegated management', () => {
+test('knowledge base management includes Admin, Admin TOP and TOP, not other delegated dashboard managers', () => {
   for (const role of ['admin', 'admintop', 'top', 'wholesale_admin', 'purchaser', 'manager', 'support_manager'] as const) {
     const session: AdminSession = { role, adminUserId: 1, managerId: 2, sessionId: randomUUID(), canManageTopDashboard: true };
     assert.equal(canAccessKnowledgeBase(session), true);
-    assert.equal(canManageKnowledgeBase(session), role === 'admin' || role === 'admintop');
+    const manages = role === 'admin' || role === 'admintop' || role === 'top';
+    assert.equal(canManageKnowledgeBase(session), manages);
+    assert.equal(isKnowledgeBaseManagementRole(role), manages);
     assert.equal(knowledgeBaseActorKey(session), role === 'manager' || role === 'support_manager' ? 'manager:2' : 'admin:1');
   }
   assert.equal(canAccessKnowledgeBase({ role: 'top', sessionId: randomUUID() }), false);
+  assert.equal(canManageKnowledgeBase({ role: 'top', sessionId: randomUUID() }), false);
+  assert.equal(canManageKnowledgeBase({ role: 'top', adminUserId: 1 }), false);
+  assert.equal(canManageKnowledgeBase({ role: 'top', adminUserId: 1, sessionId: randomUUID(), canManageTopDashboard: false }), true);
+  assert.equal(isKnowledgeBaseManagementRole('unknown'), false);
   assert.equal(canManageKnowledgeBase({ role: 'admin' }), false);
   assert.equal(knowledgeBaseActorKey({ role: 'admin', sessionId: randomUUID() }), 'admin:primary');
 });

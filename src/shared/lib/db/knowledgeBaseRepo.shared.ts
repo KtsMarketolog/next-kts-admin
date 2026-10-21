@@ -35,7 +35,7 @@ async function assertActiveSession(client: PoolClient, session: AdminSession) {
 }
 export async function withKnowledgeBase<T>(session: AdminSession, mode: 'read' | 'write' | 'event', work: (context: KnowledgeBaseContext) => Promise<T>) {
   if (!canAccessKnowledgeBase(session)) throw new KnowledgeBaseError(401, 'UNAUTHORIZED', 'Необходимо войти');
-  if (mode === 'write' && !canManageKnowledgeBase(session)) throw new KnowledgeBaseError(403, 'FORBIDDEN', 'Управление базой знаний доступно администратору и Админ ТОП');
+  if (mode === 'write' && !canManageKnowledgeBase(session)) throw new KnowledgeBaseError(403, 'FORBIDDEN', 'Управление базой знаний доступно Админу, Админ ТОП и ТОП');
   await ensureSiteSchema();
   return withTransaction(async client => {
     await client.query("set local statement_timeout='5s'; set local lock_timeout='2s'");

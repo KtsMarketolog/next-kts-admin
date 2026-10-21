@@ -7,6 +7,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { compile } from 'sass';
+import { canManageKnowledgeBase } from '../src/shared/lib/knowledgeBase';
+import type { AdminSession } from '../src/shared/lib/adminAuth';
 
 async function main() {
   const root = path.resolve('.');
@@ -18,9 +20,11 @@ async function main() {
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import Header from './src/widgets/layout/Header/Header';
     import {KnowledgeBase} from './src/features/admin/knowledge-base/KnowledgeBase';
+    import {canManageKnowledgeBase} from './src/shared/lib/knowledgeBase';
     const folder=new URLSearchParams(location.search).get('folder');
     const parentId=folder&&/^[1-9]\\d*$/.test(folder)&&Number.isSafeInteger(Number(folder))?Number(folder):null;
-    createRoot(document.getElementById('root')).render(<><Header/><KnowledgeBase initialCanManage={!location.search.includes('reader=1')} initialParentId={parentId}/></>);
+    const session=location.search.includes('reader=1')?{role:'manager',managerId:1,canManageTopDashboard:true,sessionId:'00000000-0000-4000-8000-000000000001'}:{role:'top',adminUserId:7,sessionId:'00000000-0000-4000-8000-000000000007'};
+    createRoot(document.getElementById('root')).render(<><Header/><KnowledgeBase initialCanManage={canManageKnowledgeBase(session)} initialParentId={parentId}/></>);
   ` }, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     define: { 'process.env.NODE_ENV': '"test"' }, alias: { '@': path.join(root, 'src') }, plugins: [{ name: 'fixtures', setup(plugin) {
       plugin.onResolve({ filter: /^next\/(link|navigation|dynamic)$/ }, ({ path: name }) => ({ path: name, namespace: 'fixture' }));
@@ -50,6 +54,10 @@ async function main() {
   const material = { ...folder, id: 2, parentId: 1, kind: 'file', title: 'Порядок работы с клиентом', originalName: 'regulation.html',
     mimeType: 'text/html', size: 1200, access: { mode: 'inherit', actorKeys: [] } };
   const calls: { path: string; method: string; body: unknown; headers: Record<string, unknown> }[] = [];
+  const topSession: AdminSession = { role: 'top', adminUserId: 7, sessionId: '00000000-0000-4000-8000-000000000007' };
+  const readerSession: AdminSession = { role: 'manager', managerId: 1, canManageTopDashboard: true, sessionId: '00000000-0000-4000-8000-000000000001' };
+  assert.equal(canManageKnowledgeBase(topSession), true, 'real KB policy grants TOP management');
+  assert.equal(canManageKnowledgeBase(readerSession), false, 'unrelated TOP-dashboard management flag does not grant KB management');
   let readOnly = false, failList = false, failSave = false, archived = false;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -65,7 +73,10 @@ async function main() {
     const body = request.headers['content-type']?.includes('application/json') && raw ? JSON.parse(raw) : raw;
     calls.push({ path: url.pathname + url.search, method: request.method ?? 'GET', body, headers: { ...request.headers } });
     const json = (data: unknown, code = 200) => response.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(data));
-    if (url.pathname.endsWith('/employees')) return void json({ actors: [{ actorKey: 'manager:1', actorName: 'Тестовый сотрудник', actorRole: 'manager' }], nextCursor: null });
+    if (url.pathname.endsWith('/employees')) return void json({ actors: [
+      { actorKey: 'manager:1', actorName: 'Тестовый сотрудник', actorRole: 'manager' },
+      { actorKey: 'admin:7', actorName: 'Тестовый руководитель', actorRole: 'top' },
+    ], nextCursor: null });
     if (url.pathname.endsWith('/events')) return void json({ recorded: true });
     if (url.pathname.includes('/files/')) return void response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "sandbox allow-scripts; default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" })
       .end('<!doctype html><html><h1>Тестовый регламент</h1><button onclick="this.textContent=\'Работает\'">Проверить</button><script>try{parent.document.body.dataset.exposed="yes"}catch(e){}</script></html>');
@@ -83,7 +94,7 @@ async function main() {
     const materialNodes = archived === inArchive ? [{ ...material, archivedAt: archived ? stamp : null }] : [];
     return void json({ nodes: parent ? [...(parent === '1' && !inArchive ? [nestedFolder] : []), ...materialNodes]
       : inArchive ? [archivedFolder] : [folder, longFolder],
-      nextCursor: null, breadcrumbs: parent ? parent === '4' ? [folder, nestedFolder] : [folder] : [], canManage: !readOnly });
+      nextCursor: null, breadcrumbs: parent ? parent === '4' ? [folder, nestedFolder] : [folder] : [], canManage: canManageKnowledgeBase(readOnly ? readerSession : topSession) });
   });
   try {
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
@@ -100,6 +111,9 @@ async function main() {
           await page.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
           await page.goto(origin + '/admin/knowledge-base');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          assert.equal(await page.getByRole('button', { name: 'Создать папку', exact: true }).isEnabled(), true, 'TOP can create folders');
+          assert.equal(await page.getByRole('button', { name: 'Статистика использования', exact: true }).isVisible(), true, 'TOP sees usage statistics');
+          assert.ok(await page.getByRole('button', { name: 'Настроить', exact: true }).count() > 0, 'TOP can edit folder settings');
           assert.equal(await page.getByRole('button', { name: /^Назад (к списку папок|в папку)/ }).count(), 0, 'root has no folder-back button');
           await page.evaluate(() => document.fonts.ready);
           for (const title of [folder.title, longFolder.title]) {
@@ -122,6 +136,12 @@ async function main() {
           await page.getByRole('button', { name: 'Создать папку', exact: true }).click();
           let dialog = page.getByRole('dialog');
           await dialog.getByLabel('Название', { exact: true }).fill('Новая папка');
+          const topAccess = dialog.getByRole('checkbox', { name: /Тестовый руководитель.*управляет разделом/ });
+          await topAccess.waitFor();
+          assert.equal(await topAccess.isChecked(), true, 'TOP always has access without a per-folder grant');
+          assert.equal(await topAccess.isDisabled(), true, 'TOP management access cannot be unchecked');
+          assert.match(await dialog.innerText(), /Админ.*Админ ТОП.*ТОП.*всегда имеют доступ/);
+          await dialog.screenshot({ path: path.join(output, `${engine}-${width}-top-access.png`) });
           await dialog.getByLabel('Тестовый сотрудник', { exact: false }).check();
           failSave = true;
           await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click();
@@ -133,6 +153,8 @@ async function main() {
           await page.getByText('Папка создана.', { exact: true }).waitFor();
           const lastOperation = (calls.filter((call) => call.method === 'POST' && call.path === '/api/admin/knowledge-base').at(-1)?.body as { operationId: string }).operationId;
           assert.equal(firstOperation, lastOperation, 'same operation ID for retry');
+          const folderCreate = calls.filter((call) => call.method === 'POST' && call.path === '/api/admin/knowledge-base').at(-1)?.body as { access: { actorKeys: string[] } };
+          assert.deepEqual(folderCreate.access.actorKeys, ['manager:1'], 'TOP role access is implicit, not stored as a selected employee grant');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).click();
           await page.getByRole('button', { name: material.title, exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), '1');
@@ -232,15 +254,19 @@ async function main() {
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'failed-load fallback returns to root');
           readOnly = true;
+          calls.length = 0;
           await page.goto(origin + '/admin/knowledge-base?reader=1');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(await page.getByRole('button', { name: 'Создать папку', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Статистика использования', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Настроить', exact: true }).count(), 0);
+          assert.equal(await page.getByRole('button', { name: 'Архив', exact: true }).count(), 0);
           const readerOpen = page.getByRole('button', { name: openFolderName(folder.title), exact: true });
           assert.equal(await readerOpen.isEnabled(), true, 'read-only employee can open granted folder');
           await readerOpen.focus(); await readerOpen.press('Enter');
           await page.getByRole('button', { name: material.title, exact: true }).waitFor();
+          assert.equal(await page.getByRole('button', { name: 'Загрузить файл', exact: true }).count(), 0, 'manager cannot upload materials');
+          assert.equal(await page.getByRole('button', { name: 'Доступ к папке', exact: true }).count(), 0, 'manager cannot change grants');
           await backToRoot.focus(); await backToRoot.press('Enter');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'reader can return to root with keyboard');
@@ -251,6 +277,7 @@ async function main() {
           failList = false;
           await page.getByRole('button', { name: 'Повторить', exact: true }).click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          assert.equal(calls.some((call) => call.path.includes('/usage') || call.path.includes('/employees')), false, 'reader never loads management directory or statistics');
           await page.close(); console.log(`${engine}/${width}: KB navigation, access editor, upload, archive, stats, errors, isolated HTML passed`);
         }
       } finally { await browser.close(); }

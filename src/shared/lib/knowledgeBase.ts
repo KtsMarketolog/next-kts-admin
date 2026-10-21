@@ -31,8 +31,11 @@ export class KnowledgeBaseError extends Error {
 }
 export const knowledgeBaseInvalid = () => new KnowledgeBaseError(400, 'INVALID_INPUT', 'Некорректные данные базы знаний');
 export const knowledgeBaseNotFound = () => new KnowledgeBaseError(404, 'NOT_FOUND', 'Материал не найден или недоступен');
+export function isKnowledgeBaseManagementRole(role: string): boolean {
+  return ['admin', 'admintop', 'top'].includes(role);
+}
 export function canManageKnowledgeBase(session: AdminSession | null | undefined): boolean {
-  return hasDashboardIdentity(session) && ['admin', 'admintop'].includes(session.role);
+  return hasDashboardIdentity(session) && isKnowledgeBaseManagementRole(session.role);
 }
 export function canAccessKnowledgeBase(session: AdminSession | null | undefined): session is AdminSession {
   return hasDashboardIdentity(session);
