@@ -5,6 +5,12 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 
 import { createPriceReadCache } from '../src/shared/lib/priceReadCache';
+import * as v8 from 'node:v8';
+import * as buildErrors from '../src/shared/lib/priceBuild/errors';
+import { assemblePriceBuild } from '../src/shared/lib/priceBuild/assemble';
+import { freezePrice } from '../src/shared/lib/priceBuild/client';
+import { createPriceSnapshotQuery } from '../src/shared/lib/priceBuild/snapshotDeadline';
+import type { PriceBuildInput } from '../src/shared/lib/priceBuild/types';
 
 type PublicPrice = NonNullable<Awaited<ReturnType<typeof import('../src/shared/lib/db/wholesaleRepo').getPublicWholesalePriceList>>>;
 
@@ -21,6 +27,10 @@ function harness() {
   let itemLoads = 0;
   let analogBuilds = 0;
   let transactions = 0;
+  let builds = 0;
+  let coordinatorFailure: Error | undefined;
+  let coordinatorBarrier: Promise<void> | undefined;
+  const buildController = new AbortController();
   const states: string[] = [];
   const statements: string[] = [];
   const itemReadStarted = deferred();
@@ -46,8 +56,8 @@ function harness() {
 
   async function queryFor(id: number | null, sql: string) {
     statements.push(sql);
-    assert.ok(/^\s*(select|set transaction isolation level repeatable read read only)\b/i.test(sql), 'read paths must not write source data');
-    if (sql.startsWith('set transaction')) return { rows: [] };
+    assert.ok(/^\s*(select|set transaction isolation level repeatable read read only|SET LOCAL statement_timeout)\b/i.test(sql), 'read paths must not write source data');
+    if (/^set /i.test(sql)) return { rows: [] };
     if (sql === 'select synthetic_revision') return { rows: id === null ? [] : [{ revision: `revision-${id}` }] };
     if (sql.includes('join wholesale_price_list_items')) {
       itemLoads += 1;
@@ -60,6 +70,19 @@ function harness() {
   }
 
   const modules: Record<string, unknown> = {
+    'node:v8': v8,
+    '../priceBuild/errors': buildErrors,
+    '../priceBuild/snapshotDeadline': { createPriceSnapshotQuery },
+    '../priceBuild/client': { freezePrice, buildPublicWholesalePriceInWorker: async (input: PriceBuildInput) => {
+      if (input.includeAnalogs) analogBuilds += 1;
+      return assemblePriceBuild(input);
+    } },
+    '../priceBuild/coordinator': { runSharedPriceBuild: async (options: { build: (context: { signal: AbortSignal; deadlineAt: number }) => Promise<{ value: PublicPrice | null }> }) => {
+      builds += 1;
+      if (coordinatorFailure) throw coordinatorFailure;
+      if (coordinatorBarrier) await coordinatorBarrier;
+      return (await options.build({ signal: buildController.signal, deadlineAt: Date.now() + 60_000 })).value;
+    } },
     './client': {
       query: (sql: string) => queryFor(activeId, sql),
       withTransaction: async (work: (client: { query: (sql: string) => ReturnType<typeof queryFor> }) => Promise<unknown>) => {
@@ -98,6 +121,8 @@ function harness() {
     '../pricePerformance': { createPricePerformanceTrace: () => ({
       measure: async <T,>(_stage: string, work: () => Promise<T>) => work(),
       measureSync: <T,>(_stage: string, work: () => T) => work(),
+      recordWorkerStage: () => {},
+      recordMainStage: () => {},
       finish: () => {},
     }) },
   };
@@ -106,7 +131,7 @@ function harness() {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   runInNewContext(code, {
-    exports,
+    exports, Buffer,
     require(name: string) { assert.ok(name in modules, name); return modules[name]; },
   });
   const repo = exports as { getPublicWholesalePriceList(token: string, options?: { includeAnalogs?: boolean }): Promise<PublicPrice | null> };
@@ -118,6 +143,10 @@ function harness() {
     itemReadStarted: itemReadStarted.promise,
     states, statements,
     counts: () => ({ itemLoads, analogBuilds, transactions }),
+    builds: () => builds,
+    failCoordinator: (error?: Error) => { coordinatorFailure = error; },
+    blockCoordinator: (barrier?: Promise<void>) => { coordinatorBarrier = barrier; },
+    abortBuild: () => buildController.abort(),
   };
 }
 
@@ -195,4 +224,42 @@ test('public price repository: export reads omit analog calculation and do not p
   assert.equal(pagePrice?.categories[0].products[0].variants[0].wholesalePrice, '100');
   assert.equal(await h.read(), pagePrice);
   assert.deepEqual(h.counts(), { itemLoads: 2, analogBuilds: 1, transactions: 2 });
+});
+
+test('public price repository: admission failure starts no full read and is never a missing price', async () => {
+  const h = harness();
+  const busy = new buildErrors.PriceBuildError('PRICE_BUILD_BUSY');
+  h.failCoordinator(busy);
+  await assert.rejects(h.read(), error => error === busy);
+  assert.deepEqual(h.counts(), { itemLoads: 0, analogBuilds: 0, transactions: 0 });
+  h.failCoordinator();
+  assert.equal((await h.read())?.id, 1);
+  const builds = h.builds();
+  h.failCoordinator(busy);
+  assert.equal((await h.read())?.id, 1, 'hot result bypasses even an overloaded coordinator');
+  assert.equal(h.builds(), builds);
+});
+
+test('public price repository: access revoked while queued is rechecked before full item loading', async () => {
+  const h = harness();
+  const gate = deferred();
+  h.blockCoordinator(gate.promise);
+  const pending = h.read();
+  await new Promise(resolve => setImmediate(resolve));
+  h.changeOwner(null);
+  gate.resolve();
+  assert.equal(await pending, null);
+  assert.deepEqual(h.counts(), { itemLoads: 0, analogBuilds: 0, transactions: 1 });
+});
+
+test('public price repository: cancelled snapshot SQL cannot start the CPU worker or publish a price', async () => {
+  const h = harness();
+  const gate = deferred();
+  h.blockItems(gate.promise);
+  const pending = h.read();
+  await h.itemReadStarted;
+  h.abortBuild();
+  gate.resolve();
+  await assert.rejects(pending, { code: 'PRICE_BUILD_ABORTED' });
+  assert.deepEqual(h.counts(), { itemLoads: 1, analogBuilds: 0, transactions: 1 });
 });

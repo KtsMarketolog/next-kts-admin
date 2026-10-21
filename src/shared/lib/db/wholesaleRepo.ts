@@ -1,77 +1,16 @@
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
-import { buildPriceListAnalogLinks, type PriceListAnalogLink } from '../analogs';
-import { resolveWholesaleStockDisplayMode, type WholesaleStockDisplayMode } from '../wholesaleStockDisplay';
 import { normalizePublicWholesalePriceToken } from './wholesalePriceTelemetryRepo';
 import { readPublicWholesalePriceRevision, type PriceReadQuery } from './wholesalePriceRevision';
 import { createPriceReadCache } from '../priceReadCache';
-import { createPricePerformanceTrace, type PricePerformanceTrace } from '../pricePerformance';
-
-export type PublicWholesaleVariant = {
-  priceItemId: number;
-  id: number | null;
-  title: string;
-  retailPrice: string | null;
-  retailPriceEur: string | null;
-  retailPriceRub: string | null;
-  retailPriceCny: string | null;
-  wholesalePrice: string | null;
-  priceEur: string | null;
-  priceRub: string | null;
-  priceCny: string | null;
-};
-
-export type PublicWholesaleProduct = {
-  id: number;
-  title: string;
-  sku: string;
-  model: string;
-  description: string;
-  priceGroup: string;
-  priceGroupImageUrl: string | null;
-  imageUrl: string | null;
-  stock: number;
-  stockVolzhsk: number;
-  stockMoscow: number;
-  unit: string | null;
-  isExpected: boolean;
-  stockDisplayMode: WholesaleStockDisplayMode;
-  stockUpdatedAt: string | null;
-  analogs: PriceListAnalogLink[];
-  variants: PublicWholesaleVariant[];
-};
-
-export type PublicWholesaleCategory = {
-  id: number;
-  title: string;
-  products: PublicWholesaleProduct[];
-};
-
-export type PublicWholesalePriceList = {
-  /** Exact source snapshot version, for derived export caches; never a write revision. */
-  cacheRevision?: string;
-  id: number;
-  clientCompanyId: number | null;
-  title: string;
-  token: string;
-  clientName: string;
-  managerId: number | null;
-  managerName: string;
-  managerEmail: string;
-  managerPhone: string;
-  supportManagerId: number | null;
-  supportManagerName: string;
-  supportManagerEmail: string;
-  supportManagerPhone: string;
-  validUntil: string | null;
-  updatedAt: string;
-  showRetailPrices: boolean;
-  showStock: boolean;
-  showStockText: boolean;
-  categories: PublicWholesaleCategory[];
-};
-
-export type PublicWholesalePriceMetadata = Omit<PublicWholesalePriceList, 'categories' | 'cacheRevision'>;
+import { createPricePerformanceTrace } from '../pricePerformance';
+import { deserialize } from 'node:v8';
+import { buildPublicWholesalePriceInWorker, freezePrice } from '../priceBuild/client';
+import { runSharedPriceBuild } from '../priceBuild/coordinator';
+import { createPriceSnapshotQuery } from '../priceBuild/snapshotDeadline';
+import { PriceBuildError } from '../priceBuild/errors';
+import type { PublicWholesalePriceList, PublicWholesalePriceMetadata, PriceItemRow } from '../priceBuild/types';
+export type { PublicWholesaleVariant, PublicWholesaleProduct, PublicWholesaleCategory, PublicWholesalePriceList, PublicWholesalePriceMetadata } from '../priceBuild/types';
 
 type PriceListRow = {
   id: string;
@@ -92,38 +31,6 @@ type PriceListRow = {
   show_retail_prices: boolean;
   show_stock: boolean;
   show_stock_text: boolean;
-};
-
-type PriceItemRow = {
-  item_id: string;
-  category_id: string | null;
-  category_title: string | null;
-  product_id: string;
-  product_title: string;
-  sku: string;
-  model: string | null;
-  series_description: string;
-  price_group: string | null;
-  price_group_image_url: string | null;
-  image_url: string | null;
-  stock: string | null;
-  stock_volzhsk: string | null;
-  stock_moscow: string | null;
-  unit: string | null;
-  is_expected: boolean | null;
-  group_show_stock_numbers: boolean | null;
-  group_show_stock_text: boolean | null;
-  stock_updated_at: string | null;
-  variant_id: string | null;
-  variant_title: string | null;
-  retail_price: string | null;
-  retail_price_eur: string | null;
-  retail_price_rub: string | null;
-  retail_price_cny: string | null;
-  wholesale_price: string | null;
-  price_eur: string | null;
-  price_rub: string | null;
-  price_cny: string | null;
 };
 
 export type PublicWholesaleRequestItem = {
@@ -289,97 +196,16 @@ async function readPublicWholesalePriceItems(token: string, runQuery: PriceReadQ
   return items.rows;
 }
 
-function assemblePublicWholesalePriceList(metadata: PublicWholesalePriceMetadata, rows: PriceItemRow[], includeAnalogs: boolean, trace: PricePerformanceTrace): PublicWholesalePriceList {
-  const categoriesById = new Map<number, PublicWholesaleCategory>();
-  const productKeyByCategory = new Map<string, PublicWholesaleProduct>();
-
-  for (const row of rows) {
-    const categoryId = Number(row.category_id ?? 0);
-    const categoryKey = Number.isFinite(categoryId) && categoryId > 0 ? categoryId : 0;
-    let category = categoriesById.get(categoryKey);
-    if (!category) {
-      category = {
-        id: categoryKey,
-        title: row.category_title || 'Без категории',
-        products: [],
-      };
-      categoriesById.set(categoryKey, category);
-    }
-
-    const productId = Number(row.product_id);
-    const productKey = `${categoryKey}:${productId}`;
-    let product = productKeyByCategory.get(productKey);
-    if (!product) {
-      product = {
-        id: productId,
-        title: row.product_title,
-        sku: row.sku,
-        model: row.model ?? '',
-        description: row.series_description,
-        priceGroup: row.price_group ?? '',
-        priceGroupImageUrl: row.price_group_image_url,
-        imageUrl: row.image_url,
-        stock: Number(row.stock ?? 0),
-        stockVolzhsk: Number(row.stock_volzhsk ?? 0),
-        stockMoscow: Number(row.stock_moscow ?? 0),
-        unit: row.unit,
-        isExpected: Boolean(row.is_expected),
-        stockDisplayMode: resolveWholesaleStockDisplayMode({
-          globalShowNumbers: metadata.showStock,
-          globalShowText: metadata.showStockText,
-          groupShowNumbers: row.group_show_stock_numbers,
-          groupShowText: row.group_show_stock_text,
-        }),
-        stockUpdatedAt: row.stock_updated_at,
-        analogs: [],
-        variants: [],
-      };
-      category.products.push(product);
-      productKeyByCategory.set(productKey, product);
-    }
-
-    product.variants.push({
-      priceItemId: Number(row.item_id),
-      id: row.variant_id ? Number(row.variant_id) : null,
-      title: row.variant_title || 'Цена',
-      retailPrice: row.retail_price,
-      retailPriceEur: row.retail_price_eur,
-      retailPriceRub: row.retail_price_rub,
-      retailPriceCny: row.retail_price_cny,
-      wholesalePrice: row.wholesale_price,
-      priceEur: row.price_eur,
-      priceRub: row.price_rub,
-      priceCny: row.price_cny,
-    });
-  }
-
-  if (includeAnalogs) {
-    const allProducts = Array.from(categoriesById.values()).flatMap((category) => category.products);
-    const analogLinks = trace.measureSync('analogs', () => buildPriceListAnalogLinks(allProducts));
-    for (const product of allProducts) {
-      product.analogs = analogLinks.get(product.id) ?? [];
-    }
-  }
-
-  return {
-    ...metadata,
-    categories: Array.from(categoriesById.values()),
-  };
-}
-
+const cachedPriceSizes = new WeakMap<PublicWholesalePriceList, number>();
 const publicPriceCache = createPriceReadCache<PublicWholesalePriceList | null>({
   maxEntries: 8, maxBytes: 32 * 1024 * 1024, ttlMs: 5 * 60_000,
+  maxPending: 12,
+  overloadError: () => new PriceBuildError('PRICE_BUILD_BUSY'),
+  sizeOf: (price) => price ? (cachedPriceSizes.get(price) ?? Infinity) : 0,
+  // A newer snapshot may legitimately be read after the initial revision check.
+  // Return it, but never publish it as the result of the previous version.
+  shouldCache: (price, key) => Boolean(price && key.startsWith(price.token + ':' + price.cacheRevision + ':')),
 });
-
-function freezePrice(value: PublicWholesalePriceList) {
-  // Shared cached objects cannot be changed accidentally by another reader.
-  const freeze = (object: object) => {
-    for (const child of Object.values(object)) if (child && typeof child === 'object') freeze(child);
-    Object.freeze(object);
-  };
-  freeze(value);
-  return value;
-}
 
 export async function getPublicWholesalePriceList(token: string, options: { includeAnalogs?: boolean } = {}): Promise<PublicWholesalePriceList | null> {
   const trace = createPricePerformanceTrace('price_read');
@@ -393,26 +219,46 @@ export async function getPublicWholesalePriceList(token: string, options: { incl
     if (!revision) { trace.finish(404); return null; }
     const includeAnalogs = options.includeAnalogs !== false;
     const key = `${normalizedToken}:${revision}:${includeAnalogs ? 'page' : 'export'}`;
-    const price = await publicPriceCache.read(key, async () => {
-      const snapshot = await withTransaction(async (client) => {
-        // No row locks or source writes. A concurrent manager save/import cannot
-        // produce a half-old/half-new result stamped with the wrong revision.
-        await client.query('set transaction isolation level repeatable read read only');
-        const runQuery: PriceReadQuery = (sql, params) => client.query(sql, params);
-        const currentMetadata = await trace.measure('snapshot_access', () => readPublicWholesalePriceMetadata(normalizedToken, runQuery));
-        if (!currentMetadata) return null;
-        const currentRevision = await trace.measure('snapshot_revision', () => readPublicWholesalePriceRevision(normalizedToken, runQuery));
-        if (!currentRevision) return null;
-        const rows = await trace.measure('items', () => readPublicWholesalePriceItems(normalizedToken, runQuery));
-        return { metadata: currentMetadata, revision: currentRevision, rows };
-      });
-      if (!snapshot) return null;
-      // Release the database connection BEFORE CPU-heavy assembly and analogs.
-      return trace.measureSync('assembly', () => freezePrice({
-        ...assemblePublicWholesalePriceList(snapshot.metadata, snapshot.rows, includeAnalogs, trace),
-        cacheRevision: snapshot.revision,
-      }));
-    }, (state) => trace.measureSync(`cache_${state}`, () => undefined));
+    const price = await publicPriceCache.read(key, () => trace.measure('build_coordinator', () => runSharedPriceBuild<PublicWholesalePriceList | null>({
+      key: `price-build-v1:${metadata.id}:${key}`,
+      onState: (state) => trace.measureSync(`shared_${state}`, () => undefined),
+      decode: async (encoded, signal) => {
+        const restored = trace.measureSync('cache_decode', () => deserialize(Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength))) as PublicWholesalePriceList;
+        if (!restored || restored.id !== metadata.id || restored.token !== normalizedToken
+          || restored.cacheRevision !== revision || !Array.isArray(restored.categories)) {
+          throw new PriceBuildError('PRICE_BUILD_UNAVAILABLE');
+        }
+        await trace.measure('cache_freeze', () => freezePrice(restored, { signal }));
+        cachedPriceSizes.set(restored, encoded.byteLength);
+        return restored;
+      },
+      build: async ({ signal, deadlineAt }) => {
+        if (signal.aborted) throw new PriceBuildError('PRICE_BUILD_ABORTED');
+        const snapshot = await withTransaction(async (client) => {
+          // No row locks or source writes. A concurrent manager save/import cannot
+          // produce a half-old/half-new result stamped with the wrong revision.
+          const runQuery: PriceReadQuery = createPriceSnapshotQuery(client, { signal, deadlineAt });
+          await runQuery('set transaction isolation level repeatable read read only');
+          const currentMetadata = await trace.measure('snapshot_access', () => readPublicWholesalePriceMetadata(normalizedToken, runQuery));
+          if (!currentMetadata) return null;
+          const currentRevision = await trace.measure('snapshot_revision', () => readPublicWholesalePriceRevision(normalizedToken, runQuery));
+          if (!currentRevision) return null;
+          const rows = await trace.measure('items', () => readPublicWholesalePriceItems(normalizedToken, runQuery));
+          return { metadata: currentMetadata, revision: currentRevision, rows };
+        }, { profile: 'read' });
+        if (!snapshot) return { value: null, encoded: new Uint8Array(), cacheable: false };
+        // No business-data connection remains held while the worker computes.
+        const built = await trace.measure('worker', () => buildPublicWholesalePriceInWorker({
+          ...snapshot, includeAnalogs,
+        }, { signal, deadlineAt }));
+        for (const [stage, wallMs] of Object.entries(built.timings)) trace.recordWorkerStage(stage, wallMs);
+        for (const [stage, wallMs] of Object.entries(built.mainThreadTimings ?? {})) trace.recordMainStage(stage, wallMs);
+        await trace.measure('freeze', () => freezePrice(built.price, { signal, deadlineAt }));
+        cachedPriceSizes.set(built.price, built.cacheBytes);
+        return { value: built.price, encoded: built.serialized,
+          cacheable: snapshot.revision === revision && snapshot.metadata.id === metadata.id };
+      },
+    })), (state) => trace.measureSync(`cache_${state}`, () => undefined));
     // Also recheck after waiting for another request or a long cold calculation.
     const stillAccessible = await trace.measure('access_recheck', () => getPublicWholesalePriceListMetadata(normalizedToken));
     // A token may have been reassigned while the old price was being built.

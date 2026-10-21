@@ -6,6 +6,7 @@ import PDFDocument from 'pdfkit';
 import ts from 'typescript';
 
 import * as exportCache from '../src/shared/lib/priceExportCache';
+import * as buildErrors from '../src/shared/lib/priceBuild/errors';
 
 type Format = 'pdf' | 'excel';
 
@@ -25,6 +26,7 @@ function harness(format: Format) {
   let denied: 'actor' | 'global' | null = null;
   let rows = 2;
   let failProducts = false;
+  let buildError: Error | undefined;
   let blockProducts: Promise<void> | undefined;
   let revokeDuringProducts = false;
   let pdfBuilds = 0;
@@ -61,6 +63,7 @@ function harness(format: Format) {
         assert.equal(options.includeAnalogs, false);
         if (blockProducts) await blockProducts;
         if (failProducts) throw new Error('Synthetic product lookup failure');
+        if (buildError) throw buildError;
         if (revokeDuringProducts) active = false;
         return {
           ...metadata, id: productId, cacheRevision: builtRevision ?? revision,
@@ -76,6 +79,7 @@ function harness(format: Format) {
     },
     '@/shared/lib/db/securityAuditRepo': { recordSecurityEvent: async () => {} },
     '@/shared/lib/priceExportCache': exportCache,
+    '@/shared/lib/priceBuild/errors': buildErrors,
     '@/shared/lib/pricePdfCache': {
       readPricePdfCache: async (key: exportCache.PriceExportCacheKey) => { calls.push('cache_read'); return pdfCache.read(key); },
       writePricePdfCache: async (key: exportCache.PriceExportCacheKey, value: Buffer) => { calls.push('cache_write'); await pdfCache.write(key, value); },
@@ -114,6 +118,7 @@ function harness(format: Format) {
     deny(value: typeof denied) { denied = value; },
     setRows(value: number) { rows = value; },
     setFailProducts(value: boolean) { failProducts = value; },
+    setBuildError(value?: Error) { buildError = value; },
     setProductBlock(value: Promise<void>) { blockProducts = value; },
     revokeDuringProducts() { revokeDuringProducts = true; },
     setProductIdentity(value: number) { productId = value; },
@@ -252,6 +257,34 @@ for (const format of ['pdf', 'excel'] as const) {
     assert.equal((await h.get()).status, 200);
     assert.deepEqual(h.finished, [500, 200]);
   });
+
+  for (const code of ['PRICE_BUILD_BUSY', 'PRICE_BUILD_TIMEOUT', 'PRICE_BUILD_UNAVAILABLE', 'PRICE_BUILD_ABORTED', 'PRICE_BUILD_FAILED'] as const) {
+    test(`${format}: ${code} returns retryable 503, preserves cache/source and allows a successful retry`, async () => {
+      const h = harness(format);
+      h.setBuildError(new buildErrors.PriceBuildError(code));
+      const response = await h.get();
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('Retry-After'), '3');
+      assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
+      assert.equal(response.headers.get('Server-Timing'), 'synthetic;dur=1');
+      assert.equal(response.headers.get('Set-Cookie'), 'synthetic-cookie', 'retry keeps the same session used by the rate limit');
+      assert.equal(response.headers.get('Content-Disposition'), null, 'error is not an empty download');
+      const body = await response.json();
+      assert.equal(body.code, code);
+      assert.equal(body.retryable, true);
+      assert.match(body.error, /Данные сохранены/);
+      assert.equal(h.events.length, 0, 'a failed build is not a successful download');
+      assert.ok(!h.calls.includes('cache_write'));
+      assert.equal(h.pdfBuilds(), 0);
+
+      h.setBuildError();
+      const retry = await h.get();
+      assert.equal(retry.status, 200);
+      assert.equal(retry.headers.get('X-Price-Export-Cache'), 'miss', 'failed build did not poison cache');
+      assert.ok((await retry.arrayBuffer()).byteLength > 100);
+      assert.deepEqual(h.finished, [503, 200]);
+    });
+  }
 
   test(`${format}: export limit returns an error rather than a truncated file`, async () => {
     const h = harness(format);

@@ -1,5 +1,6 @@
 import { existsSync } from 'fs';
 import PDFDocument from 'pdfkit';
+import { isPriceBuildRetryableError, retryAfterSeconds } from '@/shared/lib/priceBuild/errors';
 
 import { getAdminSession, isManagerSessionRole } from '@/shared/lib/adminAuth';
 import { getPublicWholesalePriceList, getPublicWholesalePriceListMetadata, getPublicWholesalePriceListRevision, trackAnalyticsEvent } from '@/shared/lib/db';
@@ -403,23 +404,42 @@ function createPdf(priceList: NonNullable<Awaited<ReturnType<typeof getPublicWho
 
 export async function GET(request: Request, context: Context) {
   const trace = createPricePerformanceTrace('pdf');
+  const responseState: { session?: ReturnType<typeof getOrCreateSessionCookie> } = {};
   let status = 500;
   try {
-    const response = await downloadPdf(request, context, trace);
+    const response = await downloadPdf(request, context, trace, responseState);
     status = response.status;
     response.headers.set('Server-Timing', trace.header());
+    return response;
+  } catch (error) {
+    if (!isPriceBuildRetryableError(error)) throw error;
+    status = 503;
+    const response = Response.json({
+      error: 'Прайс временно готовится. Данные сохранены. Повторите скачивание через несколько секунд.',
+      code: error.code,
+      retryable: true,
+    }, {
+      status,
+      headers: {
+        'Retry-After': String(retryAfterSeconds),
+        'Cache-Control': 'private, no-store',
+        'Server-Timing': trace.header(),
+      },
+    });
+    if (responseState.session) applySessionCookie(response.headers, responseState.session);
     return response;
   } finally {
     trace.finish(status);
   }
 }
 
-async function downloadPdf(request: Request, context: Context, trace: ReturnType<typeof createPricePerformanceTrace>) {
+async function downloadPdf(request: Request, context: Context, trace: ReturnType<typeof createPricePerformanceTrace>, responseState: { session?: ReturnType<typeof getOrCreateSessionCookie> }) {
   const { token } = await context.params;
   const priceList = await trace.measure('access', () => getPublicWholesalePriceListMetadata(token));
   if (!priceList) return Response.json({ error: 'Not found' }, { status: 404, headers: { 'Cache-Control': 'private, no-store' } });
 
   const publicSession = getOrCreateSessionCookie(request, PUBLIC_PRICE_SESSION_COOKIE);
+  responseState.session = publicSession;
   const sessionId = publicSession.sessionId;
   const adminSession = await getAdminSession();
   const actorType = isManagerSessionRole(adminSession?.role) ? 'manager' : adminSession ? 'admin' : 'client';

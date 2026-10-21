@@ -1,7 +1,14 @@
 type Entry<T> = { value: T; bytes: number; expiresAt: number };
 
 /** Derived read results only. Eviction never touches a database row or source file. */
-export function createPriceReadCache<T>(options: { maxEntries: number; maxBytes: number; ttlMs: number }) {
+export function createPriceReadCache<T>(options: {
+  maxEntries: number; maxBytes: number; ttlMs: number;
+  /** Worker-computed size avoids a second synchronous serialization on the server. */
+  sizeOf?: (value: T) => number;
+  shouldCache?: (value: T, key: string) => boolean;
+  maxPending?: number;
+  overloadError?: () => Error;
+}) {
   const entries = new Map<string, Entry<T>>();
   const pending = new Map<string, Promise<T>>();
   let bytes = 0;
@@ -21,11 +28,15 @@ export function createPriceReadCache<T>(options: { maxEntries: number; maxBytes:
       if (existing) remove(key);
       const inFlight = pending.get(key);
       if (inFlight) { onState?.('coalesced'); return inFlight; }
+      if (pending.size >= (options.maxPending ?? Infinity)) {
+        throw options.overloadError?.() ?? new Error('Price build capacity reached');
+      }
       onState?.('miss');
       const work = Promise.resolve().then(load).then((value) => {
         if (value === null || value === undefined) return value;
-        const size = Buffer.byteLength(JSON.stringify(value), 'utf8');
-        if (size > options.maxBytes) return value;
+        if (options.shouldCache && !options.shouldCache(value, key)) return value;
+        const size = options.sizeOf ? options.sizeOf(value) : Buffer.byteLength(JSON.stringify(value), 'utf8');
+        if (!Number.isFinite(size) || size < 0 || size > options.maxBytes) return value;
         for (const [oldKey, entry] of entries) if (entry.expiresAt <= Date.now()) remove(oldKey);
         remove(key);
         while (entries.size >= options.maxEntries || bytes + size > options.maxBytes) {

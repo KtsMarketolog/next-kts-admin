@@ -4,9 +4,11 @@ import { cache } from 'react';
 
 import { getPublicWholesalePriceList } from '@/shared/lib/db';
 import { phoneHref } from '@/shared/lib/phone';
+import { isPriceBuildRetryableError } from '@/shared/lib/priceBuild/errors';
 import { createPrivateMetadata } from '@/shared/lib/seo/privateMetadata';
 
 import { PriceAnalyticsTracker } from './PriceAnalyticsTracker';
+import { PriceBuildNotice } from './PriceBuildNotice';
 import { PriceEventLink } from './PriceEventLink';
 import { PriceRequestForm } from './PriceRequestForm';
 import styles from './PricePage.module.scss';
@@ -21,16 +23,26 @@ const getCachedPublicWholesalePriceList = cache(getPublicWholesalePriceList);
 
 export async function generateMetadata({ params }: PricePageProps): Promise<Metadata> {
   const { token } = await params;
-  const priceList = await getCachedPublicWholesalePriceList(token);
+  try {
+    const priceList = await getCachedPublicWholesalePriceList(token);
 
-  if (!priceList) notFound();
+    if (!priceList) notFound();
+  } catch (error) {
+    if (!isPriceBuildRetryableError(error)) throw error;
+  }
 
   return createPrivateMetadata();
 }
 
 export default async function PricePage({ params }: PricePageProps) {
   const { token } = await params;
-  const priceList = await getCachedPublicWholesalePriceList(token);
+  let priceList;
+  try {
+    priceList = await getCachedPublicWholesalePriceList(token);
+  } catch (error) {
+    if (!isPriceBuildRetryableError(error)) throw error;
+    return <PriceBuildNotice />;
+  }
 
   if (!priceList) notFound();
 

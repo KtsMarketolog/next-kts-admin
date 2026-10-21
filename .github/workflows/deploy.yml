@@ -88,6 +88,11 @@ jobs:
           bash scripts/test-employee-identifiers-postgres.sh
           bash scripts/test-login-credentials-postgres.sh
           bash scripts/test-price-request-outbox-postgres.sh
+          # Shared price-build admission must work across the two app processes.
+          # Only disposable PostgreSQL clusters and synthetic price data are used.
+          bash scripts/test-price-build-postgres.sh
+          bash scripts/test-wholesale-public-cache-postgres.sh
+          bash scripts/test-wholesale-price-postgres.sh
           bash scripts/test-knowledge-base-postgres.sh
           bash scripts/test-dashboard-usage-postgres.sh
           bash scripts/test-catalog-stock-locking-postgres.sh

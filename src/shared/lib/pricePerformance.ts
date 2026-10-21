@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 /** CPU deltas are process-wide observations, not attribution to one concurrent request. */
 export function createPricePerformanceTrace(operation: string) {
   const started = performance.now();
-  const stages: Array<{ stage: string; wallMs: number; processCpuMs: number }> = [];
+  const stages: Array<{ stage: string; wallMs: number; processCpuMs: number | null; source?: 'worker' | 'main' }> = [];
   let finished = false;
   const safeName = (name: string) => name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
   function startStage(stage: string) {
@@ -23,6 +23,15 @@ export function createPricePerformanceTrace(operation: string) {
       const end = startStage(stage);
       try { return work(); } finally { end(); }
     },
+    recordWorkerStage(stage: string, wallMs: number) {
+      if (!Number.isFinite(wallMs) || wallMs < 0) return;
+      // Worker wall-time is measured in the worker. No invented CPU attribution.
+      stages.push({ stage: safeName(`worker_${stage}`), wallMs, processCpuMs: null, source: 'worker' });
+    },
+    recordMainStage(stage: string, wallMs: number) {
+      if (!Number.isFinite(wallMs) || wallMs < 0) return;
+      stages.push({ stage: safeName(`main_${stage}`), wallMs, processCpuMs: null, source: 'main' });
+    },
     header() {
       return stages.map(({ stage, wallMs }) => `${stage};dur=${wallMs.toFixed(1)}`).join(', ');
     },
@@ -36,7 +45,7 @@ export function createPricePerformanceTrace(operation: string) {
       console.info(JSON.stringify({
         event: 'public_price_performance', operation: safeName(operation), status: safeName(String(status)),
         wallMs: Number(wallMs.toFixed(1)), cpuScope: 'process_interval_includes_concurrent_work',
-        stages: stages.map((stage) => ({ ...stage, wallMs: Number(stage.wallMs.toFixed(1)), processCpuMs: Number(stage.processCpuMs.toFixed(1)) })),
+        stages: stages.map((stage) => ({ ...stage, wallMs: Number(stage.wallMs.toFixed(1)), processCpuMs: stage.processCpuMs === null ? null : Number(stage.processCpuMs.toFixed(1)) })),
       }));
     },
   };

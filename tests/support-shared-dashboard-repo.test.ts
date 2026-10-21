@@ -108,6 +108,7 @@ test('shared migration only creates new report tables and does not migrate or co
     './employeeIdentifierMigration': { applyEmployeeIdentifierMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './loginCredentialMigration': { applyLoginCredentialMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './priceRequestOutboxMigration': { applyPriceRequestOutboxMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './priceBuildMigration': { applyPriceBuildMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './knowledgeBaseMigration': { applyKnowledgeBaseMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardAccessMigration': { applyDashboardAccessMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardUsageMigration': { applyDashboardUsageMigration: async () => { throw new Error('Unrelated migration must not run'); } },

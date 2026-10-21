@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["pdfkit"],
   outputFileTracingRoot: __dirname,
   outputFileTracingIncludes: {
+    '/*': ['./.runtime-build/price-build-worker.cjs'],
     '/api/admin/currency-dashboard/frame': ['./assets/currency-dashboard/**/*'],
     '/api/admin/currency-dashboard/html': ['./assets/currency-dashboard/**/*'],
     '/api/admin/dashboard-instructions/*': ['./assets/dashboard-instructions/*.{pdf,mp4}'],

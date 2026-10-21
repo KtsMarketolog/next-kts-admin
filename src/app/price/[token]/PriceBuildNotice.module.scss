@@ -1,0 +1,57 @@
+.page {
+  min-height: 100vh;
+  padding: clamp(130px, 12vw, 190px) 20px 48px;
+  background: #f3f4f8;
+  color: #242633;
+}
+
+.notice {
+  width: min(640px, 100%);
+  margin: 0 auto;
+  padding: clamp(20px, 4vw, 36px);
+  border: 1px solid #e1e3ef;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(29, 31, 54, 0.04);
+
+  h1 {
+    margin: 8px 0 16px;
+    font-size: clamp(26px, 3vw, 36px);
+    line-height: 1.2;
+  }
+
+  p {
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  .eyebrow {
+    margin: 0;
+    color: #6f7182;
+    font-size: 14px;
+  }
+
+  button {
+    min-height: 44px;
+    margin-top: 12px;
+    padding: 10px 22px;
+    border: 0;
+    border-radius: 8px;
+    background: #260b86;
+    color: #fff;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+
+    &:hover:not(:disabled) { background: #1f086f; }
+    &:focus-visible { outline: 3px solid #8878dc; outline-offset: 3px; }
+    &:disabled { opacity: 0.65; cursor: wait; }
+  }
+
+  .status {
+    min-height: 22px;
+    margin: 12px 0 0;
+    color: #6f7182;
+    font-size: 14px;
+  }
+}

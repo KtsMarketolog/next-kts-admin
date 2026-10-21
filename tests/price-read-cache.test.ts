@@ -158,3 +158,32 @@ test('expired entries release their byte allowance on new writes', async () => {
   assert.equal(await cache.read('new-a', async () => assert.fail('expired bytes must be released')), '5678');
   assert.equal(await cache.read('new-b', async () => assert.fail('both live entries fit')), 'abcd');
 });
+
+test('bounded pending work allows ready hits and same-key joins without admitting more distinct work', async () => {
+  const h = harness();
+  const busy = new Error('synthetic busy');
+  const cache = h.createPriceReadCache<string>({ maxEntries: 8, maxBytes: 1000, ttlMs: 100,
+    maxPending: 1, overloadError: () => busy });
+  await cache.read('ready', async () => 'ready result');
+  const work = deferred<string>();
+  const first = cache.read('cold', async () => work.promise);
+  const joined = cache.read('cold', async () => assert.fail('same key must share'));
+  assert.equal(await cache.read('ready', async () => assert.fail('ready must bypass work')), 'ready result');
+  await assert.rejects(cache.read('other', async () => assert.fail('full queue must not start load')), error => error === busy);
+  work.resolve('built');
+  assert.deepEqual(await Promise.all([first, joined]), ['built', 'built']);
+  assert.equal(await cache.read('other', async () => 'slot released'), 'slot released');
+});
+
+test('worker sizing avoids JSON serialization and mismatched snapshot versions are never cached', async () => {
+  const h = harness();
+  const cache = h.createPriceReadCache<{ version: string; toJSON: () => never }>({ maxEntries: 8, maxBytes: 1000, ttlMs: 100,
+    sizeOf: () => 200, shouldCache: (value, key) => value.version === key });
+  const first = { version: 'new', toJSON: () => assert.fail('server must not serialize worker result again') };
+  assert.equal(await cache.read('old', async () => first), first);
+  let builds = 0;
+  await cache.read('old', async () => { builds++; return first; });
+  assert.equal(builds, 1);
+  assert.equal(await cache.read('new', async () => first), first);
+  assert.equal(await cache.read('new', async () => assert.fail('matching version should be cached')), first);
+});

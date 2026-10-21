@@ -18,7 +18,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir "$test_root/socket"
 "$pg_bin/initdb" -D "$test_root/data" --username=wholesale_test_owner --auth-local=trust --auth-host=reject --no-locale --encoding=UTF8 >"$test_root/init.log"
-"$pg_bin/pg_ctl" -D "$test_root/data" -l "$test_root/postgres.log" -o "-k $test_root/socket -h '' -p 55474 -c shared_buffers=16MB -c max_connections=12 -c work_mem=1MB" -w start >/dev/null
+"$pg_bin/pg_ctl" -D "$test_root/data" -l "$test_root/postgres.log" -o "-k $test_root/socket -h '' -p 55474 -c shared_buffers=16MB -c max_connections=16 -c work_mem=1MB" -w start >/dev/null
 "$pg_bin/psql" -X -h "$test_root/socket" -p 55474 -U wholesale_test_owner -d postgres -v ON_ERROR_STOP=1 \
   -c 'CREATE ROLE wholesale_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE' \
   -c 'CREATE DATABASE kts_wholesale_integration OWNER wholesale_app' >/dev/null
@@ -27,6 +27,9 @@ mkdir "$test_root/socket"
 export DATABASE_URL="postgresql://wholesale_app@localhost/kts_wholesale_integration?host=$test_root/socket&port=55474"
 export KTS_WHOLESALE_TEST=1
 export NODE_ENV=test
+export KTS_PRICE_BUILD_TEST=1
+export KTS_PRICE_BUILD_CACHE_DIR="$test_root/cache"
+node scripts/build-price-worker.mjs
 if [[ -n "${KTS_WHOLESALE_TEST_BUNDLE:-}" ]]; then
   node --test "$KTS_WHOLESALE_TEST_BUNDLE"
 else

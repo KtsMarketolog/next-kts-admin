@@ -104,3 +104,17 @@ test('timing identifiers are bounded and cannot inject additional HTTP headers',
   assert.match(h.logs()[0].operation, /^[a-zA-Z0-9_-]+$/);
   assert.match(h.logs()[0].status, /^[a-zA-Z0-9_-]+$/);
 });
+
+test('worker timings identify their source without inventing per-request CPU usage', () => {
+  const h = harness(true);
+  const trace = h.createPricePerformanceTrace('price_read');
+  trace.recordWorkerStage('analogsMs', 12.34);
+  trace.recordWorkerStage('invalid', Infinity);
+  trace.recordMainStage('inputTransferMs', 3.21);
+  trace.recordMainStage('invalid', NaN);
+  trace.finish(200);
+  assert.deepEqual(h.logs()[0].stages, [
+    { stage: 'worker_analogsMs', wallMs: 12.3, processCpuMs: null, source: 'worker' },
+    { stage: 'main_inputTransferMs', wallMs: 3.2, processCpuMs: null, source: 'main' },
+  ]);
+});
