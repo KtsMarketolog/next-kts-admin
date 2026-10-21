@@ -22,6 +22,7 @@ import { applyClientArchiveMigration } from './clientArchiveMigration';
 import { applyEmployeeIdentifierMigration } from './employeeIdentifierMigration';
 import { applyPriceRequestOutboxMigration } from './priceRequestOutboxMigration';
 import { applyLoginCredentialMigration } from './loginCredentialMigration';
+import { applyKnowledgeBaseMigration } from './knowledgeBaseMigration';
 
 type SchemaMigration = {
   id: string;
@@ -866,6 +867,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610190002_employee_login_identifiers', description: 'Reserve normalized employee login and email identifiers across employee roles without changing accounts', apply: applyEmployeeIdentifierMigration},
   {id: '202610190003_price_request_outbox', description: 'Durable idempotent price request receipts and transactional email notification queue', apply: applyPriceRequestOutboxMigration},
   {id: '202610190004_verified_login_credentials', description: 'Bind one-time email challenges to verified login credentials', apply: applyLoginCredentialMigration},
+  {id: '202610210001_knowledge_base', description: 'Private employee knowledge base with folder permissions and idempotent usage events', apply: applyKnowledgeBaseMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

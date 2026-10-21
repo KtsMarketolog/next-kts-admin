@@ -2,8 +2,9 @@ import { getAdminSession, isTopDashboardManagementSession } from '@/shared/lib/a
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { canViewDashboard } from '@/shared/lib/dashboardAccess';
 import { canManageCurrencyDashboard } from '@/shared/lib/currencyDashboardAccess';
-import { DASHBOARD_USAGE_MAX_BODY, isDashboardUsageAction, isDashboardUsageKey, parseDashboardUsageBatch } from '@/shared/lib/dashboardUsage';
-import { listDashboardUsage, listDashboardUsageEmployees, listDashboardUsageEmployeeReports, recordDashboardUsage } from '@/shared/lib/db/dashboardUsageRepo';
+import { DASHBOARD_USAGE_MAX_BODY, parseDashboardUsageBatch } from '@/shared/lib/dashboardUsage';
+import { listDashboardUsage, listDashboardUsageActors, listDashboardUsageEmployees, listDashboardUsageEmployeeReports, recordDashboardUsage } from '@/shared/lib/db/dashboardUsageRepo';
+import { DashboardUsageFilterError, parseDashboardUsageFilters } from '@/shared/lib/dashboardUsageFilters';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { canReviewDashboardUsage } from '@/shared/lib/dashboardUsageAccess';
 import { DASHBOARD_USAGE_SESSION_HEADER } from '@/shared/lib/dashboardUsageDelivery';
@@ -54,38 +55,18 @@ export async function GET(request: Request) {
   const session = await getAdminSession();
   if (!session || !canReviewDashboardUsage(session)) return json({ error: 'Нет доступа' }, session ? 403 : 401);
   const params = new URL(request.url).searchParams;
-  if (params.get('view') === 'employee') {
-    const actorKey = params.get('actor') ?? '', after = params.get('after') || undefined;
-    if ([...params.keys()].some((key) => !['view', 'actor', 'after'].includes(key) || params.getAll(key).length !== 1)
-      || !/^(admin|manager):([1-9][0-9]{0,14}|primary)$/.test(actorKey) || (after && !isDashboardUsageKey(after))) {
-      return json({ error: 'Некорректный фильтр' }, 400);
-    }
+  const view = params.get('view') ?? 'events';
+  if (!['events', 'employees', 'employee', 'actors'].includes(view)) return json({ error: 'Некорректный фильтр' }, 400);
+  try {
+    const filter = parseDashboardUsageFilters(params, view as 'events' | 'employees' | 'employee' | 'actors');
     const limited = await enforceAdminActionRateLimit(session, 'dashboard-usage-read', 60, 60_000);
-    if (limited) return limited;
-    try { return json(await listDashboardUsageEmployeeReports({ actorKey, after })); }
-    catch { console.error('DASHBOARD_USAGE_EMPLOYEE_FAILED'); return json({ error: 'Сводка сотрудника временно недоступна' }, 503); }
+    if (limited) { for (const [key, value] of Object.entries(headers)) limited.headers.set(key, value); return limited; }
+    if (view === 'employee') return json(await listDashboardUsageEmployeeReports({ ...filter, actorKey: filter.actorKey! }));
+    if (view === 'employees') return json(await listDashboardUsageEmployees(filter));
+    if (view === 'actors') return json(await listDashboardUsageActors(filter));
+    return json(await listDashboardUsage(filter));
+  } catch (error) {
+    if (error instanceof DashboardUsageFilterError) return json({ error: error.message }, 400);
+    console.error('DASHBOARD_USAGE_READ_FAILED'); return json({ error: 'Журнал временно недоступен' }, 503);
   }
-  if (params.get('view') === 'employees') {
-    const after = params.get('after') || undefined, search = params.get('search')?.trim() || undefined;
-    if ([...params.keys()].some((key) => !['view', 'after', 'search'].includes(key) || params.getAll(key).length !== 1)
-      || (after && !/^(admin|manager):[1-9][0-9]{0,14}$/.test(after)) || (search && search.length > 100)) {
-      return json({ error: 'Некорректный фильтр' }, 400);
-    }
-    const limited = await enforceAdminActionRateLimit(session, 'dashboard-usage-read', 60, 60_000);
-    if (limited) return limited;
-    try { return json(await listDashboardUsageEmployees({ after, search })); }
-    catch { console.error('DASHBOARD_USAGE_SUMMARY_FAILED'); return json({ error: 'Сводка временно недоступна' }, 503); }
-  }
-  const before = params.get('before') || undefined, dashboardKey = params.get('dashboard') || undefined;
-  const actorKey = params.get('actor') || undefined, action = params.get('action') || undefined;
-  const includePreview = params.get('preview') === '1';
-  if ([...params.keys()].some((key) => !['before', 'dashboard', 'actor', 'action', 'preview'].includes(key) || params.getAll(key).length !== 1)
-    || (params.has('preview') && !['0', '1'].includes(params.get('preview')!))
-    || (before && !/^[1-9][0-9]{0,17}$/.test(before)) || (dashboardKey && !isDashboardUsageKey(dashboardKey))
-    || (actorKey && !/^(admin|manager):([1-9][0-9]{0,14}|primary)$/.test(actorKey))
-    || (action && !isDashboardUsageAction(action))) return json({ error: 'Некорректный фильтр' }, 400);
-  const limited = await enforceAdminActionRateLimit(session, 'dashboard-usage-read', 60, 60_000);
-  if (limited) return limited;
-  try { return json(await listDashboardUsage({ before, dashboardKey, actorKey, includePreview, action: action as import('@/shared/lib/dashboardUsage').DashboardUsageAction | undefined })); }
-  catch { console.error('DASHBOARD_USAGE_READ_FAILED'); return json({ error: 'Журнал временно недоступен' }, 503); }
 }

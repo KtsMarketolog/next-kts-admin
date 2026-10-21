@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { blocksPublicClientDocumentRequest } from '@/shared/lib/clientDocumentPaths';
+import { blocksPublicKnowledgeBaseRequest } from '@/shared/lib/knowledgeBasePaths';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const PRIVATE_CACHE_PREFIXES = ['/admin', '/cabinet', '/login', '/price'];
@@ -95,7 +96,7 @@ export function proxy(request: NextRequest) {
       },
     });
   }
-  if (blocksPublicClientDocumentRequest(request.nextUrl)) {
+  if (blocksPublicClientDocumentRequest(request.nextUrl) || blocksPublicKnowledgeBaseRequest(request.nextUrl)) {
     return new NextResponse(null, {
       status: 403,
       headers: {
@@ -151,6 +152,8 @@ export const config = {
     // This route authenticates, rate-limits and checks Origin before reading
     // its bounded gzip stream. Avoid Next proxy cloning/buffering that stream.
     // Image requests must pass the private-document guard before cache lookup.
-    '/((?!_next/static|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$|api/admin/manager-dashboard/shared/json/?$).*)',
+    // The KB upload handler likewise checks session/role/origin before consuming
+    // its size/deadline-bounded stream. Never clone that body in the proxy.
+    '/((?!_next/static|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$|api/admin/manager-dashboard/shared/json/?$|api/admin/knowledge-base/upload/?$).*)',
   ],
 };

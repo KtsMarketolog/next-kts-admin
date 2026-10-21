@@ -6,7 +6,8 @@ import { enforceAdminActionRateLimit } from '../src/shared/lib/adminSecurity';
 import { createAccessUser, updateAccessUser } from '../src/shared/lib/db/adminUsersRepo';
 import { createStoredAdminSession, getStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
 import { query, withTransaction } from '../src/shared/lib/db/client';
-import { DASHBOARD_USAGE_RETENTION_CUTOFF_SQL, dashboardUsageActorKey, listDashboardUsage, listDashboardUsageEmployees, listDashboardUsageEmployeeReports, recordDashboardUsage, pruneExpiredDashboardUsage } from '../src/shared/lib/db/dashboardUsageRepo';
+import { DASHBOARD_USAGE_RETENTION_CUTOFF_SQL, dashboardUsageActorKey, exportDashboardUsage, listDashboardUsageActors, listDashboardUsage, listDashboardUsageEmployees, listDashboardUsageEmployeeReports, recordDashboardUsage, pruneExpiredDashboardUsage } from '../src/shared/lib/db/dashboardUsageRepo';
+import { dashboardUsageDateBounds, DashboardUsageExportLimitError } from '../src/shared/lib/dashboardUsageFilters';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import { createTopDashboardBlock } from '../src/shared/lib/db/topDashboardBlocksRepo';
 
@@ -58,13 +59,13 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
     await t.test('revoked access and viewer-only preview never write events', async () => {
       await assert.rejects(recordDashboardUsage(viewer, { ...batch, preview: true }), /Нет доступа/);
       await assert.rejects(recordDashboardUsage({ ...viewer, sessionId: undefined }, batch), /Нет доступа/);
-      await updateAccessUser(user.id, { ...input, passwordHash: undefined, dashboardAccess: [] });
+      const changed = await updateAccessUser(user.id, { ...input, passwordHash: undefined, dashboardAccess: [], expectedRevision: user.revision });
       assert.equal(await getStoredAdminSession(stored.token), null, 'Changing access revokes the old login session');
       const deniedLogin = await createStoredAdminSession({ role: 'purchaser', adminUserId: user.numericId });
       const revoked = (await getStoredAdminSession(deniedLogin.token))!;
       await assert.rejects(recordDashboardUsage(revoked, { ...batch, events: [{ id: randomUUID(), action: 'filter_changed' }] }), /Нет доступа/);
       assert.equal((await listDashboardUsage({ actorKey })).events.length, 1);
-      await updateAccessUser(user.id, { ...input, passwordHash: undefined });
+      await updateAccessUser(user.id, { ...input, passwordHash: undefined, expectedRevision: changed!.user.revision });
     });
 
     await t.test('pagination is bounded, ordered and stable; filters work across pages', async () => {
@@ -147,6 +148,56 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
       assert.ok(Number(rejected?.headers.get('Retry-After')) > 0);
       assert.equal(await enforceAdminActionRateLimit(viewer2, action, 2, 60_000), null);
       assert.ok(Number((await query('select max(count) as count from rate_limit_buckets')).rows[0].count) >= 3);
+    });
+
+    await t.test('Moscow day boundaries, exact actors, historical picker and whole-result export agree with paginated reads', async () => {
+      const account = await createAccessUser({ ...input, name: 'Same synthetic name', login: `usage-range-${randomUUID()}` });
+      const other = await createAccessUser({ ...input, name: 'Same synthetic name', login: `usage-range-other-${randomUUID()}` });
+      const actor = `admin:${account.numericId}`, otherActor = `admin:${other.numericId}`;
+      // Yesterday in Moscow: always within retention, regardless of the runner timezone/date.
+      const day = new Date(Date.now() + 3 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
+      const bounds = dashboardUsageDateBounds({ from: day, to: day });
+      await query(`insert into dashboard_usage_events(actor_key,actor_role,dashboard_key,event_id,action,created_at)
+        select $1,'purchaser',$2,'range-event-'||lpad(i::text,8,'0'),'filter_changed',
+          $3::timestamptz + (i-1)*interval '1 millisecond' from generate_series(1,55) i`, [actor, key, bounds.fromInclusive]);
+      await query(`insert into dashboard_usage_events(actor_key,actor_role,dashboard_key,event_id,action,created_at,is_preview) values
+        ($1,'purchaser',$3,'range-end-inclusive','report_open',$5::timestamptz-interval '1 millisecond',false),
+        ($1,'purchaser',$3,'range-before-day','report_open',$4::timestamptz-interval '1 millisecond',false),
+        ($1,'purchaser',$3,'range-next-midnight','report_open',$5::timestamptz,false),
+        ($1,'purchaser',$3,'range-preview-day','report_open',$4::timestamptz,true),
+        ($2,'purchaser',$3,'range-other-actor','report_open',$4::timestamptz,false)`, [actor, otherActor, key, bounds.fromInclusive, bounds.toExclusive]);
+      const filter = { from: day, to: day, actorKey: actor, dashboardKey: key };
+      const first = await listDashboardUsage(filter), second = await listDashboardUsage({ ...filter, before: first.nextCursor! });
+      assert.equal(first.events.length, 50); assert.equal(second.events.length, 6); assert.equal(second.nextCursor, null);
+      const full = await exportDashboardUsage('events', filter); assert.equal(full.view, 'events');
+      assert.equal(full.rows.length, 56);
+      assert.deepEqual(full.rows.map(row => (row as { id: string }).id), [...first.events, ...second.events].map(row => row.id));
+      assert.equal(new Set(full.rows.map(row => row.actorKey)).size, 1);
+      assert.equal((await exportDashboardUsage('events', { ...filter, includePreview: true })).rows.length, 57);
+      const summary = await listDashboardUsageEmployees({ from: day, to: day, actorKey: actor });
+      assert.equal(summary.employees.length, 1); assert.equal(summary.employees[0].interactionCount, 55); assert.equal(summary.employees[0].reportCount, 1);
+      assert.equal(summary.employees[0].lastOpenedAt, new Date(new Date(bounds.toExclusive!).getTime() - 1).toISOString());
+      const reports = await listDashboardUsageEmployeeReports({ actorKey: actor, from: day, to: day });
+      assert.equal(reports.reports.length, 1); assert.equal(reports.reports[0].openCount, 1); assert.equal(reports.reports[0].interactionCount, 55);
+      const summaryExport = await exportDashboardUsage('employees', { actorKey: actor, from: day, to: day });
+      assert.deepEqual(summaryExport.rows, summary.employees);
+      assert.equal((await listDashboardUsageEmployees({ from: day, to: day, actorKey: otherActor })).employees[0].interactionCount, 0);
+      await query('update admin_users set is_active=false where id=$1', [account.numericId]);
+      const options = await listDashboardUsageActors({ search: 'Same synthetic name' });
+      assert.equal(options.actors.filter(row => [actor, otherActor].includes(row.actorKey)).length, 2);
+      assert.deepEqual(Object.keys(options.actors[0]).sort(), ['actorKey', 'actorName', 'actorRole']);
+      assert.equal((await listDashboardUsageEmployees({ actorKey: actor, from: day, to: day })).employees[0].interactionCount, 55, 'explicit disabled actor remains inspectable');
+      assert.equal((await listDashboardUsageEmployees({ search: 'Same synthetic name' })).employees.some(row => row.actorKey === actor), false, 'default roster remains active only');
+      await query('delete from admin_users where id=$1', [account.numericId]);
+      assert.equal((await listDashboardUsageActors({ search: actor })).actors.find(row => row.actorKey === actor)?.actorName, actor);
+      assert.equal((await listDashboardUsageEmployees({ actorKey: actor, from: day, to: day })).employees[0].interactionCount, 55);
+      assert.equal((await listDashboardUsage({ actorKey: actor, from: '1970-01-01', to: '1970-01-02' })).events.length, 0, 'date filters never extend retained history');
+      // The SQL read itself detects the extra row; the workbook builder is never asked to truncate.
+      await query(`insert into dashboard_usage_events(actor_key,actor_role,dashboard_key,event_id,action,created_at)
+        select 'admin:888888','admin',$1,'export-limit-'||lpad(i::text,8,'0'),'report_open',now() from generate_series(1,5001) i`, [key]);
+      await assert.rejects(exportDashboardUsage('events', { actorKey: 'admin:888888' }), DashboardUsageExportLimitError);
+      await query("delete from dashboard_usage_events where actor_key='admin:888888' and event_id='export-limit-00005001'");
+      assert.equal((await exportDashboardUsage('events', { actorKey: 'admin:888888' })).rows.length, 5000);
     });
 
     await t.test('locked metadata storage fails within its bounded timeout and rolls back the whole usage write', async () => {

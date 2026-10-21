@@ -88,6 +88,8 @@ jobs:
           bash scripts/test-employee-identifiers-postgres.sh
           bash scripts/test-login-credentials-postgres.sh
           bash scripts/test-price-request-outbox-postgres.sh
+          bash scripts/test-knowledge-base-postgres.sh
+          bash scripts/test-dashboard-usage-postgres.sh
           node --import tsx tests/dashboard-usage-cron.http.integration.ts
           node --test ops/backup/tests/*.test.cjs
           npx tsc --noEmit --incremental false
@@ -118,6 +120,7 @@ jobs:
           cp ecosystem.config.cjs deploy-artifact/ecosystem.config.cjs
           cp scripts/verify-production-seo.mjs deploy-artifact/scripts/verify-production-seo.mjs
           cp scripts/verify-client-document-privacy.mjs deploy-artifact/scripts/verify-client-document-privacy.mjs
+          cp scripts/verify-knowledge-base-privacy.mjs deploy-artifact/scripts/verify-knowledge-base-privacy.mjs
           cp scripts/dashboard-usage-prune.mjs deploy-artifact/scripts/dashboard-usage-prune.mjs
           cp scripts/price-request-mail-drain.mjs deploy-artifact/scripts/price-request-mail-drain.mjs
           # Ship the explicit single-file cleanup tool; never execute it during deploy.
@@ -393,6 +396,7 @@ jobs:
           node "$RELEASE/ops/client-documents/protect-storage.mjs" \
             --app-env "$BASE/.env.local" --public-root "$SHARED/public/uploads"
           node "$RELEASE/scripts/verify-client-document-privacy.mjs"
+          node "$RELEASE/scripts/verify-knowledge-base-privacy.mjs"
 
           EXPECTED_CWD="$CURRENT"
           EXPECTED_SCRIPT="$CURRENT/server.js"
@@ -439,6 +443,7 @@ jobs:
             "Release canary" \
             120
           node "$RELEASE/scripts/verify-client-document-privacy.mjs" "http://127.0.0.1:3001"
+          node "$RELEASE/scripts/verify-knowledge-base-privacy.mjs" --optimizer "http://127.0.0.1:3001"
           env \
             SEO_REQUIRE_YANDEX_VERIFICATION=1 \
             SEO_REQUIRE_CATALOG_ENTITIES=1 \
@@ -488,6 +493,7 @@ jobs:
           node "$RELEASE/ops/client-documents/protect-storage.mjs" \
             --app-env "$BASE/.env.local" --public-root "$SHARED/public/uploads" --check
           node "$RELEASE/scripts/verify-client-document-privacy.mjs"
+          node "$RELEASE/scripts/verify-knowledge-base-privacy.mjs" --optimizer
 
           pm2 save
 
@@ -528,3 +534,4 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/verify-client-document-privacy.mjs
+          node scripts/verify-knowledge-base-privacy.mjs --optimizer

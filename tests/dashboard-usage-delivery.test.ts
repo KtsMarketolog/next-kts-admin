@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import * as protocol from '../src/shared/lib/dashboardUsage';
+import * as usageFilters from '../src/shared/lib/dashboardUsageFilters';
 import { DashboardUsageDelivery, DASHBOARD_USAGE_QUEUE_LIMIT, DASHBOARD_USAGE_REQUEST_TIMEOUT_MS, DASHBOARD_USAGE_SESSION_HEADER, dashboardUsageRetryDelay } from '../src/shared/lib/dashboardUsageDelivery';
 
 const context = { dashboardKey: 'top:4', preview: false, versionId: 7 };
@@ -157,6 +158,7 @@ test('actual POST rejects stale/missing session correlation before parsing, limi
     '@/shared/lib/dashboardAccess': { canViewDashboard: () => true },
     '@/shared/lib/currencyDashboardAccess': { canManageCurrencyDashboard: () => true },
     '@/shared/lib/dashboardUsage': protocol,
+    '@/shared/lib/dashboardUsageFilters': usageFilters,
     '@/shared/lib/db/dashboardUsageRepo': { recordDashboardUsage: async () => { writes++; } },
     '@/shared/lib/originProtection': { enforceSameOriginRequest: () => null },
     '@/shared/lib/dashboardUsageAccess': { canReviewDashboardUsage: () => true },

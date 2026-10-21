@@ -2,8 +2,9 @@ import { isTopDashboardManagementSession, type AdminSession } from '../adminAuth
 import { canViewDashboard } from '../dashboardAccess';
 import { canManageCurrencyDashboard } from '../currencyDashboardAccess';
 import { parseDashboardUsageBatch, type DashboardUsageAction, type DashboardUsageBatch, type DashboardUsageUpload, type DashboardUsageUploadType } from '../dashboardUsage';
-import { query, withTransaction } from './client';
+import { withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
+import { DASHBOARD_USAGE_EXPORT_LIMIT, DashboardUsageExportLimitError, isDashboardUsageActor, validateDashboardUsageFilters, type DashboardUsageFilters } from '../dashboardUsageFilters';
 
 export const DASHBOARD_USAGE_RETENTION_CUTOFF_SQL = "((now() at time zone 'Europe/Moscow') - interval '1 month') at time zone 'Europe/Moscow'";
 export const DASHBOARD_USAGE_PURGE_BATCH_SIZE = 1000;
@@ -59,9 +60,16 @@ export type DashboardUsageRow = {
   upload: DashboardUsageUpload | null; uploadType: DashboardUsageUploadType | null; durationSeconds: number | null;
 };
 
-export async function listDashboardUsage(input: { before?: string; dashboardKey?: string; actorKey?: string; action?: DashboardUsageAction; includePreview?: boolean }) {
+export async function listDashboardUsage(input: DashboardUsageFilters & { before?: string }) {
+  return readDashboardUsage(input, 50);
+}
+
+async function readDashboardUsage(input: DashboardUsageFilters & { before?: string }, limit: number) {
+  const bounds = validateDashboardUsageFilters(input);
   await ensureSiteSchema();
-  const result = await query<{
+  return withTransaction(async (client) => {
+  await client.query("set local statement_timeout='5s'");
+  const result = await client.query<{
     id: string; actor_key: string; actor_name: string; actor_role: string; dashboard_key: string;
     dashboard_title: string; action: DashboardUsageAction; is_preview: boolean; html_version_id: string | null; created_at: Date;
     has_profitability_details: boolean;
@@ -85,8 +93,12 @@ export async function listDashboardUsage(input: { before?: string; dashboardKey?
       and ($4::text is null or event.action = $4)
       and ($5::boolean or not event.is_preview)
       and ($4::text = 'viewing_time' or event.action <> 'viewing_time')
-    order by event.id desc limit 51`, [input.before ?? null, input.dashboardKey ?? null, input.actorKey ?? null, input.action ?? null, input.includePreview ?? false]);
-  const rows: DashboardUsageRow[] = result.rows.slice(0, 50).map((row) => ({
+      and ($6::timestamptz is null or event.created_at >= $6::timestamptz)
+      and ($7::timestamptz is null or event.created_at < $7::timestamptz)
+      and ($8::text = '' or position(lower($8) in lower(coalesce(nullif(u.name, ''), nullif(m.name, ''), case when event.actor_key = 'admin:primary' then 'Основной администратор' else event.actor_key end))) > 0)
+    order by event.id desc limit ${limit + 1}`, [input.before ?? null, input.dashboardKey ?? null, input.actorKey ?? null, input.action ?? null, input.includePreview ?? false,
+      bounds.fromInclusive, bounds.toExclusive, input.search?.trim() ?? '']);
+  const rows: DashboardUsageRow[] = result.rows.slice(0, limit).map((row) => ({
     id: row.id, actorKey: row.actor_key, actorName: row.actor_name, actorRole: row.actor_role,
     dashboardKey: row.dashboard_key, dashboardTitle: row.dashboard_title,
     action: row.action, preview: row.is_preview, versionId: row.html_version_id ? Number(row.html_version_id) : null,
@@ -95,7 +107,8 @@ export async function listDashboardUsage(input: { before?: string; dashboardKey?
     upload: row.upload_name !== null && row.upload_name !== undefined ? { name: row.upload_name, size: Number(row.upload_size) } : null,
     uploadType: row.upload_type ?? null, durationSeconds: row.duration_seconds ?? null,
   }));
-  return { events: rows, nextCursor: result.rows.length > 50 ? rows.at(-1)!.id : null };
+  return { events: rows, nextCursor: result.rows.length > limit ? rows.at(-1)!.id : null };
+  }, { profile: 'read' });
 }
 
 export type DashboardUsageEmployee = {
@@ -106,20 +119,27 @@ export type DashboardUsageEmployee = {
 };
 export type DashboardUsageSummary = {
   employees: DashboardUsageEmployee[]; nextCursor: string | null;
-  periodStart: string; generatedAt: string;
+  periodStart: string; periodEnd: string; generatedAt: string;
 };
 
 /** Active employee roster, including zero-event employees. No previews or expired history. */
-export async function listDashboardUsageEmployees(input: { after?: string; search?: string } = {}): Promise<DashboardUsageSummary> {
-  if (input.after && !/^(?:admin|manager):[1-9][0-9]{0,14}$/.test(input.after)) throw new Error('Некорректный фильтр');
+export async function listDashboardUsageEmployees(input: DashboardUsageFilters & { after?: string } = {}): Promise<DashboardUsageSummary> {
+  return readDashboardUsageEmployees(input, 50);
+}
+
+async function readDashboardUsageEmployees(input: DashboardUsageFilters & { after?: string }, limit: number): Promise<DashboardUsageSummary> {
+  if (input.after && !isDashboardUsageActor(input.after)) throw new Error('Некорректный фильтр');
+  const bounds = validateDashboardUsageFilters(input);
   const search = input.search?.trim() ?? '';
   if (search.length > 100) throw new Error('Некорректный фильтр');
   await ensureSiteSchema();
   return withTransaction(async (client) => {
     // Bound query time as well as the response; the actor index limits event scans to this page.
     await client.query("set local statement_timeout='5s'");
-    const clock = await client.query<{ period_start: Date; generated_at: Date }>(
-      `select (${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL}) as period_start, now() as generated_at`);
+    await client.query('set transaction isolation level repeatable read, read only');
+    const clock = await client.query<{ period_start: Date; period_end: Date; generated_at: Date }>(
+      `select greatest((${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL}), $1::timestamptz) as period_start,
+        least(now(), coalesce($2::timestamptz, now())) as period_end, now() as generated_at`, [bounds.fromInclusive, bounds.toExclusive]);
     const { period_start: periodStart, generated_at: generatedAt } = clock.rows[0];
     const result = await client.query<{
       actor_key: string; actor_name: string; actor_role: string;
@@ -132,10 +152,23 @@ export async function listDashboardUsageEmployees(input: { after?: string; searc
       union all
       select 'manager:' || id::text, coalesce(nullif(name, ''), login, email), coalesce(nullif(role, ''), 'manager')
       from wholesale_managers where is_active = true
+      union all
+      select historical.actor_key,
+        coalesce(nullif(u.name, ''), nullif(m.name, ''), case when historical.actor_key = 'admin:primary' then 'Основной администратор' else historical.actor_key end),
+        coalesce(u.role, m.role, historical.actor_role)
+      from (
+        select actor_key, actor_role from dashboard_usage_events
+        where actor_key = $5::text and created_at >= $3::timestamptz and created_at < $4::timestamptz
+        order by created_at desc, id desc limit 1
+      ) historical
+      left join admin_users u on historical.actor_key = 'admin:' || u.id::text
+      left join wholesale_managers m on historical.actor_key = 'manager:' || m.id::text
+      where not coalesce(u.is_active, false) and not coalesce(m.is_active, false)
     ), page as (
       select * from employees
       where ($1::text is null or actor_key > $1) and ($2::text = '' or position(lower($2) in lower(actor_name)) > 0)
-      order by actor_key limit 51
+        and ($5::text is null or actor_key = $5)
+      order by actor_key limit ${limit + 1}
     )
     select page.*, activity.last_opened_at, activity.last_used_at, activity.last_interaction_at,
       activity.report_count, activity.interaction_count::text, activity.upload_count::text, duration.viewing_seconds::text,
@@ -154,6 +187,7 @@ export async function listDashboardUsageEmployees(input: { after?: string; searc
       from dashboard_usage_events event
       left join dashboard_usage_event_details metadata on metadata.usage_event_id = event.id
       where event.actor_key = page.actor_key and not event.is_preview and event.created_at >= $3::timestamptz
+        and event.created_at < $4::timestamptz
     ) activity
     cross join lateral (
       select coalesce(sum(window_seconds), 0) as viewing_seconds from (
@@ -161,6 +195,7 @@ export async function listDashboardUsageEmployees(input: { after?: string; searc
         from dashboard_usage_events event
         join dashboard_usage_event_details metadata on metadata.usage_event_id = event.id
         where event.actor_key = page.actor_key and not event.is_preview and event.created_at >= $3::timestamptz
+          and event.created_at < $4::timestamptz
           and event.action = 'viewing_time'
         group by metadata.viewing_window_id
       ) windows
@@ -168,20 +203,21 @@ export async function listDashboardUsageEmployees(input: { after?: string; searc
     left join lateral (
       select dashboard_key from dashboard_usage_events event
       where event.actor_key = page.actor_key and not event.is_preview and event.created_at >= $3::timestamptz
+        and event.created_at < $4::timestamptz
       order by created_at desc, id desc limit 1
     ) latest on true
     left join top_dashboard_blocks block on latest.dashboard_key = 'top:' || block.id::text
-    order by page.actor_key`, [input.after ?? null, search, periodStart]);
+    order by page.actor_key`, [input.after ?? null, search, periodStart, clock.rows[0].period_end, input.actorKey ?? null]);
     const iso = (value: Date | null) => value === null ? null : new Date(value).toISOString();
-    const employees = result.rows.slice(0, 50).map((row): DashboardUsageEmployee => ({
+    const employees = result.rows.slice(0, limit).map((row): DashboardUsageEmployee => ({
       actorKey: row.actor_key, actorName: row.actor_name, actorRole: row.actor_role,
       lastOpenedAt: iso(row.last_opened_at), lastUsedAt: iso(row.last_used_at), lastInteractionAt: iso(row.last_interaction_at),
       lastDashboardKey: row.last_dashboard_key, lastDashboardTitle: row.last_dashboard_title,
       reportCount: row.report_count, interactionCount: Number(row.interaction_count),
       uploadCount: Number(row.upload_count), viewingSeconds: Number(row.viewing_seconds),
     }));
-    return { employees, nextCursor: result.rows.length > 50 ? employees.at(-1)!.actorKey : null,
-      periodStart: new Date(periodStart).toISOString(), generatedAt: new Date(generatedAt).toISOString() };
+    return { employees, nextCursor: result.rows.length > limit ? employees.at(-1)!.actorKey : null,
+      periodStart: new Date(periodStart).toISOString(), periodEnd: new Date(clock.rows[0].period_end).toISOString(), generatedAt: new Date(generatedAt).toISOString() };
   });
 }
 
@@ -193,8 +229,8 @@ export type DashboardUsageEmployeeReport = {
 export type DashboardUsageEmployeeReports = { reports: DashboardUsageEmployeeReport[]; nextCursor: string | null };
 
 /** Employee drilldown: report totals rather than hundreds of individual time heartbeats. */
-export async function listDashboardUsageEmployeeReports(input: { actorKey: string; after?: string }): Promise<DashboardUsageEmployeeReports> {
-  if (!/^(?:admin|manager):(?:[1-9][0-9]{0,14}|primary)$/.test(input.actorKey)) throw new Error('Некорректный фильтр');
+export async function listDashboardUsageEmployeeReports(input: DashboardUsageFilters & { actorKey: string; after?: string }): Promise<DashboardUsageEmployeeReports> {
+  const bounds = validateDashboardUsageFilters(input);
   await ensureSiteSchema();
   return withTransaction(async (client) => {
     await client.query("set local statement_timeout='5s'");
@@ -209,6 +245,8 @@ export async function listDashboardUsageEmployeeReports(input: { actorKey: strin
       where event.actor_key = $1 and not event.is_preview
         and event.created_at >= (${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL})
         and ($2::text is null or event.dashboard_key > $2)
+        and ($3::timestamptz is null or event.created_at >= $3::timestamptz)
+        and ($4::timestamptz is null or event.created_at < $4::timestamptz)
     ), activity as (
       select dashboard_key, max(created_at) as last_used_at,
         max(created_at) filter (where action = 'report_open') as last_opened_at,
@@ -231,7 +269,7 @@ export async function listDashboardUsageEmployeeReports(input: { actorKey: strin
     from activity
     left join durations on durations.dashboard_key = activity.dashboard_key
     left join top_dashboard_blocks block on activity.dashboard_key = 'top:' || block.id::text
-    order by activity.dashboard_key`, [input.actorKey, input.after ?? null]);
+    order by activity.dashboard_key`, [input.actorKey, input.after ?? null, bounds.fromInclusive, bounds.toExclusive]);
     const reports = result.rows.slice(0, 50).map((row): DashboardUsageEmployeeReport => ({
       dashboardKey: row.dashboard_key, dashboardTitle: row.dashboard_title,
       lastOpenedAt: row.last_opened_at ? new Date(row.last_opened_at).toISOString() : null,
@@ -241,6 +279,56 @@ export async function listDashboardUsageEmployeeReports(input: { actorKey: strin
     }));
     return { reports, nextCursor: result.rows.length > 50 ? reports.at(-1)!.dashboardKey : null };
   });
+}
+
+export type DashboardUsageActor = Pick<DashboardUsageEmployee, 'actorKey' | 'actorName' | 'actorRole'>;
+
+/** Only safe identity labels; historical actors remain selectable after deactivation/deletion. */
+export async function listDashboardUsageActors(input: { search?: string; after?: string } = {}) {
+  validateDashboardUsageFilters(input);
+  if (input.after && !isDashboardUsageActor(input.after)) throw new Error('Некорректный фильтр');
+  await ensureSiteSchema();
+  return withTransaction(async (client) => {
+    await client.query("set local statement_timeout='5s'");
+    const result = await client.query<{ actor_key: string; actor_name: string; actor_role: string }>(`
+      with historical as (
+        select distinct on (actor_key) actor_key, actor_role
+        from dashboard_usage_events where created_at >= (${DASHBOARD_USAGE_RETENTION_CUTOFF_SQL})
+        order by actor_key, created_at desc, id desc
+      ), roster as (
+        select 'admin:' || id::text as actor_key, coalesce(nullif(name,''), 'admin:' || id::text) as actor_name, role as actor_role
+        from admin_users where is_active = true
+        union all
+        select 'manager:' || id::text, coalesce(nullif(name,''), 'manager:' || id::text), coalesce(nullif(role,''),'manager')
+        from wholesale_managers where is_active = true
+        union all
+        select h.actor_key, coalesce(nullif(u.name,''),nullif(m.name,''),
+          case when h.actor_key='admin:primary' then 'Основной администратор' else h.actor_key end),
+          coalesce(u.role,m.role,h.actor_role)
+        from historical h
+        left join admin_users u on h.actor_key='admin:' || u.id::text
+        left join wholesale_managers m on h.actor_key='manager:' || m.id::text
+        where not coalesce(u.is_active,false) and not coalesce(m.is_active,false)
+      ) select actor_key, actor_name, actor_role from roster
+      where ($1::text is null or actor_key > $1)
+        and ($2::text = '' or position(lower($2) in lower(actor_name)) > 0 or position(lower($2) in lower(actor_key)) > 0)
+      order by actor_key limit 51`, [input.after ?? null, input.search?.trim() ?? '']);
+    const actors: DashboardUsageActor[] = result.rows.slice(0, 50).map(row => ({ actorKey: row.actor_key, actorName: row.actor_name, actorRole: row.actor_role }));
+    return { actors, nextCursor: result.rows.length > 50 ? actors.at(-1)!.actorKey : null };
+  }, { profile: 'read' });
+}
+
+export type DashboardUsageExport = { view: 'events'; rows: DashboardUsageRow[] } | { view: 'employees'; rows: DashboardUsageEmployee[]; periodStart: string; periodEnd: string; generatedAt: string };
+/** One bounded query/snapshot, not a loop over live pages. Never returns a truncated workbook. */
+export async function exportDashboardUsage(view: 'events' | 'employees', input: DashboardUsageFilters): Promise<DashboardUsageExport> {
+  if (view === 'events') {
+    const result = await readDashboardUsage(input, DASHBOARD_USAGE_EXPORT_LIMIT);
+    if (result.nextCursor) throw new DashboardUsageExportLimitError();
+    return { view, rows: result.events };
+  }
+  const result = await readDashboardUsageEmployees(input, DASHBOARD_USAGE_EXPORT_LIMIT);
+  if (result.nextCursor) throw new DashboardUsageExportLimitError();
+  return { view, rows: result.employees, periodStart: result.periodStart, periodEnd: result.periodEnd, generatedAt: result.generatedAt };
 }
 
 /** Scheduled physical deletion; never prunes HTML, snapshots, users or security audit. */

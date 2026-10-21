@@ -47,6 +47,22 @@
   button[aria-selected="true"]:hover { background: #3c21a0; }
 }
 .sectionHeader { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; justify-content: space-between; h2 { margin: 0; font-size: 21px; } }
+.scopeFilters { padding: 16px; border: 1px solid #e2deef; border-radius: 10px; margin-bottom: 22px; background: #faf9fd;
+  > .filters { margin-top: 0; }
+  input[type="date"] { min-height: 42px; min-width: 0; width: 170px; }
+}
+.actorPicker { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; font-size: 14px;
+  details { min-width: 0; max-width: 100%; flex: 0 1 620px; }
+  summary { padding: 12px; border: 1px solid #d1cee3; border-radius: 8px; cursor: pointer; color: #302261; background: #fff; overflow-wrap: anywhere; }
+}
+.actorOptions { border: 1px solid #e2deef; border-radius: 8px; padding: 12px; margin-top: 8px; background: #fff; }
+.actorList { list-style: none; margin: 12px 0; padding: 0; max-height: 250px; overflow: auto;
+  li + li { margin-top: 5px; }
+  button { text-align: left; width: 100%; overflow-wrap: anywhere; }
+}
+.exportArea { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 12px;
+  .error { flex-basis: 100%; margin: 0; }
+}
 .period { font-size: 12px; color: #687082; line-height: 1.5; margin: 4px 0; }
 .filters { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin: 18px 0 12px; font-size: 14px;
   label { display: grid; gap: 7px; min-width: 0; }

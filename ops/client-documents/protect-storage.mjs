@@ -43,6 +43,7 @@ export async function protectClientDocumentRoots({
   ownerUid = process.getuid?.(),
   workerUids = nginxWorkerUids(execFileSync('/bin/ps', ['-eo', 'uid,args'], { encoding: 'utf8' })),
   checkOnly = false,
+  privateSubdirectories = ['client-documents'],
 }) {
   if (!Number.isSafeInteger(ownerUid) || ownerUid <= 0 || ownerUid !== process.getuid?.()) {
     throw new Error('Run this gate as the non-root application owner, not via sudo');
@@ -51,6 +52,8 @@ export async function protectClientDocumentRoots({
     throw new Error('Nginx workers must run as a distinct non-root uid; owner-only permissions cannot isolate them');
   }
   if (!Array.isArray(uploadRoots) || !uploadRoots.length) throw new Error('Explicit upload roots are required');
+  if (!Array.isArray(privateSubdirectories) || !privateSubdirectories.length
+    || privateSubdirectories.some(value => !['client-documents', 'knowledge-base'].includes(value))) throw new Error('Unknown private upload directory');
 
   const directories = new Set();
   for (const uploadRoot of uploadRoots) {
@@ -66,7 +69,8 @@ export async function protectClientDocumentRoots({
     if (!rootStat.isDirectory() || rootStat.uid !== ownerUid || (rootStat.mode & 0o002) !== 0) {
       throw new Error(`Upload root must be owned by the application and not world-writable: ${root}`);
     }
-    const directory = path.join(root, 'client-documents');
+    for (const child of privateSubdirectories) {
+    const directory = path.join(root, child);
     let stat;
     try { stat = await lstat(directory); } catch (error) {
       if (error.code !== 'ENOENT') throw error;
@@ -76,6 +80,7 @@ export async function protectClientDocumentRoots({
       throw new Error(`Private document root must be a real directory owned by the application: ${directory}`);
     }
     directories.add(directory);
+    }
   }
 
   for (const directory of directories) {
@@ -121,8 +126,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // they are different directories. Deduplicate their resolved roots.
       uploadRoots: [PRODUCTION_UPLOAD_ROOT, configuredUploadRoot(environment, process.env.UPLOAD_DIR), options.publicRoot],
       checkOnly: options.checkOnly,
+      privateSubdirectories: ['client-documents', 'knowledge-base'],
     });
-    console.log(`Private client document storage verified: ${result.privateRoots} owner-only roots; Nginx uid(s): ${result.workerUids.join(', ')}.`);
+    console.log(`Private document and knowledge base storage verified: ${result.privateRoots} owner-only roots; Nginx uid(s): ${result.workerUids.join(', ')}.`);
   }).catch((error) => {
     console.error(error instanceof Error ? error.message : 'Private document storage gate failed');
     process.exitCode = 1;

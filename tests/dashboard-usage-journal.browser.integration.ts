@@ -7,6 +7,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { compile } from 'sass';
+import * as XLSX from 'xlsx';
+import { buildDashboardUsageWorkbook } from '../src/shared/lib/dashboardUsageExport';
+import type { DashboardUsageRow } from '../src/shared/lib/db/dashboardUsageRepo';
 
 async function main() {
   const root = path.resolve('.');
@@ -67,6 +70,9 @@ async function main() {
   let rejectNextSummary = false;
   let delayNextSummary = false;
   let releaseDelayedSummary: (() => void) | null = null;
+  let rejectNextExport = false;
+  let delayNextExport = false;
+  let releaseDelayedExport: (() => void) | null = null;
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (['/', '/admin', '/admin/top', '/admin/dashboard-usage'].includes(url.pathname)) return void res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"><div id="root"></div><script src="/app.js"></script></html>');
@@ -79,6 +85,17 @@ async function main() {
     if (!url.pathname.startsWith('/api/admin/dashboard-usage')) return void res.writeHead(404).end();
     assert.equal(req.method, 'GET'); requests.push(url);
     const json = (body: unknown, status = 200) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
+    if (url.pathname.endsWith('/export')) {
+      if (rejectNextExport) { rejectNextExport = false; return void json({ error: 'Слишком много данных для Excel. Сузьте период или выберите сотрудника (не более 5000 строк).' }, 413); }
+      const output = () => res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+        .end(buildDashboardUsageWorkbook({ view: 'events', rows: Array.from({ length: 121 }, (_, index) => ({ ...event, id: String(1000 - index) } as DashboardUsageRow)) }, {}));
+      if (delayNextExport) { delayNextExport = false; releaseDelayedExport = output; return; }
+      return void output();
+    }
+    if (url.searchParams.get('view') === 'actors') return void json({ actors: [
+      { actorKey: 'manager:1', actorName: 'Одинаковое имя', actorRole: 'manager' },
+      { actorKey: 'admin:2', actorName: 'Одинаковое имя', actorRole: 'top' },
+    ], nextCursor: null });
     if (url.pathname.endsWith('/profitability')) return void json({ invoice: { documentType: 'invoice', invoiceNumber: 'TEST-001',
       currency: 'EUR', dealAmount: 1250, amountSource: 'document', lines: [{ nomenclature: 'Тестовая позиция', quantity: 5 }] } });
     if (url.searchParams.get('view') === 'employees') {
@@ -128,13 +145,16 @@ async function main() {
         const events = page.getByRole('tabpanel', { name: 'События', exact: true });
         const employeeRequests = () => requests.filter(url => url.searchParams.get('view') === 'employee');
         const summaryRequests = () => requests.filter(url => url.searchParams.get('view') === 'employees');
-        const eventRequests = () => requests.filter(url => url.pathname === '/api/admin/dashboard-usage' && !['employee', 'employees'].includes(url.searchParams.get('view') ?? ''));
+        const eventRequests = () => requests.filter(url => url.pathname === '/api/admin/dashboard-usage' && !['employee', 'employees', 'actors'].includes(url.searchParams.get('view') ?? ''));
+        const actorRequests = () => requests.filter(url => url.searchParams.get('view') === 'actors');
+        const exportRequests = () => requests.filter(url => url.pathname.endsWith('/export'));
         const invoiceRequests = () => requests.filter(url => url.pathname.endsWith('/profitability'));
         await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
         assert.equal(await activityTab.getAttribute('aria-selected'), 'true');
         assert.equal(eventRequests().length, 0, 'default activity view never eagerly fetches events');
         assert.equal(employeeRequests().length, 0, 'employee reports are lazy');
         assert.equal(invoiceRequests().length, 0, 'invoice data is never prefetched');
+        assert.equal(actorRequests().length, 0, 'employee picker is also lazy');
         const help = page.locator('details').filter({ has: page.getByText('Как читать журнал', { exact: true }) });
         assert.equal(await help.getAttribute('open'), null, 'help is collapsed initially');
         const journalNavigation = page.getByRole('navigation', { name: 'Навигация журнала' });
@@ -350,7 +370,8 @@ async function main() {
         console.log(`${engineName}: lazy employee/event/invoice dialogs, focus and filter chips passed`);
         await page.screenshot({ path: path.join(screenshots, `${engineName}-desktop.png`), fullPage: true });
         await activityTab.click();
-        await summary.getByRole('button', { name: 'Следующая страница сотрудников', exact: true }).waitFor();
+        await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
+        assert.match(await summary.innerText(), /Страница 1/, 'changing the shared employee filter resets the activity cursor');
         rejectNextSummary = true;
         await summary.getByRole('button', { name: 'Обновить сводку' }).click();
         await summary.getByRole('alert').waitFor();
@@ -371,6 +392,77 @@ async function main() {
         await activityTab.click();
         await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
         assert.equal(await page.getByText('Устаревший ответ', { exact: true }).count(), 0, 'aborted inactive-tab response cannot overwrite the active summary');
+
+        const common = page.getByRole('region', { name: 'Общие фильтры журнала' });
+        await common.getByLabel('Дата с (МСК)').fill('2026-10-14');
+        await common.getByLabel('Дата по (МСК)').fill('2026-10-13');
+        const beforeInvalid = summaryRequests().length;
+        assert.ok(await common.getByRole('button', { name: 'Выгрузить в Excel' }).isDisabled());
+        await common.getByRole('button', { name: 'Применить период' }).click();
+        await common.getByRole('alert').filter({ hasText: 'Начало периода' }).waitFor();
+        assert.equal(summaryRequests().length, beforeInvalid, 'invalid range never queries API');
+        await common.getByLabel('Дата с (МСК)').fill('2026-10-12');
+        await common.getByRole('button', { name: 'Применить период' }).click();
+        await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
+        assert.equal(summaryRequests().at(-1)?.searchParams.get('from'), '2026-10-12');
+        assert.equal(summaryRequests().at(-1)?.searchParams.get('to'), '2026-10-13');
+        await common.locator('summary').click();
+        await common.getByRole('button', { name: /Одинаковое имя.*manager:1/ }).waitFor();
+        assert.equal(actorRequests().length, 1);
+        await common.getByRole('searchbox', { name: 'Поиск сотрудника' }).fill('Одинаковое');
+        await common.getByRole('button', { name: 'Искать', exact: true }).click();
+        await common.getByRole('button', { name: /Одинаковое имя.*admin:2/ }).click();
+        await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
+        assert.equal(summaryRequests().at(-1)?.searchParams.get('actor'), 'admin:2', 'identical names select exact account key');
+        assert.equal(summaryRequests().at(-1)?.searchParams.has('after'), false);
+        await summary.getByRole('button', { name: employee.actorName, exact: true }).click();
+        await employeeDialog.getByRole('button', { name: `События: ${event.dashboardTitle}`, exact: true }).waitFor();
+        assert.equal(employeeRequests().at(-1)?.searchParams.get('from'), '2026-10-12');
+        assert.equal(employeeRequests().at(-1)?.searchParams.get('to'), '2026-10-13');
+        await page.keyboard.press('Escape');
+        await employeeDialog.waitFor({ state: 'hidden' });
+        await summary.getByRole('button', { name: 'Далее', exact: true }).click();
+        await summary.getByRole('button', { name: 'Следующая страница сотрудников', exact: true }).waitFor();
+        const [summaryDownload] = await Promise.all([page.waitForEvent('download'), common.getByRole('button', { name: 'Выгрузить в Excel' }).click()]);
+        await summaryDownload.path();
+        assert.equal(exportRequests().at(-1)?.searchParams.get('view'), 'employees');
+        assert.equal(exportRequests().at(-1)?.searchParams.get('actor'), 'admin:2');
+        assert.equal(exportRequests().at(-1)?.searchParams.get('search'), 'Тестовый');
+        assert.equal(exportRequests().at(-1)?.searchParams.has('after'), false);
+        await eventsTab.click();
+        await events.getByRole('button', { name: /^Подробнее/ }).waitFor();
+        await events.getByRole('combobox', { name: 'Действие', exact: true }).selectOption('file_uploaded');
+        await events.getByRole('checkbox', { name: 'Включить предпросмотры и архив' }).check();
+        await events.getByRole('button', { name: event.dashboardTitle, exact: true }).click();
+        await events.getByRole('button', { name: 'Далее', exact: true }).click();
+        await events.getByRole('button', { name: 'Отчёт второй страницы', exact: true }).waitFor();
+        const [download] = await Promise.all([page.waitForEvent('download'), common.getByRole('button', { name: 'Выгрузить в Excel' }).click()]);
+        const file = await download.path(); assert.ok(file);
+        const workbook = XLSX.read(await readFile(file));
+        assert.equal(XLSX.utils.sheet_to_json(workbook.Sheets['События']).length, 121, 'download is the full filtered result, not the current one-row page');
+        const exportQuery = exportRequests().at(-1)!.searchParams;
+        assert.deepEqual(Object.fromEntries(exportQuery), { view: 'events', from: '2026-10-12', to: '2026-10-13', actor: 'admin:2', dashboard: 'top:10', action: 'file_uploaded', preview: '1' });
+        rejectNextExport = true;
+        await common.getByRole('button', { name: 'Выгрузить в Excel' }).click();
+        await common.getByRole('alert').filter({ hasText: 'Слишком много данных' }).waitFor();
+        assert.ok(await common.getByRole('button', { name: 'Выгрузить в Excel' }).isEnabled());
+        delayNextExport = true; let lateDownloads = 0;
+        const countDownload = () => { lateDownloads++; }; page.on('download', countDownload);
+        await common.getByRole('button', { name: 'Выгрузить в Excel' }).click();
+        for (let attempt = 0; attempt < 50 && !releaseDelayedExport; attempt++) await page.waitForTimeout(10);
+        const releaseExport = releaseDelayedExport as (() => void) | null; assert.ok(releaseExport);
+        await common.getByRole('button', { name: 'Сбросить период' }).click();
+        releaseExport(); releaseDelayedExport = null;
+        await events.getByRole('button', { name: event.dashboardTitle, exact: true }).waitFor();
+        await page.waitForTimeout(100);
+        assert.equal(lateDownloads, 0, 'changing filters aborts old export and ignores late file');
+        page.off('download', countDownload);
+        await common.getByRole('button', { name: 'Все сотрудники', exact: true }).click();
+        await activityTab.click();
+        await summary.getByRole('button', { name: employee.actorName, exact: true }).waitFor();
+        assert.equal(summaryRequests().at(-1)?.searchParams.has('actor'), false);
+        assert.equal(summaryRequests().at(-1)?.searchParams.has('from'), false);
+        console.log(`${engineName}: shared Moscow period/exact employee filters, full XLSX export, overflow and late-response cancellation passed`);
         await page.setViewportSize({ width: 375, height: 812 });
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Tables must scroll inside their wrappers, not overflow mobile viewport');
         await page.screenshot({ path: path.join(screenshots, `${engineName}-mobile.png`), fullPage: true });

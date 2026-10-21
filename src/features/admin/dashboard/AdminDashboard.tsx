@@ -31,6 +31,13 @@ function DashboardUsageCard() {
   );
 }
 
+function KnowledgeBaseCard() {
+  return <Link className={interactiveCardClassName} href="/admin/knowledge-base">
+    <div><h2>База знаний</h2><p>Папки с инструкциями, положениями и регламентами. Материалы, доступные вам по назначению администратора.</p></div>
+    <span className={styles.dashboardCardLink}>Открыть материалы</span>
+  </Link>;
+}
+
 export function AdminDashboard({
   canAccessSite,
   canManageUsers = false,
@@ -50,6 +57,7 @@ export function AdminDashboard({
         aria-label="Разделы панели управления"
       >
         {canReviewUsage && <DashboardUsageCard />}
+        <KnowledgeBaseCard />
         <Link className={interactiveCardClassName} href="/admin/top" replace scroll={false}>
           <div>
             <h2>HTML-страницы и отчёты</h2>
@@ -68,6 +76,7 @@ export function AdminDashboard({
   return (
     <section className={styles.dashboardGrid} aria-label="Разделы панели управления">
       {canReviewUsage && <DashboardUsageCard />}
+      <KnowledgeBaseCard />
       {canAccessSite ? (
         <Link className={interactiveCardClassName} href="/admin/site" replace scroll={false}>
           <div>

@@ -122,14 +122,15 @@ test('journal return link uses the standard admin label and preserves ordinary n
     './UsageActivityTab': { UsageActivityTab: () => null },
     './UsageEventsTab': { UsageEventsTab: () => null },
     './UsageDetailsDrawer': { UsageDetailsDrawer: () => null },
-    './usage-journal-shared': { firstPage: () => [''], emptyEventFilters: {} },
+    './UsageScopeFilters': { UsageScopeFilters: () => null },
+    './usage-journal-shared': { firstPage: () => [''], emptyEventFilters: {}, emptyUsagePeriod: { from: '', to: '' } },
     './dashboard-usage.module.scss': { default: new Proxy({}, { get: (_, name) => String(name) }) },
   };
   const code = ts.transpileModule(readFileSync('src/features/admin/dashboard-usage/DashboardUsageJournal.tsx', 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const exports: { DashboardUsageJournal?: typeof import('../src/features/admin/dashboard-usage/DashboardUsageJournal').DashboardUsageJournal } = {};
-  vm.runInNewContext(code, { exports, require: (name: string) => {
+  vm.runInNewContext(code, { exports, URLSearchParams, require: (name: string) => {
     assert.ok(Object.hasOwn(dependencies, name), `Unexpected dependency: ${name}`);
     return dependencies[name];
   } });

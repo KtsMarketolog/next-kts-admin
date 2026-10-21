@@ -5,7 +5,8 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 import { UsageActivityTab, type ActivityViewState } from './UsageActivityTab';
 import { UsageEventsTab, type EventsViewState } from './UsageEventsTab';
 import { UsageDetailsDrawer } from './UsageDetailsDrawer';
-import { emptyEventFilters, firstPage, type UsageSelection } from './usage-journal-shared';
+import { emptyEventFilters, emptyUsagePeriod, firstPage, type UsagePeriod, type UsageSelection } from './usage-journal-shared';
+import { UsageScopeFilters } from './UsageScopeFilters';
 import styles from './dashboard-usage.module.scss';
 
 type Tab = 'activity' | 'events';
@@ -14,6 +15,15 @@ export function DashboardUsageJournal() {
   const [activity, setActivity] = useState<ActivityViewState>({ search: '', draft: '', pages: firstPage() });
   const [events, setEvents] = useState<EventsViewState>({ filter: { ...emptyEventFilters }, pages: firstPage() });
   const [selection, setSelection] = useState<UsageSelection | null>(null);
+  const [period, setPeriod] = useState<UsagePeriod>(emptyUsagePeriod);
+  const changeEvents = (next: EventsViewState) => {
+    if (next.filter.actor !== events.filter.actor) setActivity(current => ({ ...current, pages: firstPage() }));
+    setEvents(next);
+  };
+  const exportParams = new URLSearchParams({ view: tab === 'activity' ? 'employees' : 'events' });
+  const exportFilters = { ...period, actor: events.filter.actor, ...(tab === 'activity' ? { search: activity.search }
+    : { dashboard: events.filter.dashboard, action: events.filter.action, preview: events.filter.preview ? '1' : '' }) };
+  for (const [key, value] of Object.entries(exportFilters)) if (value) exportParams.set(key, value);
   const activityTab = useRef<HTMLButtonElement>(null), eventsTab = useRef<HTMLButtonElement>(null);
   const switchTab = (next: Tab, focus = false) => {
     setTab(next);
@@ -50,15 +60,19 @@ export function DashboardUsageJournal() {
         <button ref={eventsTab} id="usage-events-tab" type="button" role="tab" aria-selected={tab === 'events'} aria-controls="usage-events-panel"
           tabIndex={tab === 'events' ? 0 : -1} onKeyDown={tabKeys} onClick={() => switchTab('events')}>События</button>
       </div>
+      <UsageScopeFilters period={period} actor={events.filter.actor} actorName={events.filter.actorName}
+        exportUrl={`/api/admin/dashboard-usage/export?${exportParams}`}
+        onPeriod={next => { setPeriod(next); setActivity(current => ({ ...current, pages: firstPage() })); setEvents(current => ({ ...current, pages: firstPage() })); setSelection(null); }}
+        onActor={person => changeEvents({ filter: { ...events.filter, actor: person?.actorKey ?? '', actorName: person?.actorName ?? '' }, pages: firstPage() })} />
       <div id="usage-activity-panel" role="tabpanel" aria-labelledby="usage-activity-tab" hidden={tab !== 'activity'}>
-        {tab === 'activity' && <UsageActivityTab state={activity} onChange={setActivity} onSelect={(employee) => setSelection({ kind: 'employee', person: employee, summary: employee })} />}
+        {tab === 'activity' && <UsageActivityTab state={activity} period={period} actor={events.filter.actor} onChange={setActivity} onSelect={(employee) => setSelection({ kind: 'employee', person: employee, summary: employee })} />}
       </div>
       <div id="usage-events-panel" role="tabpanel" aria-labelledby="usage-events-tab" hidden={tab !== 'events'}>
-        {tab === 'events' && <UsageEventsTab state={events} onChange={setEvents} onSelect={setSelection} />}
+        {tab === 'events' && <UsageEventsTab state={events} period={period} onChange={changeEvents} onSelect={setSelection} />}
       </div>
-      {selection && <UsageDetailsDrawer key={selection.kind === 'employee' ? selection.person.actorKey : selection.event.id} selection={selection}
+      {selection && <UsageDetailsDrawer key={selection.kind === 'employee' ? selection.person.actorKey : selection.event.id} selection={selection} period={period}
         onClose={() => setSelection(null)} onViewEvents={(person, dashboard) => {
-          setEvents({ filter: { ...emptyEventFilters, actor: person.actorKey, actorName: person.actorName,
+          changeEvents({ filter: { ...emptyEventFilters, actor: person.actorKey, actorName: person.actorName,
             dashboard: dashboard?.key ?? '', dashboardName: dashboard?.title ?? '' }, pages: firstPage() });
           setSelection(null); switchTab('events');
           // The originating row may be unmounted after switching tabs; focus the destination tab instead.

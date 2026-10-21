@@ -13,7 +13,7 @@ function normalizePath(pathname: string) {
   return `/${segments.join('/')}`.toLowerCase();
 }
 
-function matchesDecodedPath(value: string, predicate: (pathname: string) => boolean) {
+export function matchesDecodedPath(value: string, predicate: (pathname: string) => boolean) {
   let decoded = value;
   // Check each decoding layer, including ASCII escapes beside malformed UTF-8.
   // Both proxy/static lookup and the image optimizer can normalize these paths.

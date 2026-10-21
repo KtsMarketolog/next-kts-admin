@@ -2,21 +2,21 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ProfitabilityInvoice } from '@/shared/lib/dashboardProfitabilityAudit';
 import type { DashboardUsageEmployeeReports, DashboardUsageRow } from '@/shared/lib/db/dashboardUsageRepo';
-import { eventLabel, eventMode, firstPage, formatDuration, formatFileSize, formatTimestamp, roleLabels, uploadTypes, usageUrl, type UsagePerson, type UsageSelection } from './usage-journal-shared';
+import { eventLabel, eventMode, firstPage, formatDuration, formatFileSize, formatTimestamp, roleLabels, uploadTypes, usagePeriodLabel, usageUrl, type UsagePeriod, type UsagePerson, type UsageSelection } from './usage-journal-shared';
 import { useUsagePage } from './useUsagePage';
 import { UsagePagination } from './UsagePagination';
 import styles from './dashboard-usage.module.scss';
 
 type ViewEvents = (person: UsagePerson, dashboard?: { key: string; title: string }) => void;
 
-function EmployeeDetails({ selection, onViewEvents }: { selection: Extract<UsageSelection, { kind: 'employee' }>; onViewEvents: ViewEvents }) {
+function EmployeeDetails({ selection, period, onViewEvents }: { selection: Extract<UsageSelection, { kind: 'employee' }>; period: UsagePeriod; onViewEvents: ViewEvents }) {
   const { person, summary } = selection;
   const [pages, setPages] = useState(firstPage);
   const reportsRef = useRef<HTMLElement>(null);
   const { data, busy, error, reload } = useUsagePage<DashboardUsageEmployeeReports>(
-    usageUrl({ view: 'employee', actor: person.actorKey }, pages), 'Не удалось загрузить отчёты сотрудника');
+    usageUrl({ view: 'employee', actor: person.actorKey, ...period }, pages), 'Не удалось загрузить отчёты сотрудника');
   return <>
-    <p className={styles.role}>{roleLabels[person.actorRole] ?? person.actorRole} · последний месяц</p>
+    <p className={styles.role}>{roleLabels[person.actorRole] ?? person.actorRole} · {usagePeriodLabel(period)}</p>
     {summary && <>
       <dl className={styles.metrics}>
         <div><dt>Отчёты</dt><dd>{summary.reportCount}</dd></div><div><dt>Действия</dt><dd>{summary.interactionCount}</dd></div>
@@ -31,7 +31,7 @@ function EmployeeDetails({ selection, onViewEvents }: { selection: Extract<Usage
     </>}
     <button className={styles.primaryButton} type="button" onClick={() => onViewEvents(person)}>Посмотреть события</button>
     <section ref={reportsRef} aria-labelledby="usage-employee-reports-heading" className={styles.reportSection}>
-      <h3 id="usage-employee-reports-heading">Отчёты сотрудника за последний месяц</h3>
+      <h3 id="usage-employee-reports-heading">Отчёты сотрудника за выбранный период</h3>
       <p className={styles.notice}>Открытия, действия и загрузки файлов по каждому отчёту. Предпросмотры и архив не входят в итоги.</p>
       {error && <div role="alert" className={styles.error}>{error} <button type="button" onClick={reload}>Повторить</button></div>}
       {busy && <p role="status">Загружаем отчёты сотрудника…</p>}
@@ -96,8 +96,8 @@ function EventDetails({ event, onViewEvents }: { event: DashboardUsageRow; onVie
   </>;
 }
 
-export function UsageDetailsDrawer({ selection, onClose, onViewEvents }: {
-  selection: UsageSelection; onClose: () => void; onViewEvents: ViewEvents;
+export function UsageDetailsDrawer({ selection, period, onClose, onViewEvents }: {
+  selection: UsageSelection; period: UsagePeriod; onClose: () => void; onViewEvents: ViewEvents;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -121,7 +121,7 @@ export function UsageDetailsDrawer({ selection, onClose, onViewEvents }: {
       <header className={styles.drawerHeader}><h2 id="usage-drawer-title">{title}</h2>
         <button type="button" aria-label="Закрыть подробности" onClick={onClose}>Закрыть <span aria-hidden="true">×</span></button></header>
       <div className={styles.drawerBody}>
-        {selection.kind === 'employee' ? <EmployeeDetails selection={selection} onViewEvents={onViewEvents} />
+        {selection.kind === 'employee' ? <EmployeeDetails selection={selection} period={period} onViewEvents={onViewEvents} />
           : <EventDetails event={selection.event} onViewEvents={onViewEvents} />}
       </div>
     </div>

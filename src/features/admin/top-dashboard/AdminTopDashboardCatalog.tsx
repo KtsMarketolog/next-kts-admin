@@ -197,6 +197,7 @@ export function AdminTopDashboardCatalog({ canManage, canReadTopBlocks = true, c
           : 'Откройте нужный отчёт — актуальные данные уже сохранены и загрузятся автоматически.'}
       </p>
       <p><Link href="/admin/top/paired">Два отчёта на одном экране</Link></p>
+      <p><Link href="/admin/knowledge-base">База знаний: инструкции и регламенты</Link></p>
       {canReviewUsage ? <p><Link href="/admin/dashboard-usage">История использования дашбордов</Link></p> : null}
 
       <div className={styles.topDashboardCatalogGrid} aria-busy={loading}>

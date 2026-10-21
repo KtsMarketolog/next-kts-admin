@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { canReviewDashboardUsage } from '../src/shared/lib/dashboardUsageAccess';
 import { DASHBOARD_USAGE_LABELS, isDashboardUsageAction, isDashboardUsageKey, parseDashboardUsageBatch } from '../src/shared/lib/dashboardUsage';
+import * as usageFilters from '../src/shared/lib/dashboardUsageFilters';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import type { listDashboardUsageEmployees, listDashboardUsageEmployeeReports, listDashboardUsage } from '../src/shared/lib/db/dashboardUsageRepo';
 
@@ -48,7 +49,7 @@ function repoFixture(rows = [employeeRow(), employeeRow(2, true)], details: {
   const calls: Array<{ sql: string; params?: unknown[] }> = [];
   const run = async (sql: string, params?: unknown[]) => {
     calls.push({ sql, params });
-    if (sql.startsWith('select (')) return { rows: [{ period_start: new Date('2026-09-13T06:00:00Z'), generated_at: new Date('2026-10-13T06:00:00Z') }] };
+    if (sql.startsWith('select greatest(')) return { rows: [{ period_start: new Date('2026-09-13T06:00:00Z'), period_end: new Date('2026-10-13T06:00:00Z'), generated_at: new Date('2026-10-13T06:00:00Z') }] };
     if (sql.startsWith('with employees')) return { rows };
     if (sql.startsWith('select event.id::text')) return { rows: details.events ?? [] };
     if (sql.startsWith('with events as materialized')) return { rows: details.reports ?? [] };
@@ -57,6 +58,7 @@ function repoFixture(rows = [employeeRow(), employeeRow(2, true)], details: {
   const repo = compile('src/shared/lib/db/dashboardUsageRepo.ts', {
     '../adminAuth': {}, '../dashboardAccess': {}, '../currencyDashboardAccess': {},
     '../dashboardUsage': { parseDashboardUsageBatch },
+    '../dashboardUsageFilters': usageFilters,
     './schema': { ensureSiteSchema: async () => {} },
     './client': { query: run, withTransaction: async (callback: (client: { query: typeof run }) => Promise<unknown>) => callback({ query: run }) },
   });
@@ -103,7 +105,7 @@ test('employee summary paginates at 50, parameterizes literal search, bounds run
   assert.match(query.sql, /position\(lower\(\$2\) in lower\(actor_name\)\)/);
   assert.match(query.sql, /order by actor_key limit 51/);
   assert.doesNotMatch(query.sql, /%_'; --/);
-  for (const after of ['admin:primary', 'manager:0', 'admin:1;delete', 'admin:9999999999999999']) {
+  for (const after of ['manager:primary', 'manager:0', 'admin:1;delete', 'admin:9999999999999999']) {
     await assert.rejects(summary({ after }), /Некорректный фильтр/);
   }
   await assert.rejects(summary({ search: 'x'.repeat(101) }), /Некорректный фильтр/);
@@ -120,9 +122,10 @@ test('detailed history excludes previews by default and permits an explicit incl
   const { list, calls } = repoFixture();
   await list({ actorKey: 'admin:1' });
   await list({ actorKey: 'admin:1', includePreview: true });
-  assert.equal(calls[0].params?.[4], false);
-  assert.equal(calls[1].params?.[4], true);
-  assert.match(calls[0].sql, /\(\$5::boolean or not event\.is_preview\)/);
+  const reads = calls.filter(call => call.sql.startsWith('select event.id::text'));
+  assert.equal(reads[0].params?.[4], false);
+  assert.equal(reads[1].params?.[4], true);
+  assert.match(reads[0].sql, /\(\$5::boolean or not event\.is_preview\)/);
 });
 
 test('all three read models return independent pages of at most 50 with a correct last-row cursor', async () => {
@@ -165,14 +168,14 @@ test('page cursors use the same strict keyset order as SQL, remain opaque and ca
   assert.match(reportsQuery.sql, /order by activity\.dashboard_key/);
   assert.equal(reportsQuery.params?.[0], 'manager:12');
   assert.equal(reportsQuery.params?.[1], 'top:9');
-  assert.equal(fixture.calls.filter(call => call.sql === "set local statement_timeout='5s'").length, 2);
+  assert.equal(fixture.calls.filter(call => call.sql === "set local statement_timeout='5s'").length, 3);
   assert.match(eventsQuery.sql, /event\.id < \$1::bigint/);
   assert.match(eventsQuery.sql, /order by event\.id desc limit 51/);
   assert.equal(eventsQuery.params?.[0], '9007199254740993', 'Event IDs are never rounded through JavaScript Number');
-  assert.deepEqual(Array.from(eventsQuery.params ?? []), ['9007199254740993', 'top:9', 'manager:12', 'data_loaded', true]);
+  assert.deepEqual(Array.from(eventsQuery.params ?? []), ['9007199254740993', 'top:9', 'manager:12', 'data_loaded', true, null, null, '']);
   for (const { sql } of [employeeQuery, reportsQuery, eventsQuery]) assert.doesNotMatch(sql, /\boffset\b/i);
   assert.equal((await fixture.list({})).events.length, 1);
-  assert.deepEqual(Array.from(fixture.calls.at(-1)!.params ?? []), [null, null, null, null, false], 'No previous cursor or filter leaks into a new request');
+  assert.deepEqual(Array.from(fixture.calls.at(-1)!.params ?? []), [null, null, null, null, false, null, null, ''], 'No previous cursor or filter leaks into a new request');
 });
 
 function routeFixture(session: AdminSession | null, limited: Response | null = null) {
@@ -182,10 +185,12 @@ function routeFixture(session: AdminSession | null, limited: Response | null = n
     '@/shared/lib/adminSecurity': { enforceAdminActionRateLimit: async () => limited },
     '@/shared/lib/dashboardAccess': {}, '@/shared/lib/currencyDashboardAccess': {},
     '@/shared/lib/dashboardUsage': { isDashboardUsageAction, isDashboardUsageKey },
+    '@/shared/lib/dashboardUsageFilters': usageFilters,
     '@/shared/lib/db/dashboardUsageRepo': {
       listDashboardUsageEmployees: async (input: unknown) => { calls.push({ method: 'summary', input }); return { employees: [] }; },
       listDashboardUsageEmployeeReports: async (input: unknown) => { calls.push({ method: 'employee', input }); return { reports: [] }; },
       listDashboardUsage: async (input: unknown) => { calls.push({ method: 'events', input }); return { events: [] }; },
+      listDashboardUsageActors: async (input: unknown) => { calls.push({ method: 'actors', input }); return { actors: [] }; },
     },
     '@/shared/lib/originProtection': {}, '@/shared/lib/dashboardUsageAccess': { canReviewDashboardUsage },
     '@/shared/lib/dashboardUsageDelivery': {},
@@ -196,7 +201,7 @@ function routeFixture(session: AdminSession | null, limited: Response | null = n
 const admin: AdminSession = { role: 'admin', sessionId: 'session', adminUserId: 1 };
 
 test('all journal read views keep the exact admin/admintop/top gate, private caching and read limits', async () => {
-  for (const params of ['view=employees', 'view=employee&actor=manager:3', 'actor=manager:3']) {
+  for (const params of ['view=employees', 'view=employee&actor=manager:3', 'actor=manager:3', 'view=actors&search=Имя']) {
     const request = () => new Request(`https://kts.test/api/admin/dashboard-usage?${params}`);
     for (const role of ['admin', 'admintop', 'top', 'manager', 'support_manager', 'purchaser', 'wholesale_admin'] as const) {
       const { get, calls } = routeFixture({ ...admin, role, managerId: 3 });

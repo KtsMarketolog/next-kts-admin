@@ -28,6 +28,14 @@ export const eventMode = (row: DashboardUsageRow) => row.preview ? 'Предпр
   : row.action === 'file_uploaded' ? 'Сохранено на сайте' : 'Опубликованный отчёт';
 
 export type UsagePerson = Pick<DashboardUsageEmployee, 'actorKey' | 'actorName' | 'actorRole'>;
+export type UsagePeriod = { from: string; to: string };
+export const emptyUsagePeriod: UsagePeriod = { from: '', to: '' };
+export function usagePeriodLabel(period: UsagePeriod) {
+  const day = (value: string) => value.split('-').reverse().join('.');
+  return period.from || period.to
+    ? `${period.from ? `С ${day(period.from)}` : 'Начало доступной истории'}${period.to ? ` по ${day(period.to)} включительно` : ' — по настоящее время'} · МСК`
+    : 'Последний месяц · МСК';
+}
 export type UsageSelection = { kind: 'employee'; person: UsagePerson; summary?: DashboardUsageEmployee }
   | { kind: 'event'; event: DashboardUsageRow };
 export type EventFilters = { actor: string; actorName: string; dashboard: string; dashboardName: string; action: string; preview: boolean };

@@ -1,18 +1,19 @@
 import { Fragment, useEffect, useRef } from 'react';
 import { DASHBOARD_USAGE_ACTIONS, DASHBOARD_USAGE_LABELS } from '@/shared/lib/dashboardUsage';
 import type { DashboardUsageRow } from '@/shared/lib/db/dashboardUsageRepo';
-import { emptyEventFilters, eventLabel, firstPage, formatDay, formatTime, roleLabels, usageUrl, type EventFilters, type UsagePagePosition, type UsageSelection } from './usage-journal-shared';
+import { emptyEventFilters, eventLabel, firstPage, formatDay, formatTime, roleLabels, usagePeriodLabel, usageUrl, type UsagePeriod, type EventFilters, type UsagePagePosition, type UsageSelection } from './usage-journal-shared';
 import { useUsagePage } from './useUsagePage';
 import { UsagePagination } from './UsagePagination';
 import styles from './dashboard-usage.module.scss';
 
 export type EventsViewState = { filter: EventFilters; pages: UsagePagePosition };
-export function UsageEventsTab({ state, onChange, onSelect }: {
+export function UsageEventsTab({ state, period, onChange, onSelect }: {
   state: EventsViewState; onChange: (state: EventsViewState) => void; onSelect: (selection: UsageSelection) => void;
+  period: UsagePeriod;
 }) {
   const { filter, pages } = state;
   const { data, error, busy, reload } = useUsagePage<{ events: DashboardUsageRow[]; nextCursor: string | null }>(
-    usageUrl({ actor: filter.actor, dashboard: filter.dashboard, action: filter.action, preview: filter.preview ? '1' : '' }, pages, 'before'),
+    usageUrl({ ...period, actor: filter.actor, dashboard: filter.dashboard, action: filter.action, preview: filter.preview ? '1' : '' }, pages, 'before'),
     'Не удалось загрузить журнал');
   const tableRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (tableRef.current) tableRef.current.scrollTop = 0; }, [pages, filter]);
@@ -20,7 +21,7 @@ export function UsageEventsTab({ state, onChange, onSelect }: {
   return <section aria-labelledby="usage-events-heading">
     <div className={styles.sectionHeader}><div><h2 id="usage-events-heading">События</h2>
       <p className={styles.notice}>Сначала новые записи. Нажмите «Подробнее», чтобы увидеть файл, режим и детализацию счёта.</p></div>
-      <span className={styles.period}>Последний месяц · МСК</span></div>
+      <span className={styles.period}>{usagePeriodLabel(period)}</span></div>
     <div className={styles.filters}>
       <label>Действие<select value={filter.action} onChange={(event) => changeFilter({ action: event.target.value })}>
         <option value="">Все действия</option>{DASHBOARD_USAGE_ACTIONS.map((action) => <option key={action} value={action}>{DASHBOARD_USAGE_LABELS[action]}</option>)}
@@ -33,7 +34,7 @@ export function UsageEventsTab({ state, onChange, onSelect }: {
       {filter.actor && <button type="button" onClick={() => changeFilter({ actor: '', actorName: '' })} aria-label="Убрать фильтр сотрудника">{filter.actorName || filter.actor} <span aria-hidden="true">×</span></button>}
       {filter.dashboard && <button type="button" onClick={() => changeFilter({ dashboard: '', dashboardName: '' })} aria-label="Убрать фильтр дашборда">{filter.dashboardName || filter.dashboard} <span aria-hidden="true">×</span></button>}
     </div>}
-    <p className={styles.notice}>Фильтр по сотруднику — через его карточку; по дашборду — нажатием на название. Интервалы просмотра показываются только при выборе «Время видимого отчёта».</p>
+    <p className={styles.notice}>Сотрудника можно выбрать сверху или через его карточку; дашборд — нажатием на название. Интервалы просмотра показываются только при выборе «Время видимого отчёта».</p>
     {error && <div className={styles.error} role="alert">{error} <button type="button" onClick={reload}>Повторить</button></div>}
     {busy && <p className={styles.empty} role="status">Загружаем журнал…</p>}
     {data && <div ref={tableRef} className={styles.table} tabIndex={0} role="region" aria-label="Таблица событий"><table className={styles.eventsTable}>
