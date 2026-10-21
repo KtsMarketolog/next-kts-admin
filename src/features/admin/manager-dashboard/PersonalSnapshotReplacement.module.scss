@@ -1,0 +1,13 @@
+.confirmation { border: 1px solid #d8d2f4; border-radius: 12px; padding: 20px; overflow-wrap: anywhere; }
+.confirmation:focus-visible { outline: 2px solid #2d168c; outline-offset: 3px; }
+.comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.file { min-width: 0; background: #f7f7fb; border: 1px solid #e4e7ee; border-radius: 10px; padding: 16px; }
+.file h4 { margin: 0 0 12px; font-size: 14px; color: #697387; }
+.file strong { display: block; overflow-wrap: anywhere; }
+.file dl { display: grid; gap: 10px; margin: 16px 0 0; font-size: 14px; }
+.file dt { color: #697387; }
+.file dd { margin: 2px 0 0; }
+.digest { margin-top: 14px; font-size: 12px; color: #697387; }
+.digest summary { cursor: pointer; }
+.digest code { display: block; overflow-wrap: anywhere; margin-top: 8px; }
+@media (max-width: 700px) { .comparison { grid-template-columns: minmax(0, 1fr); } .confirmation { padding: 14px; } }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { recordPersonalSnapshotUploadUsage } from '@/shared/lib/dashboardUploadUsage';
+import { getDashboardUploadUsageActor, scheduleDashboardUploadUsageDrain } from '@/shared/lib/dashboardUploadUsage';
 import { getPersonalDashboardSnapshot, importPersonalDashboardSnapshot, recordPersonalDashboardImportFailure } from '@/shared/lib/db/managerDashboardRepo';
 import { personalDashboardSafeFilename } from '@/shared/lib/managerDashboardDomain';
 import { PERSONAL_PRIVATE_HEADERS, parsePersonalDashboardId } from '@/shared/lib/managerDashboardSecurity';
@@ -46,12 +46,10 @@ export async function POST(request: Request) {
         continue;
       }
       try {
-        const result = await importPersonalDashboardSnapshot({filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), sourceKey});
+        const result = await importPersonalDashboardSnapshot({filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), sourceKey,
+          usageActor: getDashboardUploadUsageActor(access.session)});
         results.push(result);
-        if (result.status === 'imported' && (result.managerId || result.adminUserId) && result.snapshotId) {
-          await recordPersonalSnapshotUploadUsage(access.session, { managerId: result.managerId ?? undefined, adminUserId: result.adminUserId ?? undefined, snapshotId: result.snapshotId,
-            name: result.originalName, size: file.size });
-        }
+        if (result.status === 'imported') scheduleDashboardUploadUsageDrain();
       } catch {
         // Preserve successful items and continue the batch; never return a DB/library error.
         await recordPersonalDashboardImportFailure({filename: file.name, sourceKey: `${sourceKey}:failure`, code: 'ATTACHMENT_FAILED'}).catch(() => {});

@@ -58,7 +58,7 @@ function api(role: Role = 'admin', options: {
   const route = compile<typeof import('../src/app/api/admin/manager-dashboard/shared/json/route')>(
     '../src/app/api/admin/manager-dashboard/shared/json/route.ts', {
       'node:stream': {Readable}, '@/shared/lib/managerDashboardDomain': {PersonalDashboardError},
-      '@/shared/lib/dashboardUploadUsage': { recordDashboardUploadUsage: async (_session: unknown, input: Record<string, unknown>) => { uploadUsage.push(input); return true; } },
+      '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:7', actorRole: role}), scheduleDashboardUploadUsageDrain() { uploadUsage.push({}); } },
       '@/shared/lib/managerDashboardSecurity': security, '../../_shared': base, '../_shared': shared,
       '@/shared/lib/db/supportSharedDashboardRepo': {
         assertSupportSharedJsonUploadTarget: observe('preflight', () => {if (options.preflightError) throw options.preflightError;}),
@@ -140,14 +140,15 @@ test('JSON import preserves committed bytes and returns metadata without file pa
   const response = await harness.route.POST(upload());
   assert.equal(response.status, 201);
   assert.equal(harness.uploadUsage.length, 1);
-  assert.deepEqual(harness.uploadUsage[0], { dashboardKey: 'route-planner', versionId: 8, resourceKey: 'shared-json:9', name: 'маршруты.json', size: 18, type: 'data' });
+  assert.deepEqual((harness.calls.find(call => call.name === 'import')!.args[0] as {usageActor: unknown}).usageActor, {actorKey: 'admin:7', actorRole: 'admintop'});
   const result = await response.json();
   assert.deepEqual(result.snapshot, harness.snapshot);
   assert.equal('prunedStoragePaths' in result, false);
   assert.match(response.headers.get('cache-control')!, /private.*no-store/);
   assert.deepEqual(harness.calls.map((call) => call.name), ['preflight', 'lock', 'prepare', 'commit', 'import', 'preserve', 'prune', 'discard', 'release']);
   assert.deepEqual(harness.calls.find((call) => call.name === 'import')!.args, [{htmlVersionId: 8, expectedActiveSnapshotId: null,
-    originalName: 'маршруты.json', savedAt: harness.snapshot.savedAt, fileSize: 18, sha256: 'a'.repeat(64), storagePath: 'aa/file.bin', actorId: 'admintop:7'}]);
+    originalName: 'маршруты.json', savedAt: harness.snapshot.savedAt, fileSize: 18, sha256: 'a'.repeat(64), storagePath: 'aa/file.bin', actorId: 'admintop:7',
+    usageActor: {actorKey: 'admin:7', actorRole: 'admintop'}}]);
 });
 
 test('duplicates discard only incoming bytes; known rejection discards; uncertain commit preserves recovery bytes', async () => {

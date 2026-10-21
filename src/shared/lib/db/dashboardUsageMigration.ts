@@ -24,3 +24,14 @@ export async function applyDashboardUsageMigration(client: PoolClient) {
 export async function applyDashboardUsageRetentionMigration(client: PoolClient) {
   await client.query('create index dashboard_usage_events_retention_idx on dashboard_usage_events(created_at,id)');
 }
+
+/** Preserve receipt-time ordering; delayed browser clocks are explicitly separate and untrusted. */
+export async function applyDashboardUsageCapturedTimeMigration(client: PoolClient) {
+  await client.query(`alter table dashboard_usage_events
+    add column captured_at timestamptz,
+    add column captured_source text,
+    add constraint dashboard_usage_capture_source_check check (
+      (captured_at is null and captured_source is null)
+      or (captured_at is not null and captured_source is not null and captured_source in ('browser','server'))
+    )`);
+}

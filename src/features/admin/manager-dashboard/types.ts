@@ -1,4 +1,5 @@
 import type { PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
+import type { PersonalSnapshotReplacementPreview } from '@/shared/lib/managerDashboardSnapshotReplacement';
 
 export type ManagerDashboardSnapshot = {
   id: number;
@@ -25,6 +26,8 @@ export type ManagerDashboardImport = {
   message?: string;
   createdAt?: string;
   receivedAt?: string;
+  performedBy?: string | null;
+  performedByKey?: string | null;
 };
 
 export type ManagerDashboardSnapshotStatus = 'current' | 'stale' | 'expired' | 'missing';
@@ -43,6 +46,7 @@ export type ManagerDashboardGroup = {
     isActive?: boolean;
     bindingStatus?: 'matched' | 'unknown' | 'ambiguous';
     snapshot: ManagerDashboardSnapshot | null;
+    previousSnapshot?: ManagerDashboardSnapshot | null;
     snapshotStatus?: ManagerDashboardSnapshotStatus;
   }>;
 };
@@ -104,6 +108,7 @@ export type ManagerDashboardOverview = {
 };
 
 export type ManagerDashboardMutationResult = {
+  preview?: PersonalSnapshotReplacementPreview;
   /** Client-only: the write succeeded, but cancellation must stop a batch. */
   cancelledAfterSave?: boolean;
   results?: ManagerDashboardImport[];

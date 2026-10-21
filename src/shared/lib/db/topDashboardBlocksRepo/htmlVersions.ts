@@ -19,6 +19,7 @@ import {
   type TopDashboardVersionRow,
 } from './records';
 import { withTransaction } from '../client';
+import { enqueueDashboardUploadUsage } from '../dashboardUploadUsageOutboxRepo';
 
 export const TOP_DASHBOARD_VERSION_LIMIT = 50;
 
@@ -94,8 +95,13 @@ export async function createTopDashboardBlockVersion(
       [input.blockId],
     );
 
+    const version = mapVersion(result.rows[0], null);
+    if (input.usageActor) await enqueueDashboardUploadUsage(client, input.usageActor, {
+      dashboardKey: `top:${input.blockId}`, versionId: version.id,
+      resourceKey: `top-html:${input.blockId}:${version.id}`, name: version.originalName, size: version.fileSize, type: 'html',
+    });
     return {
-      version: mapVersion(result.rows[0], null),
+      version,
       prunedStoragePaths: [],
     };
   });

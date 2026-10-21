@@ -25,6 +25,7 @@ import {
 import { normalizeDashboardDataDate } from '../../dashboardDates';
 import { pruneDashboardDataVersions } from './history';
 import { withTransaction } from '../client';
+import { enqueueDashboardUploadUsage } from '../dashboardUploadUsageOutboxRepo';
 
 export async function createAndActivateTopDashboardBlockDataVersion(
   input: CreateAndActivateTopDashboardBlockDataVersionInput,
@@ -148,6 +149,11 @@ export async function createAndActivateTopDashboardBlockDataVersion(
     );
     const versionRow = versionResult.rows[0];
     const versionId = Number(versionRow.id);
+    if (input.usageActor) await enqueueDashboardUploadUsage(client, input.usageActor, {
+      dashboardKey: `top:${input.blockId}`, versionId: input.expectedActiveHtmlVersionId,
+      resourceKey: `top-data:${input.blockId}:${versionId}`, name: versionRow.original_name,
+      size: Number(versionRow.file_size), type: 'data',
+    });
 
     const updatedStateResult = await client.query<TopDashboardStateRow>(
       `update top_dashboard_block_data_state

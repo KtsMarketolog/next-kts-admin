@@ -12,11 +12,12 @@ const timestamp = (value: string | null) => value ? new Intl.DateTimeFormat('ru-
 export function buildDashboardUsageWorkbook(data: DashboardUsageExport, filters: DashboardUsageFilters): Buffer {
   if (data.rows.length > DASHBOARD_USAGE_EXPORT_LIMIT) throw new DashboardUsageExportLimitError();
   const rows: (string | number)[][] = data.view === 'events'
-    ? [['ID события', 'Зарегистрировано, МСК', 'Код сотрудника', 'Сотрудник', 'Роль', 'Код дашборда', 'Дашборд', 'Действие', 'Режим', 'Версия HTML', 'Имя файла', 'Размер файла, байт', 'Время видимого отчёта, с'],
+    ? [['ID события', 'Зарегистрировано, МСК', 'Код сотрудника', 'Сотрудник', 'Роль', 'Код дашборда', 'Дашборд', 'Действие', 'Режим', 'Версия HTML', 'Имя файла', 'Размер файла, байт', 'Время видимого отчёта, с', 'Зафиксировано источником, МСК', 'Источник времени'],
       ...data.rows.map(row => [row.id, timestamp(row.createdAt), row.actorKey, row.actorName, roles[row.actorRole] ?? row.actorRole,
         row.dashboardKey, row.dashboardTitle, row.hasProfitabilityDetails ? 'Загружен счёт / КП' : DASHBOARD_USAGE_LABELS[row.action],
         row.preview ? 'Предпросмотр / архив' : row.action === 'file_uploaded' ? 'Сохранено на сайте' : 'Опубликованный отчёт', row.versionId ?? '',
-        row.upload?.name ?? '', row.upload?.size ?? '', row.durationSeconds ?? ''])]
+        row.upload?.name ?? '', row.upload?.size ?? '', row.durationSeconds ?? '', timestamp(row.capturedAt ?? null),
+        row.capturedSource === 'browser' ? 'Часы браузера (не подтверждены сервером)' : row.capturedSource === 'server' ? 'Сохранение операции сервером' : ''])]
     : [['Код сотрудника', 'Сотрудник', 'Роль', 'Последнее открытие, МСК', 'Последнее событие, МСК', 'Последнее действие, МСК', 'Последний дашборд', 'Отчёты', 'Действия', 'Загрузки файлов', 'Время видимого отчёта, с'],
       ...data.rows.map(row => [row.actorKey, row.actorName, roles[row.actorRole] ?? row.actorRole,
         timestamp(row.lastOpenedAt), timestamp(row.lastUsedAt), timestamp(row.lastInteractionAt), row.lastDashboardTitle ?? '',
@@ -45,6 +46,7 @@ export function buildDashboardUsageWorkbook(data: DashboardUsageExport, filters:
     ['Предпросмотры и архив', filters.includePreview ? 'Включены' : 'Не включены'], ['Строк данных', data.rows.length],
     ['История', 'Только доступная история за один календарный месяц. Более старые удалённые события не восстанавливаются.'],
     ['Время просмотра', 'Время видимого отчёта, не оценка производительности.'],
+    ['Время событий', 'Фильтры и сводка используют время регистрации сервером. Время источника показывается отдельно; часы браузера не подтверждены сервером.'],
     ['Персональные данные', 'Пароли, значения фильтров, содержимое загруженных файлов и детализация счетов в эту выгрузку не входят.'],
   ]), 'Параметры');
   const output: Buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: true });

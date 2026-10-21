@@ -80,6 +80,10 @@ function EventDetails({ event, onViewEvents }: { event: DashboardUsageRow; onVie
     <p className={styles.eventTitle}>{eventLabel(event)}</p>
     <dl className={styles.facts}>
       <div><dt>Зарегистрировано, МСК</dt><dd>{formatTimestamp(event.createdAt)}</dd></div>
+      {event.capturedAt && <div><dt>{event.capturedSource === 'server' ? 'Операция сохранена, МСК' : 'Зафиксировано браузером, МСК'}</dt>
+        <dd>{formatTimestamp(event.capturedAt)}<small>{event.capturedSource === 'server'
+          ? 'Время сохранения операции на сервере; запись в журнал могла поступить позже.'
+          : 'Часы устройства сотрудника; время не подтверждено сервером. Фильтры и сводка используют время регистрации.'}</small></dd></div>}
       <div><dt>Сотрудник</dt><dd>{event.actorName}<small>{roleLabels[event.actorRole] ?? event.actorRole}</small></dd></div>
       <div><dt>Дашборд</dt><dd>{event.dashboardTitle}{event.versionId && <small>HTML #{event.versionId}</small>}</dd></div>
       <div><dt>Режим</dt><dd>{eventMode(event)}</dd></div>

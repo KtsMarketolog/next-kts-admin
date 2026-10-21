@@ -83,6 +83,7 @@ function management(options: {
     react: hooks, 'react/jsx-runtime': jsx, './ManagerDashboard.module.scss': { default: {} },
     './ManagerDashboardParts': parts, '@/shared/lib/managerDashboardAudience': audiences,
     './ManagerDashboardImportJournal': { ManagerDashboardImportJournal() {} },
+    './PersonalSnapshotReplacement': { PersonalSnapshotReplacement() {} },
     './sharedJsonUpload': sharedJsonUpload,
     './ManagerDashboardViewer': { RoutePlannerViewer() {} },
     '@/shared/lib/dashboardDates': dashboardDates,

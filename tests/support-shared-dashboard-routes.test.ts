@@ -66,7 +66,7 @@ function routes(role: Role = 'support_manager', options: {grants?: readonly stri
     importSupportSharedDashboardSnapshot: observed('import', () => ({status: 'imported', snapshot: sharedSnapshot})),
   };
   const common = {
-    '@/shared/lib/dashboardUploadUsage': { recordDashboardUploadUsage: async (_session: unknown, input: Record<string, unknown>) => { uploadUsage.push(input); return true; } },
+    '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:2', actorRole: role}), scheduleDashboardUploadUsageDrain() { uploadUsage.push({}); } },
     '@/shared/lib/db/supportSharedDashboardRepo': repo,
     '@/shared/lib/managerDashboardHtml': html,
     '@/shared/lib/supportSharedRoutePlannerHtml': routePlannerHtml,
@@ -278,18 +278,18 @@ test('shared uploads, publication and deletion use only separate repository muta
   const form = new FormData(); form.set('file', new File([fixture], 'shared.html'));
   assert.equal((await api.html.POST(request('html', {method: 'POST', headers: {origin: 'https://example.test'}, body: form}))).status, 201);
   assert.equal(api.uploadUsage.length, 1);
-  assert.deepEqual(api.uploadUsage[0], { dashboardKey: 'route-planner', versionId: 24, resourceKey: 'shared-html:24', name: 'shared.html', size: Buffer.byteLength(fixture), type: 'html' });
+  assert.deepEqual((api.calls.find(call => call.name === 'create')!.args[0] as {usageActor: unknown}).usageActor, {actorKey: 'admin:2', actorRole: 'admintop'});
   assert.equal((await api.publish.POST(request('publish', json({versionId: 24, expectedActiveVersionId: 22})))).status, 200);
   assert.equal((await api.html.DELETE(request('html?id=23', {method: 'DELETE', headers: {origin: 'https://example.test'}}))).status, 200);
   const imported = await api.snapshots.POST(request('snapshots', {method: 'POST', headers: {origin: 'https://example.test'}, body: snapshotForm()}));
   assert.equal(imported.status, 200);
   assert.equal(api.uploadUsage.length, 2, 'publication/deletion do not invent uploads; successful snapshot is logged once');
-  assert.equal(api.uploadUsage[1].resourceKey, 'shared-snapshot:31');
-  assert.equal(api.uploadUsage[1].name, 'shared.ktsp');
+  assert.deepEqual((api.calls.find(call => call.name === 'import')!.args[0] as {usageActor: unknown}).usageActor, {actorKey: 'admin:2', actorRole: 'admintop'});
   assert.deepEqual(api.calls.map((call) => call.name), ['create', 'publish', 'delete', 'import']);
   assert.deepEqual(api.calls[1].args, [{versionId: 24, expectedActiveVersionId: 22, actorId: 'admintop:2'}]);
   assert.deepEqual(api.calls[2].args, [{versionId: 23, actorId: 'admintop:2'}]);
-  assert.deepEqual(api.calls[3].args, [{filename: 'shared.ktsp', bytes: Buffer.from('synthetic-encrypted-bytes'), email: 'shared@example.test', actorId: 'admintop:2', expectedActiveSnapshotId: null}]);
+  assert.deepEqual(api.calls[3].args, [{filename: 'shared.ktsp', bytes: Buffer.from('synthetic-encrypted-bytes'), email: 'shared@example.test', actorId: 'admintop:2', expectedActiveSnapshotId: null,
+    usageActor: {actorKey: 'admin:2', actorRole: 'admintop'}}]);
 });
 
 test('shared upload needs explicit group-sharing confirmation, single file and snapshot CAS', async () => {

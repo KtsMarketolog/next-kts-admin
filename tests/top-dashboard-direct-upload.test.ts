@@ -261,7 +261,7 @@ function directRouteHarness(options: {
   storageCommitError?: Error;
 } = {}) {
   const calls: string[] = [];
-  const uploadUsage: Array<{ session: unknown; input: Record<string, unknown> }> = [];
+  const uploadUsage: unknown[] = [];
   let created: Record<string, unknown> | null = null;
   let preserved = false;
   let discardedFile = false;
@@ -297,7 +297,7 @@ function directRouteHarness(options: {
     },
   };
   const dependencies: Record<string, unknown> = {
-    '@/shared/lib/dashboardUploadUsage': { async recordDashboardUploadUsage(session: unknown, input: Record<string, unknown>) { uploadUsage.push({ session, input }); return true; } },
+    '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:1', actorRole: 'admin'}), scheduleDashboardUploadUsageDrain() { uploadUsage.push({}); } },
     '@/shared/lib/dashboardAccess': dashboardAccess,
     'node:stream': {},
     '@/shared/lib/adminAuth': {
@@ -412,9 +412,7 @@ test('direct route retains prior data version CAS and preserves files after succ
   assert.equal(harness.created()?.storagePath, 'test.ktsmf');
   assert.equal('pendingFile' in harness.created()!, false);
   assert.equal(harness.uploadUsage.length, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(harness.uploadUsage[0].input)), {
-    dashboardKey: 'top:7', versionId: 19, resourceKey: 'top-data:7:71', name: 'dashboard-files.ktsmf', size: 80, type: 'data',
-  });
+  assert.deepEqual(harness.created()?.usageActor, {actorKey: 'admin:1', actorRole: 'admin'});
 
   const conflicted = directRouteHarness({ commitConflict: true });
   assert.equal((await conflicted.put()).status, 409);

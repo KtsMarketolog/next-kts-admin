@@ -72,6 +72,7 @@ export type DeleteTopDashboardBlockResult = {
 
 export type CreateTopDashboardBlockVersionInput = CreateTopDashboardVersionInput & {
   blockId: number;
+  usageActor?: import('../../dashboardUploadUsage').DashboardUploadUsageActor;
 };
 
 export type ActivateTopDashboardBlockVersionInput = {

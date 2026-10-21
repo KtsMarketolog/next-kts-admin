@@ -86,6 +86,7 @@ function repository(steps: Step[] = [], options: {openFile?: () => Readable | Pr
       } finally { transactionActive = false; }
     } },
     './schema': { ensureSiteSchema: async () => { schemaCalls++; } },
+    './dashboardUploadUsageOutboxRepo': { enqueueDashboardUploadUsage: async () => assert.fail('Legacy test without usageActor must not invent an upload actor') },
     './dashboardAccessRepo': { DASHBOARD_ACCESS_LOCK: 'kts:dashboard-view-grants' },
   });
   return { repo, queries, fileReads, deletedFiles, queuedFiles, get schemaCalls() { return schemaCalls; }, get transactions() { return transactions; },
@@ -116,6 +117,7 @@ test('shared migration only creates new report tables and does not migrate or co
     './dashboardAudiencePolicyMigration': { applyDashboardAudiencePolicyMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardProfitabilityAuditMigration': { applyDashboardProfitabilityAuditMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './dashboardUsageDetailsMigration': { applyDashboardUsageDetailsMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './dashboardUploadUsageOutboxMigration': { applyDashboardUploadUsageOutboxMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './managerDashboardRecipientMigration': { applyPersonalDashboardRecipientMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './currencyDashboardHtmlMigration': { applyCurrencyDashboardHtmlMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './recordVersionMigration': { applyRecordVersionMigration: async () => { throw new Error('Unrelated migration must not run'); } },

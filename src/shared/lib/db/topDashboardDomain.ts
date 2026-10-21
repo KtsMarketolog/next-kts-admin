@@ -54,6 +54,7 @@ export type TopDashboardBlockDataVersionContent = {
 
 export type CreateAndActivateTopDashboardBlockDataVersionInput = {
   blockId: number;
+  usageActor?: import('../dashboardUploadUsage').DashboardUploadUsageActor;
   expectedActiveVersionId: number | null;
   expectedActiveHtmlVersionId: number;
   expectedHtmlSnapshotFormat: TopDashboardSnapshotFormat;

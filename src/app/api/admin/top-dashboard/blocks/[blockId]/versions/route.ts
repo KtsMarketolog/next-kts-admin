@@ -6,7 +6,7 @@ import {
   TopDashboardDraftLimitError,
 } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
-import { recordDashboardUploadUsage } from '@/shared/lib/dashboardUploadUsage';
+import { getDashboardUploadUsageActor, scheduleDashboardUploadUsageDrain } from '@/shared/lib/dashboardUploadUsage';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
@@ -52,10 +52,10 @@ export async function POST(request: Request, context: Context) {
       ...parsed.upload,
       uploadedByAdminUserId: actor.adminUserId,
       uploadedByManagerId: actor.managerId,
+      usageActor: getDashboardUploadUsageActor(session),
     });
     const version = result.version;
-    await recordDashboardUploadUsage(session, { dashboardKey: `top:${blockId}`, versionId: version.id,
-      resourceKey: `top-html:${blockId}:${version.id}`, name: version.originalName, size: version.fileSize, type: 'html' });
+    scheduleDashboardUploadUsageDrain();
     if (result.prunedStoragePaths.length > 0) {
       await deleteTopDashboardDataFiles(result.prunedStoragePaths).catch((error) => {
         console.error('Failed to remove pruned TOP dashboard data files', error);

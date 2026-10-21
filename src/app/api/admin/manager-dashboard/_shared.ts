@@ -50,7 +50,7 @@ export function personalApiError(error: unknown) {
   if (message === 'BAD_MULTIPART') return personalJson({error: 'Нужна загрузка файлов multipart/form-data'}, 400);
   // Domain messages are authored safe text, never library/network errors.
   if (error instanceof Error && error.name === 'PersonalDashboardError') {
-    return personalJson({error: message, code}, /conflict|stale/i.test(code) ? 409 : /limit|quota|size/i.test(code) ? 413 : 400);
+    return personalJson({error: message, code}, /forbidden/i.test(code) ? 403 : /conflict|stale/i.test(code) ? 409 : /limit|quota|size/i.test(code) ? 413 : 400);
   }
   console.error('Personal dashboard operation failed', {category: 'internal'});
   return personalJson({error: 'Не удалось выполнить операцию личного дашборда'}, 500);

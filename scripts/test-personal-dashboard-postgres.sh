@@ -27,9 +27,12 @@ mkdir "$test_root/socket"
 export DATABASE_URL="postgresql://personal_app@localhost/kts_personal_integration?host=$test_root/socket&port=55473"
 export KTS_PERSONAL_TEST=1
 export NODE_ENV=test
-if [[ -n "${KTS_PERSONAL_TEST_BUNDLE:-}" ]]; then
-  # Optional locally compiled test bundle; permits testing without installing tools in production.
-  node --test "$KTS_PERSONAL_TEST_BUNDLE"
+if [[ "${KTS_PERSONAL_REPLACEMENT_TEST:-}" == "1" ]]; then
+  node --import tsx --test tests/manager-dashboard-replacement-db.integration.ts
+elif [[ -n "${KTS_PERSONAL_TEST_BUNDLE:-}" ]]; then
+  # Optional isolated suite/bundle, including the replacement suite independently of legacy fixtures.
+  node --import tsx --test "$KTS_PERSONAL_TEST_BUNDLE"
 else
   node --import tsx --test tests/manager-dashboard-db.integration.ts
+  node --import tsx --test tests/manager-dashboard-replacement-db.integration.ts
 fi

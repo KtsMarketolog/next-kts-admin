@@ -4,6 +4,7 @@ import { PERSONAL_DASHBOARD_AUDIENCE_LABELS, type PersonalDashboardAudience } fr
 
 import { DashboardFrame, SharedDashboardFrame, formatDashboardDate, ImportResults, SnapshotStatus } from './ManagerDashboardParts';
 import { ManagerDashboardImportJournal } from './ManagerDashboardImportJournal';
+import { PersonalSnapshotReplacement } from './PersonalSnapshotReplacement';
 import { RoutePlannerViewer } from './ManagerDashboardViewer';
 import { formatDashboardTimestamp, formatDashboardDataDate } from '@/shared/lib/dashboardDates';
 import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
@@ -528,7 +529,10 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
           </div>
         </form>
         <ImportResults results={results} title="Результат последней операции" />
+        {results.some(result => result.status === 'conflict') && <p className={styles.notice}>Если вы загрузили исправленный личный файл за ту же дату, используйте <a href="#personal-snapshot-replacement">замену с подтверждением ниже</a>. Обычная загрузка не перезаписывает действующий снимок.</p>}
       </section> : null}
+
+      {personalOverview ? <PersonalSnapshotReplacement groups={groups} busy={busy} mutate={mutate} /> : null}
 
       {personalOverview ? groups.filter((group) => !audience || group.audience === audience).map((group) => (
         <DashboardInstructions key={group.audience} dashboardKey={`manager:${group.audience}`} kind="personal-sales" />

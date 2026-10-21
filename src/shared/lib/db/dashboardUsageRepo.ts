@@ -21,7 +21,7 @@ export function dashboardUsageActorKey(session: AdminSession) {
 }
 
 export async function recordDashboardUsage(session: AdminSession, batch: DashboardUsageBatch) {
-  batch = parseDashboardUsageBatch(batch, { allowServerUpload: true });
+  batch = parseDashboardUsageBatch(batch, { allowServerUpload: true, allowCapturedAt: true });
   const managesReport = batch.dashboardKey === 'currency-rates' ? canManageCurrencyDashboard(session)
     : batch.dashboardKey.startsWith('top:') ? isTopDashboardManagementSession(session)
       : session.role === 'admin' || session.role === 'admintop';
@@ -37,10 +37,11 @@ export async function recordDashboardUsage(session: AdminSession, batch: Dashboa
     await client.query("set local statement_timeout='3s'");
     await client.query(`with incoming as (
       select * from jsonb_to_recordset($6::jsonb) as event(id text, action text, upload jsonb,
-        "uploadType" text, "durationSeconds" integer, "viewingWindowId" text)
+        "uploadType" text, "durationSeconds" integer, "viewingWindowId" text, "capturedAt" timestamptz)
     ), inserted as (
-      insert into dashboard_usage_events(actor_key, actor_role, dashboard_key, event_id, action, is_preview, html_version_id)
-      select $1, $2, $3, event.id, event.action, $4, $5 from incoming event
+      insert into dashboard_usage_events(actor_key, actor_role, dashboard_key, event_id, action, is_preview, html_version_id, captured_at, captured_source)
+      select $1, $2, $3, event.id, event.action, $4, $5, event."capturedAt",
+        case when event."capturedAt" is not null then 'browser' end from incoming event
       on conflict(actor_key, event_id) do nothing returning id, event_id
     )
     insert into dashboard_usage_event_details(usage_event_id, upload_name, upload_size, upload_type, duration_seconds, viewing_window_id)
@@ -56,6 +57,7 @@ export type DashboardUsageRow = {
   id: string; actorKey: string; actorName: string; actorRole: string;
   dashboardKey: string; dashboardTitle: string; action: DashboardUsageAction;
   preview: boolean; versionId: number | null; createdAt: string;
+  capturedAt?: string | null; capturedSource?: 'browser' | 'server' | null;
   hasProfitabilityDetails: boolean;
   upload: DashboardUsageUpload | null; uploadType: DashboardUsageUploadType | null; durationSeconds: number | null;
 };
@@ -73,9 +75,11 @@ async function readDashboardUsage(input: DashboardUsageFilters & { before?: stri
     id: string; actor_key: string; actor_name: string; actor_role: string; dashboard_key: string;
     dashboard_title: string; action: DashboardUsageAction; is_preview: boolean; html_version_id: string | null; created_at: Date;
     has_profitability_details: boolean;
+    captured_at: Date | null; captured_source: 'browser' | 'server' | null;
     upload_name: string | null; upload_size: string | null; upload_type: DashboardUsageUploadType | null; duration_seconds: number | null;
   }>(`select event.id::text, event.actor_key, event.actor_role, event.dashboard_key, event.action, event.is_preview,
-      event.html_version_id::text, event.created_at, metadata.upload_name, metadata.upload_size::text, metadata.upload_type, metadata.duration_seconds,
+      event.html_version_id::text, event.created_at, event.captured_at, event.captured_source,
+      metadata.upload_name, metadata.upload_size::text, metadata.upload_type, metadata.duration_seconds,
       exists(select 1 from dashboard_profitability_audit_details details where details.usage_event_id = event.id) as has_profitability_details,
       coalesce(nullif(u.name, ''), nullif(m.name, ''), case when event.actor_key = 'admin:primary' then 'Основной администратор' else event.actor_key end) as actor_name,
       coalesce(block.title, case event.dashboard_key when 'manager:development' then 'Дашборды МР'
@@ -103,6 +107,7 @@ async function readDashboardUsage(input: DashboardUsageFilters & { before?: stri
     dashboardKey: row.dashboard_key, dashboardTitle: row.dashboard_title,
     action: row.action, preview: row.is_preview, versionId: row.html_version_id ? Number(row.html_version_id) : null,
     createdAt: new Date(row.created_at).toISOString(),
+    capturedAt: row.captured_at ? new Date(row.captured_at).toISOString() : null, capturedSource: row.captured_source ?? null,
     hasProfitabilityDetails: row.has_profitability_details === true,
     upload: row.upload_name !== null && row.upload_name !== undefined ? { name: row.upload_name, size: Number(row.upload_size) } : null,
     uploadType: row.upload_type ?? null, durationSeconds: row.duration_seconds ?? null,

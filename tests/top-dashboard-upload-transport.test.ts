@@ -151,7 +151,7 @@ function routeHarness(mode: Mode, directory: string, options: {
       },
     },
     '@/shared/lib/db/securityAuditRepo': { async recordSecurityEvent() {} },
-    '@/shared/lib/dashboardUploadUsage': { async recordDashboardUploadUsage() {} },
+    '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:1', actorRole: 'admin'}), scheduleDashboardUploadUsageDrain() {} },
     '@/shared/lib/originProtection': { enforceSameOriginRequest },
     '@/shared/lib/rateLimit': { getClientIp() { return '127.0.0.1'; } },
     '@/shared/lib/topDashboardDataStorage': {},

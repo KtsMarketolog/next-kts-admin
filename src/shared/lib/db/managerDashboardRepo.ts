@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 
 import type { AdminSession } from '../adminAuth';
+import type { DashboardUploadUsageActor } from '../dashboardUploadUsage';
+import { getDashboardUploadUsageActor } from '../dashboardUploadUsage';
+import { createPersonalReplacementToken, personalReplacementDigest, readPersonalReplacementToken } from '../managerDashboardSnapshotReplacementToken';
+import type { PersonalSnapshotReplacementFile, PersonalSnapshotReplacementPreview } from '../managerDashboardSnapshotReplacement';
 import { canViewDashboardKey, hasDashboardManagementRight } from '../dashboardPermissions';
 import { getPersonalDashboardAudience, parsePersonalDashboardAudience, type PersonalDashboardAudience } from '../managerDashboardAudience';
 import { canReceiveLeaderPersonalSnapshot, type PersonalDashboardRecipient } from '../managerDashboardRecipients';
@@ -21,6 +25,7 @@ import {
 import { query, withTransaction } from './client';
 import { ensureSiteSchema } from './schema';
 import { DASHBOARD_ACCESS_LOCK } from './dashboardAccessRepo';
+import { enqueueDashboardUploadUsage } from './dashboardUploadUsageOutboxRepo';
 
 export type PersonalDashboardSnapshot = PersonalSnapshotMetadata & {
   id: number;
@@ -66,6 +71,7 @@ export type ImportPersonalDashboardSnapshotInput = {
   sourceKey: string;
   sender?: string;
   messageId?: string;
+  usageActor?: DashboardUploadUsageActor;
 };
 export type PersonalDashboardManagerBinding = { id: number; email: string; isActive: boolean; role: string | null };
 export type PersonalDashboardRecipientBinding = PersonalDashboardManagerBinding & { source: PersonalDashboardRecipient['source'] };
@@ -161,7 +167,9 @@ function mapHtml(row: HtmlRow, activeId: string | null): PersonalDashboardHtmlVe
 }
 function mapImport(row: ImportRow): PersonalDashboardImportResult {
   return { id: Number(row.id), originalName: row.original_name, status: row.status, code: row.code,
-    message: IMPORT_MESSAGES[row.status], managerId: idOrNull(row.manager_id), adminUserId: idOrNull(row.admin_user_id), snapshotId: idOrNull(row.snapshot_id) };
+    message: row.code === 'REPLACED_SAME_DAY' ? 'Снимок за эту дату заменён по подтверждению; предыдущий доступен для отката'
+      : row.code === 'SNAPSHOT_ROLLED_BACK' ? 'Восстановлен предыдущий личный снимок' : IMPORT_MESSAGES[row.status],
+    managerId: idOrNull(row.manager_id), adminUserId: idOrNull(row.admin_user_id), snapshotId: idOrNull(row.snapshot_id) };
 }
 
 /** Hashes are only routing metadata. These checks do not authenticate an attachment or authorize a caller. */
@@ -444,6 +452,7 @@ export async function getPersonalDashboardHtml(id?: number, preview = false, req
 
 export async function createPersonalDashboardHtml(input: {
   originalName: string; htmlContent: string; fileSize: number; sha256: string; actorId: string; audience?: PersonalDashboardAudience;
+  usageActor?: DashboardUploadUsageActor;
 }) {
   const audience = checkedAudience(input.audience === undefined ? 'development' : input.audience);
   const size = Buffer.byteLength(input.htmlContent, 'utf8');
@@ -463,6 +472,10 @@ export async function createPersonalDashboardHtml(input: {
       (original_name,html_content,file_size,sha256,uploaded_by,audience) values ($1,$2,$3,$4,$5,$6)
       returning id::text, audience, original_name, file_size::text, sha256, created_at::text, uploaded_by, first_published_at::text`,
     [personalDashboardSafeFilename(input.originalName), input.htmlContent, size, input.sha256, uploadedBy, audience]);
+    if (input.usageActor) await enqueueDashboardUploadUsage(client, input.usageActor, {
+      dashboardKey: `manager:${audience}`, versionId: Number(result.rows[0].id), resourceKey: `personal-html:${audience}:${result.rows[0].id}`,
+      name: input.originalName, size, type: 'html',
+    });
     return mapHtml(result.rows[0], null);
   });
 }
@@ -616,7 +629,157 @@ export async function importPersonalDashboardSnapshot(input: ImportPersonalDashb
     const retainedIds = new Set(retained.map((row) => row.id));
     const removeIds = current.rows.filter((row) => !retainedIds.has(row.id)).map((row) => row.id);
     if (removeIds.length) await client.query(`delete from personal_dashboard_snapshots where ${column}=$1 and id=any($2::bigint[])`, [recipient.id, removeIds]);
+    if (input.usageActor) await enqueueDashboardUploadUsage(client, input.usageActor, {
+      dashboardKey: `manager:${recipient.source === 'admin' ? 'development' : getPersonalDashboardAudience(recipients.find(row => row.source === recipient.source && Number(row.id) === recipient.id)!.role)!}`,
+      versionId: null, resourceKey: `personal-snapshot:${snapshotId}`, name: metadata.originalName, size: metadata.fileSize, type: 'personal',
+    });
     return logImport(client, input, 'imported', 'IMPORTED', metadata, recipient, snapshotId);
+  });
+}
+
+type ReplacementFileInput = { filename: string; bytes: Buffer };
+type ReplacementState = { active_snapshot_id: string; previous_snapshot_id: string | null; updated_at: string };
+const replacementConflict = () => new PersonalDashboardError('REPLACEMENT_CONFLICT', 'Сотрудник или снимки уже изменились. Обновите страницу и сравните файлы заново; текущие данные сохранены.');
+
+/** Account table locks freeze identity, then a persisted session check prevents revoked/fabricated authority. */
+async function replacementAccounts(client: PoolClient, session: AdminSession) {
+  if (!['admin', 'admintop'].includes(session.role) || !session.sessionId || !/^[a-f0-9-]{36}$/i.test(session.sessionId)
+    || (session.role === 'admintop' && (!Number.isSafeInteger(session.adminUserId) || Number(session.adminUserId) < 1))) {
+    throw new PersonalDashboardError('REPLACEMENT_FORBIDDEN', 'Нет права заменять личные снимки');
+  }
+  const accounts = await currentRecipients(client);
+  const access = await client.query(`select s.id from admin_sessions s left join admin_users u on u.id=s.admin_user_id
+    where s.id=$1::uuid and s.role=$2 and s.admin_user_id is not distinct from $3::bigint and s.manager_id is null
+      and s.revoked_at is null and s.expires_at>now()
+      and ((s.admin_user_id is null and s.role='admin') or (u.is_active and u.role=s.role
+        and (u.password_changed_at is null or s.created_at>=u.password_changed_at))) for share of s`,
+  [session.sessionId, session.role, session.adminUserId ?? null]);
+  if (!access.rowCount) throw new PersonalDashboardError('REPLACEMENT_FORBIDDEN', 'Нет права заменять личные снимки; войдите заново');
+  return accounts;
+}
+
+async function replacementContext(client: PoolClient, accounts: RecipientRow[], recipient: PersonalDashboardRecipient) {
+  checkedRecipient(recipient);
+  const account = accounts.find(row => row.source === recipient.source && Number(row.id) === recipient.id);
+  if (!account?.is_active || !account.email.trim()) throw replacementConflict();
+  const emailHash = getManagerEmailHash(account.email);
+  const binding = resolvePersonalDashboardRecipient(bindings(accounts), emailHash);
+  if (binding.status !== 'matched' || binding.recipient.id !== recipient.id || binding.recipient.source !== recipient.source) throw replacementConflict();
+  await client.query('select pg_advisory_xact_lock(hashtext($1))', [`kts-personal-${recipient.source}:${recipient.id}`]);
+  const column = ownerColumn(recipient);
+  const state = (await client.query<ReplacementState>(`select active_snapshot_id::text,previous_snapshot_id::text,updated_at::text
+    from personal_dashboard_snapshot_state where ${column}=$1 for update`, [recipient.id])).rows[0];
+  const rows = (await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT} from personal_dashboard_snapshots s
+    join personal_dashboard_snapshot_state st on ${SNAPSHOT_OWNER_JOIN} where s.${column}=$1 order by s.id`, [recipient.id])).rows;
+  const current = rows.find(row => row.id === state?.active_snapshot_id);
+  const previous = rows.find(row => row.id === state?.previous_snapshot_id) ?? null;
+  if (!state || !current || current.email_hash !== emailHash) throw replacementConflict();
+  const fingerprint = personalReplacementDigest({ recipient, account, state, rows });
+  return { account, emailHash, column, state, rows, current, previous, fingerprint };
+}
+
+function replacementMetadata(row: SnapshotRow): PersonalSnapshotReplacementFile {
+  return { id: Number(row.id), originalName: row.original_name, fileSize: Number(row.file_size), sha256: row.sha256,
+    issued: row.issued, expires: row.expires, receivedAt: row.received_at };
+}
+function checkIncomingReplacement(metadata: PersonalSnapshotMetadata, context: Awaited<ReturnType<typeof replacementContext>>) {
+  if (metadata.emailHash !== context.emailHash || metadata.issued !== context.current.issued) throw replacementConflict();
+  if (metadata.expires < personalDashboardToday() || metadata.issued > personalDashboardToday()) {
+    throw new PersonalDashboardError('INVALID_SNAPSHOT_DATE', 'Снимок просрочен или содержит будущую дату');
+  }
+  if (context.rows.some(row => row.sha256 === metadata.sha256)) {
+    throw new PersonalDashboardError('REPLACEMENT_CONFLICT', 'Этот файл уже сохранён. Для возврата к предыдущему используйте откат.');
+  }
+  if (Number(context.current.file_size) + metadata.fileSize > PERSONAL_DASHBOARD_MANAGER_MAX_BYTES) {
+    throw new PersonalDashboardError('SNAPSHOT_QUOTA', 'Недостаточно места для текущего и предыдущего снимка');
+  }
+}
+
+export async function preparePersonalDashboardSnapshotReplacement(session: AdminSession, input: ReplacementFileInput): Promise<PersonalSnapshotReplacementPreview> {
+  const metadata = inspectPersonalSnapshot(input.bytes, input.filename);
+  await ensureSiteSchema();
+  return withTransaction(async client => {
+    const accounts = await replacementAccounts(client, session);
+    const binding = resolvePersonalDashboardRecipient(bindings(accounts), metadata.emailHash);
+    if (binding.status !== 'matched') throw new PersonalDashboardError('REPLACEMENT_CONFLICT', 'Email файла не соответствует одному активному сотруднику. Проверьте привязку.');
+    const context = await replacementContext(client, accounts, binding.recipient);
+    checkIncomingReplacement(metadata, context);
+    return { action: 'replace', recipient: { ...binding.recipient, name: context.account.name, email: context.account.email },
+      current: replacementMetadata(context.current), previous: context.previous ? replacementMetadata(context.previous) : null,
+      incoming: { originalName: metadata.originalName, fileSize: metadata.fileSize, sha256: metadata.sha256, issued: metadata.issued, expires: metadata.expires },
+      token: createPersonalReplacementToken(session, { action: 'replace', recipient: binding.recipient,
+        fingerprint: context.fingerprint, incoming: personalReplacementDigest(metadata) }) };
+  });
+}
+
+export async function confirmPersonalDashboardSnapshotReplacement(session: AdminSession, input: ReplacementFileInput & { token: string }) {
+  const token = readPersonalReplacementToken(session, input.token, 'replace');
+  const metadata = inspectPersonalSnapshot(input.bytes, input.filename);
+  if (personalReplacementDigest(metadata) !== token.incoming) throw replacementConflict();
+  const usageActor = getDashboardUploadUsageActor(session);
+  const key = `replace:${usageActor.actorKey}:${personalReplacementDigest(input.token)}`;
+  await ensureSiteSchema();
+  return withTransaction(async client => {
+    const prior = await existingImport(client, key);
+    const accounts = await replacementAccounts(client, session);
+    // A repeated confirmed request acknowledges the original commit, never rolls another change back.
+    if (prior?.code === 'REPLACED_SAME_DAY') return prior;
+    const context = await replacementContext(client, accounts, token.recipient);
+    if (context.fingerprint !== token.fingerprint) throw replacementConflict();
+    checkIncomingReplacement(metadata, context);
+    const snapshotId = Number((await client.query<{id:string}>(`insert into personal_dashboard_snapshots
+      (${context.column},original_name,encrypted_payload,file_size,sha256,email_hash,person_name,person_role,issued,expires,source_key)
+      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id::text`, [token.recipient.id, metadata.originalName, input.bytes,
+      metadata.fileSize, metadata.sha256, metadata.emailHash, metadata.name, metadata.role, metadata.issued, metadata.expires, key])).rows[0].id);
+    const changed = await client.query(`update personal_dashboard_snapshot_state set previous_snapshot_id=active_snapshot_id,
+      active_snapshot_id=$2,updated_at=clock_timestamp() where ${context.column}=$1 and active_snapshot_id=$3 and updated_at=$4::timestamptz`,
+    [token.recipient.id, snapshotId, context.current.id, context.state.updated_at]);
+    if (!changed.rowCount) throw replacementConflict();
+    await client.query(`delete from personal_dashboard_snapshots where ${context.column}=$1 and id<>$2 and id<>$3`, [token.recipient.id, context.current.id, snapshotId]);
+    await enqueueDashboardUploadUsage(client, usageActor, { dashboardKey: `manager:${token.recipient.source === 'admin' ? 'development' : getPersonalDashboardAudience(context.account.role)!}`,
+      versionId: null, resourceKey: `personal-snapshot:${snapshotId}`, name: metadata.originalName, size: metadata.fileSize, type: 'personal' });
+    return logImport(client, { filename: metadata.originalName, sourceKey: key, sender: usageActor.actorKey,
+      messageId: `replaces-snapshot:${context.current.id}` }, 'imported', 'REPLACED_SAME_DAY', metadata, token.recipient, snapshotId);
+  });
+}
+
+function checkedRollbackPrevious(context: Awaited<ReturnType<typeof replacementContext>>) {
+  if (!context.previous || context.previous.email_hash !== context.emailHash || context.previous.expires < personalDashboardToday()) {
+    throw new PersonalDashboardError('REPLACEMENT_CONFLICT', 'Предыдущий снимок отсутствует, просрочен или больше не соответствует email сотрудника');
+  }
+  return context.previous;
+}
+export async function preparePersonalDashboardSnapshotRollback(session: AdminSession, recipient: PersonalDashboardRecipient): Promise<PersonalSnapshotReplacementPreview> {
+  await ensureSiteSchema();
+  return withTransaction(async client => {
+    const context = await replacementContext(client, await replacementAccounts(client, session), recipient);
+    const previous = checkedRollbackPrevious(context);
+    return { action: 'rollback', recipient: { ...recipient, name: context.account.name, email: context.account.email },
+      current: replacementMetadata(context.current), incoming: replacementMetadata(previous), previous: replacementMetadata(previous),
+      token: createPersonalReplacementToken(session, { action: 'rollback', recipient,
+        fingerprint: context.fingerprint, incoming: personalReplacementDigest(previous) }) };
+  });
+}
+export async function confirmPersonalDashboardSnapshotRollback(session: AdminSession, input: {token: string}) {
+  const token = readPersonalReplacementToken(session, input.token, 'rollback');
+  const usageActor = getDashboardUploadUsageActor(session);
+  const key = `rollback:${usageActor.actorKey}:${personalReplacementDigest(input.token)}`;
+  await ensureSiteSchema();
+  return withTransaction(async client => {
+    const prior = await existingImport(client, key);
+    const accounts = await replacementAccounts(client, session);
+    if (prior?.code === 'SNAPSHOT_ROLLED_BACK') return prior;
+    const context = await replacementContext(client, accounts, token.recipient);
+    if (context.fingerprint !== token.fingerprint) throw replacementConflict();
+    const previous = checkedRollbackPrevious(context);
+    if (personalReplacementDigest(previous) !== token.incoming) throw replacementConflict();
+    const changed = await client.query(`update personal_dashboard_snapshot_state set active_snapshot_id=previous_snapshot_id,
+      previous_snapshot_id=active_snapshot_id,updated_at=clock_timestamp() where ${context.column}=$1 and active_snapshot_id=$2
+      and previous_snapshot_id=$3 and updated_at=$4::timestamptz`, [token.recipient.id, context.current.id, previous.id, context.state.updated_at]);
+    if (!changed.rowCount) throw replacementConflict();
+    // This is a switch to retained bytes, not another file upload. Keep a separate atomic import-journal entry.
+    return logImport(client, { filename: previous.original_name, sourceKey: key, sender: usageActor.actorKey,
+      messageId: `rollback-from:${context.current.id}` }, 'imported', 'SNAPSHOT_ROLLED_BACK', mapSnapshot(previous), token.recipient, Number(previous.id));
   });
 }
 
@@ -626,9 +789,19 @@ async function readPersonalDashboardImportPage(client: PoolClient, before: strin
       ${before === null ? '' : 'where journal.id < $1::bigint'} order by journal.id desc limit ${PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE + 1}`,
     before === null ? [] : [before]);
   const rows = result.rows.slice(0, PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE);
+  const performedKey = (row: ImportJournalRow) => ['REPLACED_SAME_DAY', 'SNAPSHOT_ROLLED_BACK'].includes(row.code)
+    && /^admin:(?:primary|[1-9][0-9]*)$/.test(row.sender) ? row.sender : null;
+  const performerIds = [...new Set(rows.map(performedKey).filter((key): key is string => Boolean(key && key !== 'admin:primary')).map(key => key.slice(6)))];
+  const performers = performerIds.length ? (await client.query<{id:string;name:string}>(
+    'select id::text,name from admin_users where id=any($1::bigint[])', [performerIds])).rows : [];
   return {
-    imports: rows.map((row) => ({ ...mapImport(row), id: row.id, sender: row.sender, messageId: row.message_id,
-      receivedAt: row.received_at, issued: row.issued })),
+    imports: rows.map((row) => {
+      const key = performedKey(row);
+      return { ...mapImport(row), id: row.id, sender: row.sender, messageId: row.message_id,
+        receivedAt: row.received_at, issued: row.issued,
+        ...(key ? {performedByKey: key, performedBy: key === 'admin:primary' ? 'Основной администратор'
+          : performers.find(account => account.id === key.slice(6))?.name || 'Удалённая учётная запись администратора'} : {}) };
+    }),
     // Do not derive this cursor from mapImport: its legacy numeric id may lose BIGINT precision.
     nextCursor: result.rows.length > PERSONAL_DASHBOARD_IMPORT_PAGE_SIZE ? rows[rows.length - 1].id : null,
   };
@@ -650,7 +823,7 @@ export async function listPersonalDashboardAdmin() {
     const versions = await client.query<HtmlRow>(`select ${HTML_SELECT} from personal_dashboard_html_versions v order by v.id desc`);
     const { all: recipients, managerGrants } = await currentRecipientViewContext(client);
     const snapshots = await client.query<SnapshotRow>(`select ${SNAPSHOT_SELECT} from personal_dashboard_snapshot_state st
-      join personal_dashboard_snapshots s on ${SNAPSHOT_OWNER_JOIN} and s.id=st.active_snapshot_id`);
+      join personal_dashboard_snapshots s on ${SNAPSHOT_OWNER_JOIN} and (s.id=st.active_snapshot_id or s.id=st.previous_snapshot_id)`);
     const importPage = await readPersonalDashboardImportPage(client);
     // Resolve email collisions against the whole group, including hidden accounts.
     // View grants only filter the administrator table, never snapshot import/ownership.
@@ -668,12 +841,15 @@ export async function listPersonalDashboardAdmin() {
             .sort((left, right) => left.name.localeCompare(right.name, 'ru') || left.source.localeCompare(right.source) || Number(left.id) - Number(right.id))
             .map((recipient) => {
             const binding = recipient.email.trim() ? resolvePersonalDashboardRecipient(recipientBindings, getManagerEmailHash(recipient.email)) : null;
-            const snapshot = snapshots.rows.find((row) => recipient.source === 'manager' ? row.manager_id === recipient.id : row.admin_user_id === recipient.id);
+            const owned = snapshots.rows.filter((row) => recipient.source === 'manager' ? row.manager_id === recipient.id : row.admin_user_id === recipient.id);
+            const snapshot = owned.find(row => row.id === row.active_snapshot_id);
+            const previous = owned.find(row => row.id === row.previous_snapshot_id && row.email_hash === getManagerEmailHash(recipient.email));
             const matches = snapshot && binding?.recipient?.source === recipient.source && binding.recipient.id === Number(recipient.id)
               && snapshot.email_hash === getManagerEmailHash(recipient.email);
             return { id: Number(recipient.id), source: recipient.source, key: `${recipient.source}:${recipient.id}`,
               name: recipient.name, email: recipient.email, role: recipient.role, isActive: recipient.is_active,
-              bindingStatus: binding?.status ?? 'unknown', snapshot: matches ? mapSnapshot(snapshot) : null };
+              bindingStatus: binding?.status ?? 'unknown', snapshot: matches ? mapSnapshot(snapshot) : null,
+              previousSnapshot: matches && previous ? mapSnapshot(previous) : null };
           }),
         };
       }),

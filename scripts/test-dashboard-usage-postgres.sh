@@ -26,3 +26,4 @@ export NODE_ENV=test
 export ADMIN_SESSION_SECRET='synthetic-isolated-usage-test-only'
 node --import tsx --test tests/dashboard-usage-db.integration.ts
 node --experimental-test-module-mocks --import tsx --test tests/dashboard-profitability-db.integration.ts
+node --import tsx --test tests/dashboard-upload-usage-db.integration.ts

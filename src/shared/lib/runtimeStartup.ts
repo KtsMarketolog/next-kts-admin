@@ -3,6 +3,7 @@ import { ensureCatalogSchema, markCatalogSchemaReady } from '@/entities/catalog/
 import { withSessionAdvisoryLock } from './db/client';
 import { ensureSiteSchema, markSiteSchemaReady } from './db/schema';
 import { cleanupStaleTopDashboardIncomingFiles } from './topDashboardDataStorage';
+import { startDashboardUploadUsageWorker } from './dashboardUploadUsageWorker';
 
 const RUNTIME_SCHEMA_LOCK = 'kts_runtime_schema_prepare';
 
@@ -45,4 +46,5 @@ export async function prepareRuntimeForRelease() {
       [currentReleaseId],
     );
   });
+  startDashboardUploadUsageWorker();
 }

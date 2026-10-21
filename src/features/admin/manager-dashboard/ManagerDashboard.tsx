@@ -164,6 +164,8 @@ function PersonalManagerDashboard({ mode, audience = null, canAssignAccess = fal
       }
       const result = await readResponse(response) as ManagerDashboardMutationResult;
       setMessage(result.message || successMessage);
+      // A replacement preview has not saved anything; do not report a successful write or reload unrelated controls.
+      if (result.preview) return result;
       try { await load(controller.signal); } catch { setError('Операция выполнена, но список не удалось обновить. Нажмите «Обновить».'); }
       if (controller.signal.aborted) {
         setMessage('Текущая операция сохранена. Дальнейшая отправка остановлена.');

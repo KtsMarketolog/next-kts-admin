@@ -11,7 +11,8 @@ import { applyClientPasswordMigration } from './clientPasswordMigration';
 import { applyCurrencyDashboardMigration } from './currencyDashboardMigration';
 import { applyDashboardAccessMigration } from './dashboardAccessMigration';
 import { applyDashboardAudiencePolicyMigration } from './dashboardAudiencePolicyMigration';
-import { applyDashboardUsageMigration, applyDashboardUsageRetentionMigration } from './dashboardUsageMigration';
+import { applyDashboardUsageMigration, applyDashboardUsageRetentionMigration, applyDashboardUsageCapturedTimeMigration } from './dashboardUsageMigration';
+import { applyDashboardUploadUsageOutboxMigration } from './dashboardUploadUsageOutboxMigration';
 import { applyDashboardDatesMigration } from './dashboardDatesMigration';
 import { applyDashboardProfitabilityAuditMigration } from './dashboardProfitabilityAuditMigration';
 import { applyDashboardUsageDetailsMigration } from './dashboardUsageDetailsMigration';
@@ -870,6 +871,8 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610190004_verified_login_credentials', description: 'Bind one-time email challenges to verified login credentials', apply: applyLoginCredentialMigration},
   {id: '202610210001_knowledge_base', description: 'Private employee knowledge base with folder permissions and idempotent usage events', apply: applyKnowledgeBaseMigration},
   {id: '202610220001_price_build_admission', description: 'Bounded cross-process derived price builds and private cache receipts; preserve all saved prices and catalogue data', apply: applyPriceBuildMigration},
+  {id: '202610220002_dashboard_usage_captured_time', description: 'Distinguish original event clock from server registration without changing historical timestamps', apply: applyDashboardUsageCapturedTimeMigration},
+  {id: '202610220003_dashboard_upload_usage_outbox', description: 'Durable upload journal intents committed with each saved source version', apply: applyDashboardUploadUsageOutboxMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

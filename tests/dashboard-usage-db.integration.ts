@@ -41,7 +41,8 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
 
     await t.test('retry deduplication is actor-scoped and stores server timestamps, not client identity', async () => {
       const started = Date.now();
-      await recordDashboardUsage(viewer, batch);
+      const capturedAt = new Date(started - 86_400_000).toISOString();
+      await recordDashboardUsage(viewer, { ...batch, events: [{ ...batch.events[0], capturedAt }] });
       await recordDashboardUsage(viewer, batch);
       await recordDashboardUsage(viewer2, batch);
       const result = await listDashboardUsage({ dashboardKey: key });
@@ -54,6 +55,9 @@ test('usage audit isolated PostgreSQL acceptance', async (t) => {
       assert.equal(row.versionId, 66);
       assert.ok(new Date(row.createdAt).getTime() >= started - 1000);
       assert.ok(new Date(row.createdAt).getTime() <= Date.now() + 1000);
+      assert.equal(row.capturedAt, capturedAt, 'An ACK retry cannot overwrite the original browser timestamp');
+      assert.equal(row.capturedSource, 'browser');
+      assert.equal(result.events.find(event => event.actorKey !== actorKey)!.capturedAt, null, 'Legacy events retain an unknown source time');
     });
 
     await t.test('revoked access and viewer-only preview never write events', async () => {

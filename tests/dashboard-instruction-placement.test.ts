@@ -49,10 +49,11 @@ test('personal management keeps main panels and preview ahead of audience-scoped
   assert.match(result.child.getText(result.source), /^\{personalOverview \?/);
   assert.match(result.child.getText(result.source), /groups\.filter\(\(group\) => !audience \|\| group\.audience === audience\)\.map/);
   assert.match(result.help.attributes.getText(result.source), /dashboardKey=\{`manager:\$\{group\.audience\}`\}/);
-  assert.match(result.previous.getText(result.source), /uploadSnapshots\(event\)/);
+  assert.match(result.previous.getText(result.source), /<PersonalSnapshotReplacement\b/);
   assert.ok(ts.isJsxElement(result.next));
   assert.match(result.next.openingElement.attributes.getText(result.source), /id="manager-dashboard-html-history"/);
   const previousSiblings = result.siblings.slice(0, result.index).map((node) => node.getText(result.source));
+  assert.ok(previousSiblings.some((text) => text.includes('uploadSnapshots(event)')));
   assert.ok(previousSiblings.some((text) => text.includes('id="manager-dashboard-html-preview"') && text.includes('<DashboardFrame')));
   assert.ok(previousSiblings.some((text) => text.includes('id={`manager-dashboard-files-${audience}`}')));
   assert.ok(result.siblings.slice(result.index + 1).some((node) => node.getText(result.source).includes('<ManagerDashboardImportJournal')));

@@ -92,6 +92,9 @@ function repository(options: { deleteFails?: boolean; emptyDelete?: boolean; mis
       '../dashboardPermissions': permissions,
       '../managerDashboardDomain': domain,
       '../managerDashboardImportPagination': pagination,
+      '../dashboardUploadUsage': {},
+      '../managerDashboardSnapshotReplacementToken': {},
+      './dashboardUploadUsageOutboxRepo': {},
       './dashboardAccessRepo': { DASHBOARD_ACCESS_LOCK: 'kts:dashboard-view-grants' },
       './client': { query: () => assert.fail('deletion must be transactional'), withTransaction: async (callback: (value: typeof client) => unknown) => {
         const before = structuredClone(states);

@@ -95,6 +95,7 @@ jobs:
           bash scripts/test-wholesale-price-postgres.sh
           bash scripts/test-knowledge-base-postgres.sh
           bash scripts/test-dashboard-usage-postgres.sh
+          KTS_PERSONAL_REPLACEMENT_TEST=1 bash scripts/test-personal-dashboard-postgres.sh
           bash scripts/test-catalog-stock-locking-postgres.sh
           node --import tsx tests/dashboard-usage-cron.http.integration.ts
           node --test ops/backup/tests/*.test.cjs

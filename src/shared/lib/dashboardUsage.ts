@@ -7,6 +7,8 @@ export type DashboardUsageUploadType = 'html' | 'data' | 'personal';
 export type DashboardUsageEvent = {
   id: string; action: DashboardUsageAction; upload?: DashboardUsageUpload;
   uploadType?: DashboardUsageUploadType; durationSeconds?: number; viewingWindowId?: string;
+  /** Parent browser clock, not trusted server time or an authorization claim. */
+  capturedAt?: string;
 };
 export type DashboardUsageMessageDetails = Pick<DashboardUsageEvent, 'action' | 'upload'>;
 export type DashboardUsageBatch = {
@@ -42,14 +44,22 @@ export function parseDashboardUsageUpload(value: unknown): DashboardUsageUpload 
   return { name: upload.name, size: Number(upload.size) };
 }
 
-export function parseDashboardUsageEvent(value: unknown, options: { allowServerUpload?: boolean } = {}): DashboardUsageEvent {
+export function parseDashboardUsageEvent(value: unknown, options: { allowServerUpload?: boolean; allowCapturedAt?: boolean } = {}): DashboardUsageEvent {
   const invalid = () => { throw new Error('Некорректные события'); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid();
   const entry = value as Record<string, unknown>;
-  if (Object.keys(entry).some((key) => !['id', 'action', 'upload', 'uploadType', 'durationSeconds', 'viewingWindowId'].includes(key))
+  if (Object.keys(entry).some((key) => !['id', 'action', 'upload', 'uploadType', 'durationSeconds', 'viewingWindowId', 'capturedAt'].includes(key))
     || typeof entry.id !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(entry.id)
     || !isDashboardUsageAction(entry.action)) return invalid();
   const result: DashboardUsageEvent = { id: entry.id, action: entry.action };
+  // Server upload receipts have a reserved namespace; browser events cannot pre-empt their idempotency key.
+  if (entry.id.startsWith('upload_') && (!options.allowServerUpload || entry.action !== 'file_uploaded')) return invalid();
+  if ('capturedAt' in entry) {
+    if (!options.allowCapturedAt || typeof entry.capturedAt !== 'string'
+      || !/^[1-9][0-9]{3}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(entry.capturedAt)
+      || !Number.isFinite(Date.parse(entry.capturedAt)) || new Date(entry.capturedAt).toISOString() !== entry.capturedAt) return invalid();
+    result.capturedAt = entry.capturedAt;
+  }
   if (entry.action === 'viewing_time') {
     if (!Number.isInteger(entry.durationSeconds) || Number(entry.durationSeconds) < 1 || Number(entry.durationSeconds) > 60
       || typeof entry.viewingWindowId !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(entry.viewingWindowId)
@@ -68,7 +78,7 @@ export function parseDashboardUsageEvent(value: unknown, options: { allowServerU
   return result;
 }
 
-export function parseDashboardUsageBatch(value: unknown, options: { allowServerUpload?: boolean } = {}): DashboardUsageBatch {
+export function parseDashboardUsageBatch(value: unknown, options: { allowServerUpload?: boolean; allowCapturedAt?: boolean } = {}): DashboardUsageBatch {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Некорректные события');
   const input = value as Record<string, unknown>;
   if (Object.keys(input).some((key) => !['dashboardKey', 'preview', 'versionId', 'events'].includes(key))

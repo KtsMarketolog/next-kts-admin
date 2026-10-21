@@ -1,5 +1,5 @@
 import { getSupportSharedDashboardSnapshot, importSupportSharedDashboardSnapshot } from '@/shared/lib/db/supportSharedDashboardRepo';
-import { recordDashboardUploadUsage } from '@/shared/lib/dashboardUploadUsage';
+import { getDashboardUploadUsageActor, scheduleDashboardUploadUsageDrain } from '@/shared/lib/dashboardUploadUsage';
 import { PERSONAL_PRIVATE_HEADERS, parsePersonalDashboardId } from '@/shared/lib/managerDashboardSecurity';
 import { personalApiError, personalJson, personalMultipart } from '../../_shared';
 import { requireSharedAccess, sharedQuery } from '../_shared';
@@ -44,10 +44,8 @@ export async function POST(request: Request) {
       || !(expected === 'null' || expectedId)) return personalJson({error: 'Проверьте файл, email выпуска и подтверждение общего доступа'}, 400);
     if (!file.size || file.size > 8 * 1024 * 1024) return personalJson({error: 'Размер .ktsp должен быть от 1 байта до 8 МиБ'}, 413);
     const result = await importSupportSharedDashboardSnapshot({filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), email,
-      actorId: access.actorId, expectedActiveSnapshotId: expectedId});
-    if (result.status === 'imported') await recordDashboardUploadUsage(access.session, {
-      dashboardKey: 'route-planner', versionId: null, resourceKey: `shared-snapshot:${result.snapshot.id}`,
-      name: file.name, size: file.size, type: 'personal' });
+      actorId: access.actorId, expectedActiveSnapshotId: expectedId, usageActor: getDashboardUploadUsageActor(access.session)});
+    if (result.status === 'imported') scheduleDashboardUploadUsageDrain();
     return personalJson({...result, message: result.status === 'duplicate' ? 'Этот общий снимок уже загружен.' : 'Общий снимок загружен для всех менеджеров по сопровождению.'});
   } catch (error) { return personalApiError(error); }
 }

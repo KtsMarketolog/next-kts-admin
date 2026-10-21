@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       }
     } finally { reader.releaseLock(); }
     const bytes = Buffer.concat(chunks);
-    const batch = parseDashboardUsageBatch(JSON.parse(bytes.toString('utf8')));
+    const batch = parseDashboardUsageBatch(JSON.parse(bytes.toString('utf8')), { allowCapturedAt: true });
     if (!canViewDashboard(session, batch.dashboardKey)) return json({ error: 'Нет доступа к отчёту' }, 403);
     const manage = batch.dashboardKey === 'currency-rates' ? canManageCurrencyDashboard(session)
       : batch.dashboardKey.startsWith('top:') ? isTopDashboardManagementSession(session)

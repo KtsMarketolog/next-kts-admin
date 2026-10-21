@@ -22,7 +22,7 @@ import {
   TopDashboardStateConflictError,
 } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
-import { recordDashboardUploadUsage } from '@/shared/lib/dashboardUploadUsage';
+import { getDashboardUploadUsageActor, scheduleDashboardUploadUsageDrain } from '@/shared/lib/dashboardUploadUsage';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import {
@@ -367,10 +367,10 @@ export async function PUT(request: Request, context: Context) {
       boundHtmlVersionId: multiFileUpload ? expectedActiveHtmlVersionId : null,
       uploadedByAdminUserId: actor.adminUserId,
       uploadedByManagerId: actor.managerId,
+      usageActor: getDashboardUploadUsageActor(session),
     });
     pendingFile?.preserve();
-    await recordDashboardUploadUsage(session, { dashboardKey: `top:${blockId}`, versionId: expectedActiveHtmlVersionId,
-      resourceKey: `top-data:${blockId}:${result.version.id}`, name: result.version.originalName, size: result.version.fileSize, type: 'data' });
+    scheduleDashboardUploadUsageDrain();
     if (result.prunedStoragePaths.length > 0) {
       await deleteTopDashboardDataFiles(result.prunedStoragePaths).catch((error) => {
         console.error('Failed to remove pruned TOP dashboard data files', error);

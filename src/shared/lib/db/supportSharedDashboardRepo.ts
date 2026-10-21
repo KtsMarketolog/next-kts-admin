@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import type { DashboardUploadUsageActor } from '../dashboardUploadUsage';
+import { enqueueDashboardUploadUsage } from './dashboardUploadUsageOutboxRepo';
 import type { PoolClient } from 'pg';
 
 import {
@@ -222,6 +224,7 @@ export async function getSupportSharedDashboardSnapshot(viewer: SharedDashboardV
 
 export async function createSupportSharedDashboardHtml(input: {
   originalName: string; htmlContent: string; fileSize: number; sha256: string; actorId: string;
+  usageActor?: DashboardUploadUsageActor;
 }) {
   const uploadedBy = actor(input.actorId);
   const size = typeof input.htmlContent === 'string' ? Buffer.byteLength(input.htmlContent, 'utf8') : 0;
@@ -243,6 +246,10 @@ export async function createSupportSharedDashboardHtml(input: {
       (original_name,html_content,file_size,sha256,uploaded_by,format) values ($1,$2,$3,$4,$5,$6) returning ${HTML_SELECT}`,
     [personalDashboardSafeFilename(input.originalName), input.htmlContent, size, input.sha256, uploadedBy, format]);
     if (format === 'route-planner-v1') await client.query(`insert into support_shared_dashboard_json_state (html_version_id) values ($1)`, [result.rows[0].id]);
+    if (input.usageActor) await enqueueDashboardUploadUsage(client, input.usageActor, {
+      dashboardKey: 'route-planner', versionId: Number(result.rows[0].id), resourceKey: `shared-html:${result.rows[0].id}`,
+      name: result.rows[0].original_name, size, type: 'html',
+    });
     return mapHtml(result.rows[0], state);
   });
 }
@@ -401,6 +408,7 @@ export async function getSupportSharedDashboardJsonPreviewSnapshot(htmlVersionId
 export async function importSupportSharedDashboardJson(input: {
   htmlVersionId: number; expectedActiveSnapshotId: number | null; originalName: string; savedAt: string;
   fileSize: number; sha256: string; storagePath: string; actorId: string;
+  usageActor?: DashboardUploadUsageActor;
 }): Promise<{ status: 'imported' | 'duplicate'; snapshot: SupportSharedDashboardJsonSnapshot; prunedStoragePaths: string[] }> {
   positiveId(input.htmlVersionId);
   if (input.expectedActiveSnapshotId !== null) positiveId(input.expectedActiveSnapshotId);
@@ -439,6 +447,10 @@ export async function importSupportSharedDashboardJson(input: {
       returning id::text,html_version_id::text,original_name,file_size::text,sha256,storage_path,saved_at::text,received_at::text,uploaded_by`,
     [input.htmlVersionId, personalDashboardSafeFilename(input.originalName), input.fileSize, input.sha256, input.storagePath, input.savedAt, uploadedBy]);
     const row = created.rows[0];
+    if (input.usageActor) await enqueueDashboardUploadUsage(client, input.usageActor, {
+      dashboardKey: 'route-planner', versionId: input.htmlVersionId, resourceKey: `shared-json:${row.id}`,
+      name: row.original_name, size: Number(row.file_size), type: 'data',
+    });
     await client.query(`update support_shared_dashboard_json_state set previous_snapshot_id=active_snapshot_id,
       active_snapshot_id=$2,updated_by=$3,updated_at=now() where html_version_id=$1`, [input.htmlVersionId, row.id, uploadedBy]);
     if (remove.length) await client.query(`delete from support_shared_dashboard_json_snapshots where html_version_id=$1 and id=any($2::bigint[])`, [input.htmlVersionId, remove.map((item) => item.id)]);
@@ -451,6 +463,7 @@ export async function importSupportSharedDashboardJson(input: {
 
 export async function importSupportSharedDashboardSnapshot(input: {
   filename: string; bytes: Buffer; email: string; actorId: string; expectedActiveSnapshotId: number | null;
+  usageActor?: DashboardUploadUsageActor;
 }): Promise<{ status: 'imported' | 'duplicate'; snapshot: SupportSharedDashboardSnapshot }> {
   const uploadedBy = actor(input.actorId);
   if (input.expectedActiveSnapshotId !== null) positiveId(input.expectedActiveSnapshotId);
@@ -487,6 +500,10 @@ export async function importSupportSharedDashboardSnapshot(input: {
     [metadata.originalName, input.bytes, metadata.fileSize, metadata.sha256, email, metadata.emailHash,
       metadata.name, metadata.role, metadata.issued, metadata.expires, uploadedBy]);
     const row = created.rows[0];
+    if (input.usageActor) await enqueueDashboardUploadUsage(client, input.usageActor, {
+      dashboardKey: 'route-planner', versionId: null, resourceKey: `shared-snapshot:${row.id}`,
+      name: row.original_name, size: Number(row.file_size), type: 'personal',
+    });
     await client.query(`update support_shared_dashboard_state set previous_snapshot_id=active_snapshot_id,
       active_snapshot_id=$1,updated_by=$2,updated_at=now() where id=1`, [row.id, uploadedBy]);
     const retainedIds = new Set(retained.map((item) => item.id));

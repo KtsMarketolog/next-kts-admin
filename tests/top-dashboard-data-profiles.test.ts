@@ -207,7 +207,7 @@ function dataRoute(profile: dataUpload.TopDashboardDataProfile) {
   const uploadUsage: Array<Record<string, unknown>> = [];
   let slots = 0;
   const dependencies: Record<string, unknown> = {
-    '@/shared/lib/dashboardUploadUsage': { async recordDashboardUploadUsage(_session: unknown, input: Record<string, unknown>) { uploadUsage.push(input); return true; } },
+    '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:1', actorRole: 'admin'}), scheduleDashboardUploadUsageDrain() { uploadUsage.push({}); } },
     'node:stream': { Readable },
     '@/shared/lib/dashboardAccess': {},
     '@/shared/lib/adminAuth': {
@@ -311,8 +311,7 @@ test('TOP data route accepts extensible snapshots by base format and persists th
             assert.equal(route.created.length, 1);
             assert.equal(route.audit.length, 1);
             assert.equal(route.uploadUsage.length, 1);
-            assert.equal(route.uploadUsage[0].dashboardKey, 'top:4');
-            assert.equal(route.uploadUsage[0].resourceKey, 'top-data:4:85');
+            assert.deepEqual(route.created[0].usageActor, {actorKey: 'admin:1', actorRole: 'admin'});
             assert.equal(route.created[0]!.dashboardProfile, profile);
             assert.equal(route.created[0]!.snapshotFormat, profile === 'purchases' ? 'purchases-v1' : 'kts-bundle-v1');
             assert.equal(route.created[0]!.expectedActiveVersionId, 84);

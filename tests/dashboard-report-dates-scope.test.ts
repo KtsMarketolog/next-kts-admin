@@ -71,6 +71,9 @@ function harness(accounts: Account[], grants: Grant[], snapshots: Snapshot[], au
     'node:crypto': crypto, '../dashboardPermissions': permissions, '../managerDashboardAudience': audience,
     '../managerDashboardRecipients': recipients, '../managerDashboardDomain': domain,
     '../managerDashboardImportPagination': pagination, './dashboardAccessRepo': { DASHBOARD_ACCESS_LOCK: 'kts:dashboard-view-grants' },
+    '../dashboardUploadUsage': {getDashboardUploadUsageActor: () => assert.fail('Date reads must not create upload actors')},
+    '../managerDashboardSnapshotReplacementToken': new Proxy({}, {get: () => () => assert.fail('Date reads must not use replacement tokens')}),
+    './dashboardUploadUsageOutboxRepo': {enqueueDashboardUploadUsage: () => assert.fail('Date reads must not enqueue uploads')},
     './schema': { ensureSiteSchema: async () => {} },
     './client': { query, withTransaction: async (run: (client: { query: typeof query }) => Promise<unknown>) => run({ query }) },
   };

@@ -74,6 +74,7 @@ export function ImportResults({ results, title }: { results: ManagerDashboardImp
           <li key={result.id ?? `${result.originalName}:${index}`}>
             <div><strong>{result.originalName || 'Импорт файла'}</strong><span>{IMPORT_STATUS_LABELS[result.status] ?? result.status}</span></div>
             {result.message ? <p>{result.message}</p> : null}
+            {result.performedBy ? <p>Выполнил: {result.performedBy}{result.performedByKey ? ` (${result.performedByKey})` : ''}</p> : null}
             {result.receivedAt || result.createdAt ? <small>{formatDashboardDate(result.receivedAt ?? result.createdAt)} МСК</small> : null}
           </li>
         ))}

@@ -193,7 +193,7 @@ function dataRoute() {
       async createAndActivateTopDashboardBlockDataVersion() { created += 1; throw new Error('Rejected input must never reach activation'); },
     },
     '@/shared/lib/db/securityAuditRepo': { async recordSecurityEvent() { audit += 1; } },
-    '@/shared/lib/dashboardUploadUsage': { async recordDashboardUploadUsage() { usage += 1; } },
+    '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:1', actorRole: 'admin'}), scheduleDashboardUploadUsageDrain() { usage += 1; } },
     '@/shared/lib/originProtection': { enforceSameOriginRequest },
     '@/shared/lib/rateLimit': { getClientIp() { return '127.0.0.1'; } },
     '@/shared/lib/topDashboardDataStorage': {},
