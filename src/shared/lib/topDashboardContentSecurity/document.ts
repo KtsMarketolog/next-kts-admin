@@ -1,5 +1,4 @@
 import { instrumentReviewedDashboardUsage } from '../dashboardUsageProfiles';
-import { isSupportedProfitabilityHtml } from '../dashboardProfitabilityHtml';
 import { detectTopDashboardDataContract } from './dataContract';
 import { detectTopDashboardLegacyReadyFunction } from './legacyReady';
 import { getTopDashboardDataAdapterScript } from './adapterScript';
@@ -16,8 +15,9 @@ export function injectTopDashboardDataAdapter(
   const expectedFormat = contract.snapshotFormat;
   const expectedProfile = contract.profile;
   const legacyReadyFunction = detectTopDashboardLegacyReadyFunction(htmlContent);
-  const localInvoiceMode = options.localInvoiceMode === true && isSupportedProfitabilityHtml(htmlContent);
-  const readOnly = options.readOnly === true || contract.profile === 'profitability-unsupported';
+  const localInvoiceMode = options.localInvoiceMode === true
+    && (contract.profile === 'profitability' || contract.profile === 'standalone');
+  const readOnly = options.readOnly === true;
   htmlContent = instrumentReviewedDashboardUsage(htmlContent);
   const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, readOnly, legacyReadyFunction, localInvoiceMode)}</script>`;
   const head = HEAD_OPEN_PATTERN.exec(htmlContent);

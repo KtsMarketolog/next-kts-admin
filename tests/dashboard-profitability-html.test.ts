@@ -4,7 +4,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { injectProfitabilityAuditAdapter, isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '../src/shared/lib/dashboardProfitabilityHtml';
+import sanitizeHtml from 'sanitize-html';
+import { declaresDashboardInvoiceAudit, injectProfitabilityAuditAdapter, isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml, supportsDashboardInvoiceAudit } from '../src/shared/lib/dashboardProfitabilityHtml';
 import { parseProfitabilityInvoice } from '../src/shared/lib/dashboardProfitabilityAudit';
 import { instrumentReviewedProfitabilityUsage } from '../src/shared/lib/dashboardUsageProfiles';
 
@@ -25,6 +26,7 @@ function syntheticProfile() {
     exports,
     require(name: string) {
       if (name === './dashboardUsageProfiles') return { instrumentReviewedProfitabilityUsage };
+      if (name === 'sanitize-html') return { default: sanitizeHtml };
       assert.equal(name, 'node:crypto');
       return { createHash(algorithm: string) {
         let input = '';
@@ -69,6 +71,7 @@ function adapterFixture(script = adapterScript) {
   const window = { parent, addEventListener: add(winListeners), setInterval: (fn: () => void) => intervals.push(fn),
     crypto: { getRandomValues: (value: Uint8Array) => value.fill(5), randomUUID: () => `01234567-89ab-4def-8123-${String(++sequence).padStart(12, '0')}` },
     __ktsProfitabilityAuditV19: undefined as undefined | { recordInvoices(invoices: Invoice[], file: object): void },
+    KTSDashboardAudit: undefined as undefined | { version: string; recordInvoice(invoice: unknown, file: object): string | null },
   };
   class Clock extends Date { static now() { return time; } }
   const context = vm.createContext({ window, document, Date: Clock, TextEncoder, Uint8Array });
@@ -108,7 +111,7 @@ test('V19 fingerprint is exact, independent of data, unique, and unknown HTML re
   assert.doesNotThrow(() => new Function(adapterScript));
 });
 
-test('candidate recognition only refuses unknown profitability versions; it never enables audit by markers', () => {
+test('candidate recognition isolates invoice inputs but never enables detailed audit by markers alone', () => {
   const candidate = '<html><head><title>Рентабельность счетов V20</title></head><body><input id="fInv" type="file"><script>const format="kts-rent-snapshot";</script></body></html>';
   assert.equal(isProfitabilityHtmlCandidate(candidate), true);
   assert.equal(isSupportedProfitabilityHtml(candidate), false);
@@ -117,6 +120,112 @@ test('candidate recognition only refuses unknown profitability versions; it neve
   assert.equal(isProfitabilityHtmlCandidate('<html><title>Аналитика продаж</title><input id="fInv" type="file"><script>const format="kts-rent-snapshot";</script></html>'), false);
   assert.equal(isProfitabilityHtmlCandidate('<html><title>Рентабельность счетов</title><script>const format="generic-snapshot";</script></html>'), false);
   assert.equal(isProfitabilityHtmlCandidate('<html><script>function parseInvoiceFile(f){}; const kind="kts-rent-snapshot"; const prefix="kts-rent:";</script></html>'), true);
+});
+
+const optIn = '<meta name="kts-dashboard-audit" content="invoice-v1">';
+const protocolHtml = '<!doctype html><html><head>' + optIn + '<title>Independent report V999</title></head><body><input id="anything" type="file"><script>window.authorApplicationVersion="999";</script></body></html>';
+const protocolScript = /<script data-kts-profitability-audit-adapter="v1">([\s\S]*?)<\/script>/.exec(injectProfitabilityAuditAdapter(protocolHtml))![1];
+const canonical = () => ({ schemaVersion: 1, documentType: 'invoice', invoiceNumber: 'SYNTHETIC-123',
+  currency: 'USD', dealAmount: 125.5, amountSource: 'document', lines: [{ nomenclature: 'Original item', quantity: 2 }] });
+
+test('invoice-v1 declaration is an actual unique head meta, not a string, comment, template or body tag', () => {
+  assert.equal(declaresDashboardInvoiceAudit(protocolHtml), true);
+  assert.equal(declaresDashboardInvoiceAudit(protocolHtml.replace(optIn, '<META content=invoice-v1 name=kts-dashboard-audit>')), true);
+  assert.equal(declaresDashboardInvoiceAudit(protocolHtml.replace(optIn, '<meta content="invoice&#45;v1" name="kts-dashboard-audit">')), true);
+  for (const value of [
+    protocolHtml.replace(optIn, ''),
+    protocolHtml.replace(optIn, optIn + optIn),
+    protocolHtml.replace(optIn, '<!--' + optIn + '-->'),
+    protocolHtml.replace(optIn, '<script>const example=' + JSON.stringify(optIn) + ';</script>'),
+    protocolHtml.replace(optIn, '<template>' + optIn + '</template>'),
+    protocolHtml.replace(optIn, '<noscript>' + optIn + '</noscript>'),
+    protocolHtml.replace(optIn, '<svg>' + optIn + '</svg>'),
+    protocolHtml.replace(optIn, '').replace('</body>', optIn + '</body>'),
+    protocolHtml.replace('invoice-v1', 'invoice-v999'),
+    '<!--<head>--><html><body>' + optIn + '</body></html>',
+    protocolHtml.replace('<head>', '<body data-example="<head>">').replace('</head>', ''),
+    protocolHtml.replace('<head>', '<head-custom><head>'),
+  ]) {
+    assert.equal(declaresDashboardInvoiceAudit(value), false, value.slice(0, 300));
+    assert.equal(supportsDashboardInvoiceAudit(value), false);
+    assert.equal(injectProfitabilityAuditAdapter(value), value);
+  }
+});
+
+test('opt-in supports unrelated author versions without touching the application and remains idempotent', () => {
+  assert.equal(isSupportedProfitabilityHtml(protocolHtml), false);
+  assert.equal(supportsDashboardInvoiceAudit(protocolHtml), true);
+  const adapted = injectProfitabilityAuditAdapter(protocolHtml);
+  assert.match(adapted, /window.authorApplicationVersion="999";/);
+  assert.equal(injectProfitabilityAuditAdapter(adapted), adapted);
+  assert.equal(adapted.replace(/\n<script data-kts-profitability-audit-adapter="v1">[\s\S]*?<\/script>\n/, ''), protocolHtml);
+  const state = adapterFixture(protocolScript);
+  assert.equal(state.window.KTSDashboardAudit?.version, 'invoice-v1');
+  assert.equal(Object.isFrozen(state.window.KTSDashboardAudit), true);
+  assert.equal(state.window.__ktsProfitabilityAuditV19, undefined);
+});
+
+test('protocol records only explicitly reported successful imports from any real selected/dropped file', () => {
+  const state = adapterFixture(protocolScript);
+  state.init();
+  const file = { name: 'original.pdf', size: 42, arrayBuffer() { throw new Error('File bytes must never be read by audit'); } };
+  const api = state.window.KTSDashboardAudit!;
+  assert.equal(api.recordInvoice(canonical(), file), null, 'automatic restore is not a local import');
+  state.mark(file, 'new-input-name', false);
+  assert.equal(api.recordInvoice(canonical(), file), null, 'programmatic file assignment is not a local import');
+  state.mark(file, 'new-input-name');
+  assert.equal(state.invoices().length, 0, 'selection alone never means successful parsing');
+  const id = api.recordInvoice(canonical(), file);
+  assert.ok(id);
+  assert.deepEqual(state.invoices()[0].invoice, canonical());
+  assert.deepEqual(state.invoices()[0].upload, { name: 'original.pdf', size: 42 });
+  assert.equal(api.recordInvoice(canonical(), file), id, 'duplicate author hooks reuse the operation id');
+  state.ack(true);
+  assert.equal(api.recordInvoice(canonical(), file), id, 'acknowledged hook still does not double count');
+  assert.equal(state.invoices().length, 1);
+  const dropped = { name: 'quote.xlsx', size: 7 };
+  state.fireDocument('drop', { isTrusted: true, dataTransfer: { files: [dropped] } });
+  assert.ok(api.recordInvoice({ ...canonical(), documentType: 'quote' }, dropped));
+  assert.equal(state.invoices().length, 2);
+});
+
+test('protocol validates canonical fields, excludes manual calculations and never projects arbitrary private keys', () => {
+  for (const invalid of [
+    { ...canonical(), documentType: 'manual' },
+    { ...canonical(), calculation: 'PRIVATE' },
+    { ...canonical(), lines: [{ nomenclature: 'Manual RUB row', quantity: 1, manual: true }] },
+    { ...canonical(), lines: [] },
+    { ...canonical(), amountSource: 'unavailable' },
+    { ...canonical(), currency: 'rub' },
+    { ...canonical(), dealAmount: Infinity },
+    { ...canonical(), invoiceNumber: 'bad\nvalue' },
+  ]) {
+    const state = adapterFixture(protocolScript); state.init();
+    const file = { name: 'original.pdf', size: 42 }; state.mark(file, 'any');
+    assert.equal(state.window.KTSDashboardAudit!.recordInvoice(invalid, file), null);
+    assert.equal(state.invoices().length, 0);
+    assert.match(state.status(), /Не записано/);
+  }
+});
+
+test('protocol rejects forged ACK/source/nonce and retries a lost ACK with the identical event id', () => {
+  const state = adapterFixture(protocolScript);
+  const file = { name: 'invoice.pdf', size: 4 }; state.mark(file, 'any');
+  const id = state.window.KTSDashboardAudit!.recordInvoice(canonical(), file)!;
+  state.fire('message', { source: {}, data: { marker, type: 'init', nonce } });
+  assert.equal(state.invoices().length, 0);
+  state.init();
+  state.fire('message', { source: state.parent, data: { marker, type: 'ack', nonce: 'forged', eventId: id, ok: true } });
+  state.fire('message', { source: {}, data: { marker, type: 'ack', nonce, eventId: id, ok: true } });
+  state.advance(10001);
+  assert.equal(state.invoices().length, 2);
+  assert.deepEqual(state.invoices()[0], state.invoices()[1]);
+  state.ack(false); state.advance(30001);
+  assert.equal(state.invoices().length, 3);
+  assert.equal(state.invoices()[2].eventId, id);
+  state.ack(true); state.advance(10001);
+  assert.equal(state.invoices().length, 3);
+  assert.match(state.status(), /записана в журнал: 1/);
 });
 
 test('allowlisted original currency/amount and nonmanual invoice items only, server derives identity and time', () => {

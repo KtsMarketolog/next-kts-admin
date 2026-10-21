@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { TOP_DASHBOARD_HTML_MAX_BYTES, TOP_DASHBOARD_HTML_MAX_MEGABYTES } from '@/shared/lib/topDashboardLimits';
-import { isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '@/shared/lib/dashboardProfitabilityHtml';
+import { addStandaloneTopDashboardMarker } from '@/shared/lib/topDashboardStandalone';
 
 const MAX_TOP_DASHBOARD_BYTES = TOP_DASHBOARD_HTML_MAX_BYTES;
 const HTML_LIMIT_MESSAGE = `HTML-файл должен быть не больше ${TOP_DASHBOARD_HTML_MAX_MEGABYTES} МБ`;
@@ -66,6 +66,12 @@ export async function readTopDashboardHtmlUpload(
     formData = await new Response(Buffer.concat(chunks), { headers: { 'Content-Type': request.headers.get('content-type') || '' } }).formData();
   } catch { return { error: errorResponse('Не удалось прочитать HTML-файл. Повторите загрузку') }; }
   finally { clearTimeout(timeout); void reader.cancel().catch(() => {}); reader.releaseLock(); }
+  const modes = formData.getAll('integrationMode');
+  const integrationMode = modes[0];
+  if (modes.length > 1 || (integrationMode !== undefined
+    && integrationMode !== 'standalone' && integrationMode !== 'connected')) {
+    return { error: errorResponse('Выберите режим HTML: самостоятельный или с общими данными сайта') };
+  }
   const file = formData.get('file');
   if (!(file instanceof File)) return { error: errorResponse('Выберите HTML-файл') };
   if (file.size <= 0) return { error: errorResponse('HTML-файл пустой') };
@@ -94,16 +100,22 @@ export async function readTopDashboardHtmlUpload(
   if (!HTML_DOCUMENT_MARKER.test(htmlContent)) {
     return { error: errorResponse('В файле не найден полноценный HTML-документ') };
   }
-  if (isProfitabilityHtmlCandidate(htmlContent) && !isSupportedProfitabilityHtml(htmlContent)) {
-    return { error: errorResponse('Для этой версии «Рентабельности счетов» ещё не подключён журнал детализации. Нужна адаптация авторского HTML; выгруженную из сайта копию используйте только локально.') };
+  if (integrationMode === 'standalone') {
+    htmlContent = addStandaloneTopDashboardMarker(htmlContent);
+  }
+  // Metadata is part of the stored version: quota, fingerprint, downloads and
+  // duplicate checks must describe the bytes actually saved, not the original.
+  const storedBytes = Buffer.from(htmlContent, 'utf8');
+  if (storedBytes.length > MAX_TOP_DASHBOARD_BYTES) {
+    return { error: errorResponse(HTML_LIMIT_MESSAGE, 413) };
   }
 
   return {
     upload: {
       originalName: normalizeOriginalName(file.name),
       htmlContent,
-      fileSize: bytes.length,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
+      fileSize: storedBytes.length,
+      sha256: createHash('sha256').update(storedBytes).digest('hex'),
     },
   };
 }

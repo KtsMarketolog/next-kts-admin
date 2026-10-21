@@ -16,6 +16,7 @@ export type TopDashboardVersion = {
 
 export type TopDashboardDataVersionStatus = 'active' | 'previous' | 'archived';
 export type TopDashboardSnapshotFormat = 'kts-bundle-v1' | 'purchases-v1' | 'multi-file-v1';
+export type TopDashboardIntegrationMode = 'standalone' | 'connected';
 
 export type TopDashboardDataVersion = {
   id: number;
@@ -42,7 +43,7 @@ export type TopDashboardDataContract = {
   htmlVersionId: number | null;
   mode: 'legacy' | 'generic' | 'disabled';
   snapshotFormat: TopDashboardSnapshotFormat | null;
-  profile: 'sales-analytics' | 'assortment-optimization' | 'purchases' | 'generic' | 'profitability' | 'profitability-unsupported' | null;
+  profile: 'sales-analytics' | 'assortment-optimization' | 'purchases' | 'generic' | 'profitability' | 'standalone' | null;
   directUploadTarget: {
     id: string | null;
     name: string | null;
@@ -71,6 +72,11 @@ export async function readError(response: Response, fallback: string) {
   return typeof data.error === 'string' ? data.error : fallback;
 }
 
+export function defaultTopDashboardIntegrationMode(overview: TopDashboardOverview | null): TopDashboardIntegrationMode {
+  return overview?.activeDataContract.mode === 'legacy' || overview?.activeDataContract.mode === 'generic'
+    ? 'connected' : 'standalone';
+}
+
 export function normalizeTopDashboardDataContract(value: unknown): TopDashboardDataContract {
   const disabled: TopDashboardDataContract = {
     htmlVersionId: null,
@@ -87,7 +93,8 @@ export function normalizeTopDashboardDataContract(value: unknown): TopDashboardD
     ? Number(source.htmlVersionId)
     : null;
   if (source.mode === 'disabled') return { ...disabled, htmlVersionId,
-    profile: source.profile === 'profitability' || source.profile === 'profitability-unsupported' ? source.profile : null };
+    profile: source.profile === 'profitability' ? 'profitability'
+      : source.profile === 'standalone' || source.profile === 'profitability-unsupported' ? 'standalone' : null };
   if (
     source.mode === 'legacy'
     && (source.snapshotFormat === 'kts-bundle-v1' || source.snapshotFormat === 'purchases-v1')

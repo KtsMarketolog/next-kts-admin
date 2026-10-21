@@ -11,6 +11,7 @@ export type TopDashboardProfile =
   | 'purchases'
   | 'generic'
   | 'profitability'
+  | 'standalone'
   | 'profitability-unsupported';
 
 export type TopDashboardBlockDataVersionStatus = 'active' | 'previous' | 'archived';

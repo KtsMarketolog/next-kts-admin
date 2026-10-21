@@ -1,5 +1,5 @@
 import { ensureSiteSchema } from '../schema';
-import { isSupportedProfitabilityHtml } from '../../dashboardProfitabilityHtml';
+import { detectTopDashboardDataContract } from '../../topDashboardContentSecurity';
 import { query } from '../client';
 import type { TopDashboardPublishedBlockOverview, TopDashboardPublishedBlockSummary } from './types';
 import type { TopDashboardPublishedBlockRow } from './records';
@@ -7,7 +7,13 @@ import type { TopDashboardVersionContent } from '../topDashboardDomain';
 
 export function publishedBlockReady(row: TopDashboardPublishedBlockRow) {
   return row.has_compatible_data
-    || (typeof row.self_contained_html === 'string' && isSupportedProfitabilityHtml(row.self_contained_html));
+    || (typeof row.self_contained_html === 'string' && selfContainedHtmlReady(row.self_contained_html));
+}
+
+function selfContainedHtmlReady(html: string) {
+  const contract = detectTopDashboardDataContract(html);
+  return contract.mode === 'disabled' && contract.snapshotFormat === null
+    && (contract.profile === 'profitability' || contract.profile === 'standalone');
 }
 
 export async function getPublishedTopDashboardBlocks(): Promise<TopDashboardPublishedBlockSummary[]> {
@@ -222,7 +228,7 @@ export async function getPublishedTopDashboardBlockVersionContent(
     [blockId, versionId],
   );
   const row = result.rows[0];
-  if (!row || (!row.has_compatible_data && !isSupportedProfitabilityHtml(row.html_content))) return null;
+  if (!row || (!row.has_compatible_data && !selfContainedHtmlReady(row.html_content))) return null;
 
   return {
     id: Number(row.id),

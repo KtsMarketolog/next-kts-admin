@@ -7,6 +7,7 @@ import {
 } from '../topDashboardDomain';
 import { TopDashboardBlockStateNotFoundError } from './types';
 import { numericId, type Queryable } from './records';
+import { detectTopDashboardDataContract } from '../../topDashboardContentSecurity';
 
 export function assertDashboardDataCompatibility(input: {
   htmlVersionId: number;
@@ -96,12 +97,16 @@ export async function assertExpectedActiveHtmlVersion(
   client: Queryable,
   blockId: number,
   expectedActiveHtmlVersionId: number,
+  expectedSnapshotFormat: TopDashboardSnapshotFormat,
+  expectedProfile: TopDashboardProfile,
 ) {
-  const stateResult = await client.query<{ active_version_id: string | null }>(
-    `select active_version_id::text
-     from top_dashboard_block_state
-     where block_id = $1
-     for update`,
+  const stateResult = await client.query<{ active_version_id: string | null; html_content: string | null }>(
+    `select state.active_version_id::text, version.html_content
+     from top_dashboard_block_state state
+     left join top_dashboard_block_versions version
+       on version.block_id = state.block_id and version.id = state.active_version_id
+     where state.block_id = $1
+     for update of state`,
     [blockId],
   );
   const state = stateResult.rows[0];
@@ -112,4 +117,9 @@ export async function assertExpectedActiveHtmlVersion(
     throw new TopDashboardStateConflictError(activeHtmlVersionId);
   }
   if (activeHtmlVersionId === null) throw new TopDashboardActiveHtmlRequiredError();
+  const contract = state.html_content === null ? null : detectTopDashboardDataContract(state.html_content);
+  if (!contract || contract.mode === 'disabled'
+    || contract.snapshotFormat !== expectedSnapshotFormat || contract.profile !== expectedProfile) {
+    throw new TopDashboardDataCompatibilityError('Для этого HTML общие данные не подключены или режим изменился');
+  }
 }

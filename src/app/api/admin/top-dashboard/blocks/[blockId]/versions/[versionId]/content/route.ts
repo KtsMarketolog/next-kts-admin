@@ -1,6 +1,6 @@
 import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
 import { injectSalesOfficeView } from '@/shared/lib/dashboardOfficeView';
-import { injectProfitabilityAuditAdapter, isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '@/shared/lib/dashboardProfitabilityHtml';
+import { injectProfitabilityAuditAdapter, supportsDashboardInvoiceAudit } from '@/shared/lib/dashboardProfitabilityHtml';
 import { isActiveTopDashboardHtmlVersion } from '@/shared/lib/db/topDashboardBlocksRepo';
 import {
   isTopDashboardManagementSession,
@@ -15,6 +15,7 @@ import {
   buildTopDashboardContentSecurityPolicy,
   injectTopDashboardDataAdapter,
   isTopDashboardBlockFrameRequest,
+  detectTopDashboardDataContract,
 } from '@/shared/lib/topDashboardContentSecurity';
 
 import { parsePositiveId } from '../../../../routeUtils';
@@ -51,19 +52,23 @@ export async function GET(request: Request, context: Context) {
       : await getPublishedTopDashboardBlockVersionContent(blockId, versionId);
     if (!version && !canManage) {
       const localVersion = await getTopDashboardBlockVersionContent(blockId, versionId);
-      if (localVersion && isSupportedProfitabilityHtml(localVersion.htmlContent)
-        && await isActiveTopDashboardHtmlVersion(blockId, versionId)) version = localVersion;
+      if (localVersion) {
+        const profile = detectTopDashboardDataContract(localVersion.htmlContent).profile;
+        if ((profile === 'profitability' || profile === 'standalone')
+          && await isActiveTopDashboardHtmlVersion(blockId, versionId)) version = localVersion;
+      }
     }
     if (!version) return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
 
     const officeView = new URL(request.url).searchParams.get('view') === 'sales-office';
-    const profitability = !officeView && isSupportedProfitabilityHtml(version.htmlContent);
-    const unsupportedProfitability = !profitability && isProfitabilityHtmlCandidate(version.htmlContent);
+    const profile = detectTopDashboardDataContract(version.htmlContent).profile;
+    const localReport = profile === 'profitability' || profile === 'standalone';
+    const invoiceAudit = !officeView && localReport && supportsDashboardInvoiceAudit(version.htmlContent);
     const adapted = injectTopDashboardDataAdapter(version.htmlContent, {
-      readOnly: officeView || !canManage || unsupportedProfitability,
-      localInvoiceMode: profitability,
+      readOnly: officeView || !canManage,
+      localInvoiceMode: localReport && !officeView,
     });
-    const htmlContent = officeView ? injectSalesOfficeView(adapted) : profitability ? injectProfitabilityAuditAdapter(adapted) : adapted;
+    const htmlContent = officeView ? injectSalesOfficeView(adapted) : invoiceAudit ? injectProfitabilityAuditAdapter(adapted) : adapted;
     const bytes = Buffer.from(htmlContent, 'utf8');
     return new Response(new Uint8Array(bytes), {
       headers: {
@@ -71,7 +76,7 @@ export async function GET(request: Request, context: Context) {
         'Content-Length': String(bytes.length),
         'Content-Disposition': 'inline; filename="dashboard.html"',
         'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-        'Content-Security-Policy': buildTopDashboardContentSecurityPolicy(htmlContent, { allowBlobModules: profitability }),
+        'Content-Security-Policy': buildTopDashboardContentSecurityPolicy(htmlContent, { allowBlobModules: localReport && !officeView }),
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'SAMEORIGIN',
         'X-DNS-Prefetch-Control': 'off',

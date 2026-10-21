@@ -41,6 +41,10 @@ async function main() {
   const stamp = '2026-10-21T08:00:00.000Z';
   const folder = { id: 1, parentId: null, kind: 'folder', title: 'Регламенты продаж', revision: '1', archivedAt: null,
     createdAt: stamp, updatedAt: stamp, originalName: null, mimeType: null, size: null, access: { mode: 'custom', actorKeys: ['manager:1'] } };
+  const nestedFolder = { ...folder, id: 4, parentId: 1, title: 'Инструкции для новых сотрудников' };
+  const longFolder = { ...folder, id: 5, title: 'Положения и инструкции по работе с региональными партнёрами — СправочникДляНовыхСотрудниковПодразделенияПродажИЗакупок' };
+  const archivedFolder = { ...folder, id: 6, title: 'Архив регламентов', archivedAt: stamp };
+  const openFolderName = (title: string) => `Открыть папку «${title}»`;
   const material = { ...folder, id: 2, parentId: 1, kind: 'file', title: 'Порядок работы с клиентом', originalName: 'regulation.html',
     mimeType: 'text/html', size: 1200, access: { mode: 'inherit', actorKeys: [] } };
   const calls: { path: string; method: string; body: unknown; headers: Record<string, unknown> }[] = [];
@@ -74,8 +78,10 @@ async function main() {
     if (failList) return void json({ error: 'Не удалось загрузить папку' }, 503);
     const parent = url.searchParams.get('parentId');
     const inArchive = url.searchParams.get('archived') === '1';
-    return void json({ nodes: parent ? (archived === inArchive ? [{ ...material, archivedAt: archived ? stamp : null }] : []) : [folder],
-      nextCursor: null, breadcrumbs: parent ? [folder] : [], canManage: !readOnly });
+    const materialNodes = archived === inArchive ? [{ ...material, archivedAt: archived ? stamp : null }] : [];
+    return void json({ nodes: parent ? [...(parent === '1' && !inArchive ? [nestedFolder] : []), ...materialNodes]
+      : inArchive ? [archivedFolder] : [folder, longFolder],
+      nextCursor: null, breadcrumbs: parent ? parent === '4' ? [folder, nestedFolder] : [folder] : [], canManage: !readOnly });
   });
   try {
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
@@ -84,15 +90,26 @@ async function main() {
     for (const engine of ['chromium', 'webkit']) {
       const browser = await playwright[engine].launch({ headless: true });
       try {
-        for (const width of [1440, 390]) {
+        for (const width of [1440, 390, 320]) {
           readOnly = false; failList = false; failSave = false; archived = false; calls.length = 0;
           const page = await browser.newPage({ viewport: { width, height: 1000 } });
           page.setDefaultTimeout(10_000);
           const errors: string[] = []; page.on('pageerror', (error: Error) => errors.push(error.message));
           await page.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
           await page.goto(origin + '/admin/knowledge-base');
-          await page.getByRole('button', { name: folder.title, exact: true }).waitFor();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           await page.evaluate(() => document.fonts.ready);
+          for (const title of [folder.title, longFolder.title]) {
+            const card = page.getByRole('article').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+            const badge = card.getByText('Папка', { exact: true });
+            const badgeBox = await badge.boundingBox();
+            const titleBox = await card.getByRole('heading').boundingBox();
+            assert.ok(badgeBox && titleBox && badgeBox.height <= 30 && badgeBox.y + badgeBox.height <= titleBox.y, 'compact folder badge sits above title');
+            assert.ok(await badge.evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth), 'folder label is not clipped');
+            assert.ok(await card.evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth), 'long folder name stays inside card');
+            assert.ok(await card.getByRole('button', { name: openFolderName(title), exact: true }).evaluate((node: HTMLElement) => node.getBoundingClientRect().height) >= 42, 'open folder touch target');
+            assert.equal(await card.getByRole('heading').getByRole('button').count(), 0, 'folder title is a clear heading, not hidden navigation');
+          }
           assert.equal(calls.some((call) => call.path.includes('/usage')), false, 'statistics lazy');
           assert.equal(calls.some((call) => call.path.includes('/employees')), false, 'employee directory lazy');
           assert.ok(await page.getByRole('heading', { name: 'База знаний', exact: true }).evaluate((node: HTMLElement) => node.getBoundingClientRect().top) > 75, 'title below fixed header');
@@ -113,8 +130,18 @@ async function main() {
           await page.getByText('Папка создана.', { exact: true }).waitFor();
           const lastOperation = (calls.filter((call) => call.method === 'POST' && call.path === '/api/admin/knowledge-base').at(-1)?.body as { operationId: string }).operationId;
           assert.equal(firstOperation, lastOperation, 'same operation ID for retry');
-          await page.getByRole('button', { name: folder.title, exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).click();
           await page.getByRole('button', { name: material.title, exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), '1');
+          assert.ok(calls.some((call) => call.method === 'GET' && call.path.includes('parentId=1')), 'explicit open loads folder');
+          const nestedOpen = page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true });
+          await nestedOpen.focus();
+          await nestedOpen.press('Enter');
+          await page.getByRole('heading', { name: nestedFolder.title, exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), '4');
+          assert.ok(calls.some((call) => call.method === 'GET' && call.path.includes('parentId=4')), 'keyboard open loads nested folder');
+          await page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: folder.title, exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
           await page.getByRole('button', { name: 'Загрузить файл', exact: true }).click();
           dialog = page.getByRole('dialog');
           await dialog.getByLabel('Файл', { exact: true }).setInputFiles({ name: 'instruction.html', mimeType: 'text/html', buffer: Buffer.from('<!doctype html><h1>Тест</h1>') });
@@ -134,13 +161,19 @@ async function main() {
           assert.equal(await page.evaluate(() => document.body.dataset.exposed), undefined, 'HTML cannot access parent');
           await page.screenshot({ path: path.join(output, `${engine}-${width}-preview.png`), fullPage: true });
           await dialog.getByRole('button', { name: 'Закрыть', exact: true }).click();
-          await page.getByRole('button', { name: 'В архив', exact: true }).click();
+          await page.getByRole('article').filter({ has: page.getByRole('heading', { name: material.title, exact: true }) }).getByRole('button', { name: 'В архив', exact: true }).click();
           await page.getByRole('dialog').getByRole('button', { name: 'В архив', exact: true }).click();
           await page.getByText('Материал перенесён в архив. Файлы и история сохранены.', { exact: true }).waitFor();
           await page.getByRole('button', { name: 'Архив', exact: true }).click();
           await page.getByRole('button', { name: 'Восстановить', exact: true }).click();
           await page.getByRole('dialog').getByRole('button', { name: 'Восстановить', exact: true }).click();
           await page.getByText('Материал восстановлен.', { exact: true }).waitFor();
+          await page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: 'База знаний', exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          await page.getByRole('button', { name: 'Архив', exact: true }).click();
+          await page.getByRole('heading', { name: archivedFolder.title, exact: true }).waitFor();
+          assert.equal(await page.getByRole('button', { name: /^Открыть папку/ }).count(), 0, 'archived folders cannot be opened');
+          assert.equal(await page.getByRole('button', { name: 'Восстановить', exact: true }).count(), 1, 'archived folder can be restored');
           await page.getByRole('button', { name: 'Статистика использования', exact: true }).click();
           await page.getByRole('button', { name: 'Тестовый сотрудник', exact: true }).click();
           await page.getByRole('button', { name: material.title, exact: true }).waitFor();
@@ -152,17 +185,23 @@ async function main() {
           assert.deepEqual(errors, []);
           readOnly = true;
           await page.goto(origin + '/admin/knowledge-base?reader=1');
-          await page.getByRole('button', { name: folder.title, exact: true }).waitFor();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(await page.getByRole('button', { name: 'Создать папку', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Статистика использования', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Настроить', exact: true }).count(), 0);
+          const readerOpen = page.getByRole('button', { name: openFolderName(folder.title), exact: true });
+          assert.equal(await readerOpen.isEnabled(), true, 'read-only employee can open granted folder');
+          await readerOpen.focus(); await readerOpen.press('Enter');
+          await page.getByRole('button', { name: material.title, exact: true }).waitFor();
+          await page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: 'База знаний', exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           failList = true;
           await page.getByRole('button', { name: 'Обновить', exact: true }).click();
           await page.getByRole('alert').waitFor();
           assert.equal(await page.getByRole('button', { name: 'Обновить', exact: true }).isEnabled(), true);
           failList = false;
           await page.getByRole('button', { name: 'Повторить', exact: true }).click();
-          await page.getByRole('button', { name: folder.title, exact: true }).waitFor();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           await page.close(); console.log(`${engine}/${width}: KB navigation, access editor, upload, archive, stats, errors, isolated HTML passed`);
         }
       } finally { await browser.close(); }

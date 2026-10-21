@@ -4,13 +4,20 @@ import { useEffect, useRef, useState } from 'react';
 import { ADMIN_UPLOAD_TIMEOUT_MS } from '@/features/admin/shared/adminRequest';
 import { requestProfitabilityFrameChange } from '@/features/admin/dashboard-usage/useProfitabilityAuditGuard';
 import { TOP_DASHBOARD_HTML_MAX_BYTES as MAX_HTML_BYTES, TOP_DASHBOARD_HTML_MAX_MEGABYTES } from '@/shared/lib/topDashboardLimits';
-import { readError, type TopDashboardVersion, type UploadFeedback } from './topDashboardManagementModel';
+import { defaultTopDashboardIntegrationMode, readError, type TopDashboardIntegrationMode, type TopDashboardVersion, type UploadFeedback } from './topDashboardManagementModel';
 import type { TopDashboardManagement } from './useTopDashboardManagement';
 
 /** HTML selection, draft upload, publication and deletion share no data-upload state. */
 export function useTopDashboardHtmlVersions(management: TopDashboardManagement) {
-  const { overview, mutationRef, previewFrameRef, beginMutation, finishMutation, request, apiBasePath, loadOverview, selectedVersionId, setPreviewRevision, showStatusRef, isActive } = management;
+  const { blockId, overview, mutationRef, previewFrameRef, beginMutation, finishMutation, request, apiBasePath, loadOverview, selectedVersionId, setPreviewRevision, showStatusRef, isActive } = management;
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [integrationSelection, setIntegrationSelection] = useState<{ blockId: number; mode: TopDashboardIntegrationMode } | null>(null);
+  const integrationMode = integrationSelection?.blockId === blockId
+    ? integrationSelection.mode : defaultTopDashboardIntegrationMode(overview);
+  const chooseIntegrationMode = (mode: TopDashboardIntegrationMode) => {
+    setIntegrationSelection({ blockId, mode });
+    setHtmlUploadFeedback(null);
+  };
   const [htmlUploadFeedback, setHtmlUploadFeedback] = useState<UploadFeedback | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const reportUploadFeedback = (_target: 'html', message: string, kind: UploadFeedback['kind'] = 'error') => {
@@ -35,6 +42,8 @@ export function useTopDashboardHtmlVersions(management: TopDashboardManagement) 
       reportUploadFeedback('html', `HTML-файл должен быть непустым и не больше ${TOP_DASHBOARD_HTML_MAX_MEGABYTES} МБ`);
       return;
     }
+    // A background overview refresh must not change the mode of an already selected file.
+    setIntegrationSelection((current) => current?.blockId === blockId ? current : { blockId, mode: integrationMode });
     setSelectedFile(file);
   };
 
@@ -51,6 +60,7 @@ export function useTopDashboardHtmlVersions(management: TopDashboardManagement) 
     try {
       const body = new FormData();
       body.set('file', selectedFile);
+      body.set('integrationMode', integrationMode);
       const response = await request(`${apiBasePath}/versions`, {
         method: 'POST',
         body,
@@ -165,7 +175,7 @@ export function useTopDashboardHtmlVersions(management: TopDashboardManagement) 
     }
   };
 
-  return { selectedFile, htmlUploadFeedback, fileInputRef, chooseFile, uploadVersion, activateVersion, deleteVersion };
+  return { selectedFile, integrationMode, chooseIntegrationMode, htmlUploadFeedback, fileInputRef, chooseFile, uploadVersion, activateVersion, deleteVersion };
 }
 
 export type TopDashboardHtmlVersions = ReturnType<typeof useTopDashboardHtmlVersions>;

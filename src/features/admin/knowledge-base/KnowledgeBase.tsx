@@ -117,12 +117,17 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
       {loading && <p role="status" className={styles.muted}>Загружаем материалы…</p>}
       {error && <div className={styles.error} role="alert">{error} <button type="button" onClick={() => setRefresh((n) => n + 1)}>Повторить</button></div>}
       {data && <><div className={styles.grid}>{data.nodes.map((node) => <article key={node.id} className={`${styles.card} ${node.kind === 'folder' ? styles.folder : ''}`}>
-        <span className={styles.icon} aria-hidden="true">{node.kind === 'folder' ? 'ПАПКА' : (node.originalName?.split('.').at(-1) ?? 'ФАЙЛ').toUpperCase().slice(0, 5)}</span>
-        <h3>{archived ? node.title : <button className={`${styles.text} ${styles.cardTitle}`} type="button" onClick={() => node.kind === 'folder'
-          ? navigate(node.id) : setPreview({ node, eventId: crypto.randomUUID() })}>{node.title}</button>}</h3>
+        {node.kind === 'folder' ? <span className={styles.folderBadge}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+          </svg>Папка</span> : <span className={styles.icon} aria-hidden="true">{(node.originalName?.split('.').at(-1) ?? 'ФАЙЛ').toUpperCase().slice(0, 5)}</span>}
+        <h3>{archived || node.kind === 'folder' ? node.title : <button className={`${styles.text} ${styles.cardTitle}`} type="button"
+          onClick={() => setPreview({ node, eventId: crypto.randomUUID() })}>{node.title}</button>}</h3>
         <div><p className={styles.muted}>{node.kind === 'file' ? `${kbSize(node.size)} · ` : ''}{kbDate(node.updatedAt)} МСК</p>
           {canManage && <span className={styles.badge}>{node.access?.mode === 'inherit' ? 'Доступ как у папки' : `Выбрано сотрудников: ${node.access?.actorKeys.length ?? 0}`}</span>}</div>
-        <div className={styles.cardActions}>{!archived && node.kind === 'file' && <button type="button" onClick={() => download(node)}>Скачать</button>}
+        <div className={styles.cardActions}>{!archived && node.kind === 'folder' && <button type="button" className={`${styles.primary} ${styles.openFolder}`}
+          aria-label={`Открыть папку «${node.title}»`} onClick={() => navigate(node.id)}>Открыть папку <span aria-hidden="true">→</span></button>}
+          {!archived && node.kind === 'file' && <button type="button" onClick={() => download(node)}>Скачать</button>}
           {canManage && <>{!archived && <button type="button" onClick={() => setEditor({ node })}>Настроить</button>}
             <button type="button" onClick={() => { setArchiveError(''); setArchiveTarget(node); }}>{archived ? 'Восстановить' : 'В архив'}</button></>}
         </div></article>)}</div>

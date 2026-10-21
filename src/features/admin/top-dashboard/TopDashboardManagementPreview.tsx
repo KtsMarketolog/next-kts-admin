@@ -57,7 +57,7 @@ async function exitDocumentFullscreen() {
 export function TopDashboardManagementPreview({ management, html, data, selectedVersion, previewCardRef }: { management: TopDashboardManagement; html: TopDashboardHtmlVersions; data: TopDashboardDataVersions; selectedVersion: TopDashboardVersion | null; previewCardRef: RefObject<HTMLElement | null> }) {
   const { blockId, overview, loading, busyAction, previewFrameRef, previewRevision, setPreviewRevision, apiBasePath, showStatusRef, loadOverview } = management;
   const { activateVersion } = html;
-  const { activeDataVersion, probeRuntimeUploadTargets } = data;
+  const { activeDataVersion, isLocalDataReport, probeRuntimeUploadTargets } = data;
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
 
   useEffect(() => {
@@ -105,7 +105,10 @@ export function TopDashboardManagementPreview({ management, html, data, selected
             <h2>{selectedVersion?.originalName ?? 'HTML ещё не загружен'}</h2>
             {selectedVersion ? (
               <div className={styles.topDashboardMeta}>
-                {selectedVersion.status === 'active' ? <DashboardDataDates uploadedAt={activeDataVersion?.createdAt} dataAsOf={activeDataVersion?.dataAsOf} /> : <span>Предпросмотр не заменяет действующий отчёт</span>}
+                {selectedVersion.status === 'active'
+                  ? isLocalDataReport ? <span>Личные данные загружаются внутри HTML</span>
+                    : <DashboardDataDates uploadedAt={activeDataVersion?.createdAt} dataAsOf={activeDataVersion?.dataAsOf} />
+                  : <span>Предпросмотр не заменяет действующий отчёт</span>}
                 <details><summary>Техническая информация HTML</summary>
                   <span>Версия #{selectedVersion.id} · {formatFileSize(selectedVersion.fileSize)}</span>{' · '}
                   <span>HTML загружен: {formatDate(selectedVersion.createdAt)}</span>{' · '}

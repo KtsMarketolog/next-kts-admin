@@ -6,6 +6,7 @@ import type { AdminSessionRole } from '../src/shared/lib/adminAuth';
 import type { TopDashboardSnapshotFormat } from '../src/shared/lib/db/topDashboardDomain';
 import type { ProfitabilityAuditRequest, ProfitabilityInvoice } from '../src/shared/lib/dashboardProfitabilityAudit';
 import { MAX_PROFITABILITY_AUDIT_BODY } from '../src/shared/lib/dashboardProfitabilityAudit';
+import { declaresDashboardInvoiceAudit } from '../src/shared/lib/dashboardProfitabilityHtml';
 import { createAccessUser } from '../src/shared/lib/db/adminUsersRepo';
 import { createStoredAdminSession, getStoredAdminSession } from '../src/shared/lib/db/adminSessionsRepo';
 import { query } from '../src/shared/lib/db/client';
@@ -56,6 +57,7 @@ test('profitability details isolated PostgreSQL acceptance', async (t) => {
   // It permits wholly synthetic invoices/HTML while exercising real SQL and ACL.
   const profile = {
     isSupportedProfitabilityHtml: (html: string) => html === SUPPORTED_HTML,
+    supportsDashboardInvoiceAudit: (html: string) => html === SUPPORTED_HTML || declaresDashboardInvoiceAudit(html),
     isProfitabilityHtmlCandidate: (html: string) => html === SUPPORTED_HTML || html.includes('Unreviewed invoice version'),
   };
   const moduleMock = mock.module('../src/shared/lib/dashboardProfitabilityHtml.ts', {
@@ -250,22 +252,22 @@ test('profitability details isolated PostgreSQL acceptance', async (t) => {
       assert.deepEqual(await read(admin.session,event.id), invoice);
     });
 
-    await t.test('published catalog and readers admit only the exact supported self-contained profile without data', async () => {
+    await t.test('published catalog and readers admit standalone HTML without requiring detailed invoice support', async () => {
       const ordinary = await createTopDashboardBlock({ title: 'Synthetic ordinary report', createdByAdminUserId: null, createdByManagerId: null });
-      const ordinaryVersion = await htmlVersion(ordinary.id, '<html>Ordinary standalone HTML is not eligible</html>');
+      const ordinaryVersion = await htmlVersion(ordinary.id, '<html>Ordinary standalone HTML is eligible</html>');
       await query('update top_dashboard_block_versions set original_name=$2 where block_id=$1', [ordinary.id, 'рентабельность_сделок_v19.html']);
       const catalog = await getPublishedTopDashboardBlocks();
       assert.ok(catalog.some((row) => row.id === block.id));
       assert.ok(catalog.some((row) => row.id === secondBlock.id));
-      assert.ok(!catalog.some((row) => row.id === ordinary.id));
+      assert.ok(catalog.some((row) => row.id === ordinary.id));
       const overview = await getPublishedTopDashboardBlockOverview(block.id);
       assert.equal(overview?.activeVersionId, versionId);
       assert.equal(overview?.dataUploadedAt, null);
       assert.equal((await getPublishedTopDashboardBlockVersionContent(block.id, versionId))?.htmlContent, SUPPORTED_HTML);
       assert.equal(await getPublishedTopDashboardBlockVersionContent(block.id, draftId), null);
       assert.equal(await getPublishedTopDashboardBlockVersionContent(secondBlock.id, versionId), null);
-      assert.equal(await getPublishedTopDashboardBlockOverview(ordinary.id), null);
-      assert.equal(await getPublishedTopDashboardBlockVersionContent(ordinary.id, ordinaryVersion), null);
+      assert.equal((await getPublishedTopDashboardBlockOverview(ordinary.id))?.activeVersionId, ordinaryVersion);
+      assert.equal((await getPublishedTopDashboardBlockVersionContent(ordinary.id, ordinaryVersion))?.id, ordinaryVersion);
     });
 
     await t.test('same-actor retries are idempotent including concurrency; mismatches never overwrite details', async () => {
@@ -337,6 +339,30 @@ test('profitability details isolated PostgreSQL acceptance', async (t) => {
       await assert.rejects(record({ ...purchaser.session, role: 'admin' }, input()), forbidden);
       await assert.rejects(read({ ...top.session, sessionId: randomUUID() }, acceptedId), forbidden);
       assert.equal(await count(), before);
+    });
+
+    await t.test('independent author invoice-v1 opt-in authorizes audited events, not unknown or deceptive declarations', async () => {
+      const item = await createTopDashboardBlock({ title: 'Synthetic invoice protocol V999', createdByAdminUserId: null, createdByManagerId: null });
+      const marker = '<meta name="kts-dashboard-audit" content="invoice-v1">';
+      const html = '<!doctype html><html><head>' + marker + '</head><body><input id="new-input" type="file"><script>window.syntheticVersion=999;</script></body></html>';
+      const version = await htmlVersion(item.id, html);
+      const event = input({ dashboardKey: `top:${item.id}`, versionId: version,
+        upload: { name: 'Synthetic original invoice.pdf', size: 125 } });
+      const before = await count();
+      const writes = await Promise.all(Array.from({ length: 4 }, () => record(admin.session, event)));
+      assert.equal(new Set(writes.map(value => value.id)).size, 1);
+      assert.equal(await count(), before + 1);
+      assert.deepEqual(await read(admin.session, writes[0].id), invoice);
+      await assert.rejects(record(admin.session, { ...event, invoice: { ...invoice, currency: 'EUR' } }), conflict);
+      await assert.rejects(record(purchaser.session, event), forbidden, 'declaration does not bypass report access');
+      for (const unsupported of [html.replace(marker, ''), html.replace(marker, '<!--' + marker + '-->'), html.replace('invoice-v1', 'invoice-v99')]) {
+        const draft = await htmlVersion(item.id, unsupported, false);
+        await assert.rejects(record(admin.session, { ...event, eventId: randomUUID(), versionId: draft, preview: true }), forbidden);
+      }
+      const draft = await htmlVersion(item.id, html + '<!--new author release-->', false);
+      await assert.rejects(record(admin.session, { ...event, eventId: randomUUID(), versionId: draft }), forbidden);
+      const preview = await record(admin.session, { ...event, eventId: randomUUID(), versionId: draft, preview: true });
+      assert.ok(preview.id);
     });
 
     await t.test('persisted revocation, deactivation, password changes and session expiry override stale sessions', async () => {

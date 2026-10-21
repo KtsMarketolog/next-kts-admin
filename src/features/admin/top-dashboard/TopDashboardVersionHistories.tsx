@@ -9,12 +9,12 @@ import type { TopDashboardDataVersions } from './useTopDashboardDataVersions';
 export function TopDashboardVersionHistories({ management, html, data }: { management: TopDashboardManagement; html: TopDashboardHtmlVersions; data: TopDashboardDataVersions }) {
   const { overview, busyAction, selectedVersionId, setSelectedVersionId, setPreviewRevision, previewFrameRef } = management;
   const { activateVersion, deleteVersion } = html;
-  const { activateDataVersion, hasActiveHtml } = data;
+  const { activateDataVersion, hasActiveHtml, isLocalDataReport } = data;
   const activeVersion = overview?.versions.find((version) => version.id === overview.activeVersionId) ?? null;
   const workingHtmlVersions = overview ? selectWorkingVersionPair(overview.versions, overview.activeVersionId, overview.previousVersionId) : [];
   const workingDataVersions = overview ? selectWorkingVersionPair(overview.data.versions, overview.data.activeVersionId, overview.data.previousVersionId) : [];
   return <>
-      <section id="top-dashboard-data-history" className={styles.section}>
+      {!isLocalDataReport && <section id="top-dashboard-data-history" className={styles.section}>
         <p className={styles.mutedText}>Хранятся текущий и один предыдущий рабочий снимок данных.</p>
         {overview && workingDataVersions.length ? (
           <div className={styles.topDashboardDataHistory}>
@@ -59,7 +59,7 @@ export function TopDashboardVersionHistories({ management, html, data }: { manag
             </div>
           </div>
         ) : null}
-      </section>
+      </section>}
 
       <section id="top-dashboard-html-history" className={styles.section}>
         <div className={styles.sectionHeader}>

@@ -1,5 +1,6 @@
 import sanitizeHtml from 'sanitize-html';
 import { isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '../dashboardProfitabilityHtml';
+import { hasStandaloneTopDashboardMarker } from '../topDashboardStandalone';
 import type { TopDashboardProfile, TopDashboardSnapshotFormat } from '../db/topDashboardDomain';
 import { TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_TARGET_TEXT_BYTES, type TopDashboardMultiFileSnapshotTarget } from '../topDashboardMultiFileSnapshot';
 
@@ -66,13 +67,13 @@ export function detectTopDashboardExpectedSnapshotFormat(
 export function detectTopDashboardDataContract(
   htmlContent: string,
 ): TopDashboardDataContract {
-  // V19 invoice files are private local calculations, not a shared snapshot.
-  // Never capture/restore these inputs through the generic multi-file bridge.
+  // Detailed invoice instrumentation is optional. Local files must never be
+  // captured as shared data just because the author's application changed.
   if (isSupportedProfitabilityHtml(htmlContent)) {
     return { mode: 'disabled', snapshotFormat: null, profile: 'profitability', directUploadTarget: null };
   }
-  if (isProfitabilityHtmlCandidate(htmlContent)) {
-    return { mode: 'disabled', snapshotFormat: null, profile: 'profitability-unsupported', directUploadTarget: null };
+  if (hasStandaloneTopDashboardMarker(htmlContent) || isProfitabilityHtmlCandidate(htmlContent)) {
+    return { mode: 'disabled', snapshotFormat: null, profile: 'standalone', directUploadTarget: null };
   }
   const profile = detectTopDashboardExpectedProfile(htmlContent);
   const snapshotFormat = detectTopDashboardExpectedSnapshotFormat(htmlContent);
@@ -113,7 +114,7 @@ export function detectTopDashboardDataContract(
     : {
         mode: 'disabled',
         snapshotFormat: null,
-        profile: null,
+        profile: 'standalone',
         directUploadTarget: null,
       };
 }

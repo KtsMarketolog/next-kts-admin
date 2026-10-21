@@ -5,10 +5,11 @@ import {
 } from '@/shared/lib/adminAuth';
 import { getTopDashboardBlockVersionContent, isPublishedTopDashboardBlockVersion } from '@/shared/lib/db';
 import { isActiveTopDashboardHtmlVersion } from '@/shared/lib/db/topDashboardBlocksRepo';
-import { isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml } from '@/shared/lib/dashboardProfitabilityHtml';
+import { supportsDashboardInvoiceAudit } from '@/shared/lib/dashboardProfitabilityHtml';
 import {
   buildTopDashboardFrameSecurityPolicy,
   createTopDashboardFrameBridgeScript,
+  detectTopDashboardDataContract,
 } from '@/shared/lib/topDashboardContentSecurity';
 
 import { parsePositiveId } from '../../../../routeUtils';
@@ -34,24 +35,24 @@ export async function GET(request: Request, context: Context) {
   const canManage = isTopDashboardManagementSession(session);
   const version = await getTopDashboardBlockVersionContent(blockId, versionId);
   if (!version) return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
-  const profitability = isSupportedProfitabilityHtml(version.htmlContent);
-  const unsupportedProfitability = !profitability && isProfitabilityHtmlCandidate(version.htmlContent);
-  // The approved self-contained invoice report does not require a shared
-  // snapshot; ordinary HTML reports retain their existing data-readiness gate.
-  const published = profitability ? await isActiveTopDashboardHtmlVersion(blockId, versionId)
+  const profile = detectTopDashboardDataContract(version.htmlContent).profile;
+  const localReport = profile === 'profitability' || profile === 'standalone';
+  // Standalone HTML does not need a shared snapshot. Connected dashboards keep
+  // their data-readiness gate, and drafts remain visible to managers only.
+  const published = localReport ? await isActiveTopDashboardHtmlVersion(blockId, versionId)
     : !canManage && await isPublishedTopDashboardBlockVersion(blockId, versionId);
   if (!canManage && !published) {
     return Response.json({ error: 'Версия HTML не найдена' }, { status: 404 });
   }
 
   const officeView = new URL(request.url).searchParams.get('view') === 'sales-office';
+  const invoiceAudit = localReport && !officeView && supportsDashboardInvoiceAudit(version.htmlContent);
   const contentPath = `/api/admin/top-dashboard/blocks/${blockId}/versions/${versionId}/content${officeView ? '?view=sales-office' : ''}`;
   const bridgeScript = createTopDashboardFrameBridgeScript(
     blockId,
     versionId,
     canManage && !officeView,
-    profitability && !officeView ? { preview: !published }
-      : unsupportedProfitability || (profitability && officeView) ? { preview: true, auditEnabled: false } : undefined,
+    localReport ? { preview: !published, auditEnabled: invoiceAudit } : undefined,
   );
   const html = `<!doctype html>
 <html lang="ru">
@@ -63,6 +64,7 @@ export async function GET(request: Request, context: Context) {
     html,body,iframe{width:100%;height:100%;margin:0;border:0;background:#fff}
     body{position:relative;overflow:hidden}
     iframe{display:block}
+    ${localReport && !officeView ? 'body{display:flex;flex-direction:column}iframe{flex:1;min-height:0}#local-report-info{flex:none;box-sizing:border-box;padding:7px 12px;background:#f6f4fb;color:#504766;font:12px/1.45 Arial,sans-serif;border-bottom:1px solid #ded8ef}#local-report-info summary{cursor:pointer}#local-report-info p{margin:6px 0 0}' : ''}
     #data-notice{position:fixed;z-index:10;top:14px;right:14px;max-width:min(420px,calc(100% - 28px));
       box-sizing:border-box;padding:10px 14px;border:1px solid transparent;border-radius:10px;
       box-shadow:0 8px 24px rgba(22,27,46,.18);font:600 14px/1.35 Arial,sans-serif;color:#202333;background:#fff}
@@ -73,6 +75,7 @@ export async function GET(request: Request, context: Context) {
   </style>
 </head>
 <body>
+  ${localReport && !officeView ? `<details id="local-report-info"><summary>Самостоятельный HTML · ${invoiceAudit ? 'журнал счетов подключён' : 'детализация счетов не подключена'}</summary><p>Файлы обрабатываются в этой вкладке и не сохраняются как общие данные сайта. Для сохранения работы используйте снимок или экспорт внутри отчёта. Открытия и время просмотра учитываются отдельно.${invoiceAudit ? ' В журнал передаются только поддерживаемые события загрузки счетов.' : ' HTML может работать без подключения подробного журнала.'}</p></details>` : ''}
   <iframe
     id="dashboard-frame"
     src="${contentPath}"
@@ -83,7 +86,6 @@ export async function GET(request: Request, context: Context) {
     allowfullscreen
   ></iframe>
   <div id="data-notice" role="status" aria-live="polite" hidden></div>
-  ${unsupportedProfitability ? '<div role="alert" style="position:fixed;bottom:14px;left:14px;right:14px;padding:12px;background:#fff0ee;color:#9d271e;font:600 14px Arial,sans-serif">Эта версия «Рентабельности» ещё не поддерживает журнал счетов. Загрузка счетов отключена до адаптации HTML; общие данные не изменяются.</div>' : ''}
   <script>${bridgeScript}</script>
 </body>
 </html>`;

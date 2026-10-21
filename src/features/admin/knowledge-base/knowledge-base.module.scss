@@ -32,6 +32,8 @@
   .cardActions { margin-top: auto; display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; }
 }
 .icon { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 10px; background: #efebfc; color: #260b86; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+.folderBadge { display: inline-flex; align-items: center; align-self: flex-start; gap: 6px; max-width: 100%; padding: 4px 8px; border-radius: 6px; background: #efebfc; color: #564587; font-size: 12px; line-height: 18px; font-weight: 600; white-space: nowrap; svg { flex-shrink: 0; } }
+.cardActions .openFolder { font-size: 13px; }
 .folder { background: #faf8ff; }
 .badge { display: inline-block; border-radius: 6px; padding: 3px 7px; font-size: 11px; background: #eeebf7; color: #564a77; }
 .empty { padding: 40px 20px; text-align: center; border: 1px dashed #d4cde8; border-radius: 12px; background: #faf9fd; h3 { font-size: 18px; margin-bottom: 10px; } }

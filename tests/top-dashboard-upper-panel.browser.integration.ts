@@ -4,7 +4,7 @@
  * node --import tsx tests/top-dashboard-upper-panel.browser.integration.ts
  */
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
@@ -30,7 +30,10 @@ const snapshot=id=>({id,originalName:'synthetic-'+id+'.ktsmf',fileSize:1000,unco
 window.fixtureOverview={block:{id:7,title:'Синтетический обзор',createdAt:date},activeVersionId:10,previousVersionId:9,updatedAt:date,versions:[version(10,'active'),version(11,'draft'),version(9,'archived'),version(8,'archived')],data:{activeVersionId:200,previousVersionId:199,updatedAt:date,versions:[snapshot(200),{...snapshot(199),status:'previous'},{...snapshot(198),status:'archived'},{...snapshot(190),status:'archived',boundHtmlVersionId:9}]},activeDataContract:{htmlVersionId:10,mode:'generic',snapshotFormat:'multi-file-v1',profile:'generic',directUploadTarget:null,uploadTargets:scenario==='runtime'?[]:targets}};
 window.fixtureRuntimeTargets=scenario==='runtime'?targets:null;
 if(scenario==='legacy')window.fixtureOverview.activeDataContract={htmlVersionId:10,mode:'legacy',snapshotFormat:'kts-bundle-v1',profile:'sales-analytics',directUploadTarget:null,uploadTargets:[]};
+if(scenario==='standalone'||scenario==='profitability')window.fixtureOverview.activeDataContract={htmlVersionId:10,mode:'disabled',snapshotFormat:null,profile:scenario,directUploadTarget:null,uploadTargets:[]};
+if(scenario==='new'){window.fixtureOverview.activeVersionId=null;window.fixtureOverview.versions=[];window.fixtureOverview.activeDataContract={htmlVersionId:null,mode:'disabled',snapshotFormat:null,profile:null,directUploadTarget:null,uploadTargets:[]};}
 window.fixtureUploads=[];window.fixtureRuntimeUploads=[];window.fixtureStatuses=[];window.fixtureConfirms=[];window.fixtureConfirmAllowed=true;window.fixtureFail=false;window.fixtureConflict=false;window.fixtureFailureMode=null;window.fixtureOverviewLoads=0;
+window.fixtureHtmlUploads=[];
 window.fixtureAccessLoads=0;
 window.fixtureMutations=[];
 window.confirm=message=>{window.fixtureConfirms.push(message);return window.fixtureConfirmAllowed};
@@ -46,10 +49,11 @@ window.fetch=async(input,init)=>{
  }
  if(input==='/api/admin/top-dashboard/blocks/7'&&(!init?.method||init.method==='GET')){window.fixtureOverviewLoads++;return Response.json(window.fixtureOverview);}
  if(input==='/api/admin/top-dashboard/blocks/7/versions'&&init?.method==='POST'){
+  window.fixtureHtmlUploads.push({name:init.body.get('file').name,integrationMode:init.body.get('integrationMode')});
   if(window.fixtureFailureMode==='pending')return new Promise((_,reject)=>{init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});});
   if(window.fixtureFailureMode==='network')throw new TypeError('Failed to fetch');
   if(window.fixtureFailureMode)return Response.json({error:'HTML не принят сервером'},{status:422});
-  const saved={...version(12,'draft'),originalName:init.body.get('file').name};window.fixtureOverview.versions.unshift(saved);return Response.json({version:saved});
+  const saved={...version(Math.max(11,...window.fixtureOverview.versions.map(v=>v.id))+1,'draft'),originalName:init.body.get('file').name};window.fixtureOverview.versions.unshift(saved);return Response.json({version:saved});
  }
  if(input==='/api/admin/top-dashboard/blocks/7'&&init?.method==='PATCH'){
   if(window.fixtureFailureMode==='network')throw new TypeError('Failed to fetch');
@@ -130,11 +134,13 @@ async function main() {
       });
     } }],
   });
-  const server = createServer((request, response) => {
+  const globalCss = await readFile(path.join(root, 'src/app/globals.css'), 'utf8');
+  const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-    if (url.pathname === '/') response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<!doctype html><html lang="ru"><meta charset="utf-8"><link rel="stylesheet" href="/fixture.css"><body><div id="root"></div><script src="/fixture.js"></script></body></html>');
+    if (url.pathname === '/') response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"><body><div id="root"></div><script src="/fixture.js"></script></body></html>');
     else if (url.pathname === '/fixture.js') response.writeHead(200, { 'Content-Type': 'text/javascript' }).end(bundle.outputFiles[0].contents);
-    else if (url.pathname === '/fixture.css') response.writeHead(200, { 'Content-Type': 'text/css' }).end(css);
+    else if (url.pathname === '/fixture.css') response.writeHead(200, { 'Content-Type': 'text/css' }).end(globalCss + css);
+    else if (/^\/fonts\/montserrat\/montserrat-[a-z-]+\.woff2$/.test(url.pathname)) response.writeHead(200, { 'Content-Type': 'font/woff2' }).end(await readFile(path.join(root, 'public', url.pathname)));
     else if (/^\/api\/admin\/top-dashboard\/blocks\/7\/versions\/\d+\/frame$/.test(url.pathname)) response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(frameHtml);
     else response.writeHead(404).end();
   });
@@ -315,6 +321,60 @@ async function main() {
         assert.match(await htmlFeedback.innerText(), /new-report\.html.*черновик #12.*публикация не изменена/);
         assert.equal(await page.evaluate(() => (window as any).fixtureOverview.activeVersionId), 10);
         assert.equal(await htmlInput.evaluate((input: HTMLInputElement) => input.files?.length), 0);
+        assert.equal(await page.evaluate(() => (window as any).fixtureHtmlUploads.at(-1).integrationMode), 'connected', 'existing connected report preserves its upload mode');
+
+        // Standalone reports accept ordinary HTML updates without exposing common snapshots.
+        for (const scenario of ['standalone', 'profitability', 'new', 'legacy']) {
+          await page.goto(`${origin}/?case=${scenario}`);
+          const standaloneMode = page.getByRole('radio', { name: 'Самостоятельный HTML', exact: true });
+          const connectedMode = page.getByRole('radio', { name: 'Общие данные сайта', exact: true });
+          await page.waitForFunction(() => (window as any).fixtureOverviewLoads > 0 && !document.querySelector('fieldset')?.disabled);
+          assert.equal(await standaloneMode.isChecked(), scenario !== 'legacy', `${scenario}: appropriate default mode`);
+          assert.equal(await connectedMode.isChecked(), scenario === 'legacy');
+          if (scenario === 'legacy') {
+            await htmlInput.setInputFiles({ name: 'preserve-mode.html', mimeType: 'text/html', buffer: Buffer.from('<!doctype html><title>Chosen with connected mode</title>') });
+            await page.evaluate(() => {
+              (window as any).fixtureOverview.activeDataContract = { htmlVersionId: 10, mode: 'disabled', profile: 'standalone', snapshotFormat: null, directUploadTarget: null, uploadTargets: [] };
+            });
+            await page.getByRole('button', { name: 'Обновить просмотр', exact: true }).click();
+            await page.getByRole('heading', { name: 'Данные внутри отчёта', exact: true }).waitFor();
+            assert.equal(await connectedMode.isChecked(), true, 'selected file retains its implicit mode even if active report mode changed elsewhere');
+          }
+          if (scenario === 'standalone' || scenario === 'profitability') {
+            assert.equal(await page.locator('#top-dashboard-data-upload input[type="file"]').count(), 0, 'no shared data uploader for personal browser files');
+            assert.equal(await page.locator('.topDashboardActiveDataCard').count(), 0, 'old global snapshot never shown as current local data');
+            assert.equal(await page.locator('#top-dashboard-data-history').count(), 0, 'shared snapshot rollback unavailable in local mode');
+            assert.match(await page.locator('.topDashboardPreviewCard').innerText(), /Личные данные загружаются внутри HTML/);
+            if (scenario === 'standalone') {
+              assert.match(await page.locator('#top-dashboard-data-upload').innerText(), /Детализация счетов.*только при подключении HTML/);
+              assert.doesNotMatch(await page.locator('#top-dashboard-data-upload').innerText(), /Передайте авторский HTML|Загрузка счетов отключена/);
+            } else assert.match(await page.locator('#top-dashboard-data-upload').innerText(), /Успешная загрузка счёта фиксируется в журнале/);
+          }
+          await standaloneMode.check();
+          await htmlInput.setInputFiles({ name: 'independent-report.html', mimeType: 'text/html', buffer: Buffer.from('<!doctype html><title>Standalone fixture</title>') });
+          if (scenario !== 'new') {
+            const beforeRefresh = await page.evaluate(() => (window as any).fixtureOverviewLoads);
+            await page.getByRole('button', { name: 'Обновить просмотр', exact: true }).click();
+            await page.waitForFunction((count: number) => (window as any).fixtureOverviewLoads > count, beforeRefresh);
+            assert.equal(await standaloneMode.isChecked(), true, 'overview refresh does not reset explicit upload choice');
+            assert.equal(await htmlInput.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), 'independent-report.html');
+          }
+          for (const width of [1440, 390]) {
+            await page.setViewportSize({ width, height: 900 });
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'integration selector fits mobile layout');
+            if (scenario === 'standalone') await page.locator('#top-dashboard-html-upload').screenshot({ path: path.join(screenshots, `${engine}-${width}-integration-mode.png`) });
+          }
+          await page.getByRole('button', { name: 'Загрузить как черновик', exact: true }).click();
+          await page.waitForSelector('#top-dashboard-html-upload-feedback[role="status"]');
+          assert.deepEqual(await page.evaluate(() => (window as any).fixtureHtmlUploads.at(-1)), { name: 'independent-report.html', integrationMode: 'standalone' });
+          assert.equal(await standaloneMode.isChecked(), true, 'successful draft upload preserves chosen mode');
+          await connectedMode.check();
+          await htmlInput.setInputFiles({ name: 'connected-report.html', mimeType: 'text/html', buffer: Buffer.from('<!doctype html><input type="file">') });
+          await page.getByRole('button', { name: 'Загрузить как черновик', exact: true }).click();
+          await page.waitForSelector('#top-dashboard-html-upload-feedback[role="status"]');
+          assert.equal(await page.evaluate(() => (window as any).fixtureHtmlUploads.at(-1).integrationMode), 'connected', 'explicit connected choice sent as multipart field');
+        }
+        await page.setViewportSize({ width: 1440, height: 1000 });
 
         // Each extracted operation owns its draft, but all mutations still share one lock.
         await page.goto(`${origin}/?case=legacy`);

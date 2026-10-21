@@ -37,6 +37,8 @@ export async function createAndActivateTopDashboardBlockDataVersion(
       client,
       input.blockId,
       input.expectedActiveHtmlVersionId,
+      input.expectedHtmlSnapshotFormat,
+      input.expectedHtmlProfile,
     );
 
     assertDashboardDataCompatibility({
@@ -201,6 +203,8 @@ export async function activateTopDashboardBlockDataVersion(
       client,
       input.blockId,
       input.expectedActiveHtmlVersionId,
+      input.expectedHtmlSnapshotFormat,
+      input.expectedHtmlProfile,
     );
 
     const stateResult = await client.query<TopDashboardStateRow>(

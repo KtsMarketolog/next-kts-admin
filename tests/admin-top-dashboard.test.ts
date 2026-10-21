@@ -407,7 +407,7 @@ test('TOP viewer routes enforce published-only HTML at both frame layers', () =>
   assert.match(contentSource, /isTopDashboardManagementSession/);
 });
 
-test('TOP viewer exposes only reports with both active HTML and active data', () => {
+test('TOP viewer keeps connected-data readiness queries and a separate standalone publication gate', () => {
   const source = readFileSync(new URL(
     '../src/shared/lib/db/topDashboardBlocksRepo/publishedReads.ts',
     import.meta.url,
@@ -430,6 +430,9 @@ test('TOP viewer exposes only reports with both active HTML and active data', ()
     assert.match(section, /top_dashboard_block_data_state/);
     assert.match(section, /active_version_id is not null/);
   });
+  assert.match(source, /selfContainedHtmlReady/);
+  assert.match(source, /contract\.mode === 'disabled'/);
+  assert.match(source, /contract\.profile === 'standalone'/);
 });
 
 test('TOP viewer component contains no dashboard mutation controls', () => {
@@ -502,7 +505,7 @@ test('dashboard data adapter is injected before application scripts and receives
   const appScript = "document.body.dataset.app = 'ready';";
   const original = `<!doctype html><html><head><script>${appScript}</script></head><body></body></html>`;
   const transformed = injectTopDashboardDataAdapter(original);
-  const adapterScript = getTopDashboardDataAdapterScript();
+  const adapterScript = getTopDashboardDataAdapterScript(null, 'standalone');
 
   assert.ok(transformed.indexOf(adapterScript) < transformed.indexOf(appScript));
   assert.match(transformed, /<script data-kts-top-dashboard-data-adapter>/);
@@ -570,7 +573,7 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
   ]) {
     assert.deepEqual(
       detectTopDashboardDataContract(html),
-      { mode: 'disabled', snapshotFormat: null, profile: null, directUploadTarget: null },
+      { mode: 'disabled', snapshotFormat: null, profile: 'standalone', directUploadTarget: null },
     );
   }
   for (const html of [
@@ -640,7 +643,7 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
   );
   assert.deepEqual(
     detectTopDashboardDataContract('<main>Готовый отчёт без файлов</main>'),
-    { mode: 'disabled', snapshotFormat: null, profile: null, directUploadTarget: null },
+    { mode: 'disabled', snapshotFormat: null, profile: 'standalone', directUploadTarget: null },
   );
   assert.deepEqual(
     detectTopDashboardDataContract(`
@@ -680,7 +683,7 @@ test('dashboard HTML declares the compatible snapshot family without trusting it
         upload.dataset.type = 'file';
       </script>
     `),
-    { mode: 'disabled', snapshotFormat: null, profile: null, directUploadTarget: null },
+    { mode: 'disabled', snapshotFormat: null, profile: 'standalone', directUploadTarget: null },
   );
 });
 

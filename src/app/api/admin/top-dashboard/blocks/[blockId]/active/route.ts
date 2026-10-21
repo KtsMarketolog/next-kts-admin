@@ -73,11 +73,11 @@ export async function PUT(request: Request, context: Context) {
     const contract = detectTopDashboardDataContract(targetHtml.htmlContent);
     const expectedSnapshotFormat = contract.snapshotFormat;
     const expectedProfile = contract.profile;
-    // The reviewed invoice report is self-contained. Disabled shared uploads do
-    // not disable publishing it; unknown profitability versions remain rejected.
-    const localOnlyProfitability = contract.mode === 'disabled'
-      && expectedSnapshotFormat === null && expectedProfile === 'profitability';
-    if (!localOnlyProfitability && (contract.mode === 'disabled' || !expectedSnapshotFormat || !expectedProfile)) {
+    // A local HTML report does not need a shared data snapshot or an invoice
+    // adapter. Its source-derived contract is checked again in the transaction.
+    const localOnly = contract.mode === 'disabled' && expectedSnapshotFormat === null
+      && (expectedProfile === 'profitability' || expectedProfile === 'standalone');
+    if (!localOnly && (contract.mode === 'disabled' || !expectedSnapshotFormat || !expectedProfile)) {
       return Response.json(
         { error: 'В HTML не найдено поддерживаемое поле выбора файлов' },
         { status: 422 },

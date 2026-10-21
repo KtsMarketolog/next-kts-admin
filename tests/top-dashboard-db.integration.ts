@@ -22,6 +22,8 @@ import {
   getTopDashboardBlockOverview,
   getTopDashboardBlocks,
   getPublishedTopDashboardBlockOverview,
+  getPublishedTopDashboardBlocks,
+  getPublishedTopDashboardBlockVersionContent,
   pruneTopDashboardBlockHistory,
   TopDashboardDraftLimitError,
   TopDashboardDataStorageLimitError,
@@ -38,6 +40,7 @@ import {
 import { getManagerEmailHash, personalDashboardToday } from '../src/shared/lib/managerDashboardDomain';
 import { writeTopDashboardRequestToPendingFile } from '../src/shared/lib/topDashboardDataStorage';
 import { TOP_DASHBOARD_DATA_STORED_MAX_BYTES } from '../src/shared/lib/topDashboardLimits';
+import { addStandaloneTopDashboardMarker } from '../src/shared/lib/topDashboardStandalone';
 import {
   TopDashboardBlockDataStateConflictError,
   TopDashboardDataCompatibilityError,
@@ -134,6 +137,64 @@ test('TOP retention isolated PostgreSQL acceptance', async (t) => {
     assert.equal((await query(`select to_regclass('public.top_dashboard_blocks')::text as present`)).rows[0].present, null);
     await ensureSiteSchema();
     assert.equal((await query(`select count(*)::int as count from top_dashboard_block_data_context_state`)).rows[0].count, 0);
+
+    for (const kind of ['generic', 'native'] as const) {
+      await t.test(`standalone HTML publishes without shared data and preserves the ${kind} rollback pair`, async () => {
+        const item = await block();
+        const original = await html(item.id, 'connected-original', kind);
+        await publish(item.id, original, null, kind);
+        const a = await data(item.id, original, null, 'data-A', kind);
+        const b = await data(item.id, original, a.version.id, 'data-B', kind);
+        const before = (await getTopDashboardBlockOverview(item.id)).data;
+        const source = addStandaloneTopDashboardMarker('<!doctype html><html><head></head><body><input id="private" type="file"><script>const authorVersion=999;</script></body></html>');
+        const local = (await createTopDashboardBlockVersion({blockId:item.id, originalName:'independent.html', htmlContent:source,
+          fileSize:Buffer.byteLength(source), sha256:hash(source), ...uploader})).version.id;
+        // An untrusted caller cannot reinterpret local file selection as shared data.
+        await assert.rejects(publish(item.id, local, original), TopDashboardDataCompatibilityError);
+        const saved = await activateTopDashboardBlockVersion({blockId:item.id, versionId:local, expectedActiveVersionId:original,
+          expectedSnapshotFormat:null, expectedProfile:'standalone', ...actor});
+        assert.equal(saved.activeVersionId, local);
+        assert.equal(saved.previousVersionId, original);
+        assert.deepEqual(saved.prunedStoragePaths, []);
+        const after = await getTopDashboardBlockOverview(item.id);
+        assert.equal(after.data.activeVersionId,null);
+        assert.equal(after.data.previousVersionId,null);
+        assert.deepEqual(after.data.versions.map(row=>row.id).sort(),before.versions.map(row=>row.id).sort());
+        assert.equal(await getActiveTopDashboardBlockDataContent(item.id,local),null);
+        assert.equal((await getPublishedTopDashboardBlockOverview(item.id))?.activeVersionId,local);
+        assert.ok((await getPublishedTopDashboardBlocks()).some(row=>row.id===item.id));
+        assert.equal((await getPublishedTopDashboardBlockVersionContent(item.id,local))?.htmlContent,source);
+        await assert.rejects(data(item.id,local,null,'private invoice must not save'),TopDashboardDataCompatibilityError);
+        await assert.rejects(rollbackData(item.id,local,b.version.id,b.version.id,kind),TopDashboardDataCompatibilityError);
+        await publish(item.id,original,local,kind);
+        const restored = (await getTopDashboardBlockOverview(item.id)).data;
+        assert.equal(restored.activeVersionId,b.version.id);
+        assert.equal(restored.previousVersionId,a.version.id);
+        assert.deepEqual(restored.versions,before.versions);
+        await deleteTopDashboardBlock(item.id);
+      });
+    }
+
+    await t.test('static and unknown invoice HTML can publish without an adapter; stale revisions and cross-block reads remain denied',async()=>{
+      const item = await block();
+      let previous: number | null = null;
+      for (const source of [
+        '<!doctype html><html><body>Static regulation</body></html>',
+        '<!doctype html><html><head><title>Рентабельность счетов</title></head><body><input id="fInv" type="file"><script>const format="kts-rent-snapshot"; const version=999;</script></body></html>',
+      ]) {
+        const versionId=(await createTopDashboardBlockVersion({blockId:item.id,originalName:'author.html',htmlContent:source,
+          fileSize:Buffer.byteLength(source),sha256:hash(source),...uploader})).version.id;
+        await activateTopDashboardBlockVersion({blockId:item.id,versionId,expectedActiveVersionId:previous,
+          expectedSnapshotFormat:null,expectedProfile:'standalone',...actor});
+        assert.equal((await getPublishedTopDashboardBlockOverview(item.id))?.activeVersionId,versionId);
+        assert.equal((await getPublishedTopDashboardBlockVersionContent(item.id,versionId))?.htmlContent,source);
+        await assert.rejects(activateTopDashboardBlockVersion({blockId:item.id,versionId,expectedActiveVersionId:previous,
+          expectedSnapshotFormat:null,expectedProfile:'standalone',...actor}),TopDashboardStateConflictError);
+        assert.equal(await getPublishedTopDashboardBlockVersionContent(item.id+99999,versionId),null);
+        previous=versionId;
+      }
+      await deleteTopDashboardBlock(item.id);
+    });
 
     await t.test('fixed dashboard pair persists its selection and rejects stale administrator revisions', async () => {
       assert.equal(await getDashboardPairConfig(), null);

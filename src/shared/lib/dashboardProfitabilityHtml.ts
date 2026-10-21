@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
+import sanitizeHtml from 'sanitize-html';
 import { instrumentReviewedProfitabilityUsage } from './dashboardUsageProfiles';
 
 // This fingerprint covers only the author's application script, never the private embedded stock.
-// A new author version must be reviewed before enabling detailed invoice instrumentation.
+// Automatic hooks require review; explicit invoice-v1 uses the independent author contract below.
 const V19_APPLICATION_SHA256 = 'e58f2d053f9edc76217a13e1a3d8ec89bd8e2493604ef00786d70b656d6e9b84';
 const ADAPTER_ATTRIBUTE = 'data-kts-profitability-audit-adapter="v1"';
 const INVOICE_SUCCESS = "S.log.push({ file: f.name, kind: inv.docType + ' · ' + r.kind, ok: true, id: inv.id, msg });";
@@ -31,7 +32,50 @@ export function isSupportedProfitabilityHtml(html: string): boolean {
   return supportedApplication(html) !== null;
 }
 
-/** A deny-only recognizer: unknown author versions must not share private invoice inputs as generic snapshots. */
+// A conventional, explicit head keeps insertion outside comments, attribute
+// values and author scripts. The declaration below is independently HTML-parsed.
+function protocolHeadEnd(html: string): number | null {
+  const tagAttributes = `(?:[^<>"']|"[^"]*"|'[^']*')*`;
+  const space = `(?:\\s|<!--(?:[\\s\\S]*?)-->)*`;
+  const head = new RegExp(`^${space}(?:<!doctype\\b${tagAttributes}>${space})?(?:<html(?=[\\s>])${tagAttributes}>${space})?<head(?=[\\s>])${tagAttributes}>`, 'i').exec(html);
+  return head ? head[0].length : null;
+}
+
+/** Explicit author opt-in, never inferred from JS strings, comments or filenames. */
+export function declaresDashboardInvoiceAudit(html: string): boolean {
+  if (!html.includes('kts-dashboard-audit') || protocolHeadEnd(html) === null) return false;
+  let inHead = false;
+  let inertDepth = 0;
+  let declarations = 0;
+  let supported = false;
+  const inert = new Set(['script', 'style', 'textarea', 'title', 'noscript', 'template', 'svg', 'math']);
+  try {
+    sanitizeHtml(html, {
+      allowedTags: [], allowedAttributes: {},
+      textFilter: () => '',
+      onOpenTag(name, attributes) {
+        if (inert.has(name)) inertDepth++;
+        if (name === 'head' && !inertDepth) inHead = true;
+        if (name === 'body' && !inertDepth) inHead = false;
+        if (name !== 'meta' || !inHead || inertDepth || attributes.name !== 'kts-dashboard-audit') return;
+        declarations++;
+        supported = attributes.content === 'invoice-v1';
+      },
+      onCloseTag(name) {
+        if (name === 'head' && !inertDepth) inHead = false;
+        if (inert.has(name)) inertDepth = Math.max(0, inertDepth - 1);
+      },
+    });
+  } catch { return false; }
+  return declarations === 1 && supported;
+}
+
+/** Detailed invoice collection is optional and independent of author release numbers. */
+export function supportsDashboardInvoiceAudit(html: string): boolean {
+  return isSupportedProfitabilityHtml(html) || declaresDashboardInvoiceAudit(html);
+}
+
+/** Local-invoice recognizer: unknown author versions must not share private inputs as generic snapshots. */
 export function isProfitabilityHtmlCandidate(html: string): boolean {
   return /\bkts-rent-snapshot\b/.test(html)
     && (/<input\b[^>]*\bid\s*=\s*(["'])fInv\1/i.test(html) || /\bparseInvoiceFile\s*\(/.test(html))
@@ -39,13 +83,15 @@ export function isProfitabilityHtmlCandidate(html: string): boolean {
 }
 
 /** Runs in the opaque report frame; the trusted wrapper owns identity, authorization and persistence. */
-function auditAdapterScript(): string {
+function auditAdapterScript(protocol = false): string {
   return String.raw`(function () {
   'use strict';
-  if (window.__ktsProfitabilityAuditV19) return;
+  var protocol = ${protocol ? 'true' : 'false'};
+  if (window.__ktsProfitabilityAuditV19 || (protocol && window.KTSDashboardAudit)) return;
   var marker = 'kts-profitability-audit-v1';
   var nonce = null;
   var selectedFiles = new WeakSet();
+  var protocolReceipts = new WeakMap();
   var queue = [];
   var MAX_QUEUE = 100;
   var MAX_BODY = 1024 * 1024;
@@ -72,6 +118,31 @@ function auditAdapterScript(): string {
     return value;
   }
   function finite(value, max) { return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= max; }
+  function exactObject(value, keys) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== keys.length || keys.some(function (key) { return !Object.prototype.hasOwnProperty.call(value, key); })) {
+      throw new Error('Некорректный формат invoice-v1. Передавайте только исходные поля счёта или КП.');
+    }
+    return value;
+  }
+  function canonicalInvoice(value) {
+    var inv = exactObject(value, ['schemaVersion', 'documentType', 'invoiceNumber', 'currency', 'dealAmount', 'amountSource', 'lines']);
+    if (inv.schemaVersion !== 1 || ['invoice', 'quote'].indexOf(inv.documentType) < 0
+      || typeof inv.currency !== 'string' || !/^[A-Z]{3}$/.test(inv.currency)
+      || ['document', 'lines', 'unavailable'].indexOf(inv.amountSource) < 0
+      || (inv.dealAmount === null) !== (inv.amountSource === 'unavailable')
+      || (inv.dealAmount !== null && !finite(inv.dealAmount, 1e15))
+      || !Array.isArray(inv.lines) || !inv.lines.length || inv.lines.length > 1000) {
+      throw new Error('Некорректные исходные данные счёта или КП для invoice-v1. Ручные расчёты в этот журнал не передаются.');
+    }
+    return { schemaVersion: 1, documentType: inv.documentType, invoiceNumber: inv.invoiceNumber === null ? null : text(inv.invoiceNumber, 200),
+      currency: inv.currency, dealAmount: inv.dealAmount, amountSource: inv.amountSource,
+      lines: inv.lines.map(function (value) {
+        var line = exactObject(value, ['nomenclature', 'quantity']);
+        if (!finite(line.quantity, 1e12)) throw new Error('Количество в счёте выходит за допустимый диапазон журнала.');
+        return { nomenclature: text(line.nomenclature, 500), quantity: line.quantity };
+      }) };
+  }
   function uploadMetadata(file) {
     if (typeof file.name !== 'string' || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > 2147483648) return null;
     var name = file.name.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 255);
@@ -181,7 +252,7 @@ function auditAdapterScript(): string {
     var files;
     if (event.type === 'change') {
       var input = event.target;
-      if (!input || input.type !== 'file' || ['fInv', 'fSnap', 'fDirInv'].indexOf(input.id) < 0) return;
+      if (!input || input.type !== 'file' || (!protocol && ['fInv', 'fSnap', 'fDirInv'].indexOf(input.id) < 0)) return;
       files = input.files;
     } else if (event.type === 'drop') {
       files = event.dataTransfer && event.dataTransfer.files;
@@ -210,7 +281,40 @@ function auditAdapterScript(): string {
     redraw();
     pump();
   }
-  Object.defineProperty(window, '__ktsProfitabilityAuditV19', { value: Object.freeze({ recordInvoices: recordInvoices }), writable: false, configurable: false });
+  function recordInvoice(value, file) {
+    // The protocol never inspects arbitrary author variables or reads file bytes.
+    // Success is declared by the author after import, not inferred from choosing a file.
+    if (!file || !selectedFiles.has(file)) return null;
+    try {
+      var upload = uploadMetadata(file);
+      if (!upload) throw new Error('Не удалось определить имя и размер выбранного файла.');
+      var invoice = canonicalInvoice(value);
+      var key = JSON.stringify(invoice);
+      var receipts = protocolReceipts.get(file);
+      if (receipts && receipts.has(key)) return receipts.get(key);
+      if (queue.length >= MAX_QUEUE || (receipts && receipts.size >= 1000)) throw new Error('Очередь журнала заполнена. Дождитесь записи предыдущих документов.');
+      var eventId = uuid();
+      if (new TextEncoder().encode(JSON.stringify({ eventId: eventId, invoice: invoice, upload: upload })).byteLength > MAX_BODY - 1024) {
+        throw new Error('Детализация счёта превышает 1 МБ; запись не отправлена.');
+      }
+      if (!receipts) { receipts = new Map(); protocolReceipts.set(file, receipts); }
+      receipts.set(key, eventId);
+      queue.push({ eventId: eventId, invoice: invoice, upload: upload, created: Date.now() });
+      redraw();
+      pump();
+      return eventId;
+    } catch (reason) {
+      rejected++;
+      error = reason instanceof Error ? reason.message : 'Не удалось подготовить запись.';
+      redraw();
+      return null;
+    }
+  }
+  if (protocol) {
+    Object.defineProperty(window, 'KTSDashboardAudit', { value: Object.freeze({ version: 'invoice-v1', recordInvoice: recordInvoice }), writable: false, configurable: false });
+  } else {
+    Object.defineProperty(window, '__ktsProfitabilityAuditV19', { value: Object.freeze({ recordInvoices: recordInvoices }), writable: false, configurable: false });
+  }
   document.addEventListener('change', markFiles, true);
   document.addEventListener('drop', markFiles, true);
   window.addEventListener('message', function (event) {
@@ -251,8 +355,13 @@ function auditAdapterScript(): string {
 }
 
 export function injectProfitabilityAuditAdapter(html: string): string {
+  if (html.includes(ADAPTER_ATTRIBUTE)) return html;
   const application = supportedApplication(html);
-  if (!application) return html;
+  if (!application) {
+    const insertAt = protocolHeadEnd(html);
+    if (insertAt === null || !declaresDashboardInvoiceAudit(html)) return html;
+    return html.slice(0, insertAt) + `\n<script ${ADAPTER_ATTRIBUTE}>${auditAdapterScript(true)}</script>\n` + html.slice(insertAt);
+  }
   const head = /<head(?:\s[^>]*)?>/i.exec(html);
   if (!head || head.index >= application.start) return html;
   const invoiceHook = INVOICE_SUCCESS + "\n      try { if (!DEMO) window.__ktsProfitabilityAuditV19.recordInvoices([inv], f); } catch (_) { /* Audit must not change report calculations. */ }";

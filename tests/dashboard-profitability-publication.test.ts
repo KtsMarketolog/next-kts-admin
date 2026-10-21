@@ -61,7 +61,11 @@ test('publication API admits the exact detector-approved local invoice profile w
   assert.equal(route.audit[0].eventType,'top_dashboard_version_published');
 });
 
-test('publication API still denies unknown invoices and arbitrary disabled HTML, while generic uploads retain their contract', async () => {
+test('publication API admits standalone without shared data, still denies invalid disabled contracts, and retains generic data', async () => {
+  const standalone = harness({mode:'disabled',snapshotFormat:null,profile:'standalone',directUploadTarget:null});
+  assert.equal((await standalone.request()).status,200);
+  assert.equal(standalone.activations[0].expectedSnapshotFormat,null);
+  assert.equal(standalone.activations[0].expectedProfile,'standalone');
   for (const profile of ['profitability-unsupported',null] as const) {
     const route = harness({mode:'disabled',snapshotFormat:null,profile,directUploadTarget:null});
     assert.equal((await route.request()).status,422);

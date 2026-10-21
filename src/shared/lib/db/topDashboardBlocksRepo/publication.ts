@@ -17,10 +17,7 @@ import {
 } from './dataCompatibility';
 import { ensureSiteSchema } from '../schema';
 import { initializeDashboardDataContexts } from './dataContexts';
-import {
-  isProfitabilityHtmlCandidate,
-  isSupportedProfitabilityHtml,
-} from '../../dashboardProfitabilityHtml';
+import { detectTopDashboardDataContract } from '../../topDashboardContentSecurity';
 import { numericId, requireBlock, type TopDashboardStateRow } from './records';
 import { pruneDashboardDataVersions, pruneDashboardPublishedHtml } from './history';
 import { withTransaction } from '../client';
@@ -57,17 +54,15 @@ export async function activateTopDashboardBlockVersion(
     const version = versionResult.rows[0];
     if (!version) throw new TopDashboardVersionNotFoundError();
 
-    const localOnlyProfitability = isSupportedProfitabilityHtml(version.html_content);
-    if (localOnlyProfitability) {
-      // Recheck the stored source inside the transaction. This exception permits
-      // only the reviewed local invoice workflow, never a shared data binding.
-      if (input.expectedSnapshotFormat !== null || input.expectedProfile !== 'profitability') {
-        throw new TopDashboardDataCompatibilityError('Личные счета этого отчёта нельзя публиковать как общие данные');
-      }
-    } else {
-      if (isProfitabilityHtmlCandidate(version.html_content)) {
-        throw new TopDashboardDataCompatibilityError('Эта версия отчёта рентабельности ещё не поддерживается');
-      }
+    // Never trust the caller to convert private/local inputs into a shared
+    // snapshot (or to detach an ordinary connected report's data silently).
+    const contract = detectTopDashboardDataContract(version.html_content);
+    if (contract.snapshotFormat !== input.expectedSnapshotFormat || contract.profile !== input.expectedProfile) {
+      throw new TopDashboardDataCompatibilityError('Режим HTML изменился. Обновите список версий и повторите публикацию');
+    }
+    const localOnly = contract.mode === 'disabled' && contract.snapshotFormat === null
+      && (contract.profile === 'profitability' || contract.profile === 'standalone');
+    if (!localOnly) {
       assertValidDashboardDataContract(input.expectedSnapshotFormat, input.expectedProfile);
     }
 
@@ -79,7 +74,7 @@ export async function activateTopDashboardBlockVersion(
       change: 'unchanged' as const,
       prunedStoragePaths: [],
     };
-    if (unchanged && !localOnlyProfitability) {
+    if (unchanged && !localOnly) {
       return unchangedResult;
     }
 
@@ -125,7 +120,7 @@ export async function activateTopDashboardBlockVersion(
       const activeDataBinding = numericId(dataState.bound_html_version_id);
 
       // Native JSON retains its existing format/profile compatibility checks.
-      if (!localOnlyProfitability && !targetIsGeneric && !activeDataIsGeneric) {
+      if (!localOnly && !targetIsGeneric && !activeDataIsGeneric) {
         assertDashboardDataCompatibility({
           htmlVersionId: input.versionId,
           htmlSnapshotFormat: input.expectedSnapshotFormat,
@@ -139,7 +134,7 @@ export async function activateTopDashboardBlockVersion(
     }
 
     await initializeDashboardDataContexts(client, input.blockId);
-    const targetContext = localOnlyProfitability ? null : (await client.query<TopDashboardStateRow>(
+    const targetContext = localOnly ? null : (await client.query<TopDashboardStateRow>(
       `select active_version_id::text, previous_version_id::text
        from top_dashboard_block_data_context_state
        where block_id = $1 and context_key = $2`,

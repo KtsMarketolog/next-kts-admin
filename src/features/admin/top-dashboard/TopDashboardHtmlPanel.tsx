@@ -1,4 +1,5 @@
 import styles from '@/app/admin/admin.module.scss';
+import integrationStyles from './top-dashboard-integration.module.scss';
 import { TOP_DASHBOARD_HTML_MAX_MEGABYTES } from '@/shared/lib/topDashboardLimits';
 import { requestProfitabilityFrameChange } from '@/features/admin/dashboard-usage/useProfitabilityAuditGuard';
 import { UploadFeedbackMessage } from './UploadFeedbackMessage';
@@ -9,7 +10,7 @@ import type { TopDashboardBlockSettings } from './useTopDashboardBlockSettings';
 
 export function TopDashboardHtmlPanel({ management, html, settings }: { management: TopDashboardManagement; html: TopDashboardHtmlVersions; settings: TopDashboardBlockSettings }) {
   const { overview, busyAction, previewFrameRef, setSelectedVersionId, setPreviewRevision } = management;
-  const { selectedFile, htmlUploadFeedback, fileInputRef, chooseFile, uploadVersion, activateVersion } = html;
+  const { selectedFile, integrationMode, chooseIntegrationMode, htmlUploadFeedback, fileInputRef, chooseFile, uploadVersion, activateVersion } = html;
   const { isEditingBlockTitle, blockTitleDraft, setBlockTitleDraft, blockMutationError, blockTitleInputRef, renameBlock, deleteBlock, beginBlockTitleEdit, cancelBlockTitleEdit } = settings;
   const activeVersion = overview?.versions.find((version) => version.id === overview.activeVersionId) ?? null;
   const latestDraft = overview?.versions.find((version) => version.status === 'draft');
@@ -88,6 +89,27 @@ export function TopDashboardHtmlPanel({ management, html, settings }: { manageme
           </p>
         ) : null}
 
+        <fieldset className={integrationStyles.integration} disabled={busyAction !== null || !overview} aria-describedby="top-dashboard-integration-help">
+          <legend>Как будет работать новая HTML-версия</legend>
+          <div className={integrationStyles.choices}>
+            <label className={integrationStyles.choice}>
+              <input type="radio" name="top-dashboard-integration-mode" value="standalone" checked={integrationMode === 'standalone'}
+                aria-label="Самостоятельный HTML" onChange={() => chooseIntegrationMode('standalone')} />
+              <span><strong>Самостоятельный HTML</strong><span>Авторские формы и расчёты. Файлы загружаются внутри отчёта, без общего сохранения на сайте.</span></span>
+            </label>
+            <label className={integrationStyles.choice}>
+              <input type="radio" name="top-dashboard-integration-mode" value="connected" checked={integrationMode === 'connected'}
+                aria-label="Общие данные сайта" onChange={() => chooseIntegrationMode('connected')} />
+              <span><strong>Общие данные сайта</strong><span>Для совместимых отчётов: один сохранённый набор данных для сотрудников с доступом.</span></span>
+            </label>
+          </div>
+          <p id="top-dashboard-integration-help" className={integrationStyles.hint} aria-live="polite">
+            {integrationMode === 'standalone'
+              ? 'Обычные обновления оформления и логики не требуют совпадения кода с прошлой версией. Данные внутри HTML сайт автоматически не сохраняет: используйте авторские кнопки сохранения снимка или скачивания перед закрытием. Детальный журнал зависит от подключения HTML.'
+              : 'Сайт проверит совместимость полей загрузки и снимков. Сохранённые здесь общие данные доступны всем получателям отчёта. Счета в «Рентабельности» всегда остаются личными и не становятся общими.'}
+            {' '}Режим применяется только к новой версии. Перед публикацией проверьте черновик: ошибки самого HTML и недоступные внешние ресурсы сайт не исправляет.
+          </p>
+        </fieldset>
         <div className={styles.topDashboardUploadCard}>
           <div>
             <h3>Загрузить новую версию</h3>

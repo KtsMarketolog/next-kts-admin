@@ -54,8 +54,9 @@ export function useTopDashboardDataVersions(management: TopDashboardManagement) 
   );
   const activeHtmlVersionId = overview?.activeVersionId ?? null;
   const hasActiveHtml = Boolean(activeHtmlVersionId);
-  const isUnsupportedProfitability = overview?.activeDataContract.profile === 'profitability-unsupported';
-  const isProfitabilityReport = overview?.activeDataContract.profile === 'profitability' || isUnsupportedProfitability;
+  const isProfitabilityReport = overview?.activeDataContract.profile === 'profitability';
+  const isStandaloneReport = overview?.activeDataContract.profile === 'standalone';
+  const isLocalDataReport = isProfitabilityReport || isStandaloneReport;
   const activeDataContractMatches = overview !== null
     && overview.block.id === blockId
     && overview.activeDataContract.htmlVersionId === overview.activeVersionId;
@@ -361,6 +362,10 @@ export function useTopDashboardDataVersions(management: TopDashboardManagement) 
     if (mutationRef.current) return;
     if (!requestProfitabilityFrameChange(previewFrameRef.current)) return;
     if (!overview || version.status === 'active') return;
+    if (overview.activeDataContract.mode === 'disabled') {
+      showStatusRef.current('В этом отчёте данные загружаются внутри HTML и не сохраняются как общий снимок сайта.');
+      return;
+    }
     if (!overview.activeVersionId) {
       showStatusRef.current('Сначала опубликуйте HTML-страницу');
       return;
@@ -395,7 +400,7 @@ export function useTopDashboardDataVersions(management: TopDashboardManagement) 
     }
   };
 
-  return { activeDataVersion, activeHtmlVersionId, hasActiveHtml, isUnsupportedProfitability, isProfitabilityReport, activeDataContractMatches, usesUniversalDataUpload, dataUploadTargets, canUploadData, uploadSelectionRevision, selectedFileCount, selectedFilesSize, selectedTargetFiles, selectedDataFile, dataUploadFeedback, dataFileInputRef, probeRuntimeUploadTargets, chooseTargetFiles, chooseDataFile, uploadDataVersion, activateDataVersion, cancelPendingUpload };
+  return { activeDataVersion, activeHtmlVersionId, hasActiveHtml, isStandaloneReport, isLocalDataReport, isProfitabilityReport, activeDataContractMatches, usesUniversalDataUpload, dataUploadTargets, canUploadData, uploadSelectionRevision, selectedFileCount, selectedFilesSize, selectedTargetFiles, selectedDataFile, dataUploadFeedback, dataFileInputRef, probeRuntimeUploadTargets, chooseTargetFiles, chooseDataFile, uploadDataVersion, activateDataVersion, cancelPendingUpload };
 }
 
 export type TopDashboardDataVersions = ReturnType<typeof useTopDashboardDataVersions>;

@@ -1,5 +1,6 @@
 import { type RefObject } from 'react';
 import styles from '@/app/admin/admin.module.scss';
+import integrationStyles from './top-dashboard-integration.module.scss';
 import { TOP_DASHBOARD_DATA_MAX_MEGABYTES, TOP_DASHBOARD_DATA_MAX_UNCOMPRESSED_LABEL } from '@/shared/lib/topDashboardLimits';
 import { requestProfitabilityFrameChange } from '@/features/admin/dashboard-usage/useProfitabilityAuditGuard';
 import { DashboardDataDates } from './DashboardDataDates';
@@ -12,8 +13,17 @@ import type { TopDashboardDataVersions } from './useTopDashboardDataVersions';
 
 export function TopDashboardDataPanel({ management, data, previewCardRef }: { management: TopDashboardManagement; data: TopDashboardDataVersions; previewCardRef: RefObject<HTMLElement | null> }) {
   const { overview, busyAction, previewFrameRef, selectedVersionId, setSelectedVersionId } = management;
-  const { activeDataVersion, hasActiveHtml, isProfitabilityReport, isUnsupportedProfitability, activeDataContractMatches, usesUniversalDataUpload, dataUploadTargets, canUploadData, selectedTargetFiles, selectedDataFile, selectedFileCount, selectedFilesSize, uploadSelectionRevision, dataUploadFeedback, dataFileInputRef, chooseTargetFiles, chooseDataFile, uploadDataVersion, probeRuntimeUploadTargets } = data;
+  const { activeDataVersion, hasActiveHtml, isProfitabilityReport, isStandaloneReport, activeDataContractMatches, usesUniversalDataUpload, dataUploadTargets, canUploadData, selectedTargetFiles, selectedDataFile, selectedFileCount, selectedFilesSize, uploadSelectionRevision, dataUploadFeedback, dataFileInputRef, chooseTargetFiles, chooseDataFile, uploadDataVersion, probeRuntimeUploadTargets } = data;
   const workingDataVersions = overview ? selectWorkingVersionPair(overview.data.versions, overview.data.activeVersionId, overview.data.previousVersionId) : [];
+  if (isStandaloneReport) return <section id="top-dashboard-data-upload" className={`${styles.section} ${styles.topDashboardDataSection}`}>
+    <div className={styles.sectionHeader}><div><p>Самостоятельный HTML</p><h2>Данные внутри отчёта</h2></div></div>
+    <div className={`${styles.topDashboardUploadCard} ${styles.topDashboardDataUploadCard}`}><div className={integrationStyles.localNotice}>
+      <h3>Используйте кнопки самого HTML</h3>
+      <p>Загруженные внутри отчёта файлы остаются в браузере сотрудника и не сохраняются как общие данные сайта. Изменения оформления и расчётов не требуют привязки к точному коду предыдущей версии.</p>
+      <p>Перед обновлением или закрытием отчёта сохраните результат авторской кнопкой снимка или скачивания, если она предусмотрена. Сайт не гарантирует сохранение внутреннего состояния HTML между открытиями.</p>
+      <p>Сайт учитывает открытия и время видимого отчёта. Детализация счетов и завершённых расчётов появляется только при подключении HTML к журналу; отсутствие этого подключения не блокирует работу отчёта.</p>
+    </div></div>
+  </section>;
   return (
       <section
         id="top-dashboard-data-upload"
@@ -29,9 +39,7 @@ export function TopDashboardDataPanel({ management, data, previewCardRef }: { ma
         </div>
 
         <p className={styles.topDashboardDataIntro}>
-          {isUnsupportedProfitability
-            ? 'Эта версия «Рентабельности счетов» требует адаптации журнала. Загрузка счетов отключена, чтобы не распространять личные файлы среди других сотрудников и не пропускать детализацию.'
-            : isProfitabilityReport
+          {isProfitabilityReport
             ? 'Загружайте счета и снимки кнопками внутри отчёта выше. Эти файлы используются только в открытом отчёте сотрудника и не становятся общими для всех.'
             : hasActiveHtml
             ? 'Сохранённый файл автоматически откроется в дашборде у всех пользователей с доступом. Новый файл сразу заменит текущие данные, а предыдущая версия останется доступна для отката.'
@@ -49,8 +57,6 @@ export function TopDashboardDataPanel({ management, data, previewCardRef }: { ma
               <p>
                 Данные о текущей HTML-странице устарели. Обновите страницу перед загрузкой файла.
               </p>
-            ) : isUnsupportedProfitability ? (
-              <p role="alert">Детализация для этой версии не подключена. Передайте авторский HTML для адаптации. Ранее записанные события остаются в журнале до окончания срока хранения.</p>
             ) : isProfitabilityReport ? (
               <p>Успешная загрузка счёта фиксируется в журнале: сотрудник, время, номер, номенклатура, количество, сумма и исходная валюта. Журнал доступен админу, TOP и админу TOP; хранение — один месяц.</p>
             ) : overview?.activeDataContract.mode === 'disabled' ? (

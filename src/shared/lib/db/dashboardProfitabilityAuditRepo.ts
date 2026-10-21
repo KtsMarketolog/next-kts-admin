@@ -8,7 +8,7 @@ import {
   type ProfitabilityAuditRequest,
   type ProfitabilityInvoice,
 } from '../dashboardProfitabilityAudit';
-import { isSupportedProfitabilityHtml } from '../dashboardProfitabilityHtml';
+import { supportsDashboardInvoiceAudit } from '../dashboardProfitabilityHtml';
 import { query, withTransaction } from './client';
 import { DASHBOARD_USAGE_RETENTION_CUTOFF_SQL, dashboardUsageActorKey } from './dashboardUsageRepo';
 import { ensureSiteSchema } from './schema';
@@ -90,7 +90,7 @@ export async function recordDashboardProfitabilityAudit(
     select html_content, sha256 from top_dashboard_block_versions
     where block_id = $1 and id = $2`, [blockId, input.versionId]);
   const version = html.rows[0];
-  if (!version || !isSupportedProfitabilityHtml(version.html_content)) denied();
+  if (!version || !supportsDashboardInvoiceAudit(version.html_content)) denied();
 
   return withTransaction(async (client) => {
     await client.query("set local lock_timeout = '2s'");

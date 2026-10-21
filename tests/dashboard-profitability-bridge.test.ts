@@ -169,12 +169,12 @@ test('financial bridge is opt-in; local invoice mode disables shared-file captur
   assert.throws(() => dashboardProfitabilityBridgeScript('frame;fetch("bad")', { dashboardKey: 'top:1', versionId: 2, preview: false }));
 });
 
-test('unknown profitability versions fail closed instead of generic sharing; blob modules require an explicit scoped opt-in', () => {
+test('unknown profitability versions work locally without generic sharing or fabricated invoice audit', () => {
   const candidate='<html><head><title>Рентабельность счетов</title></head><body><input type="file" id="fInv"><script>const format="kts-rent-snapshot";</script></body></html>';
-  assert.equal(detectTopDashboardDataContract(candidate).profile,'profitability-unsupported');
+  assert.equal(detectTopDashboardDataContract(candidate).profile,'standalone');
   assert.equal(detectTopDashboardDataContract(candidate).mode,'disabled');
   const html=injectTopDashboardDataAdapter(candidate,{readOnly:false,localInvoiceMode:true});
-  assert.match(html,/const READ_ONLY = true/); assert.match(html,/const LOCAL_INVOICE_MODE = false/);
+  assert.match(html,/const READ_ONLY = false/); assert.match(html,/const LOCAL_INVOICE_MODE = true/);
   const blocked=createTopDashboardFrameBridgeScript(1,2,true,{preview:true,auditEnabled:false});
   assert.doesNotMatch(blocked,/kts-profitability-audit-v1/);
   assert.match(blocked,/"localInvoiceMode":true/);
