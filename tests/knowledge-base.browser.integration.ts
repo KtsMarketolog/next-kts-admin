@@ -18,7 +18,9 @@ async function main() {
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import Header from './src/widgets/layout/Header/Header';
     import {KnowledgeBase} from './src/features/admin/knowledge-base/KnowledgeBase';
-    createRoot(document.getElementById('root')).render(<><Header/><KnowledgeBase initialCanManage={!location.search.includes('reader=1')}/></>);
+    const folder=new URLSearchParams(location.search).get('folder');
+    const parentId=folder&&/^[1-9]\\d*$/.test(folder)&&Number.isSafeInteger(Number(folder))?Number(folder):null;
+    createRoot(document.getElementById('root')).render(<><Header/><KnowledgeBase initialCanManage={!location.search.includes('reader=1')} initialParentId={parentId}/></>);
   ` }, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     define: { 'process.env.NODE_ENV': '"test"' }, alias: { '@': path.join(root, 'src') }, plugins: [{ name: 'fixtures', setup(plugin) {
       plugin.onResolve({ filter: /^next\/(link|navigation|dynamic)$/ }, ({ path: name }) => ({ path: name, namespace: 'fixture' }));
@@ -98,6 +100,7 @@ async function main() {
           await page.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
           await page.goto(origin + '/admin/knowledge-base');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          assert.equal(await page.getByRole('button', { name: /^Назад (к списку папок|в папку)/ }).count(), 0, 'root has no folder-back button');
           await page.evaluate(() => document.fonts.ready);
           for (const title of [folder.title, longFolder.title]) {
             const card = page.getByRole('article').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
@@ -134,14 +137,34 @@ async function main() {
           await page.getByRole('button', { name: material.title, exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), '1');
           assert.ok(calls.some((call) => call.method === 'GET' && call.path.includes('parentId=1')), 'explicit open loads folder');
+          const backToRoot = page.getByRole('button', { name: 'Назад к списку папок', exact: true });
+          await backToRoot.waitFor();
+          assert.ok(await backToRoot.evaluate((node: HTMLElement) => node.getBoundingClientRect().height) >= 42, 'folder-back touch target');
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'folder navigation does not overflow');
+          await page.screenshot({ path: path.join(output, `${engine}-${width}-folder-back.png`), fullPage: true });
           const nestedOpen = page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true });
           await nestedOpen.focus();
           await nestedOpen.press('Enter');
           await page.getByRole('heading', { name: nestedFolder.title, exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), '4');
           assert.ok(calls.some((call) => call.method === 'GET' && call.path.includes('parentId=4')), 'keyboard open loads nested folder');
-          await page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: folder.title, exact: true }).click();
+          const backToParent = page.getByRole('button', { name: `Назад в папку «${folder.title}»`, exact: true });
+          await backToParent.waitFor();
+          await page.getByRole('searchbox', { name: 'Поиск в текущей папке', exact: true }).fill('порядок');
+          const searchResponse = page.waitForResponse((response: { url(): string }) => new URL(response.url()).searchParams.get('search') === 'порядок');
+          await page.getByRole('button', { name: 'Найти', exact: true }).click();
+          await searchResponse;
+          await page.getByRole('heading', { name: nestedFolder.title, exact: true }).waitFor();
+          await page.getByRole('button', { name: 'Архив', exact: true }).click();
+          await page.getByRole('heading', { name: 'Архив', exact: true }).waitFor();
+          await backToParent.focus(); await backToParent.press('Enter');
           await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), '1', 'nested folder-back opens its actual parent');
+          assert.equal(await page.getByRole('searchbox', { name: 'Поиск в текущей папке', exact: true }).inputValue(), '', 'back clears folder search');
+          assert.equal(await page.getByRole('button', { name: 'К материалам', exact: true }).count(), 0, 'back leaves archive mode');
+          const parentReload = new URL(calls.filter((call) => call.method === 'GET' && new URL(call.path, origin).pathname === '/api/admin/knowledge-base').at(-1)!.path, origin);
+          assert.equal(parentReload.searchParams.get('search'), null, 'parent list does not inherit search filter');
+          assert.equal(parentReload.searchParams.get('archived'), null, 'parent list loads live materials');
           await page.getByRole('button', { name: 'Загрузить файл', exact: true }).click();
           dialog = page.getByRole('dialog');
           await dialog.getByLabel('Файл', { exact: true }).setInputFiles({ name: 'instruction.html', mimeType: 'text/html', buffer: Buffer.from('<!doctype html><h1>Тест</h1>') });
@@ -168,8 +191,10 @@ async function main() {
           await page.getByRole('button', { name: 'Восстановить', exact: true }).click();
           await page.getByRole('dialog').getByRole('button', { name: 'Восстановить', exact: true }).click();
           await page.getByText('Материал восстановлен.', { exact: true }).waitFor();
-          await page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: 'База знаний', exact: true }).click();
+          await backToRoot.click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'first-level back returns to root');
+          assert.equal(await page.getByRole('button', { name: /^Назад (к списку папок|в папку)/ }).count(), 0);
           await page.getByRole('button', { name: 'Архив', exact: true }).click();
           await page.getByRole('heading', { name: archivedFolder.title, exact: true }).waitFor();
           assert.equal(await page.getByRole('button', { name: /^Открыть папку/ }).count(), 0, 'archived folders cannot be opened');
@@ -183,6 +208,29 @@ async function main() {
           assert.ok(calls.some((call) => call.path.includes('/usage?') && call.path.includes('nodeId=2')));
           await page.screenshot({ path: path.join(output, `${engine}-${width}-stats.png`), fullPage: true });
           assert.deepEqual(errors, []);
+          // A direct link has no parent-folder entry in browser history.
+          await page.goto(origin + '/unrelated-history-entry');
+          await page.goto(origin + '/admin/knowledge-base?folder=4');
+          await page.getByRole('heading', { name: nestedFolder.title, exact: true }).waitFor();
+          await backToParent.click();
+          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
+          assert.equal(new URL(page.url()).pathname, '/admin/knowledge-base', 'back does not go to previous unrelated history entry');
+          assert.equal(new URL(page.url()).searchParams.get('folder'), '1', 'direct nested URL returns to actual parent');
+          await backToRoot.click();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          await page.goto(origin + '/admin/knowledge-base?folder=1');
+          await page.getByRole('button', { name: material.title, exact: true }).waitFor();
+          await backToRoot.click();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'direct first-level URL returns to root');
+          failList = true;
+          await page.goto(origin + '/admin/knowledge-base?folder=4');
+          await page.getByRole('alert').waitFor();
+          assert.equal(await backToRoot.isEnabled(), true, 'failed folder load still offers root fallback');
+          failList = false;
+          await backToRoot.click();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'failed-load fallback returns to root');
           readOnly = true;
           await page.goto(origin + '/admin/knowledge-base?reader=1');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
@@ -193,8 +241,9 @@ async function main() {
           assert.equal(await readerOpen.isEnabled(), true, 'read-only employee can open granted folder');
           await readerOpen.focus(); await readerOpen.press('Enter');
           await page.getByRole('button', { name: material.title, exact: true }).waitFor();
-          await page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: 'База знаний', exact: true }).click();
+          await backToRoot.focus(); await backToRoot.press('Enter');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'reader can return to root with keyboard');
           failList = true;
           await page.getByRole('button', { name: 'Обновить', exact: true }).click();
           await page.getByRole('alert').waitFor();

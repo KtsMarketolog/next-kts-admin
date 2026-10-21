@@ -30,6 +30,8 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
   const canManage = data?.canManage ?? initialCanManage;
   const after = pages.at(-1);
   const currentFolder = data?.breadcrumbs.at(-1);
+  const parentFolder = currentFolder?.id === parentId ? data?.breadcrumbs.at(-2) : undefined;
+  const backLabel = parentFolder ? `Назад в папку «${parentFolder.title}»` : 'Назад к списку папок';
   useEffect(() => {
     const pop = () => {
       const raw = new URLSearchParams(location.search).get('folder');
@@ -98,8 +100,12 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
       <button type="button" aria-pressed={tab === 'statistics'} onClick={() => setTab('statistics')}>Статистика использования</button>
     </div>}
     {tab === 'statistics' && canManage ? <KnowledgeBaseStats /> : <>
-      <nav className={styles.breadcrumbs} aria-label="Путь папки"><button type="button" className={styles.text} onClick={() => navigate(null)}>База знаний</button>
-        {data?.breadcrumbs.map((node) => <span key={node.id}> / <button type="button" className={styles.text} onClick={() => navigate(node.id)}>{node.title}</button></span>)}</nav>
+      <div className={styles.folderNavigation}>
+        {parentId !== null && <button type="button" className={styles.folderBack} disabled={loading}
+          aria-label={backLabel} title={backLabel} onClick={() => navigate(parentFolder?.id ?? null)}><span aria-hidden="true">←</span> Назад</button>}
+        <nav className={styles.breadcrumbs} aria-label="Путь папки"><button type="button" className={styles.text} onClick={() => navigate(null)}>База знаний</button>
+          {data?.breadcrumbs.map((node) => <span key={node.id}> / <button type="button" className={styles.text} onClick={() => navigate(node.id)}>{node.title}</button></span>)}</nav>
+      </div>
       <div className={styles.folderHeader}><div><h2>{archived ? 'Архив' : currentFolder?.title ?? (parentId ? 'Материалы папки' : 'Папки Базы знаний')}</h2>
         <p className={styles.muted}>{canManage ? 'Папки и файлы доступны сотрудникам только по назначенным правам.' : 'Здесь только материалы, к которым вам предоставлен доступ.'}</p></div>
         {canManage && currentFolder && !archived && <button type="button" onClick={() => setEditor({ node: currentFolder })}>Доступ к папке</button>}</div>
