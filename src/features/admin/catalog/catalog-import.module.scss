@@ -1,0 +1,35 @@
+.error {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e6bdc4;
+  border-radius: 10px;
+  background: #fff6f7;
+  color: #742b39;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+
+  h4 { margin: 0 0 8px; font-size: 17px; }
+  p { margin: 8px 0 0; color: inherit; font-size: 14px; }
+  .unchanged { font-weight: 700; }
+}
+
+.duplicates {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  margin: 14px 0;
+  padding: 3px;
+  list-style: none;
+  overflow: auto;
+
+  li { padding: 12px; border: 1px solid #f0d6db; border-radius: 7px; background: white; min-width: 0; }
+  strong { display: block; font-size: 14px; }
+  code { font: inherit; overflow-wrap: anywhere; }
+  &:focus-visible { outline: 3px solid #9276e7; outline-offset: 3px; }
+}
+
+@media (max-width: 450px) {
+  .error { padding: 12px; }
+  .duplicates li { padding: 10px; }
+}

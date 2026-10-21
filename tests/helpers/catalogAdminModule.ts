@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
+import * as catalogImportValidation from '../../src/entities/catalog/api/catalogImportValidation';
 
 // Only the extracted, pure repository modules may be followed. Every IO edge
 // remains an explicit stub; an unknown import fails rather than reaching a DB.
@@ -13,6 +14,7 @@ export function loadCatalogAdminModule<T>(dependencies: Record<string, unknown>)
   const cache = new Map<string, { exports: object }>();
   function load(name: string): unknown {
     if (name in dependencies) return dependencies[name];
+    if (name === '../catalogImportValidation') return catalogImportValidation;
     assert.ok(modules.has(name), `Unexpected IO dependency: ${name}`);
     const existing = cache.get(name);
     if (existing) return existing.exports;

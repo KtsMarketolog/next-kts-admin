@@ -1,14 +1,17 @@
 import { ensureSiteSchema } from '@/shared/lib/db';
 import { withCatalogStockWrite } from '@/shared/lib/db/catalogStockWrite';
 import { ensureCatalogSchema } from '../catalogDb';
+import { assertUniqueCatalogArticles } from '../catalogImportValidation';
 import { createCache } from './entityWrites';
 import { normalizeInput } from './productInput';
-import { catalogProductImportKey, getExistingCatalogProducts } from './importMatching';
+import { assertUnambiguousCatalogImportMatches, catalogProductImportKey, getExistingCatalogProducts } from './importMatching';
 import { insertCatalogProduct, updateCatalogProductFromImport } from './productRowWrites';
 import { getCatalogAdminStats } from './stats';
 import type { CatalogProductInput, CatalogImportResult } from './types';
 
 export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promise<CatalogImportResult> {
+  // Preserve Excel row metadata and reject the entire file before any schema or data work.
+  assertUniqueCatalogArticles(rows);
   const normalizedRows = rows.map(normalizeInput).filter((row) => row.article);
   if (normalizedRows.length === 0) throw new Error('В файле нет товаров с заполненным артикулом');
   await ensureCatalogSchema();
@@ -17,6 +20,7 @@ export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promi
   await withCatalogStockWrite(async (client) => {
     const cache = createCache();
     const existingProducts = await getExistingCatalogProducts(client);
+    assertUnambiguousCatalogImportMatches(normalizedRows, existingProducts);
     const touchedProductIds = new Set<number>();
 
     for (const [index, row] of normalizedRows.entries()) {

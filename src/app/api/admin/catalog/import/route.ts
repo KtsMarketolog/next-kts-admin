@@ -1,5 +1,7 @@
 import { parseCatalogExcel } from '@/entities/catalog/api/catalogExcel';
 import { replaceCatalogFromRows } from '@/entities/catalog/api/catalogAdmin';
+import { CatalogImportDuplicateError } from '@/entities/catalog/api/catalogImportValidation';
+import { CatalogExistingArticleConflictError } from '@/entities/catalog/api/catalogAdmin/importMatching';
 import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
@@ -56,6 +58,15 @@ export async function POST(request: Request) {
 
     return Response.json({ result });
   } catch (error) {
+    if (error instanceof CatalogImportDuplicateError || error instanceof CatalogExistingArticleConflictError) {
+      // Both errors are raised before the first catalog write. Keep the structured
+      // diagnostics separate from generic/unknown save errors in the interface.
+      return Response.json({ error: error.message, code: error.code, duplicates: error.duplicates,
+        duplicateCount: error.duplicateCount, truncated: error.truncated }, {
+        status: error instanceof CatalogImportDuplicateError ? 400 : 409,
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
     return badRequest(error instanceof Error ? error.message : 'Не удалось загрузить каталог');
   }
 }

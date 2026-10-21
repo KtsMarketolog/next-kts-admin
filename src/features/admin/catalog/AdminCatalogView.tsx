@@ -2,7 +2,7 @@ import type { Dispatch, FormEvent, RefObject, SetStateAction } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
 
-import { AdminCatalogImportPanel } from './AdminCatalogImportPanel';
+import { AdminCatalogImportPanel, type CatalogImportError } from './AdminCatalogImportPanel';
 import { AdminCatalogProductsPanel } from './AdminCatalogProductsPanel';
 import {
   type CatalogDraft,
@@ -18,6 +18,7 @@ type AdminCatalogViewProps = {
   fileInputRef: RefObject<HTMLInputElement | null>;
   importExcel: (event: FormEvent) => Promise<void>;
   importResult: string;
+  importError: CatalogImportError | null;
   fileName: string;
   setFileName: (value: string) => void;
   busyId: string | null;
@@ -49,6 +50,7 @@ export function AdminCatalogView({
   fileInputRef,
   importExcel,
   importResult,
+  importError,
   fileName,
   setFileName,
   busyId,
@@ -107,6 +109,7 @@ export function AdminCatalogView({
         fileInputRef={fileInputRef}
         importExcel={importExcel}
         importResult={importResult}
+        importError={importError}
         fileName={fileName}
         setFileName={setFileName}
         busyId={busyId}

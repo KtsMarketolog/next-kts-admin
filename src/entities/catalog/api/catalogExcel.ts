@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 
 import type { CatalogProductInput } from './catalogAdmin';
+import { assertUniqueCatalogArticles, setCatalogImportSourceRow } from './catalogImportValidation';
 
 type RawRow = Record<string, unknown>;
 type RawMatrixRow = unknown[];
@@ -67,8 +68,18 @@ function findColumn(headers: string[], match: (header: string) => boolean) {
 }
 
 function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null {
-  const matrix = XLSX.utils.sheet_to_json<RawMatrixRow>(sheet, { header: 1, defval: null, raw: true, blankrows: false });
-  if (matrix.length > MAX_CATALOG_EXCEL_ROWS) throw new Error('Excel-файл слишком большой');
+  if (!sheet['!ref']) return null;
+  const range = XLSX.utils.decode_range(sheet['!ref']);
+  const columnKeys = Array.from({ length: range.e.c - range.s.c + 1 }, (_, index) => String(index));
+  // Object rows carry SheetJS's non-enumerable, absolute __rowNum__. Explicit
+  // column keys retain the first/header row without materializing sparse gaps.
+  const indexedRows = XLSX.utils.sheet_to_json<RawRow>(sheet, { header: columnKeys, defval: null, raw: true, blankrows: false });
+  if (indexedRows.length > MAX_CATALOG_EXCEL_ROWS) throw new Error('Excel-файл слишком большой');
+  const sourceRows = indexedRows.map((row) => ({
+    row: columnKeys.map((key) => row[key]),
+    rowNumber: Number(row.__rowNum__) + 1,
+  }));
+  const matrix = sourceRows.map(({ row }) => row);
   const headerRowIndex = matrix.findIndex((row) => row.some((cell) => normalizeHeader(cell) === normalizeHeader(HEADER_ARTICLE)));
   if (headerRowIndex < 0) return null;
 
@@ -106,10 +117,10 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
 
   const products = matrix
     .slice(headerEndIndex + 1)
-    .map((row) => {
+    .map((row, index) => {
       const article = cellAt(row, columns.article ?? -1);
       const title = columns.title === null ? article : cellAt(row, columns.title) || article;
-      return {
+      return setCatalogImportSourceRow({
         brand: columns.brand === null ? '' : cellAt(row, columns.brand),
         category: columns.category === null ? 'Без категории' : cellAt(row, columns.category) || 'Без категории',
         subcategory: columns.subcategory === null ? 'Без подкатегории' : cellAt(row, columns.subcategory) || 'Без подкатегории',
@@ -124,7 +135,7 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
         manualDiscount: columns.manualDiscount === null ? null : cellAt(row, columns.manualDiscount),
         manualDiscountRop: columns.manualDiscountRop === null ? null : cellAt(row, columns.manualDiscountRop),
         isActive: true,
-      };
+      }, sourceRows[headerEndIndex + 1 + index].rowNumber);
     })
     .filter((row) => row.article);
 
@@ -149,6 +160,7 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
     if (matrixProducts.length === 0) {
       throw new Error('В Excel-файле нет товаров с заполненным артикулом');
     }
+    assertUniqueCatalogArticles(matrixProducts);
     return matrixProducts;
   }
 
@@ -157,7 +169,7 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
   if (rows.length === 0) throw new Error('В Excel-файле нет строк');
 
   const products = rows
-    .map((row) => ({
+    .map((row) => setCatalogImportSourceRow({
       brand: readCell(row, HEADER_BRAND),
       category: readCell(row, HEADER_CATEGORY) || 'Без категории',
       subcategory: readCell(row, HEADER_SUBCATEGORY) || 'Без подкатегории',
@@ -172,12 +184,13 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
       manualDiscount: readPrice(row, HEADER_MANUAL_DISCOUNT),
       manualDiscountRop: readPrice(row, HEADER_MANUAL_DISCOUNT_ROP),
       isActive: true,
-    }))
+    }, Number(row.__rowNum__) + 1))
     .filter((row) => row.article);
 
   if (products.length === 0) {
     throw new Error('В Excel-файле нет товаров с заполненным артикулом');
   }
 
+  assertUniqueCatalogArticles(products);
   return products;
 }

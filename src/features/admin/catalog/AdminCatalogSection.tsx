@@ -6,6 +6,7 @@ import { useAdminRequestScope } from '../shared/useAdminRequestScope';
 
 import { productPayload } from './AdminCatalogHelpers';
 import { AdminCatalogView } from './AdminCatalogView';
+import type { CatalogImportError } from './AdminCatalogImportPanel';
 import {
   CATALOG_PRODUCT_PAGE_LIMIT,
   EMPTY_DRAFT,
@@ -43,6 +44,7 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string>('');
+  const [importError, setImportError] = useState<CatalogImportError | null>(null);
   const [stockLogs, setStockLogs] = useState<StockImportLog[]>([]);
   const [stockHistoryExpanded, setStockHistoryExpanded] = useState(false);
 
@@ -153,21 +155,43 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
     const formData = new FormData();
     formData.append('file', file);
     await runMutation('import', async () => {
-      const response = await request('/api/admin/catalog/import', { method: 'POST', body: formData }, { timeoutMs: ADMIN_UPLOAD_TIMEOUT_MS });
+      setImportResult(''); setImportError(null);
+      try {
+        const response = await request('/api/admin/catalog/import', { method: 'POST', body: formData }, { timeoutMs: ADMIN_UPLOAD_TIMEOUT_MS });
+        if (!isActive()) return;
 
-      if (!response.ok) {
-        showStatus(await readError(response, 'Не удалось загрузить Excel'));
-        return;
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          const message = typeof data.error === 'string' ? data.error : 'Не удалось загрузить Excel';
+          const isExcelDuplicate = response.status === 400 && data.code === 'CATALOG_DUPLICATE_ARTICLES';
+          const isExistingDuplicate = response.status === 409 && data.code === 'CATALOG_EXISTING_DUPLICATE_ARTICLES';
+          const duplicates = isExcelDuplicate && Array.isArray(data.duplicates)
+            ? data.duplicates.slice(0, 100).filter((item: unknown): item is { article: string; rows: number[]; totalRows: number } => {
+              if (!item || typeof item !== 'object') return false;
+              const group = item as Record<string, unknown>;
+              return typeof group.article === 'string' && Array.isArray(group.rows) && group.rows.every((row) => Number.isSafeInteger(row) && row > 0)
+                && Number.isSafeInteger(group.totalRows) && Number(group.totalRows) >= group.rows.length;
+            }).map((group: { article: string; rows: number[]; totalRows: number }) => ({ ...group, rows: group.rows.slice(0, 100) })) : undefined;
+          setImportError({ message, unchanged: isExcelDuplicate || isExistingDuplicate,
+            duplicates, duplicateCount: Number.isSafeInteger(data.duplicateCount) ? data.duplicateCount : duplicates?.length,
+            truncated: data.truncated === true });
+          showStatus(message);
+          return;
+        }
+
+        const data = await response.json();
+        const result = data.result;
+        if (!result) throw new Error('Missing import result');
+        const summary = `Загружено: ${result.importedProducts ?? 0}; категорий: ${result.categories ?? 0}; подкатегорий: ${result.subcategories ?? 0}; брендов: ${result.brands ?? 0}`;
+        setImportResult(summary); setImportError(null);
+        setFileName('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        await refreshAfterSave('Каталог загружен из Excel', '');
+      } catch (error) {
+        if (isActive()) setImportError({ message: error instanceof AdminRequestError ? error.message
+          : 'Не удалось получить подтверждение операции. Изменения могли сохраниться. Обновите данные перед повторной попыткой.' });
+        throw error;
       }
-
-      const data = await response.json();
-      const result = data.result;
-      if (!result) throw new Error('Missing import result');
-      const summary = `Загружено: ${result.importedProducts ?? 0}; категорий: ${result.categories ?? 0}; подкатегорий: ${result.subcategories ?? 0}; брендов: ${result.brands ?? 0}`;
-      setImportResult(summary);
-      setFileName('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      await refreshAfterSave('Каталог загружен из Excel', '');
     });
   };
 
@@ -295,8 +319,9 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
       fileInputRef={fileInputRef}
       importExcel={importExcel}
       importResult={importResult}
+      importError={importError}
       fileName={fileName}
-      setFileName={setFileName}
+      setFileName={(value) => { setFileName(value); setImportError(null); setImportResult(''); }}
       busyId={busyId}
       stockLogs={stockLogs}
       visibleStockLogs={visibleStockLogs}

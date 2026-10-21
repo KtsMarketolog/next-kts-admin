@@ -4,11 +4,21 @@ import styles from '@/app/admin/admin.module.scss';
 
 import { formatStockLogDate, stockLogStatusClass, stockLogStatusText } from './AdminCatalogHelpers';
 import type { StockImportLog } from './AdminCatalogTypes';
+import importStyles from './catalog-import.module.scss';
+
+export type CatalogImportError = {
+  message: string;
+  unchanged?: boolean;
+  duplicates?: { article: string; rows: number[]; totalRows: number }[];
+  duplicateCount?: number;
+  truncated?: boolean;
+};
 
 type AdminCatalogImportPanelProps = {
   fileInputRef: RefObject<HTMLInputElement | null>;
   importExcel: (event: FormEvent) => Promise<void>;
   importResult: string;
+  importError: CatalogImportError | null;
   fileName: string;
   setFileName: (value: string) => void;
   busyId: string | null;
@@ -24,6 +34,7 @@ export function AdminCatalogImportPanel({
   fileInputRef,
   importExcel,
   importResult,
+  importError,
   fileName,
   setFileName,
   busyId,
@@ -50,11 +61,30 @@ export function AdminCatalogImportPanel({
           <input
             ref={fileInputRef}
             type="file"
+            disabled={busyId !== null}
             accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
             onChange={(event) => setFileName(event.target.files?.[0]?.name ?? '')}
           />
         </label>
         <button disabled={busyId !== null}>{busyId === 'import' ? 'Загрузка...' : 'Загрузить Excel'}</button>
+        {importError && <div className={importStyles.error} role="alert" aria-labelledby="catalog-import-error-title">
+          <h4 id="catalog-import-error-title">{importError.unchanged ? 'Импорт остановлен' : 'Ошибка загрузки Excel'}</h4>
+          <p>{importError.message}</p>
+          {importError.unchanged && <p className={importStyles.unchanged}>Каталог, остатки и прайсы не изменены.</p>}
+          {importError.duplicates && <>
+            <p>Артикулов с повторами: <strong>{importError.duplicateCount ?? importError.duplicates.length}</strong>.
+              {(importError.duplicateCount ?? 0) > importError.duplicates.length && <> Показано: {importError.duplicates.length}.</>}</p>
+            <ul className={importStyles.duplicates} tabIndex={0} aria-label="Повторяющиеся артикулы и строки Excel">
+              {importError.duplicates.map((duplicate, index) => <li key={`${duplicate.article}-${index}`}>
+                <strong>Артикул: <code>{duplicate.article}</code></strong>
+                <p>Строки Excel: {duplicate.rows.join(', ')}{duplicate.totalRows > duplicate.rows.length
+                  ? ` (показано ${duplicate.rows.length} из ${duplicate.totalRows})` : ''}.</p>
+              </li>)}
+            </ul>
+            {importError.truncated && <p>Список сокращён. После исправления повторите загрузку для полной проверки.</p>}
+            <p>Исправьте повторы в Excel, выберите исправленный файл и загрузите его снова. Существующие записи автоматически не удаляются.</p>
+          </>}
+        </div>}
       </form>
 
       <div className={styles.catalogImportCard}>

@@ -28,3 +28,4 @@ export DATABASE_URL="postgresql://catalog_app@localhost/kts_catalog_stock_integr
 export KTS_CATALOG_STOCK_TEST=1
 export NODE_ENV=test
 node --import tsx --test tests/catalog-stock-locking-db.integration.ts
+node --import tsx --test tests/catalog-import-duplicates-db.integration.ts
