@@ -36,6 +36,17 @@
 .icon { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 10px; background: #efebfc; color: #260b86; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
 .folderBadge { display: inline-flex; align-items: center; align-self: flex-start; gap: 6px; max-width: 100%; padding: 4px 8px; border-radius: 6px; background: #efebfc; color: #564587; font-size: 12px; line-height: 18px; font-weight: 600; white-space: nowrap; svg { flex-shrink: 0; } }
 .cardActions .openFolder { font-size: 13px; }
+.cardTop { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.controls button.dragHandle { background: transparent; min-width: 42px; min-height: 42px; padding: 4px; color: #75648f; font-size: 25px; line-height: 1; cursor: grab; &:active { cursor: grabbing; } }
+.dropAvailable { outline: 2px dashed #a594cc; outline-offset: 3px; }
+.dropOver { outline: 3px solid #6e46c5; outline-offset: 3px; background: #eee6ff !important; }
+.dragging { opacity: .55; }
+.moveSource { margin-bottom: 14px; overflow-wrap: anywhere; }
+.moveBreadcrumbs, .movePagination { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0; span { flex-basis: 100%; overflow-wrap: anywhere; color: #625779; } }
+.moveFolders { display: grid; gap: 8px; max-height: 32dvh; overflow-y: auto; padding: 3px; button { width: 100%; justify-content: flex-start; text-align: left; overflow-wrap: anywhere; } }
+.moveSummary { display: grid; grid-template-columns: minmax(100px, auto) minmax(0, 1fr); gap: 10px 16px; margin: 18px 0; line-height: 1.5; dt { color: #687082; } dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; } }
+.moveWarning { border: 1px solid #ddc77f; background: #fffbeb; color: #69501c; border-radius: 8px; padding: 14px; line-height: 1.6; overflow-wrap: anywhere; p { margin-top: 8px; } }
+@media(max-width: 450px) { .moveSummary { grid-template-columns: 1fr; gap: 4px; dd { margin-bottom: 10px; } } }
 .folder { background: #faf8ff; }
 .badge { display: inline-block; border-radius: 6px; padding: 3px 7px; font-size: 11px; background: #eeebf7; color: #564a77; }
 .empty { padding: 40px 20px; text-align: center; border: 1px dashed #d4cde8; border-radius: 12px; background: #faf9fd; h3 { font-size: 18px; margin-bottom: 10px; } }
@@ -70,3 +81,4 @@
 @media(max-width: 1024px) { .page { --header-space: calc(#{$apx-l-136} + 20px); } .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media(max-width: 600px) { .root { padding: 16px; } .header h1 { font-size: 25px; } .header nav { width: 100%; .link { flex: 1; font-size: 13px; } } .grid { grid-template-columns: 1fr; } .search { flex: 1 1 100%; width: 100%; } .search label { flex: 1 1 180px; } .search input { width: 100%; } .modalHeader, .modalBody { padding: 16px; } .toolbar { align-items: end; } .actions button { flex: 1; } }
 @media(max-width: 450px) { .page { --header-space: calc(#{$apx-m-74} + #{$apx-l-28} + 20px); } }
+@media(max-width: 350px) { .modalHeader { flex-wrap: wrap; h2 { flex: 1 1 180px; } button { margin-left: auto; } } }

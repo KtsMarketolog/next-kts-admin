@@ -7,6 +7,8 @@ import type { KnowledgeBaseList, KnowledgeBaseNode } from '@/shared/lib/knowledg
 import { KnowledgeBaseEditor } from './KnowledgeBaseEditor';
 import { KnowledgeBaseDialog } from './KnowledgeBaseDialog';
 import { KnowledgeBaseStats } from './KnowledgeBaseStats';
+import { KnowledgeBaseMoveDialog } from './KnowledgeBaseMoveDialog';
+import { useKnowledgeBaseDrag } from './useKnowledgeBaseDrag';
 import { KB_API, kbDate, kbSize, readKbResponse } from './knowledge-base-ui';
 import styles from './knowledge-base.module.scss';
 
@@ -23,11 +25,15 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
   const [editor, setEditor] = useState<Editor | null>(null);
   const [preview, setPreview] = useState<{ node: KnowledgeBaseNode; eventId: string } | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<KnowledgeBaseNode | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{ node: KnowledgeBaseNode; parentId?: number | null } | null>(null);
   const [busy, setBusy] = useState(false), [archiveError, setArchiveError] = useState('');
   const eventRef = useRef<{ parentId: number | null; eventId: string; sent: boolean } | null>(null);
   const archivePending = useRef(false);
   const { request, isActive } = useAdminRequestScope();
   const canManage = data?.canManage ?? initialCanManage;
+  const canMove = canManage && !archived && !loading && !error && !busy && !editor && !preview && !archiveTarget && !moveTarget && tab === 'materials';
+  const drag = useKnowledgeBaseDrag(!!canMove, (node, targetParentId) => setMoveTarget({ node, parentId: targetParentId }));
+  const dropClass = (id: number | null) => drag.valid(id) ? drag.overId === (id ?? 'root') ? styles.dropOver : styles.dropAvailable : '';
   const after = pages.at(-1);
   const currentFolder = data?.breadcrumbs.at(-1);
   const parentFolder = currentFolder?.id === parentId ? data?.breadcrumbs.at(-2) : undefined;
@@ -103,8 +109,8 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
       <div className={styles.folderNavigation}>
         {parentId !== null && <button type="button" className={styles.folderBack} disabled={loading}
           aria-label={backLabel} title={backLabel} onClick={() => navigate(parentFolder?.id ?? null)}><span aria-hidden="true">←</span> Назад</button>}
-        <nav className={styles.breadcrumbs} aria-label="Путь папки"><button type="button" className={styles.text} onClick={() => navigate(null)}>База знаний</button>
-          {data?.breadcrumbs.map((node) => <span key={node.id}> / <button type="button" className={styles.text} onClick={() => navigate(node.id)}>{node.title}</button></span>)}</nav>
+        <nav className={styles.breadcrumbs} aria-label="Путь папки"><button type="button" className={`${styles.text} ${dropClass(null)}`} {...drag.targetProps(null)} onClick={() => navigate(null)}>База знаний</button>
+          {data?.breadcrumbs.map((node) => <span key={node.id}> / <button type="button" className={`${styles.text} ${dropClass(node.id)}`} {...drag.targetProps(node.id)} onClick={() => navigate(node.id)}>{node.title}</button></span>)}</nav>
       </div>
       <div className={styles.folderHeader}><div><h2>{archived ? 'Архив' : currentFolder?.title ?? (parentId ? 'Материалы папки' : 'Папки Базы знаний')}</h2>
         <p className={styles.muted}>{canManage ? 'Папки и файлы доступны сотрудникам только по назначенным правам.' : 'Здесь только материалы, к которым вам предоставлен доступ.'}</p></div>
@@ -122,11 +128,19 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
       {status && <p role="status" className={styles.status}>{status}</p>}
       {loading && <p role="status" className={styles.muted}>Загружаем материалы…</p>}
       {error && <div className={styles.error} role="alert">{error} <button type="button" onClick={() => setRefresh((n) => n + 1)}>Повторить</button></div>}
-      {data && <><div className={styles.grid}>{data.nodes.map((node) => <article key={node.id} className={`${styles.card} ${node.kind === 'folder' ? styles.folder : ''}`}>
+      {canManage && !archived && <p className={styles.muted}>Для переноса нажмите «Переместить…» или перетащите материал за маркер ⠿ на папку либо раздел пути. Перенос выполняется только после проверки доступа и вашего подтверждения.</p>}
+      {data && <><div className={styles.grid}>{data.nodes.map((node) => <article key={node.id}
+        {...(node.kind === 'folder' ? drag.targetProps(node.id) : {})}
+        className={`${styles.card} ${node.kind === 'folder' ? `${styles.folder} ${dropClass(node.id)}` : ''} ${drag.draggedId === node.id ? styles.dragging : ''}`}>
+        <div className={styles.cardTop}>
         {node.kind === 'folder' ? <span className={styles.folderBadge}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
             <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
           </svg>Папка</span> : <span className={styles.icon} aria-hidden="true">{(node.originalName?.split('.').at(-1) ?? 'ФАЙЛ').toUpperCase().slice(0, 5)}</span>}
+        {canManage && !archived && <button type="button" className={styles.dragHandle} draggable={!!canMove} disabled={!canMove}
+          aria-label={`Перетащить «${node.title}»`} title="Перетащите в папку или нажмите, чтобы выбрать расположение"
+          onDragStart={(event) => drag.start(node, event)} onDragEnd={drag.clear} onClick={() => setMoveTarget({ node })}><span aria-hidden="true">⠿</span></button>}
+        </div>
         <h3>{archived || node.kind === 'folder' ? node.title : <button className={`${styles.text} ${styles.cardTitle}`} type="button"
           onClick={() => setPreview({ node, eventId: crypto.randomUUID() })}>{node.title}</button>}</h3>
         <div><p className={styles.muted}>{node.kind === 'file' ? `${kbSize(node.size)} · ` : ''}{kbDate(node.updatedAt)} МСК</p>
@@ -135,6 +149,7 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
           aria-label={`Открыть папку «${node.title}»`} onClick={() => navigate(node.id)}>Открыть папку <span aria-hidden="true">→</span></button>}
           {!archived && node.kind === 'file' && <button type="button" onClick={() => download(node)}>Скачать</button>}
           {canManage && <>{!archived && <button type="button" onClick={() => setEditor({ node })}>Настроить</button>}
+            {!archived && <button type="button" disabled={!canMove} aria-label={`Переместить «${node.title}»`} onClick={() => setMoveTarget({ node })}>Переместить…</button>}
             <button type="button" onClick={() => { setArchiveError(''); setArchiveTarget(node); }}>{archived ? 'Восстановить' : 'В архив'}</button></>}
         </div></article>)}</div>
         {data.nodes.length === 0 && <div className={styles.empty}><h3>{query ? 'Ничего не найдено' : archived ? 'Архив пуст' : 'Пока нет доступных материалов'}</h3>
@@ -145,12 +160,16 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
       </>}
       <details className={styles.help}><summary>Как работают доступ и история</summary>
         <p>Управлять материалами и смотреть статистику могут Админ, Админ ТОП и ТОП. Дочерние папки и файлы наследуют доступ родителя; отдельный список сотрудников дополнительно ограничивает его. Права на другие разделы сайта не меняются.</p>
+        {canManage && <p>Чтобы изменить расположение, нажмите «Переместить…» или перетащите материал за маркер ⠿ на папку либо раздел пути. Сначала появится предупреждение об изменении доступа, затем нужно подтвердить перенос. Содержимое файлов и история сохраняются.</p>}
         <p>При переносе папки в архив её содержимое недоступно сотрудникам. Файлы, права и история сохраняются; восстановите папку, чтобы вернуть доступ. Автоматического удаления нет.</p>
         <p>Регистрируются открытия раздела, папок, файлов и начало скачивания. Они не подтверждают прочтение или фактическое сохранение файла на устройстве.</p>
       </details>
     </>}
     {editor && <KnowledgeBaseEditor node={editor.node} parentId={editor.node ? editor.node.parentId : parentId} upload={editor.upload}
       onClose={() => setEditor(null)} onSaved={saved} />}
+    {moveTarget && <KnowledgeBaseMoveDialog node={moveTarget.node} initialTargetParentId={moveTarget.parentId} onClose={() => setMoveTarget(null)}
+      onMoved={(message) => { setMoveTarget(null); setStatus(message); setPages([null]); setRefresh((value) => value + 1); }}
+      onReload={(message) => { setMoveTarget(null); setStatus(message); setPages([null]); setRefresh((value) => value + 1); }} />}
     {archiveTarget && <KnowledgeBaseDialog title={archiveTarget.archivedAt ? 'Восстановить материал?' : 'Перенести в архив?'} busy={busy} onClose={() => setArchiveTarget(null)}>
       <div className={styles.modalBody}><p>{archiveTarget.title}</p><p className={styles.muted}>{archiveTarget.archivedAt
         ? 'Вернутся прежние права доступа. Содержимое папки будет доступно согласно своим настройкам.'

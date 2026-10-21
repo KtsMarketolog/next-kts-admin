@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { compile } from 'sass';
 import { canManageKnowledgeBase } from '../src/shared/lib/knowledgeBase';
+import type { KnowledgeBaseNode } from '../src/shared/lib/knowledgeBase';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 
 async function main() {
@@ -45,7 +46,7 @@ async function main() {
   });
   const globalCss = await readFile(path.join(root, 'src/app/globals.css'), 'utf8');
   const stamp = '2026-10-21T08:00:00.000Z';
-  const folder = { id: 1, parentId: null, kind: 'folder', title: 'Регламенты продаж', revision: '1', archivedAt: null,
+  const folder: KnowledgeBaseNode = { id: 1, parentId: null, kind: 'folder', title: 'Регламенты продаж', revision: '1', archivedAt: null,
     createdAt: stamp, updatedAt: stamp, originalName: null, mimeType: null, size: null, access: { mode: 'custom', actorKeys: ['manager:1'] } };
   const nestedFolder = { ...folder, id: 4, parentId: 1, title: 'Инструкции для новых сотрудников' };
   const longFolder = { ...folder, id: 5, title: 'Положения и инструкции по работе с региональными партнёрами — СправочникДляНовыхСотрудниковПодразделенияПродажИЗакупок' };
@@ -59,6 +60,19 @@ async function main() {
   assert.equal(canManageKnowledgeBase(topSession), true, 'real KB policy grants TOP management');
   assert.equal(canManageKnowledgeBase(readerSession), false, 'unrelated TOP-dashboard management flag does not grant KB management');
   let readOnly = false, failList = false, failSave = false, archived = false;
+  let moveFixture = false, movePagination = false;
+  let moveFailure: 'none' | 'conflict' | 'unknown' = 'none';
+  let movePreviewConflict = false;
+  let moveNodes: KnowledgeBaseNode[] = [];
+  const resetMoves = () => {
+    moveFixture = true; movePagination = false; moveFailure = 'none'; movePreviewConflict = false;
+    moveNodes = structuredClone([folder, nestedFolder, longFolder, material]) as KnowledgeBaseNode[];
+  };
+  const movePath = (id: number | null): KnowledgeBaseNode[] => {
+    if (id === null) return [];
+    const node = moveNodes.find((item) => item.id === id)!;
+    return [...movePath(node.parentId), node];
+  };
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     if (url.pathname === '/app.js') return void response.writeHead(200, { 'Content-Type': 'text/javascript' }).end(bundle.outputFiles[0].contents);
@@ -83,6 +97,35 @@ async function main() {
     if (url.pathname.endsWith('/usage')) return void json({ rows: [{ key: url.searchParams.get('view') === 'employees' ? 'manager:1' : '2',
       title: url.searchParams.get('view') === 'employees' ? 'Тестовый сотрудник' : material.title, role: 'manager', sectionOpens: 2,
       folderOpens: 3, fileViews: 4, downloadsStarted: 1, totalEvents: 10, lastVisitAt: stamp }], nextCursor: null });
+    if (url.pathname.endsWith('/move')) {
+      assert.equal(moveFixture, true);
+      const id = Number(url.pathname.split('/').at(-2));
+      const source = moveNodes.find((node) => node.id === id)!;
+      const destination = moveNodes.find((node) => node.id === body.targetParentId) ?? null;
+      assert.equal(readOnly, false, 'reader must never submit a move');
+      assert.equal(body.expectedRevision, source.revision);
+      assert.notEqual(body.targetParentId, source.id, 'self is not a move target');
+      assert.notEqual(body.targetParentId, source.parentId, 'current parent is not a move target');
+      assert.ok(source.kind === 'folder' || body.targetParentId !== null, 'files cannot move to root');
+      assert.equal(movePath(body.targetParentId).some((node) => node.id === source.id), false, 'descendants cannot be targets');
+      if (body.action === 'preview') {
+        if (movePreviewConflict) return void json({ error: 'Материал уже изменён. Обновите список.' }, 409);
+        return void json({ source, destination, destinationBreadcrumbs: movePath(body.targetParentId), previewToken: `preview-${source.id}-${source.revision}-${body.targetParentId}`,
+          affectedCount: moveNodes.filter((node) => movePath(node.id).some((ancestor) => ancestor.id === source.id)).length,
+          accessWarning: 'После переноса доступ сотрудников может измениться: он будет ограничен правами новой родительской папки. Проверьте получателей.' });
+      }
+      assert.equal(body.action, 'commit');
+      assert.equal(body.previewToken, `preview-${source.id}-${source.revision}-${body.targetParentId}`);
+      if (moveFailure === 'conflict') return void json({ error: 'Данные уже изменены другим пользователем.' }, 409);
+      source.parentId = body.targetParentId; source.revision = String(Number(source.revision) + 1);
+      if (moveFailure === 'unknown') {
+        // Send headers before breaking the body: avoids a browser transport-level retry of
+        // an entirely unanswered reused connection, and exercises an unknown application result.
+        response.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '1000' });
+        response.write('{'); setTimeout(() => response.destroy(), 30); return;
+      }
+      return void json(source);
+    }
     if (request.method !== 'GET') {
       if (failSave) return void json({ error: 'Данные уже изменены другим пользователем. Обновите список.' }, 409);
       if (body && typeof body === 'object' && 'archived' in body) archived = body.archived;
@@ -90,6 +133,16 @@ async function main() {
     }
     if (failList) return void json({ error: 'Не удалось загрузить папку' }, 503);
     const parent = url.searchParams.get('parentId');
+    if (moveFixture) {
+      let nodes = moveNodes.filter((node) => node.parentId === (parent === null ? null : Number(parent)));
+      let nextCursor: number | null = null;
+      if (movePagination && parent === null) {
+        nodes = nodes.filter((node) => node.id > Number(url.searchParams.get('after') ?? 0));
+        nextCursor = nodes.length > 1 ? nodes[0].id : null;
+        nodes = nodes.slice(0, 1);
+      }
+      return void json({ nodes, nextCursor, breadcrumbs: movePath(parent === null ? null : Number(parent)), canManage: canManageKnowledgeBase(readOnly ? readerSession : topSession) });
+    }
     const inArchive = url.searchParams.get('archived') === '1';
     const materialNodes = archived === inArchive ? [{ ...material, archivedAt: archived ? stamp : null }] : [];
     return void json({ nodes: parent ? [...(parent === '1' && !inArchive ? [nestedFolder] : []), ...materialNodes]
@@ -104,12 +157,20 @@ async function main() {
       const browser = await playwright[engine].launch({ headless: true });
       try {
         for (const width of [1440, 390, 320]) {
-          readOnly = false; failList = false; failSave = false; archived = false; calls.length = 0;
+          readOnly = false; failList = false; failSave = false; archived = false; moveFixture = false; calls.length = 0;
           const page = await browser.newPage({ viewport: { width, height: 1000 } });
           page.setDefaultTimeout(10_000);
-          const errors: string[] = []; page.on('pageerror', (error: Error) => errors.push(error.message));
+          let scenario = 'existing KB flows';
+          const errors: string[] = []; page.on('pageerror', (error: Error) => { errors.push(error.message); console.error(`${engine}/${width} ${scenario}: ${error.message}`); });
           await page.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
-          await page.goto(origin + '/admin/knowledge-base');
+          const gotoPage = async (url: string) => {
+            // Real folder-open telemetry completes before the fixture navigates away.
+            // Otherwise WebKit reports its intentional unload abort as a pageerror.
+            await page.waitForLoadState('networkidle');
+            await page.goto(url);
+            await page.waitForLoadState('networkidle');
+          };
+          await gotoPage(origin + '/admin/knowledge-base');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(await page.getByRole('button', { name: 'Создать папку', exact: true }).isEnabled(), true, 'TOP can create folders');
           assert.equal(await page.getByRole('button', { name: 'Статистика использования', exact: true }).isVisible(), true, 'TOP sees usage statistics');
@@ -220,6 +281,7 @@ async function main() {
           await page.getByRole('button', { name: 'Архив', exact: true }).click();
           await page.getByRole('heading', { name: archivedFolder.title, exact: true }).waitFor();
           assert.equal(await page.getByRole('button', { name: /^Открыть папку/ }).count(), 0, 'archived folders cannot be opened');
+          assert.equal(await page.getByRole('button', { name: /^Переместить «|^Перетащить «/ }).count(), 0, 'archive has no move controls');
           assert.equal(await page.getByRole('button', { name: 'Восстановить', exact: true }).count(), 1, 'archived folder can be restored');
           await page.getByRole('button', { name: 'Статистика использования', exact: true }).click();
           await page.getByRole('button', { name: 'Тестовый сотрудник', exact: true }).click();
@@ -231,8 +293,8 @@ async function main() {
           await page.screenshot({ path: path.join(output, `${engine}-${width}-stats.png`), fullPage: true });
           assert.deepEqual(errors, []);
           // A direct link has no parent-folder entry in browser history.
-          await page.goto(origin + '/unrelated-history-entry');
-          await page.goto(origin + '/admin/knowledge-base?folder=4');
+          await gotoPage(origin + '/unrelated-history-entry');
+          await gotoPage(origin + '/admin/knowledge-base?folder=4');
           await page.getByRole('heading', { name: nestedFolder.title, exact: true }).waitFor();
           await backToParent.click();
           await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
@@ -240,27 +302,214 @@ async function main() {
           assert.equal(new URL(page.url()).searchParams.get('folder'), '1', 'direct nested URL returns to actual parent');
           await backToRoot.click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
-          await page.goto(origin + '/admin/knowledge-base?folder=1');
+          await gotoPage(origin + '/admin/knowledge-base?folder=1');
           await page.getByRole('button', { name: material.title, exact: true }).waitFor();
           await backToRoot.click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'direct first-level URL returns to root');
           failList = true;
-          await page.goto(origin + '/admin/knowledge-base?folder=4');
+          await gotoPage(origin + '/admin/knowledge-base?folder=4');
           await page.getByRole('alert').waitFor();
           assert.equal(await backToRoot.isEnabled(), true, 'failed folder load still offers root fallback');
           failList = false;
           await backToRoot.click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'failed-load fallback returns to root');
+
+          // All moving uses a separate mutable local fixture, without real documents or employees.
+          console.log(`${engine}/${width}: testing move UI`);
+          scenario = 'move initial / drag';
+          const gotoMovePage = gotoPage;
+          resetMoves();
+          await gotoMovePage(origin + '/admin/knowledge-base');
+          const cardFor = (title: string) => page.getByRole('article').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+          const moveButton = (title: string) => page.getByRole('button', { name: `Переместить «${title}»`, exact: true });
+          const grip = (title: string) => page.getByRole('button', { name: `Перетащить «${title}»`, exact: true });
+          const dropOn = async (source: ReturnType<typeof grip>, destination: ReturnType<typeof cardFor>) => {
+            if (width === 1440) return source.dragTo(destination);
+            // Desktop uses native pointer dragging. On a narrow stacked layout, native
+            // dragTo cannot keep distant source/target in view; exercise DOM drop events
+            // here and the complete keyboard/touch-friendly picker independently below.
+            const transfer = await page.evaluateHandle(() => new DataTransfer());
+            await source.dispatchEvent('dragstart', { dataTransfer: transfer });
+            await destination.dispatchEvent('dragover', { dataTransfer: transfer });
+            await destination.dispatchEvent('drop', { dataTransfer: transfer });
+            await source.dispatchEvent('dragend', { dataTransfer: transfer });
+            await transfer.dispose();
+          };
+          const moveRequests = (action: string) => calls.filter((call) => call.path.endsWith('/move') && (call.body as { action?: string })?.action === action);
+          await moveButton(folder.title).waitFor();
+          const external = await page.evaluateHandle(() => {
+            const transfer = new DataTransfer(); transfer.items.add(new File(['external'], 'external.txt')); return transfer;
+          });
+          const beforeExternal = moveRequests('preview').length;
+          await cardFor(longFolder.title).dispatchEvent('dragover', { dataTransfer: external });
+          await cardFor(longFolder.title).dispatchEvent('drop', { dataTransfer: external });
+          await external.dispose();
+          assert.equal(await page.getByRole('dialog').count(), 0, 'external file drop does not create a move or open a dialog');
+          assert.equal(moveRequests('preview').length, beforeExternal);
+          assert.equal(await cardFor(longFolder.title).evaluate((node: HTMLElement) => {
+            const transfer = new DataTransfer(); transfer.setData('text/uri-list', 'https://example.invalid/');
+            const event = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer });
+            node.dispatchEvent(event); return event.defaultPrevented;
+          }), true, 'external URL drop cannot navigate away from the knowledge base');
+          const targetBeforeDrag = await cardFor(longFolder.title).boundingBox();
+          const internal = await page.evaluateHandle(() => new DataTransfer());
+          await grip(folder.title).dispatchEvent('dragstart', { dataTransfer: internal });
+          const impostor = await page.evaluateHandle(() => {
+            const transfer = new DataTransfer(); transfer.setData('application/x-kts-knowledge-base-node', '9999'); return transfer;
+          });
+          await cardFor(longFolder.title).dispatchEvent('drop', { dataTransfer: impostor });
+          await impostor.dispose();
+          assert.equal(moveRequests('preview').length, beforeExternal, 'stale/internal source cannot authorize mismatched drag data');
+          await cardFor(longFolder.title).dispatchEvent('dragover', { dataTransfer: internal });
+          assert.equal(await cardFor(longFolder.title).evaluate((node: HTMLElement) => getComputedStyle(node).outlineWidth), '3px', 'valid drop target is clearly highlighted');
+          const targetDuringDrag = await cardFor(longFolder.title).boundingBox();
+          assert.equal(targetDuringDrag?.y, targetBeforeDrag?.y, 'drag feedback does not move cards under the pointer');
+          await cardFor(folder.title).dispatchEvent('dragover', { dataTransfer: internal });
+          await cardFor(folder.title).dispatchEvent('drop', { dataTransfer: internal });
+          await grip(folder.title).dispatchEvent('dragend', { dataTransfer: internal });
+          await internal.dispose();
+          assert.equal(await page.getByRole('dialog').count(), 0, 'dropping on self is ignored');
+          assert.equal(moveRequests('preview').length, beforeExternal);
+          console.log(`${engine}/${width}: testing folder drop`);
+          await dropOn(grip(folder.title), cardFor(longFolder.title));
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).waitFor();
+          assert.match(await dialog.getByRole('note').innerText(), /доступ сотрудников может измениться/);
+          assert.equal(moveRequests('preview').length, beforeExternal + 1, 'drag opens server preview');
+          assert.equal(moveRequests('commit').length, 0, 'drag never directly changes hierarchy');
+          assert.equal(moveNodes.find((node) => node.id === folder.id)!.parentId, null);
+          assert.equal(await dialog.locator('dd').nth(1).innerText(), '3', 'preview shows affected folder, child folder, and file');
+          assert.equal(await dialog.evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth), true, 'long destination stays inside confirmation');
+          await dialog.screenshot({ path: path.join(output, `${engine}-${width}-move-confirmation.png`) });
+          await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+          assert.equal(moveRequests('commit').length, 0, 'cancel after drag is non-mutating');
+
+          // Keyboard alternative: paginated folder picker, source excluded, root/back navigation.
+          scenario = 'move picker';
+          movePagination = true;
+          await moveButton(folder.title).focus(); await moveButton(folder.title).press('Enter');
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: 'Следующие папки', exact: true }).waitFor();
+          assert.equal(await dialog.getByRole('button', { name: `Выбрать расположение внутри «${folder.title}»`, exact: true }).count(), 0, 'picker excludes source and therefore its descendants');
+          assert.equal(await dialog.getByRole('button', { name: 'Переместить сюда', exact: true }).isDisabled(), true, 'same parent cannot be selected');
+          await dialog.getByRole('button', { name: 'Следующие папки', exact: true }).focus();
+          await dialog.getByRole('button', { name: 'Следующие папки', exact: true }).press('Enter');
+          await dialog.getByRole('button', { name: `Выбрать расположение внутри «${longFolder.title}»`, exact: true }).waitFor();
+          assert.equal(await dialog.evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth), true, 'long picker name does not overflow on small screens');
+          await dialog.screenshot({ path: path.join(output, `${engine}-${width}-move-picker.png`) });
+          await dialog.getByRole('button', { name: `Выбрать расположение внутри «${longFolder.title}»`, exact: true }).focus();
+          await dialog.getByRole('button', { name: `Выбрать расположение внутри «${longFolder.title}»`, exact: true }).press('Enter');
+          await dialog.getByRole('button', { name: 'Переместить сюда', exact: true }).waitFor({ state: 'visible' });
+          await dialog.getByRole('button', { name: 'На уровень выше', exact: true }).click();
+          await dialog.getByRole('button', { name: 'Следующие папки', exact: true }).click();
+          await dialog.getByRole('button', { name: `Выбрать расположение внутри «${longFolder.title}»`, exact: true }).click();
+          await dialog.getByRole('button', { name: 'Переместить сюда', exact: true }).click();
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).evaluate((node: HTMLButtonElement) => { node.click(); node.click(); });
+          await page.getByRole('status').filter({ hasText: 'Файлы и история сохранены.' }).waitFor();
+          assert.equal(moveRequests('commit').length, 1, 'one deliberate commit after server preview');
+          assert.equal(moveNodes.find((node) => node.id === folder.id)!.parentId, longFolder.id);
+          assert.equal(moveNodes.find((node) => node.id === nestedFolder.id)!.parentId, folder.id, 'nested hierarchy is preserved');
+          assert.equal(moveNodes.find((node) => node.id === material.id)!.originalName, 'regulation.html', 'file remains intact');
+          await moveButton(folder.title).waitFor({ state: 'detached' });
+          await moveButton(longFolder.title).waitFor();
+          assert.equal(await moveButton(folder.title).count(), 0, 'successful move refreshes source list');
+
+          // Root/ancestor breadcrumb drops and no root destination for a file.
+          scenario = 'move root/ancestor';
+          resetMoves();
+          await gotoMovePage(origin + '/admin/knowledge-base?folder=1');
+          await grip(material.title).waitFor();
+          await dropOn(grip(material.title), page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: 'База знаний', exact: true }));
+          assert.equal(await page.getByRole('dialog').count(), 0, 'file cannot be dropped at root');
+          await moveButton(material.title).click();
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: 'В корень', exact: true }).click();
+          await dialog.getByRole('button', { name: `Выбрать расположение внутри «${longFolder.title}»`, exact: true }).waitFor();
+          assert.equal(await dialog.getByRole('button', { name: 'Переместить сюда', exact: true }).isDisabled(), true, 'picker forbids file at root too');
+          await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+          await dropOn(grip(nestedFolder.title), page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: 'База знаний', exact: true }));
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).waitFor();
+          assert.equal((moveRequests('preview').at(-1)!.body as { targetParentId: number | null }).targetParentId, null, 'root breadcrumb previews folder move');
+          await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+          await moveButton(material.title).click();
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: `Выбрать расположение внутри «${nestedFolder.title}»`, exact: true }).click();
+          await dialog.getByRole('button', { name: 'Переместить сюда', exact: true }).click();
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).waitFor();
+          assert.equal(await dialog.locator('dd').nth(1).innerText(), '1', 'moving a file affects only that file');
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).click();
+          await moveButton(material.title).waitFor({ state: 'detached' });
+          await moveButton(nestedFolder.title).waitFor();
+          assert.equal(moveNodes.find((node) => node.id === material.id)!.parentId, nestedFolder.id, 'file picker move succeeds');
+          assert.equal(moveNodes.find((node) => node.id === material.id)!.size, 1200, 'move preserves file metadata');
+          const deeperFolder = { ...nestedFolder, id: 8, parentId: nestedFolder.id, title: 'Вложенные правила' };
+          moveNodes.push(deeperFolder);
+          await gotoMovePage(origin + '/admin/knowledge-base?folder=4');
+          await grip(deeperFolder.title).waitFor();
+          await dropOn(grip(deeperFolder.title), page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: folder.title, exact: true }));
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).waitFor();
+          assert.equal((moveRequests('preview').at(-1)!.body as { targetParentId: number | null }).targetParentId, folder.id, 'ancestor breadcrumb previews the correct target');
+          await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+
+          // Conflict forces reloading and re-previewing; no stale token retry button exists.
+          scenario = 'move conflicts';
+          resetMoves();
+          await gotoMovePage(origin + '/admin/knowledge-base');
+          await dropOn(grip(folder.title), cardFor(longFolder.title));
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).waitFor();
+          moveFailure = 'conflict';
+          const beforeConflict = moveRequests('commit').length;
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).click();
+          await dialog.getByRole('alert').filter({ hasText: 'Данные или права доступа изменились' }).waitFor();
+          assert.equal(await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).count(), 0);
+          assert.equal(moveRequests('commit').length, beforeConflict + 1);
+          assert.equal(moveNodes.find((node) => node.id === folder.id)!.parentId, null);
+          await dialog.getByRole('button', { name: 'Закрыть', exact: true }).click();
+          await moveButton(folder.title).waitFor();
+          moveFailure = 'none'; movePreviewConflict = true;
+          const beforePreviewConflict = moveRequests('commit').length;
+          await dropOn(grip(folder.title), cardFor(longFolder.title));
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('alert').filter({ hasText: 'Материал уже изменён' }).waitFor();
+          assert.equal(moveRequests('commit').length, beforePreviewConflict, 'failed preview is never committed');
+          assert.equal(await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).count(), 0);
+          await dialog.press('Escape');
+
+          // The server commits but its response is lost: require refresh, never blindly retry.
+          scenario = 'move unknown result';
+          resetMoves();
+          await gotoMovePage(origin + '/admin/knowledge-base');
+          await dropOn(grip(folder.title), cardFor(longFolder.title));
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).waitFor();
+          moveFailure = 'unknown';
+          const beforeUnknown = moveRequests('commit').length;
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).click();
+          await dialog.getByRole('alert').filter({ hasText: 'Изменение могло уже сохраниться' }).waitFor();
+          assert.equal(await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).count(), 0);
+          assert.equal(moveRequests('commit').length, beforeUnknown + 1);
+          await dialog.getByRole('button', { name: 'Закрыть и обновить список', exact: true }).click();
+          await moveButton(folder.title).waitFor({ state: 'detached' });
+          await moveButton(longFolder.title).waitFor();
+          assert.equal(await moveButton(folder.title).count(), 0, 'refresh discovers successful move after lost response');
+          assert.equal(moveRequests('commit').length, beforeUnknown + 1, 'refresh did not retry commit');
+          assert.deepEqual(errors, []);
+          await page.waitForLoadState('networkidle');
+          moveFixture = false;
           readOnly = true;
           calls.length = 0;
-          await page.goto(origin + '/admin/knowledge-base?reader=1');
+          await gotoPage(origin + '/admin/knowledge-base?reader=1');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(await page.getByRole('button', { name: 'Создать папку', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Статистика использования', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Настроить', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Архив', exact: true }).count(), 0);
+          assert.equal(await page.getByRole('button', { name: /^Переместить «|^Перетащить «/ }).count(), 0, 'read-only employees have no move or drag controls');
           const readerOpen = page.getByRole('button', { name: openFolderName(folder.title), exact: true });
           assert.equal(await readerOpen.isEnabled(), true, 'read-only employee can open granted folder');
           await readerOpen.focus(); await readerOpen.press('Enter');
@@ -278,11 +527,11 @@ async function main() {
           await page.getByRole('button', { name: 'Повторить', exact: true }).click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(calls.some((call) => call.path.includes('/usage') || call.path.includes('/employees')), false, 'reader never loads management directory or statistics');
-          await page.close(); console.log(`${engine}/${width}: KB navigation, access editor, upload, archive, stats, errors, isolated HTML passed`);
+          await page.close(); console.log(`${engine}/${width}: KB navigation, access editor, upload, archive, stats, move picker/drag/drop/409/lost response, errors, isolated HTML passed`);
         }
       } finally { await browser.close(); }
     }
     console.log(`Screenshots: ${output}`);
-  } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+  } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

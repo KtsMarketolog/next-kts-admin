@@ -26,6 +26,12 @@ export type KnowledgeBaseFileCreate = KnowledgeBaseCreate & {
   parentId: number; originalName: string; mimeType: string; size: number; storagePath: string; sha256: string;
 };
 export type KnowledgeBaseUpdate = { expectedRevision: string; title?: string; access?: KnowledgeBaseAccess };
+export type KnowledgeBaseMoveInput = { expectedRevision: string; targetParentId: number | null };
+export type KnowledgeBaseMoveCommit = KnowledgeBaseMoveInput & { previewToken: string };
+export type KnowledgeBaseMovePreview = {
+  source: KnowledgeBaseNode; destination: KnowledgeBaseNode | null; destinationBreadcrumbs: KnowledgeBaseNode[];
+  previewToken: string; affectedCount: number; accessWarning: string;
+};
 export class KnowledgeBaseError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); this.name = 'KnowledgeBaseError'; }
 }

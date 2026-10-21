@@ -26,3 +26,4 @@ export ADMIN_SESSION_SECRET='synthetic-knowledge-base-test-secret-not-for-produc
 unset EMPLOYEE_PASSWORD_ENCRYPTION_KEY
 export NODE_ENV=test
 node --import tsx --test tests/knowledge-base-db.integration.ts
+node --import tsx --test tests/knowledge-base-move-db.integration.ts
