@@ -11,6 +11,7 @@ import { ensureCatalogSchema } from '../src/entities/catalog/api/catalogDb';
 import { createCatalogAdminProduct, deleteCatalogAdminProduct, replaceCatalogFromRows, updateCatalogAdminProduct } from '../src/entities/catalog/api/catalogAdmin/core';
 import type { CatalogProductInput } from '../src/entities/catalog/api/catalogAdmin/types';
 import { importStockFromExcelBuffer } from '../src/entities/catalog/api/stockImport';
+import { getPublicWholesalePriceListRevision, getPublicWholesaleRequestItems } from '../src/shared/lib/db/wholesaleRepo';
 
 function guard() {
   assert.equal(process.env.KTS_CATALOG_STOCK_TEST, '1', 'Explicit isolated integration flag is required');
@@ -142,6 +143,70 @@ test('catalog/stock writes and transaction policy in isolated PostgreSQL', { tim
     assert.deepEqual((await query('select rolsuper,rolcreatedb,rolcreaterole from pg_roles where rolname=current_user')).rows[0], { rolsuper: false, rolcreatedb: false, rolcreaterole: false });
     // Complete actual import schema initialization before introducing lock gates.
     await stock([['SYNTHETIC-WARMUP-NOT-FOUND', 0]], 'warmup');
+
+    await t.test('catalog disappearance and return preserve each manager visibility choice and every saved price setting', async () => {
+      const prefix = 'catalog-return';
+      const { first, second } = await fixture(prefix);
+      const retained = await createCatalogAdminProduct(input(`${prefix}-RETAINED`));
+      assert.ok(retained);
+      const firstToken = `synthetic-${prefix}`;
+      const secondToken = `synthetic-${prefix}-other-manager`;
+      await query(`update wholesale_price_list_items i set visible=false,price_manually_changed=false,
+        custom_wholesale_price=null,discount_percent=17.5
+        from wholesale_products p where p.id=i.wholesale_product_id and p.catalog_product_id=$1`, [second.id]);
+      const otherPriceId = (await query(`insert into wholesale_price_lists(title,token,comment)
+        values ('Other synthetic manager price',$1,'Preserved independent manager choice') returning id`, [secondToken])).rows[0].id;
+      await query(`insert into wholesale_price_list_items(price_list_id,wholesale_product_id,custom_wholesale_price,
+        discount_percent,price_manually_changed,visible,sort_order,snapshot_product_title)
+        select $1,p.id,987.65,12.5,true,p.catalog_product_id=$3,45,'Preserved manager title'
+        from wholesale_products p where p.catalog_product_id=any($2::bigint[])`, [otherPriceId, [first.id, second.id], second.id]);
+
+      const initialImport = [input(first.article), input(second.article), input(retained.article)];
+      await replaceCatalogFromRows(initialImport);
+      const beforeItems = await prices();
+      const beforeLists = (await query(`select row_to_json(p) as row,p.xmin::text as version
+        from wholesale_price_lists p order by id`)).rows;
+      const beforeIdentities = (await query(`select c.id::integer as catalog_id,w.id::integer as wholesale_id,
+        c.article from catalog_products c join wholesale_products w on w.catalog_product_id=c.id order by c.id`)).rows;
+      const itemIds = (await query<{ id: number }>('select id::integer from wholesale_price_list_items order by id')).rows.map(({ id }) => id);
+      const beforePublic = await Promise.all([firstToken, secondToken].map(token => getPublicWholesaleRequestItems(token, itemIds)));
+      assert.deepEqual(beforePublic.map(items => items.map(({ sku, priceRub }) => ({ sku, priceRub }))), [
+        [{ sku: first.article, priceRub: '123.45' }], [{ sku: second.article, priceRub: '987.65' }],
+      ]);
+      const beforeCacheRevisions = await Promise.all([firstToken, secondToken].map(getPublicWholesalePriceListRevision));
+      assert.ok(beforeCacheRevisions.every(Boolean));
+
+      await replaceCatalogFromRows([input(retained.article)]);
+      for (const table of ['catalog_products', 'wholesale_products'] as const) {
+        const key = table === 'catalog_products' ? 'id' : 'catalog_product_id';
+        assert.deepEqual((await query(`select is_active from ${table} where ${key}=any($1::bigint[]) order by id`,
+          [[first.id, second.id]])).rows, [{ is_active: false }, { is_active: false }]);
+      }
+      assert.deepEqual(await prices(), beforeItems, 'Temporary catalog absence must not change manager choices, prices, discounts, snapshots, positions or timestamps');
+      assert.deepEqual((await query(`select row_to_json(p) as row,p.xmin::text as version
+        from wholesale_price_lists p order by id`)).rows, beforeLists, 'Import must not alter or increment manager price-list revisions');
+      assert.deepEqual(await Promise.all([firstToken, secondToken].map(token => getPublicWholesaleRequestItems(token, itemIds))), [[], []],
+        'Inactive products must not remain orderable even when their saved selection is enabled');
+      const absentCacheRevisions = await Promise.all([firstToken, secondToken].map(getPublicWholesalePriceListRevision));
+      absentCacheRevisions.forEach((revision, index) => assert.notEqual(revision, beforeCacheRevisions[index], 'Product activity must invalidate public price cache'));
+
+      await replaceCatalogFromRows([input(first.article, { priceRub: '333' }), input(second.article, { priceRub: '444' }), input(retained.article)]);
+      for (const table of ['catalog_products', 'wholesale_products'] as const) {
+        const key = table === 'catalog_products' ? 'id' : 'catalog_product_id';
+        assert.deepEqual((await query(`select is_active from ${table} where ${key}=any($1::bigint[]) order by id`,
+          [[first.id, second.id]])).rows, [{ is_active: true }, { is_active: true }]);
+      }
+      assert.deepEqual((await query(`select c.id::integer as catalog_id,w.id::integer as wholesale_id,
+        c.article from catalog_products c join wholesale_products w on w.catalog_product_id=c.id order by c.id`)).rows, beforeIdentities,
+        'Returning products must reconnect to the original saved positions, not become duplicate product records');
+      assert.deepEqual(await prices(), beforeItems);
+      assert.deepEqual((await query(`select row_to_json(p) as row,p.xmin::text as version
+        from wholesale_price_lists p order by id`)).rows, beforeLists);
+      assert.deepEqual(await Promise.all([firstToken, secondToken].map(token => getPublicWholesaleRequestItems(token, itemIds))), beforePublic,
+        'Only each manager-selected product must return automatically, retaining individual prices despite changed catalog prices');
+      const restoredCacheRevisions = await Promise.all([firstToken, secondToken].map(getPublicWholesalePriceListRevision));
+      restoredCacheRevisions.forEach((revision, index) => assert.notEqual(revision, absentCacheRevisions[index], 'Reactivation must invalidate absent-state cache'));
+    });
 
     await t.test('a small sparse workbook cannot commit a truncated warehouse snapshot or success receipt', async () => {
       const { first, second, originalPrices } = await fixture('sparse-stock');

@@ -55,33 +55,9 @@ export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promi
          and is_active = true`,
       [activeIds],
     );
-    // Editors lock the parent before its positions. Use the same order here
-    // before the child-change revision trigger touches affected price lists.
-    await client.query(
-      `select price.id
-       from wholesale_price_lists price
-       where exists (
-         select 1 from wholesale_price_list_items items
-         join wholesale_products products on products.id = items.wholesale_product_id
-         where items.price_list_id = price.id
-           and products.catalog_product_id is not null
-           and not (products.catalog_product_id = any($1::bigint[]))
-           and items.visible = true
-       )
-       order by price.id for update of price`,
-      [activeIds],
-    );
-    await client.query(
-      `update wholesale_price_list_items items
-       set visible = false,
-           updated_at = now()
-       from wholesale_products products
-       where products.id = items.wholesale_product_id
-         and products.catalog_product_id is not null
-         and not (products.catalog_product_id = any($1::bigint[]))
-         and items.visible = true`,
-      [activeIds],
-    );
+    // Catalog availability is temporary; price-list visibility is the manager's
+    // saved choice. Public reads require both, so leave positions untouched and
+    // let reactivated products return only to the lists where they were selected.
     await client.query(`
       update catalog_categories categories
       set is_active = exists (
