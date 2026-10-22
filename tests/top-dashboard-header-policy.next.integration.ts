@@ -60,30 +60,36 @@ export function GET(request) {
     }
     const report = '/api/admin/top-dashboard/blocks/10/versions/83';
     for (const method of ['GET', 'HEAD']) {
-      for (const suffix of ['frame', 'content', 'frame/', 'content/']) {
-        const response = await fetch(`${origin}${report}/${suffix}`, { method, signal: AbortSignal.timeout(10_000) });
+      for (const pathname of ['frame', 'content', 'frame/', 'content/'].map(suffix => `${report}/${suffix}`).concat([
+        '/api/admin/knowledge-base/files/7?mode=preview',
+        '/api/admin/knowledge-base/files/7/?mode=preview',
+        '/api/admin/knowledge-base/files/7?mode=download',
+      ])) {
+        const response = await fetch(`${origin}${pathname}`, { method, signal: AbortSignal.timeout(10_000) });
         assert.equal(response.status, 200);
         assert.equal(response.headers.get('x-test-route'), 'synthetic-handler');
-        assert.equal(response.headers.get('content-security-policy'), scopedCsp, `${method} ${suffix}`);
+        assert.equal(response.headers.get('content-security-policy'), scopedCsp, `${method} ${pathname}`);
         assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
         assert.equal(response.headers.get('x-frame-options'), 'SAMEORIGIN');
       }
       for (const status of [401, 403]) {
-        const response = await fetch(`${origin}${report}/content?status=${status}`, { method, signal: AbortSignal.timeout(10_000) });
-        assert.equal(response.status, status);
-        assert.match(response.headers.get('content-type') ?? '', /^application\/json/);
-        assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
-        assert.equal(response.headers.get('content-security-policy'), null);
+        for (const pathname of [`${report}/content`, '/api/admin/knowledge-base/files/7']) {
+          const response = await fetch(`${origin}${pathname}?status=${status}`, { method, signal: AbortSignal.timeout(10_000) });
+          assert.equal(response.status, status);
+          assert.match(response.headers.get('content-type') ?? '', /^application\/json/);
+          assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+          assert.equal(response.headers.get('content-security-policy'), null);
+        }
       }
     }
-    for (const pathname of ['/api/probe', `${report}/contentx`, `${report}/content/extra`, '/api/admin/top-dashboard/blocks/10/data']) {
+    for (const pathname of ['/api/probe', `${report}/contentx`, `${report}/content/extra`, '/api/admin/top-dashboard/blocks/10/data', '/api/admin/knowledge-base/files/7/extra', '/api/admin/knowledge-base/nodes']) {
       const response = await fetch(origin + pathname, { signal: AbortSignal.timeout(10_000) });
       const policy = response.headers.get('content-security-policy') ?? '';
       assert.equal(response.status, 200);
       assert.match(policy, /script-src 'self' 'unsafe-inline' 'unsafe-eval' https:\/\/crm\.kts-impex\.ru/);
       assert.doesNotMatch(policy, /script-src blob:/);
     }
-    console.log('Real Next HTTP: scoped frame/content GET+HEAD, slash normalization, JSON denials and ordinary API CSP passed');
+    console.log('Real Next HTTP: scoped TOP/knowledge-base GET+HEAD, slash normalization, JSON denials and ordinary API CSP passed');
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM');

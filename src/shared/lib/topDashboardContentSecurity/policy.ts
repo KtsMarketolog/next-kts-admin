@@ -1,7 +1,5 @@
 import { createHash } from 'crypto';
-
-const INLINE_SCRIPT_PATTERN = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi;
-const INLINE_EVENT_HANDLER_PATTERN = /\son[a-z][\w:-]*\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+import { collectTopDashboardInlineHashes } from './inlineSources';
 
 function sha256Source(value: string) {
   return `'sha256-${createHash('sha256').update(value, 'utf8').digest('base64')}'`;
@@ -25,14 +23,7 @@ export function buildTopDashboardFrameSecurityPolicy(scriptContent: string) {
 }
 
 export function buildTopDashboardContentSecurityPolicy(htmlContent: string, options: { allowBlobModules?: boolean } = {}) {
-  const scriptHashes = Array.from(htmlContent.matchAll(INLINE_SCRIPT_PATTERN), (match) => {
-    // HTML tokenization normalizes CRLF before CSP hashes are checked.
-    const scriptContent = (match[1] ?? '').replace(/\r\n?/g, '\n');
-    return sha256Source(scriptContent);
-  });
-  const eventHandlerHashes = Array.from(htmlContent.matchAll(INLINE_EVENT_HANDLER_PATTERN), (match) => (
-    sha256Source(match[1] ?? match[2] ?? '')
-  ));
+  const { scriptHashes, eventHandlerHashes } = collectTopDashboardInlineHashes(htmlContent);
   const hashes = Array.from(new Set([...scriptHashes, ...eventHandlerHashes]));
   const scriptSource = hashes.length > 0
     ? `${eventHandlerHashes.length > 0 ? "'unsafe-hashes' " : ''}${hashes.join(' ')}`

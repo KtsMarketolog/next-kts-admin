@@ -79,7 +79,7 @@ export async function removeUncommittedKnowledgeBaseFile(storagePath: string) {
 }
 
 export function knowledgeBaseHtmlPolicy(html: string) {
-  // Bound work before the shared regex/hash builder; many unterminated tags or
+  // Bound work before the shared HTML tokenizer/hash builder; many unterminated tags or
   // hundreds of thousands of tiny handlers must not amplify parser work.
   let scriptCount = 0;
   const markers = /<script\b|\son[a-z][\w:-]*\s*=/gi;

@@ -32,7 +32,17 @@ test('ordinary pages, APIs and lookalike URLs retain the global CSP', () => {
     '/api/admin/top-dashboard/blocks/x/versions/83/content',
     '/api/admin/top-dashboard/blocks/1/versions/x/content',
     '/api/admin/manager-dashboard/shared/content',
+    '/admin/knowledge-base', '/api/admin/knowledge-base/files',
+    '/api/admin/knowledge-base/files/7/extra', '/api/admin/knowledge-base/files/7.json',
+    '/api/admin/knowledge-base/files/0', '/api/admin/knowledge-base/files/07',
+    '/api/admin/knowledge-base/files/-7', '/api/admin/knowledge-base/files/x',
   ]) assert.notEqual(matchesGlobal(pathname), false, pathname);
+});
+
+test('canonical knowledge-base file paths retain their exact preview or attachment CSP', () => {
+  for (const id of ['1', '7', '999999']) {
+    for (const trailing of ['', '/']) assert.equal(matchesGlobal(`/api/admin/knowledge-base/files/${id}${trailing}`), false);
+  }
 });
 
 test('Next configuration preserves common protection everywhere and does not widen global script permissions', async () => {
@@ -51,7 +61,7 @@ test('Next configuration preserves common protection everywhere and does not wid
   const scriptSrc = globalCsp.split('; ').find(directive => directive.startsWith('script-src '));
   assert.equal(scriptSrc, "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://crm.kts-impex.ru");
   assert.equal(resolved('/api/admin/clients').get('content-security-policy'), globalCsp);
-  for (const pathname of [`${reportPath}/frame`, `${reportPath}/content`, `${reportPath}/content/`]) {
+  for (const pathname of [`${reportPath}/frame`, `${reportPath}/content`, `${reportPath}/content/`, '/api/admin/knowledge-base/files/7', '/api/admin/knowledge-base/files/7/']) {
     const headers = resolved(pathname);
     assert.equal(headers.has('content-security-policy'), false);
     for (const key of ['strict-transport-security', 'x-content-type-options', 'x-frame-options', 'referrer-policy', 'permissions-policy']) {
