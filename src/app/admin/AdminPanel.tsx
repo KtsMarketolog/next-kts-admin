@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { AdminDashboard } from '@/features/admin/dashboard/AdminDashboard';
 import { AnalogFinder } from '@/features/analogs/AnalogFinder';
 import { AdminClientDetailSection } from '@/features/admin/clients/AdminClientDetailSection';
 import { AdminClientsSection } from '@/features/admin/clients/AdminClientsSection';
+import type { ClientNavigationState } from '@/features/admin/clients/AdminClientsModel';
+import { discardClientDraftWorkspace, getClientDraftScope, hasClientDraftWorkspaceChanges, openClientDraftWorkspace, subscribeClientDraftWorkspace } from '@/features/admin/clients/clientDraftWorkspace';
 import { useAdminRequestScope } from '@/features/admin/shared/useAdminRequestScope';
 import { AdminStatusToast } from '@/features/admin/shared/AdminStatusToast';
 import { AdminTopDashboardCatalog } from '@/features/admin/top-dashboard/AdminTopDashboardCatalog';
@@ -45,6 +47,15 @@ export default function AdminPanel({
     canManageTopDashboard, setCanManageTopDashboard, recheckSessionAfterDenied } = session;
   const canAccessCatalog = canAccessReportsCatalog(reportSession);
   const draftScope = reportSession?.role === 'admin' ? `site-content:${reportSession.adminUserId ?? 'legacy-admin'}` : undefined;
+  const clientDraftScope = getClientDraftScope(authenticated ? reportSession : null);
+  const cachedClientChanges = useSyncExternalStore(subscribeClientDraftWorkspace,
+    () => hasClientDraftWorkspaceChanges(clientDraftScope), () => false);
+  const [clientNavigation, setClientNavigation] = useState<ClientNavigationState>({ dirty: false, busy: false, passwordPending: false });
+  useLayoutEffect(() => {
+    // A different identity/session (or logout) invalidates old cache writers.
+    // Normal SPA unmounts deliberately retain the current session's drafts.
+    openClientDraftWorkspace(clientDraftScope);
+  }, [clientDraftScope]);
   const [status, setStatus] = useState('');
   const { request, isActive } = useAdminRequestScope();
 
@@ -59,7 +70,15 @@ export default function AdminPanel({
   const { settingsDraft, phone, email, address, busy, contentLoaded, contentLoadError, setContentLoadError,
     savedSetting, uploadImage, slideAdmin, newsAdmin, groupCompanyAdmin, brandAdmin, priceGroupAdmin,
     dirtySections, hasUnsaved, loadAdminData, saveInfo } = content;
-  const { confirmLeave } = useAdminUnsavedChanges(hasUnsaved || busy);
+  const clientWarning = clientNavigation.dirty || clientNavigation.busy || cachedClientChanges
+    ? 'Есть несохранённые изменения или незавершённый запрос в разделе клиентов. '
+      + (clientDraftScope ? 'Обычные поля останутся при переходах между разделами в этой вкладке. ' : '')
+      + 'При обновлении страницы, закрытии вкладки или выходе из учётной записи черновики потеряются. '
+      + (clientNavigation.passwordPending ? 'Введённые пароли после возврата потребуется ввести заново. ' : '')
+      + (clientNavigation.busy ? 'Уход не отменяет уже выполненное сервером сохранение. ' : '')
+      + 'Продолжить?'
+    : undefined;
+  const { confirmLeave } = useAdminUnsavedChanges(hasUnsaved || busy || clientNavigation.dirty || clientNavigation.busy || cachedClientChanges, clientWarning);
   const navigation = useAdminPanelNavigation({ initialArea, initialSession, initialTopDashboardBlockId,
     sessionRole, sessionReady, canAccessCatalog, canAccessTopDashboard, confirmLeave });
   const { pathname, router, activeArea, setActiveArea, activeSection, clientDetailId, topDashboardBlockId, switchSection, switchArea } = navigation;
@@ -145,6 +164,7 @@ export default function AdminPanel({
             const response = await request('/api/admin/logout', { method: 'POST' });
             if (!response.ok) throw new Error('Не удалось завершить сеанс. Повторите выход.');
             if (draftScope) discardAdminDraftWorkspace(draftScope);
+            discardClientDraftWorkspace(clientDraftScope);
             setSessionRole(null);
             setReportSession(null);
             setCanAccessTopDashboard(false);
@@ -211,7 +231,8 @@ export default function AdminPanel({
         (clientDetailId ? (
           <AdminClientDetailSection key={clientDetailId} clientId={clientDetailId} onBack={() => router.push('/admin/clients', { scroll: false })} />
         ) : (
-          <AdminClientsSection onBack={() => switchArea('home')} />
+          <AdminClientsSection key={clientDraftScope ?? 'no-client-draft-session'} draftScope={clientDraftScope}
+            onNavigationStateChange={setClientNavigation} onBack={() => switchArea('home')} />
         ))}
 
       {activeArea === 'site' && (

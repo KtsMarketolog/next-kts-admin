@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import styles from '@/app/admin/admin.module.scss';
 import { validatePasswordPolicy } from '@/shared/lib/passwordPolicy';
@@ -10,7 +10,8 @@ import { AdminClientCompanyCard } from './AdminClientCompanyCard';
 import { AdminClientCreateForm } from './AdminClientCreateForm';
 import { AdminClientDeletionDialog } from './AdminClientDeletionDialog';
 import { ClientMutationError, submitClientMutation } from './clientMutation';
-import { buildClientConflict, reconcileClientDrafts, resolveClientConflict, type ClientConflictComparison, type ClientEditableField } from './clientConflict';
+import { CLIENT_EDITABLE_FIELDS, buildClientConflict, reconcileClientDrafts, resolveClientConflict, type ClientConflictComparison, type ClientEditableField } from './clientConflict';
+import { openClientDraftWorkspace } from './clientDraftWorkspace';
 import { useAdminRequestScope } from '../shared/useAdminRequestScope';
 import {
   emptyDraft,
@@ -29,7 +30,7 @@ import {
   type ClientDeletionPreview,
 } from './AdminClientsModel';
 
-export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
+export function AdminClientsSection({ onBack, draftScope, onNavigationStateChange }: AdminClientsSectionProps) {
   const { request, cancelAll, isActive } = useAdminRequestScope();
   const [companies, setCompanies] = useState<ClientCompany[]>([]);
   const companiesRef = useRef<ClientCompany[]>([]);
@@ -55,6 +56,52 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [savedCompanyId, setSavedCompanyId] = useState<number | null>(null);
+  const creationRef = useRef(draft);
+  const expandedRef = useRef(expandedCompanyIds);
+  const workspaceRef = useRef<ReturnType<typeof openClientDraftWorkspace> | null>(null);
+
+  // Capture committed state before the restore effect. Its cleanup reads live
+  // refs, not the render that opened the editor (also safe in Strict Mode).
+  useLayoutEffect(() => {
+    creationRef.current = draft;
+    expandedRef.current = expandedCompanyIds;
+    workspaceRef.current?.save({ creation: draft, drafts: companyDraftsRef.current,
+      baselines: companyBaselines.current, expanded: expandedCompanyIds, scope: scopeRef.current });
+  });
+  useLayoutEffect(() => {
+    const workspace = openClientDraftWorkspace(draftScope);
+    workspaceRef.current = workspace;
+    const saved = workspace.snapshot;
+    creationRef.current = saved.creation;
+    expandedRef.current = saved.expanded;
+    companyDraftsRef.current = saved.drafts;
+    companyBaselines.current = saved.baselines;
+    scopeRef.current = saved.scope;
+    setDraft(saved.creation);
+    setExpandedCompanyIds(saved.expanded);
+    setCompanyDrafts(saved.drafts);
+    setScope(saved.scope);
+    // No passwords, password-edit flags, access grants or rendered company
+    // list are cached. Fresh permission-filtered reads decide what is visible.
+    return () => {
+      workspace.save({ creation: creationRef.current, drafts: companyDraftsRef.current,
+        baselines: companyBaselines.current, expanded: expandedRef.current, scope: scopeRef.current });
+      if (workspaceRef.current === workspace) workspaceRef.current = null;
+    };
+  }, [draftScope]);
+
+  const passwordPending = Boolean(draft.password) || Object.values(clientPasswordEditIds).some(Boolean);
+  const hasUnsaved = passwordPending || CLIENT_EDITABLE_FIELDS.some((field) => draft[field] !== emptyDraft[field])
+    || Object.entries(companyDrafts).some(([id, value]) => {
+      const base = companyBaselines.current.get(Number(id));
+      return !base || CLIENT_EDITABLE_FIELDS.some((field) => value[field] !== base[field]);
+    });
+  useLayoutEffect(() => {
+    onNavigationStateChange?.({ dirty: hasUnsaved, busy, passwordPending });
+  }, [onNavigationStateChange, hasUnsaved, busy, passwordPending]);
+  useLayoutEffect(() => () => {
+    onNavigationStateChange?.({ dirty: false, busy: false, passwordPending: false });
+  }, [onNavigationStateChange]);
 
   const replaceCompanyDrafts = useCallback((update: (current: Record<number, ClientDraft>) => Record<number, ClientDraft>) => {
     const next = update(companyDraftsRef.current);
@@ -496,6 +543,13 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       </div>
 
       {status ? <p role="status" className={`${styles.status} ${styles.clientSectionStatus}`}>{status}</p> : null}
+
+      {hasUnsaved ? <p role="status" className={styles.draftNotice}>
+        <strong>Есть несохранённые изменения.</strong>{' '}
+        {draftScope ? 'Обычные поля сохранятся при переходах между разделами в этой вкладке, но ещё не записаны на сервер.' : 'Перед уходом сохраните нужные карточки.'}{' '}
+        При обновлении страницы, закрытии вкладки или выходе из учётной записи черновики потеряются.
+        {passwordPending ? ' Введённые пароли при уходе не сохраняются — после возврата введите их заново.' : ''}
+      </p> : null}
 
       <div className={styles.userRoleTabs} aria-label="Список клиентов">
         <button type="button" aria-pressed={scope === 'active'} disabled={busy} onClick={() => selectScope('active')}>Клиенты</button>

@@ -12,16 +12,18 @@ function retainedPanel(from: string, to: string) {
 }
 
 /** Protect Panel-owned drafts without mutating browser or Next router history. */
-export function useAdminUnsavedChanges(hasUnsaved: boolean) {
+export function useAdminUnsavedChanges(hasUnsaved: boolean, warning = WARNING) {
   const dirty = useRef(hasUnsaved);
+  const message = useRef(warning);
   const allowedUntil = useRef(0);
   useLayoutEffect(() => {
     dirty.current = hasUnsaved;
+    message.current = warning;
     allowedUntil.current = 0;
-  }, [hasUnsaved]);
+  }, [hasUnsaved, warning]);
   const confirmLeave = useCallback(() => {
     if (!dirty.current) return true;
-    if (!window.confirm(WARNING)) return false;
+    if (!window.confirm(message.current)) return false;
     // An accepted plain anchor should not immediately trigger a second native
     // beforeunload prompt. A failed/intercepted navigation must not disable the
     // guard indefinitely (for example, if logout fails).

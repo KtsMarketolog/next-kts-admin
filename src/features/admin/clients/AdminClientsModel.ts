@@ -51,7 +51,11 @@ export type ClientDraft = {
 
 export type AdminClientsSectionProps = {
   onBack: () => void;
+  draftScope?: string;
+  onNavigationStateChange?: (state: ClientNavigationState) => void;
 };
+
+export type ClientNavigationState = { dirty: boolean; busy: boolean; passwordPending: boolean };
 
 export type ClientListScope = 'active' | 'archived';
 
