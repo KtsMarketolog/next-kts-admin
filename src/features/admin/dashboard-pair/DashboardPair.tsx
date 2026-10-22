@@ -138,7 +138,7 @@ function PairTopReport({panel}: {panel:DashboardPairPanel}) {
     <iframe ref={frame} title={panel.title} className={styles.frame}
       key={`${panel.key}:${panel.versionId}:${panel.reportRevision ?? ''}:${panel.view ?? 'default'}`}
       src={`/api/admin/top-dashboard/blocks/${panel.key.slice(4)}/versions/${panel.versionId}/frame${panel.view === 'sales-office' ? '?view=sales-office' : ''}`}
-      sandbox="allow-scripts allow-same-origin allow-popups" referrerPolicy="no-referrer"
+      sandbox="allow-scripts allow-same-origin allow-popups allow-modals" referrerPolicy="no-referrer"
       allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *" allowFullScreen />
   </>;
 }

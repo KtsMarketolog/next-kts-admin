@@ -171,7 +171,7 @@ export function TopDashboardManagementPreview({ management, html, data, selected
               className={styles.topDashboardFrame}
               src={`${apiBasePath}/versions/${selectedVersion.id}/frame?revision=${previewRevision}`}
               title={`Предпросмотр ${selectedVersion.originalName}`}
-              sandbox="allow-scripts allow-same-origin allow-popups"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-modals"
               referrerPolicy="no-referrer"
               allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
               allowFullScreen

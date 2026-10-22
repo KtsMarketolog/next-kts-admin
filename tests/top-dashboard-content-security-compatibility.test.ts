@@ -6,10 +6,14 @@ import {
   createTopDashboardFrameBridgeScript,
   getTopDashboardDataAdapterScript,
 } from '../src/shared/lib/topDashboardContentSecurity';
+import { sandboxPrintScript } from '../src/shared/lib/topDashboardContentSecurity/sandbox/print';
+import { framePrintScript } from '../src/shared/lib/topDashboardContentSecurity/frame/print';
 
 // Captured from the monolithic implementation before its responsibility split.
 // Exact bytes matter: the browser CSP hashes the generated scripts, and source
 // fragments must neither reorder side effects nor introduce escaping changes.
+// The later, separately tested print bridge is additive: exclude only that
+// exact fragment so the pre-existing snapshots/data/download logic stays pinned.
 const adapterCases: Array<{
   name: string;
   args: Parameters<typeof getTopDashboardDataAdapterScript>;
@@ -44,12 +48,16 @@ function sha256(source: string) {
 
 for (const fixture of adapterCases) {
   test(`sandbox adapter preserves pre-refactor bytes: ${fixture.name}`, () => {
-    assert.equal(sha256(getTopDashboardDataAdapterScript(...fixture.args)), fixture.sha256);
+    const script = getTopDashboardDataAdapterScript(...fixture.args);
+    assert.equal(script.split(sandboxPrintScript()).length, 2);
+    assert.equal(sha256(script.replace(sandboxPrintScript(), '')), fixture.sha256);
   });
 }
 
 for (const fixture of frameCases) {
   test(`trusted frame preserves pre-refactor bytes: ${fixture.name}`, () => {
-    assert.equal(sha256(createTopDashboardFrameBridgeScript(...fixture.args)), fixture.sha256);
+    const script = createTopDashboardFrameBridgeScript(...fixture.args);
+    assert.equal(script.split(framePrintScript()).length, 2);
+    assert.equal(sha256(script.replace(framePrintScript(), '')), fixture.sha256);
   });
 }

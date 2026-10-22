@@ -1,6 +1,7 @@
 import { multiFileCodecScript } from './frame/multiFileCodec';
 import { snapshotTransportScript } from './frame/snapshotTransport';
 import { managementUploadsScript } from './frame/managementUploads';
+import { framePrintScript } from './frame/print';
 import { dashboardUsageRelayScript } from '../dashboardUsageBridge';
 import { dashboardProfitabilityBridgeScript } from '../dashboardProfitabilityBridge';
 import {
@@ -130,7 +131,7 @@ export function createTopDashboardFrameBridgeScript(
     }
   }
 
-  function hideNotice() {
+${framePrintScript()}  function hideNotice() {
     if (!(notice instanceof HTMLElement)) return;
     if (noticeTimer) window.clearTimeout(noticeTimer);
     noticeTimer = 0;

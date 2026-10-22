@@ -69,6 +69,8 @@ jobs:
           set -euo pipefail
           npm run lint
           npm test
+          # Route CSP must survive Next's real HTTP header merge, not only mocks.
+          node --import tsx tests/top-dashboard-header-policy.next.integration.ts
           # Exercise legacy password migration against real PostgreSQL, including
           # numeric IDs crossing batch boundaries; mocks cannot catch SQL aliases.
           KTS_TEST_PG_BIN="$(pg_config --bindir 2>/dev/null || true)"

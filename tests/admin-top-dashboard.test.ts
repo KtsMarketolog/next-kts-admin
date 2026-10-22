@@ -945,9 +945,10 @@ test('dashboard frames keep downloads inside the trusted bridge and explicitly d
     ), 'utf8'),
   ];
 
-  assert.match(sources[0], /sandbox="allow-scripts allow-same-origin allow-popups"/);
-  assert.match(sources[1], /sandbox="allow-scripts allow-same-origin allow-popups"/);
+  assert.match(sources[0], /sandbox="allow-scripts allow-same-origin allow-popups allow-modals"/);
+  assert.match(sources[1], /sandbox="allow-scripts allow-same-origin allow-popups allow-modals"/);
   assert.match(sources[2], /sandbox="allow-scripts allow-popups"/);
+  assert.doesNotMatch(sources[2], /allow-modals|allow-same-origin/);
   assert.match(sources[0], /fullscreen \*"/);
   assert.match(sources[1], /fullscreen \*"/);
   assert.match(sources[2], /fullscreen \*"/);

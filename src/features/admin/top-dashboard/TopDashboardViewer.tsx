@@ -258,7 +258,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
               className={styles.topDashboardFrame}
               src={`${apiBasePath}/versions/${overview.activeVersionId}/frame?revision=${previewRevision}`}
               title={`Отчёт ${overview.block.title}`}
-              sandbox="allow-scripts allow-same-origin allow-popups"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-modals"
               referrerPolicy="no-referrer"
               allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
               allowFullScreen

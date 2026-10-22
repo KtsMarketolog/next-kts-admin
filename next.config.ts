@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { GLOBAL_CSP_SOURCE } from "./src/shared/lib/topDashboardHeaderPolicy";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -60,32 +61,36 @@ const nextConfig: NextConfig = {
       { key: "X-Frame-Options", value: "SAMEORIGIN" },
       { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
       { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-      {
-        key: "Content-Security-Policy",
-        value: [
-          "default-src 'self'",
-          "base-uri 'self'",
-          "frame-ancestors 'self'",
-          "object-src 'none'",
-          `img-src 'self' data: blob: https://api.kts-impex.ru http://api.kts-impex.ru ${bitrixWidgetOrigin}`,
-          "font-src 'self' data:",
-          "media-src 'self' data: blob:",
-          `style-src 'self' 'unsafe-inline' ${bitrixWidgetOrigin}`,
-          scriptSrc,
-          `connect-src 'self' https://api.kts-impex.ru http://api.kts-impex.ru ${bitrixWidgetOrigin} ${bitrixWidgetSocketOrigin}`,
-          `child-src 'self' ${bitrixWidgetOrigin} ${yandexMapOrigin}`,
-          `frame-src 'self' ${bitrixWidgetOrigin} ${yandexMapOrigin}`,
-          "worker-src 'self' blob:",
-          "manifest-src 'self'",
-          "form-action 'self'",
-        ].join("; "),
-      },
     ];
+    const contentSecurityPolicy = {
+      key: "Content-Security-Policy",
+      value: [
+        "default-src 'self'",
+        "base-uri 'self'",
+        "frame-ancestors 'self'",
+        "object-src 'none'",
+        `img-src 'self' data: blob: https://api.kts-impex.ru http://api.kts-impex.ru ${bitrixWidgetOrigin}`,
+        "font-src 'self' data:",
+        "media-src 'self' data: blob:",
+        `style-src 'self' 'unsafe-inline' ${bitrixWidgetOrigin}`,
+        scriptSrc,
+        `connect-src 'self' https://api.kts-impex.ru http://api.kts-impex.ru ${bitrixWidgetOrigin} ${bitrixWidgetSocketOrigin}`,
+        `child-src 'self' ${bitrixWidgetOrigin} ${yandexMapOrigin}`,
+        `frame-src 'self' ${bitrixWidgetOrigin} ${yandexMapOrigin}`,
+        "worker-src 'self' blob:",
+        "manifest-src 'self'",
+        "form-action 'self'",
+      ].join("; "),
+    };
 
     return [
       {
         source: "/:path*",
         headers: securityHeaders,
+      },
+      {
+        source: GLOBAL_CSP_SOURCE,
+        headers: [contentSecurityPolicy],
       },
       {
         source: "/:all*(js|css|png|jpg|jpeg|gif|svg|webp|avif|woff2|ico)",

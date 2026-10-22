@@ -19,6 +19,8 @@ export function buildTopDashboardFrameSecurityPolicy(scriptContent: string) {
     "connect-src 'self'",
     `script-src ${sha256Source(scriptContent)}`,
     "style-src 'unsafe-inline'",
+    'img-src data:',
+    'font-src data:',
   ].join('; ');
 }
 

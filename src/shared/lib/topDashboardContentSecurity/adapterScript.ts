@@ -1,6 +1,7 @@
 import { multiFileAdapterScript } from './sandbox/multiFileAdapter';
 import { sandboxPopupScript, sandboxDownloadScript } from './sandbox/downloads';
 import { readOnlyAdapterScript } from './sandbox/readOnly';
+import { sandboxPrintScript } from './sandbox/print';
 import { dashboardUsageAdapterScript } from '../dashboardUsageBridge';
 import type { TopDashboardProfile, TopDashboardSnapshotFormat } from '../db/topDashboardDomain';
 import {
@@ -122,7 +123,7 @@ ${sandboxPopupScript()}  function validName(value) {
     window.parent.postMessage(message, '*', transfer || []);
   }
 
-${sandboxDownloadScript()}  function report(code, extra) {
+${sandboxDownloadScript()}${sandboxPrintScript()}  function report(code, extra) {
     send('adapter-error', Object.assign({ code }, extra || {}));
   }
 
