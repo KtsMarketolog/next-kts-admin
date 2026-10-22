@@ -72,6 +72,31 @@ test('uncertain advisory unlock discards its session and release remains idempot
   assert.deepEqual(db.releases, [true]);
 });
 
+test('distributed TOP upload unlock failure discards its connection and frees the local slot exactly once', async () => {
+  const db = database({ fail: 'unlock' });
+  const compiled = ts.transpileModule(readFileSync(new URL('../src/shared/lib/topDashboardUploadConcurrency.ts', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loaded = { exports: {} as typeof import('../src/shared/lib/topDashboardUploadConcurrency') };
+  const globals = {};
+  new Function('require', 'module', 'exports', 'globalThis', compiled)(
+    (name: string) => { assert.equal(name, './db/client'); return db; },
+    loaded, loaded.exports, globals,
+  );
+  const release = await loaded.exports.acquireDistributedTopDashboardDataUploadSlot();
+  assert.ok(release);
+  assert.equal(await loaded.exports.acquireDistributedTopDashboardDataUploadSlot(), null);
+  await assert.rejects(release(), /Synthetic/);
+  await release();
+  assert.deepEqual(db.releases, [true]);
+  const nextRelease = await loaded.exports.acquireDistributedTopDashboardDataUploadSlot();
+  assert.ok(nextRelease, 'a failed unlock must not leave the next upload locally blocked');
+  await assert.rejects(nextRelease(), /Synthetic/);
+  await nextRelease();
+  assert.deepEqual(db.releases, [true, true]);
+  assert.equal(db.commands.filter((sql) => sql.includes('pg_advisory_unlock')).length, 2);
+});
+
 test('session callback unlock failure discards connection without losing committed callback result', async () => {
   const db = database({ fail: 'unlock' });
   assert.equal(await db.withSessionAdvisoryLock('synthetic', async () => 7), 7);

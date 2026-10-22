@@ -72,6 +72,16 @@ export async function readError(response: Response, fallback: string) {
   return typeof data.error === 'string' ? data.error : fallback;
 }
 
+/** Server warnings and the same-origin preview relay carry no HTML markup. */
+export function uploadWarningMessages(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 10).flatMap((warning: unknown) => {
+    const message = typeof warning === 'string' ? warning
+      : warning && typeof warning === 'object' && 'message' in warning ? warning.message : null;
+    return typeof message === 'string' && message.trim() ? [message.slice(0, 1000)] : [];
+  });
+}
+
 export function defaultTopDashboardIntegrationMode(overview: TopDashboardOverview | null): TopDashboardIntegrationMode {
   return overview?.activeDataContract.mode === 'legacy' || overview?.activeDataContract.mode === 'generic'
     ? 'connected' : 'standalone';

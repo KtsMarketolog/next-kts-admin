@@ -1,3 +1,5 @@
+import type { SavedOperationWarning } from '@/shared/lib/postCommitTasks';
+
 export type CatalogProductInput = {
   title: string;
   article?: string | null;
@@ -77,7 +79,9 @@ export type CatalogAdminFilterOptions = {
   brands: string[];
 };
 
-export type CatalogImportResult = CatalogAdminStats & {
+export type CatalogImportResult = { [Key in keyof CatalogAdminStats]: number | null } & {
+  saved: true;
   importedProducts: number;
   syncedWholesaleProducts: number;
+  warnings: SavedOperationWarning[];
 };

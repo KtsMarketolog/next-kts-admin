@@ -4,7 +4,15 @@
  * Emitted into the enclosing runtime's lexical scope; preserve statement order.
  */
 export function snapshotTransportScript() {
-  return String.raw`  function decodeName(value) {
+  return String.raw`  function uploadWarningMessages(value) {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, 10).flatMap(warning => {
+      const message = typeof warning === 'string' ? warning : warning && warning.message;
+      return typeof message === 'string' && message.trim() ? [message.slice(0, 1000)] : [];
+    });
+  }
+
+  function decodeName(value) {
     if (!value) return '';
     try { return decodeURIComponent(value); } catch { return ''; }
   }
@@ -237,7 +245,7 @@ export function snapshotTransportScript() {
       return false;
     }
     activeDataVersionId = nextVersionId;
-    return true;
+    return { warnings: uploadWarningMessages(payload.warnings) };
       }, externalSignal);
     } catch {
       showNotice('error', 'Файлы открыты, но подтверждение сохранения не получено. Проверьте историю перед повторной загрузкой.', false);
@@ -248,6 +256,7 @@ export function snapshotTransportScript() {
   async function runMultiFileSaveLoop() {
     if (saveLoopRunning) return;
     saveLoopRunning = true;
+    const warnings = new Set();
     try {
       while (saveCompleted < saveRequested) {
         const requestedRevision = saveRequested;
@@ -257,11 +266,12 @@ export function snapshotTransportScript() {
           saveCompleted = saveRequested;
           return;
         }
+        for (const warning of saved.warnings) warnings.add(warning);
         saveCompleted = requestedRevision;
       }
       const fileCount = Array.from(multiFileTargets.values())
         .reduce((total, entry) => total + entry.files.length, 0);
-      showNotice('success', fileCount + ' файл(ов) сохранено для всех пользователей', true);
+      showNotice('success', [fileCount + ' файл(ов) сохранено для всех пользователей', ...warnings].join(' '), warnings.size === 0);
     } finally {
       saveLoopRunning = false;
       if (saveCompleted < saveRequested) void runMultiFileSaveLoop();

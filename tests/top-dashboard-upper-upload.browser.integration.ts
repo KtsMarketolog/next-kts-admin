@@ -25,7 +25,7 @@ const contentPath = '/api/admin/top-dashboard/blocks/7/versions/51/content';
 type Target = { id: string | null; name: string | null; index: number };
 type SelectedFile = { name: string; type: string; lastModified: number; webkitRelativePath: string; text: string };
 type Selection = { target: Target; files: SelectedFile[] };
-type Message = { type: string; requestId?: string; ok?: boolean; targets?: Array<{target: Target; multiple: boolean; directory: boolean}> };
+type Message = { type: string; requestId?: string; ok?: boolean; warnings?: string[]; targets?: Array<{target: Target; multiple: boolean; directory: boolean}> };
 type Fixture = { name: string; markup: string; dynamic?: boolean; count: number; directory?: boolean };
 const fixtures: Fixture[] = [
   { name: 'static-multiple', markup: '<label for="source">Продажи и остатки</label><input id="source" name="sources" type="file" multiple accept=".json,.json.gz">', count: 1 },
@@ -59,6 +59,7 @@ async function main() {
   let puts = 0;
   let gets = 0;
   let conflict = false;
+  let saveWarnings: Array<{code: string; message: string}> = [];
   let stall: 'none' | 'headers' | 'body' = 'none';
   const stalled = { response: null as ServerResponse | null };
   const requestErrors: string[] = [];
@@ -105,7 +106,7 @@ window.__messages=[];window.addEventListener('message',e=>{if(e.source===documen
         else {
           stored = bytes;
           activeVersion = (activeVersion ?? 100) + 1;
-          response.writeHead(200, {'Content-Type': 'application/json'}).end(JSON.stringify({state: {activeVersionId: activeVersion}}));
+          response.writeHead(200, {'Content-Type': 'application/json'}).end(JSON.stringify({state: {activeVersionId: activeVersion}, warnings: saveWarnings}));
         }
       } else response.writeHead(404, common).end();
     } catch (error) {
@@ -127,7 +128,7 @@ window.__messages=[];window.addEventListener('message',e=>{if(e.source===documen
       try {
         for (const currentFixture of fixtures) {
           fixture = currentFixture;
-          stored = null; activeVersion = null; puts = 0; gets = 0; conflict = false;
+          stored = null; activeVersion = null; puts = 0; gets = 0; conflict = false; saveWarnings = [];
           const context = await browser.newContext();
           const page = await context.newPage();
           const errors: string[] = [];
@@ -191,6 +192,17 @@ window.__messages=[];window.addEventListener('message',e=>{if(e.source===documen
           assert.equal(puts, 0);
           assert.equal((await upload('first', selected)).ok, true);
           checkStored(selected);
+          saveWarnings = [{code: 'TOP_DASHBOARD_UPLOAD_SLOT_RELEASE_FAILED', message: 'Данные сохранены. Служебная очистка требует проверки; повторять загрузку не нужно.'}];
+          const putsBeforeWarning = puts;
+          const warningAck = await upload('saved-warning', selected);
+          assert.equal(warningAck.ok, true);
+          assert.deepEqual(warningAck.warnings, saveWarnings.map(warning => warning.message));
+          assert.equal(puts, putsBeforeWarning + 1, 'warning relays confirmed save without repeating the upload');
+          const notice = page.frameLocator('#outer').locator('#data-notice');
+          assert.equal(await notice.getAttribute('data-kind'), 'success');
+          assert.match(await notice.innerText(), /Служебная очистка требует проверки/);
+          checkStored(selected);
+          saveWarnings = [];
           const firstStored = Buffer.from(stored!);
           conflict = true;
           assert.equal((await upload('server-conflict', selected)).ok, false);

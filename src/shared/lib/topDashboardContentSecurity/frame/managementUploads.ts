@@ -75,8 +75,9 @@ export function managementUploadsScript() {
   }
 
   async function uploadManagementFiles(data) {
-    const respond = (ok, error) => sendManagement('upload-result', {
+    const respond = (ok, error, warnings) => sendManagement('upload-result', {
       requestId: data.requestId, ok, ...(error ? { error } : {}),
+      ...(warnings && warnings.length ? { warnings } : {}),
     });
     if (typeof data.requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(data.requestId)) return;
     if (managementUploadPending || saveLoopRunning) {
@@ -118,11 +119,12 @@ export function managementUploadsScript() {
       }
       multiFileTargets = replacement;
       showNotice('pending', 'Сохраняем выбранные файлы…', false);
-      if (!(await saveCurrentMultiFileData(signal))) {
+      const saved = await saveCurrentMultiFileData(signal);
+      if (!saved) {
         throw new Error('Не удалось подтвердить сохранение. Обновите страницу и проверьте журнал перед повторной загрузкой.');
       }
-      showNotice('success', 'Данные сохранены для всех пользователей', true);
-      respond(true);
+      showNotice('success', ['Данные сохранены для всех пользователей', ...saved.warnings].join(' '), saved.warnings.length === 0);
+      respond(true, null, saved.warnings);
       }, controller.signal);
     } catch (error) {
       if (previousTargets) multiFileTargets = previousTargets;

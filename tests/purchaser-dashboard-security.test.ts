@@ -131,6 +131,7 @@ function harness(relative: string, session: AdminSession | null, published = tru
     '@/shared/lib/db': new Proxy(db, { get: (target, name) => name in target ? target[name as keyof typeof target] : (infrastructure as Record<string, unknown>)[String(name)] }),
     '@/shared/lib/adminSecurity': infrastructure,
     '@/shared/lib/db/securityAuditRepo': infrastructure,
+    '@/shared/lib/postCommitTasks': infrastructure,
     '@/shared/lib/originProtection': infrastructure,
     '@/shared/lib/rateLimit': infrastructure,
     '@/shared/lib/topDashboardUploadConcurrency': infrastructure,

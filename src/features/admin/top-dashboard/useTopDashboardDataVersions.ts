@@ -6,7 +6,7 @@ import { requestProfitabilityFrameChange } from '@/features/admin/dashboard-usag
 import { TOP_DASHBOARD_DATA_MAX_BYTES, TOP_DASHBOARD_DATA_MAX_MEGABYTES } from '@/shared/lib/topDashboardLimits';
 import { encodeTopDashboardMultiFileBlobSnapshot } from '@/shared/lib/topDashboardMultiFileSnapshot';
 import { normalizeTopDashboardUploadTargets, topDashboardUploadTargetKey, type TopDashboardUploadTarget } from './topDashboardUploadSelection';
-import { readError, type TopDashboardDataVersion, type UploadFeedback } from './topDashboardManagementModel';
+import { readError, uploadWarningMessages, type TopDashboardDataVersion, type UploadFeedback } from './topDashboardManagementModel';
 import type { TopDashboardManagement } from './useTopDashboardManagement';
 
 /** Data selection and upload protocol, including the trusted preview's runtime-only fields. */
@@ -26,7 +26,7 @@ export function useTopDashboardDataVersions(management: TopDashboardManagement) 
   const runtimeUploadRef = useRef<{
     requestId: string;
     htmlVersionId: number;
-    resolve: () => void;
+    resolve: (warnings: string[]) => void;
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
@@ -128,7 +128,7 @@ export function useTopDashboardDataVersions(management: TopDashboardManagement) 
         if (!pending || pending.requestId !== message.requestId || pending.htmlVersionId !== message.htmlVersionId) return;
         clearTimeout(pending.timer);
         runtimeUploadRef.current = null;
-        if (message.ok === true) pending.resolve();
+        if (message.ok === true) pending.resolve(uploadWarningMessages(message.warnings));
         else pending.reject(new Error(typeof message.error === 'string'
           ? message.error : 'Не удалось сохранить выбранные файлы'));
       }
@@ -266,7 +266,7 @@ export function useTopDashboardDataVersions(management: TopDashboardManagement) 
         encodeTopDashboardMultiFileBlobSnapshot({ targets: uploadTargets });
         const frameWindow = previewFrameRef.current?.contentWindow;
         if (!frameWindow) throw new Error('Предпросмотр ещё не готов. Повторите после загрузки HTML.');
-        await new Promise<void>((resolve, reject) => {
+        const warnings = await new Promise<string[]>((resolve, reject) => {
           const requestId = crypto.randomUUID();
           const timer = setTimeout(() => {
             frameWindow.postMessage({ marker: 'kts-top-dashboard-management-v1', type: 'cancel-upload',
@@ -293,9 +293,9 @@ export function useTopDashboardDataVersions(management: TopDashboardManagement) 
         });
         setSelectedTargetFiles({});
         setSelectedDataHtmlVersionId(null);
-        const refreshed = await loadOverview(selectedVersionId);
+        const refreshed = await loadOverview(selectedVersionId).catch(() => null);
         setPreviewRevision((current) => current + 1);
-        reportUploadFeedback('data', `Данные сохранены для всех пользователей.${refreshed ? ` Текущая версия #${refreshed.data.activeVersionId}.` : ' Список версий не обновился — обновите страницу.'}`, 'success');
+        reportUploadFeedback('data', [`Данные сохранены для всех пользователей.${refreshed ? ` Текущая версия #${refreshed.data.activeVersionId}.` : ' Список версий не обновился — обновите страницу. Повторять загрузку не нужно.'}`, ...warnings].join(' '), 'success');
         return;
       }
       const headers: Record<string, string> = {
@@ -346,9 +346,9 @@ export function useTopDashboardDataVersions(management: TopDashboardManagement) 
       setSelectedTargetFiles({});
       setSelectedDataHtmlVersionId(null);
       if (dataFileInputRef.current) dataFileInputRef.current.value = '';
-      const refreshed = await loadOverview(selectedVersionId);
+      const refreshed = await loadOverview(selectedVersionId).catch(() => null);
       setPreviewRevision((current) => current + 1);
-      reportUploadFeedback('data', `Данные${savedName ? ` «${savedName}»` : ''} сохранены для всех пользователей, версия #${savedVersionId}.${refreshed ? '' : ' Список версий не обновился — обновите страницу.'}`, 'success');
+      reportUploadFeedback('data', [`Данные${savedName ? ` «${savedName}»` : ''} сохранены для всех пользователей, версия #${savedVersionId}.${refreshed ? '' : ' Список версий не обновился — обновите страницу. Повторять загрузку не нужно.'}`, ...uploadWarningMessages(result.warnings)].join(' '), 'success');
     } catch (error) {
       if (!isActive()) return;
       if (usesRuntimeUploadTargets) await loadOverview(selectedVersionId);

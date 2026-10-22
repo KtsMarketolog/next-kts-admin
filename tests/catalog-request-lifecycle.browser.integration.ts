@@ -19,7 +19,7 @@ window.fetch=async(url,init={})=>{
  const method=init.method||'GET';window.calls.push({url,method});
  init.signal?.addEventListener('abort',()=>window.aborted++);
  if(method==='GET'){
-  if(window.written&&window.mode==='reload-failure')throw new TypeError('Synthetic refresh failure');
+  if(window.written&&(window.mode==='reload-failure'||window.mode.endsWith('-refresh-failure')))throw new TypeError('Synthetic refresh failure');
   return Response.json(url.includes('/stock-import/logs')?{logs:[]}:{products:[product],filterOptions:{},stats:{products:1}});
  }
  if(window.mode==='reject')throw new TypeError('Synthetic offline');
@@ -28,7 +28,16 @@ window.fetch=async(url,init={})=>{
  if(window.mode==='http')return Response.json({error:'Synthetic validation failure'},{status:400});
  window.written=true;
  if(url.includes('/check-email'))return Response.json({status:'completed',processed:1,result:{saved:true,status:'success',updatedRows:1,failedRows:0},warnings:[]});
- if(url.includes('/catalog/import'))return Response.json({result:{importedProducts:1,categories:1,subcategories:1,brands:1}});
+ if(url.includes('/catalog/import')){
+  const noStats=window.mode.startsWith('saved-stats')||window.mode.startsWith('saved-all');
+  const cacheFailure=window.mode==='saved-cache'||window.mode.startsWith('saved-all');
+  const auditFailure=window.mode==='saved-audit'||window.mode.startsWith('saved-all');
+  const count=noStats?null:window.mode==='saved-zero-stats'?0:1;
+  const warnings=[...(noStats?[{code:'CATALOG_IMPORT_STATS_UNAVAILABLE',message:'Каталог сохранён, но статистика пока недоступна. Повторно загружать Excel не нужно.'}]:[]),
+   ...(cacheFailure?[{code:'CATALOG_IMPORT_CACHE_UNAVAILABLE',message:'Каталог сохранён, но обновление кеша сайта не завершено. Повторно загружать Excel не нужно.'}]:[]),
+   ...(auditFailure?[{code:'CATALOG_IMPORT_AUDIT_UNAVAILABLE',message:'Каталог сохранён, но запись в журнал безопасности не добавлена. Повторно загружать Excel не нужно.'}]:[])];
+  return Response.json({saved:true,result:{saved:true,importedProducts:1,categories:count,subcategories:count,brands:count},warnings});
+ }
  if(method==='DELETE')return Response.json({ok:true});
  return Response.json({product:{...product,...JSON.parse(init.body),id:method==='POST'?18:17}});
 };
@@ -69,7 +78,8 @@ async function main() {
       const browser = await engine.launch({ headless: true });
       try {
         for (const action of ['create', 'save', 'delete', 'excel', 'mail']) {
-          for (const scenario of ['reject', 'headers', 'body', 'http', 'reload-failure', 'unmount']) {
+          for (const scenario of ['reject', 'headers', 'body', 'http', 'reload-failure', 'unmount',
+            ...(action === 'excel' ? ['saved-stats', 'saved-cache', 'saved-audit', 'saved-all', 'saved-stats-refresh-failure', 'saved-all-refresh-failure', 'saved-zero-stats'] : [])]) {
             const page = await browser.newPage();
             await page.clock.install();
             const errors: string[] = [];
@@ -99,7 +109,23 @@ async function main() {
               await page.waitForFunction('document.getElementById("status").textContent.length>0');
               await page.waitForFunction('!document.querySelector("button:disabled")');
               const status = await page.locator('#status').innerText();
-              if (scenario === 'reload-failure') {
+              if (scenario.startsWith('saved-')) {
+                assert.match(status, /Каталог загружен из Excel/);
+                assert.doesNotMatch(status, /Не удалось получить подтверждение|Изменения могли сохраниться/);
+                const formText = await page.locator('form').first().innerText();
+                assert.match(formText, /Загружено: 1/);
+                if (scenario.startsWith('saved-stats') || scenario.startsWith('saved-all')) {
+                  assert.match(formText, /категорий: недоступно; подкатегорий: недоступно; брендов: недоступно/);
+                  assert.doesNotMatch(formText, /(?:категорий|подкатегорий|брендов): 0/);
+                } else if (scenario === 'saved-zero-stats') assert.match(formText, /категорий: 0; подкатегорий: 0; брендов: 0/);
+                if (scenario !== 'saved-zero-stats') {
+                  assert.match(status, /Повторно загружать Excel не нужно/);
+                  assert.match(formText, /Повторно загружать Excel не нужно/, 'confirmed save warning remains next to upload even after toast disappears');
+                }
+                if (scenario.endsWith('-refresh-failure')) assert.match(status, /список не обновился.*повторно сохранять не нужно/);
+                assert.equal(await page.getByRole('alert').count(), 0, 'saved operation must not render an import error');
+                assert.equal(await page.locator('input[type=file]').evaluate((element: HTMLInputElement) => element.files?.length), 0, 'saved file is cleared, discouraging accidental re-import');
+              } else if (scenario === 'reload-failure') {
                 assert.match(status, /(?:сохранён|добавлен|удалён|загружен|сохранены).*(?:не обновился|не обновился)/i);
               } else if (scenario === 'http') assert.match(status, /Synthetic validation failure/);
               else assert.match(status, /могло сохраниться/);

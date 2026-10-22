@@ -23,6 +23,7 @@ import {
   TopDashboardDataStorageLimitError,
 } from '../src/shared/lib/db/topDashboardBlocksRepo';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
+import * as postCommitTasks from '../src/shared/lib/postCommitTasks';
 import * as contentSecurity from '../src/shared/lib/topDashboardContentSecurity';
 import * as dashboardLimits from '../src/shared/lib/topDashboardLimits';
 import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
@@ -259,6 +260,12 @@ function directRouteHarness(options: {
   commitConflict?: boolean;
   databaseError?: Error;
   storageCommitError?: Error;
+  failRelease?: boolean;
+  failDiscard?: boolean;
+  failAudit?: boolean;
+  failDrain?: boolean;
+  failPruning?: boolean;
+  noActiveHtml?: boolean;
 } = {}) {
   const calls: string[] = [];
   const uploadUsage: unknown[] = [];
@@ -276,7 +283,10 @@ function directRouteHarness(options: {
       if (options.storageCommitError) throw options.storageCommitError;
       return 'test.ktsmf';
     },
-    async discard() { calls.push('discard'); discardedFile = !preserved; },
+    async discard() {
+      calls.push('discard'); discardedFile = !preserved;
+      if (options.failDiscard) throw new Error('Synthetic cleanup failure');
+    },
     preserve() { calls.push('preserve'); preserved = true; },
   };
   const parsed = {
@@ -297,7 +307,13 @@ function directRouteHarness(options: {
     },
   };
   const dependencies: Record<string, unknown> = {
-    '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:1', actorRole: 'admin'}), scheduleDashboardUploadUsageDrain() { uploadUsage.push({}); } },
+    '@/shared/lib/dashboardUploadUsage': {
+      getDashboardUploadUsageActor: () => ({actorKey: 'admin:1', actorRole: 'admin'}),
+      scheduleDashboardUploadUsageDrain() {
+        uploadUsage.push({});
+        if (options.failDrain) throw new Error('Synthetic drain failure');
+      },
+    },
     '@/shared/lib/dashboardAccess': dashboardAccess,
     'node:stream': {},
     '@/shared/lib/adminAuth': {
@@ -313,7 +329,9 @@ function directRouteHarness(options: {
       ...dashboardErrors,
       TopDashboardBlockNotFoundError,
       TopDashboardDataStorageLimitError,
-      async getTopDashboardBlockOverview() { calls.push('overview'); return { activeVersionId: 19 }; },
+      async getTopDashboardBlockOverview() {
+        calls.push('overview'); return { activeVersionId: options.noActiveHtml ? null : 19 };
+      },
       async getTopDashboardBlockVersionContent() { return { htmlContent: html }; },
       async createAndActivateTopDashboardBlockDataVersion(input: Record<string, unknown>) {
         calls.push('create');
@@ -322,20 +340,33 @@ function directRouteHarness(options: {
         created = input;
         return {
           version: { id: 71, ...input }, activeVersionId: 71, previousVersionId: 70,
-          prunedStoragePaths: [], prunedVersionIds: [], updatedAt: '2026-09-17',
+          prunedStoragePaths: options.failPruning ? ['previous.bin'] : [], prunedVersionIds: [], updatedAt: '2026-09-17',
         };
       },
     },
-    '@/shared/lib/db/securityAuditRepo': { async recordSecurityEvent() { calls.push('audit'); } },
+    '@/shared/lib/db/securityAuditRepo': { async recordSecurityEvent(_event: unknown, optionsForAudit: { required?: boolean }) {
+      assert.equal(optionsForAudit.required, true, 'the outer post-commit boundary must receive audit failures');
+      calls.push('audit');
+      if (options.failAudit) throw new Error('Synthetic audit failure');
+    } },
     '@/shared/lib/originProtection': { enforceSameOriginRequest },
+    '@/shared/lib/postCommitTasks': postCommitTasks,
     '@/shared/lib/rateLimit': { getClientIp() { return '127.0.0.1'; } },
-    '@/shared/lib/topDashboardDataStorage': {},
+    '@/shared/lib/topDashboardDataStorage': {
+      async deleteTopDashboardDataFiles() {
+        calls.push('prune');
+        if (options.failPruning) throw new Error('Synthetic pruning failure');
+      },
+    },
     '@/shared/lib/topDashboardContentSecurity': contentSecurity,
     '@/shared/lib/topDashboardLimits': dashboardLimits,
     '@/shared/lib/uploadRequestGuard': uploadRequestGuard,
     '@/shared/lib/topDashboardUploadConcurrency': {
       async acquireDistributedTopDashboardDataUploadSlot() {
-        calls.push('slot'); return async () => { calls.push('release'); };
+        calls.push('slot'); return async () => {
+          calls.push('release');
+          if (options.failRelease) throw new Error('Synthetic unlock failure');
+        };
       },
     },
     '@/shared/lib/topDashboardUploadTargets': { detectTopDashboardUploadTargets },
@@ -448,5 +479,84 @@ test('ordinary universal uploads retain the protected-frame request requirement'
   const response = await harness.put({ 'x-kts-top-dashboard-direct-files': '0' });
   assert.equal(response.status, 409);
   assert.deepEqual(harness.calls, ['slot', 'overview', 'parse', 'discard', 'release']);
+  assert.equal(harness.uploadUsage.length, 0);
+});
+
+for (const [failure, code] of [
+  ['failRelease', 'TOP_DASHBOARD_UPLOAD_SLOT_RELEASE_FAILED'],
+  ['failDiscard', 'TOP_DASHBOARD_UPLOAD_TEMP_CLEANUP_FAILED'],
+  ['failAudit', 'TOP_DASHBOARD_UPLOAD_AUDIT_FAILED'],
+  ['failDrain', 'TOP_DASHBOARD_UPLOAD_USAGE_DRAIN_FAILED'],
+  ['failPruning', 'TOP_DASHBOARD_UPLOAD_PRUNED_CLEANUP_FAILED'],
+] as const) {
+  test(`confirmed TOP data activation remains 201 with exact saved state after ${failure}`, async () => {
+    const harness = directRouteHarness({ [failure]: true });
+    const response = await harness.put();
+    const payload = await response.json();
+    assert.equal(response.status, 201);
+    assert.equal(payload.saved, true);
+    assert.equal(payload.version.id, 71);
+    assert.deepEqual(payload.state, { activeVersionId: 71, previousVersionId: 70, updatedAt: '2026-09-17' });
+    assert.deepEqual(payload.warnings.map((warning: { code: string }) => warning.code), [code]);
+    assert.match(payload.warnings[0].message, /повторно загружать файл не нужно/i);
+    assert.doesNotMatch(JSON.stringify(payload.warnings), /Synthetic/);
+    assert.equal(harness.calls.filter((call) => call === 'create').length, 1, 'no repeated persistence');
+    assert.equal(harness.calls.filter((call) => call === 'discard').length, 1);
+    assert.equal(harness.calls.filter((call) => call === 'release').length, 1);
+    assert.ok(harness.calls.indexOf('discard') < harness.calls.indexOf('release'));
+    assert.equal(harness.discardedFile(), false, 'confirmed active file must be preserved');
+  });
+}
+
+test('all secondary failures are reported independently without skipping audit or slot release', async () => {
+  const harness = directRouteHarness({
+    failRelease: true, failDiscard: true, failAudit: true, failDrain: true, failPruning: true,
+  });
+  const response = await harness.put();
+  const payload = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(payload.warnings.length, 5);
+  assert.deepEqual(harness.calls, [
+    'slot', 'overview', 'parse', 'commit', 'create', 'preserve', 'prune', 'audit', 'discard', 'release',
+  ]);
+  assert.equal(harness.discardedFile(), false);
+});
+
+test('cleanup failure preserves early validation and publication-conflict responses, never marking them saved', async () => {
+  for (const [options, status, message] of [
+    [{ noActiveHtml: true }, 422, /Сначала опубликуйте/],
+    [{ staleHtml: true }, 409, /уже изменилась/],
+    [{ forgedTarget: true }, 400, /неверное поле/],
+    [{ commitConflict: true }, 409, /уже изменилась/],
+    [{ databaseError: new TopDashboardDataStorageLimitError() }, 409, /Недостаточно места/],
+    [{ storageCommitError: new Error('file rename failed') }, 500, /Не удалось сохранить/],
+  ] as const) {
+    const harness = directRouteHarness({ ...options, failRelease: true, failDiscard: true });
+    const response = await harness.put();
+    const payload = await response.json();
+    assert.equal(response.status, status);
+    assert.match(payload.error, message);
+    assert.equal(payload.saved, undefined);
+    assert.equal(payload.version, undefined);
+    assert.equal(payload.warnings, undefined, 'failure must not contain saved-operation warnings');
+    assert.equal(harness.calls.filter((call) => call === 'release').length, 1);
+    assert.equal(harness.calls.includes('audit'), false);
+    assert.equal(harness.created(), null);
+  }
+});
+
+test('uncertain COMMIT plus cleanup failure preserves possibly active bytes without claiming a confirmed save', async () => {
+  const harness = directRouteHarness({
+    databaseError: new Error('connection lost after COMMIT'), failRelease: true, failDiscard: true,
+  });
+  const response = await harness.put();
+  const payload = await response.json();
+  assert.equal(response.status, 500);
+  assert.equal(payload.saved, undefined);
+  assert.equal(payload.version, undefined);
+  assert.equal(payload.warnings, undefined);
+  assert.equal(harness.discardedFile(), false);
+  assert.equal(harness.calls.filter((call) => call === 'create').length, 1);
+  assert.equal(harness.calls.filter((call) => call === 'release').length, 1);
   assert.equal(harness.uploadUsage.length, 0);
 });

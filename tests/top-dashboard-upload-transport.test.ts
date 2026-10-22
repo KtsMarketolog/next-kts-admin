@@ -16,6 +16,7 @@ import * as streamUpload from '../src/app/api/admin/top-dashboard/blocks/streamD
 import * as dashboardErrors from '../src/shared/lib/db/topDashboardDomain';
 import { TopDashboardBlockNotFoundError, TopDashboardDataStorageLimitError } from '../src/shared/lib/db/topDashboardBlocksRepo';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
+import * as postCommitTasks from '../src/shared/lib/postCommitTasks';
 import * as contentSecurity from '../src/shared/lib/topDashboardContentSecurity';
 import { writeTopDashboardRequestToPendingFile, type PendingTopDashboardDataFile } from '../src/shared/lib/topDashboardDataStorage';
 import * as uploadLimits from '../src/shared/lib/topDashboardLimits';
@@ -153,6 +154,7 @@ function routeHarness(mode: Mode, directory: string, options: {
     '@/shared/lib/db/securityAuditRepo': { async recordSecurityEvent() {} },
     '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:1', actorRole: 'admin'}), scheduleDashboardUploadUsageDrain() {} },
     '@/shared/lib/originProtection': { enforceSameOriginRequest },
+    '@/shared/lib/postCommitTasks': postCommitTasks,
     '@/shared/lib/rateLimit': { getClientIp() { return '127.0.0.1'; } },
     '@/shared/lib/topDashboardDataStorage': {},
     '@/shared/lib/topDashboardContentSecurity': { ...contentSecurity, isTopDashboardBlockDataMutationFrameRequest() { return true; } },

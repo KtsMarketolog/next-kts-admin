@@ -33,7 +33,7 @@ if(scenario==='legacy')window.fixtureOverview.activeDataContract={htmlVersionId:
 if(scenario==='standalone'||scenario==='profitability')window.fixtureOverview.activeDataContract={htmlVersionId:10,mode:'disabled',snapshotFormat:null,profile:scenario,directUploadTarget:null,uploadTargets:[]};
 if(scenario==='new'){window.fixtureOverview.activeVersionId=null;window.fixtureOverview.versions=[];window.fixtureOverview.activeDataContract={htmlVersionId:null,mode:'disabled',snapshotFormat:null,profile:null,directUploadTarget:null,uploadTargets:[]};}
 window.fixtureUploads=[];window.fixtureRuntimeUploads=[];window.fixtureStatuses=[];window.fixtureConfirms=[];window.fixtureConfirmAllowed=true;window.fixtureFail=false;window.fixtureConflict=false;window.fixtureFailureMode=null;window.fixtureOverviewLoads=0;
-window.fixtureHtmlUploads=[];
+window.fixtureHtmlUploads=[];window.fixtureWarnings=[];window.fixtureRefreshFail=false;
 window.fixtureAccessLoads=0;
 window.fixtureMutations=[];
 window.confirm=message=>{window.fixtureConfirms.push(message);return window.fixtureConfirmAllowed};
@@ -47,7 +47,7 @@ window.fetch=async(input,init)=>{
   if(access==='denied')return Response.json({error:'Нет доступа'},{status:403});
   return Response.json({key:'top:7',mode:'individual',version:'synthetic-audience',users:[{id:'manager:1',name:'Синтетический сотрудник',login:'test@example.test',role:'manager',isActive:true,checked:true,locked:false,eligible:true}]});
  }
- if(input==='/api/admin/top-dashboard/blocks/7'&&(!init?.method||init.method==='GET')){window.fixtureOverviewLoads++;return Response.json(window.fixtureOverview);}
+ if(input==='/api/admin/top-dashboard/blocks/7'&&(!init?.method||init.method==='GET')){window.fixtureOverviewLoads++;if(window.fixtureRefreshFail)return Response.json({error:'Не удалось обновить список версий'},{status:500});return Response.json(window.fixtureOverview);}
  if(input==='/api/admin/top-dashboard/blocks/7/versions'&&init?.method==='POST'){
   window.fixtureHtmlUploads.push({name:init.body.get('file').name,integrationMode:init.body.get('integrationMode')});
   if(window.fixtureFailureMode==='pending')return new Promise((_,reject)=>{init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});});
@@ -87,7 +87,7 @@ window.fetch=async(input,init)=>{
   if(window.fixtureFailureMode==='invalid-ack')return Response.json({ok:true});
   if(window.fixtureConflict){window.fixtureChangeVersion();return Response.json({error:'HTML изменился'}, {status:409});}
   if(window.fixtureFail)return Response.json({error:'Синтетическая ошибка сохранения'},{status:500});
-  window.fixtureCommit();const saved=window.fixtureOverview.data.versions[0];if(scenario==='legacy')saved.originalName=init.body.name;return Response.json({version:saved,state:{activeVersionId:saved.id}});
+  window.fixtureCommit();const saved=window.fixtureOverview.data.versions[0];if(scenario==='legacy')saved.originalName=init.body.name;return Response.json({version:saved,state:{activeVersionId:saved.id},warnings:window.fixtureWarnings});
  }
  return originalFetch(input,init);
 };
@@ -103,7 +103,7 @@ addEventListener('message',async event=>{
   const targets=[];for(const entry of d.targets){const files=[];for(const file of entry.files)files.push({name:file.name,path:file.webkitRelativePath,text:await file.blob.text()});targets.push({target:entry.target,files});}
   parent.fixtureRuntimeUploads.push({blockId:d.blockId,htmlVersionId:d.htmlVersionId,expectedActiveDataVersionId:d.expectedActiveDataVersionId,targets});
   if(parent.fixtureFailureMode){parent.postMessage({marker:d.marker,type:'upload-result',blockId:d.blockId,htmlVersionId:d.htmlVersionId,requestId:d.requestId,ok:false,error:'Ошибка сохранения из предпросмотра'},location.origin);return;}
-  parent.fixtureCommit();parent.postMessage({marker:d.marker,type:'upload-result',blockId:d.blockId,htmlVersionId:d.htmlVersionId,requestId:d.requestId,ok:true},location.origin);
+  parent.fixtureCommit();parent.postMessage({marker:d.marker,type:'upload-result',blockId:d.blockId,htmlVersionId:d.htmlVersionId,requestId:d.requestId,ok:true,warnings:parent.fixtureWarnings},location.origin);
  }
 });</script>`;
 
@@ -273,6 +273,27 @@ async function main() {
         assert.equal(runtime.htmlVersionId, 10);
         assert.equal(runtime.targets[1].files[1].text, '{"value":9}');
         assert.equal(await page.getByRole('button', { name: 'Заменить для всех', exact: true }).isDisabled(), true);
+
+        for (const scenario of ['multiple', 'runtime', 'legacy']) {
+          await page.goto(`${origin}/?case=${scenario}`);
+          const input = scenario === 'legacy' ? page.locator('.topDashboardDataUploadCard input[type="file"]')
+            : page.getByLabel('Выбрать данные: Продажи', { exact: true });
+          await input.setInputFiles(json('confirmed-save.json', 10));
+          await page.evaluate(() => {
+            (window as any).fixtureWarnings = [{code: 'TOP_DASHBOARD_UPLOAD_SLOT_RELEASE_FAILED', message: 'Данные сохранены. Освобождение служебной блокировки прошло с ошибкой; повторно загружать файл не нужно.'}];
+            (window as any).fixtureRefreshFail = true;
+          });
+          await page.getByRole('button', { name: 'Заменить для всех', exact: true }).click();
+          await page.waitForSelector('#top-dashboard-data-upload-feedback[role="status"]');
+          const message = await page.locator('#top-dashboard-data-upload-feedback').innerText();
+          assert.match(message, /сохранены/);
+          assert.match(message, /Освобождение служебной блокировки/);
+          assert.match(message, /Список версий не обновился.*Повторять загрузку не нужно/);
+          assert.equal(await page.evaluate(() => (window as any).fixtureOverview.data.activeVersionId), 201);
+          assert.equal(await page.evaluate(() => (window as any).fixtureUploads.length + (window as any).fixtureRuntimeUploads.length), 1, 'post-commit warnings never replay the upload');
+          assert.equal(await page.getByRole('button', { name: 'Заменить для всех', exact: true }).isDisabled(), true);
+          assert.equal(await input.evaluate((element: HTMLInputElement) => element.files?.length), 0, 'confirmed upload clears file selection even if refresh fails');
+        }
 
         await page.goto(`${origin}/?case=legacy`);
         const dataInput = page.locator('.topDashboardDataUploadCard input[type="file"]');

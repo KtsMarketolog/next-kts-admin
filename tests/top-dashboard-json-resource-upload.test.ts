@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import * as postCommitTasks from '../src/shared/lib/postCommitTasks';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
@@ -195,6 +196,7 @@ function dataRoute() {
     '@/shared/lib/db/securityAuditRepo': { async recordSecurityEvent() { audit += 1; } },
     '@/shared/lib/dashboardUploadUsage': { getDashboardUploadUsageActor: () => ({actorKey: 'admin:1', actorRole: 'admin'}), scheduleDashboardUploadUsageDrain() { usage += 1; } },
     '@/shared/lib/originProtection': { enforceSameOriginRequest },
+    '@/shared/lib/postCommitTasks': postCommitTasks,
     '@/shared/lib/rateLimit': { getClientIp() { return '127.0.0.1'; } },
     '@/shared/lib/topDashboardDataStorage': {},
     '@/shared/lib/topDashboardContentSecurity': contentSecurity,

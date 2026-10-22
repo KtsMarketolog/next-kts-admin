@@ -7,6 +7,8 @@ import * as validation from '../src/entities/catalog/api/catalogImportValidation
 import * as matching from '../src/entities/catalog/api/catalogAdmin/importMatching';
 import { parseCatalogExcel } from '../src/entities/catalog/api/catalogExcel';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
+import * as postCommitTasks from '../src/shared/lib/postCommitTasks';
+import { TransactionCommitUnknownError } from '../src/shared/lib/db/transactionOutcome';
 
 function workbook(rows: unknown[][], bookType: 'xlsx' | 'biff8' = 'xlsx') {
   const book = XLSX.utils.book_new();
@@ -20,7 +22,7 @@ function request(bytes: Buffer, name = 'Каталог.xlsx', origin = 'https://
   return new Request('https://example.test/api/admin/catalog/import', { method: 'POST', headers: { origin }, body: data });
 }
 
-function harness(options: { denied?: boolean; limited?: boolean; dbFailure?: Error } = {}) {
+function harness(options: { denied?: boolean; limited?: boolean; dbFailure?: Error; statsUnavailable?: boolean; cacheFailure?: boolean; auditFailure?: boolean } = {}) {
   const calls: string[] = [];
   const deps: Record<string, unknown> = {
     '@/entities/catalog/api/catalogExcel': { parseCatalogExcel: (buffer: Buffer) => { calls.push('parse'); return parseCatalogExcel(buffer); } },
@@ -28,15 +30,24 @@ function harness(options: { denied?: boolean; limited?: boolean; dbFailure?: Err
     '@/entities/catalog/api/catalogAdmin/importMatching': matching,
     '@/entities/catalog/api/catalogAdmin': { replaceCatalogFromRows: async (rows: unknown[]) => {
       calls.push('save'); if (options.dbFailure) throw options.dbFailure;
-      return { importedProducts: rows.length, syncedWholesaleProducts: rows.length, categories: 1, subcategories: 1, brands: 1 };
+      return { saved: true, importedProducts: rows.length, syncedWholesaleProducts: rows.length,
+        categories: options.statsUnavailable ? null : 1, subcategories: options.statsUnavailable ? null : 1, brands: options.statsUnavailable ? null : 1,
+        warnings: options.statsUnavailable ? [{ code: 'CATALOG_IMPORT_STATS_UNAVAILABLE', message: 'Каталог сохранён, статистика недоступна. Повторно загружать Excel не нужно.' }] : [] };
     } },
-    '@/entities/catalog/api/catalogRevalidation': { revalidatePublicCatalog: () => { calls.push('revalidate'); } },
+    '@/entities/catalog/api/catalogRevalidation': { revalidatePublicCatalog: () => {
+      calls.push('revalidate'); if (options.cacheFailure) throw new Error('Synthetic raw cache error');
+    } },
     '@/shared/lib/adminSecurity': { enforceAdminActionRateLimit: async () => options.limited ? Response.json({}, { status: 429 }) : null },
     '@/shared/lib/adminAuth': { requireAdminSession: async () => options.denied ? { denied: Response.json({}, { status: 401 }) }
       : { session: { role: 'admin', adminUserId: 1, sessionId: 'synthetic' } } },
-    '@/shared/lib/db/securityAuditRepo': { recordSecurityEvent: async () => { calls.push('audit'); } },
+    '@/shared/lib/db/securityAuditRepo': { recordSecurityEvent: async (_event: unknown, policy: { required?: boolean }) => {
+      calls.push('audit'); assert.equal(policy.required, true);
+      if (options.auditFailure) throw new Error('Synthetic raw audit error');
+    } },
     '@/shared/lib/originProtection': { enforceSameOriginRequest },
     '@/shared/lib/rateLimit': { getClientIp: () => '127.0.0.1' },
+    '@/shared/lib/postCommitTasks': postCommitTasks,
+    '@/shared/lib/db/transactionOutcome': { TransactionCommitUnknownError },
   };
   const source = readFileSync(new URL('../src/app/api/admin/catalog/import/route.ts', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -104,4 +115,44 @@ test('existing catalog ambiguity reports a conflict, without success side effect
   assert.equal(body.code, failure.code); assert.deepEqual(body.duplicates, failure.duplicates);
   assert.equal(body.duplicates[0].rows, undefined);
   assert.deepEqual(h.calls, ['parse', 'save']);
+});
+
+for (const options of [
+  { statsUnavailable: true }, { cacheFailure: true }, { auditFailure: true },
+  { statsUnavailable: true, cacheFailure: true, auditFailure: true },
+]) {
+  test(`committed catalog import remains saved after secondary failure ${JSON.stringify(options)}`, async () => {
+    const h = harness(options);
+    const response = await h.run(request(workbook([['Артикул'], ['SYN-SAVED']])));
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('cache-control')!, /private.*no-store/);
+    const body = await response.json();
+    assert.equal(body.saved, true); assert.equal(body.error, undefined);
+    assert.equal(body.result.importedProducts, 1); assert.equal(body.result.saved, true);
+    assert.equal(body.result.categories, options.statsUnavailable ? null : 1);
+    assert.deepEqual(body.warnings.map((warning: { code: string }) => warning.code), [
+      ...(options.statsUnavailable ? ['CATALOG_IMPORT_STATS_UNAVAILABLE'] : []),
+      ...(options.cacheFailure ? ['CATALOG_IMPORT_CACHE_UNAVAILABLE'] : []),
+      ...(options.auditFailure ? ['CATALOG_IMPORT_AUDIT_UNAVAILABLE'] : []),
+    ]);
+    assert.doesNotMatch(JSON.stringify(body), /Synthetic raw/);
+    assert.deepEqual(h.calls, ['parse', 'save', 'revalidate', 'audit'], 'failure of one secondary task does not skip another or repeat the save');
+  });
+}
+
+test('a failed or unconfirmed catalog commit never reports saved success or runs postcommit tasks', async () => {
+  for (const [failure, status, saved] of [
+    [new Error('Synthetic transaction rollback'), 400, false],
+    [new TransactionCommitUnknownError(), 503, null],
+  ] as const) {
+    const h = harness({ dbFailure: failure });
+    const response = await h.run(request(workbook([['Артикул'], ['SYN-UNCERTAIN']])));
+    assert.equal(response.status, status);
+    const body = await response.json(); assert.equal(body.saved, saved); assert.equal(body.result, undefined);
+    if (saved === null) {
+      assert.equal(body.code, 'COMMIT_OUTCOME_UNKNOWN');
+      assert.match(body.error, /Обновите данные перед повторной попыткой/);
+    }
+    assert.deepEqual(h.calls, ['parse', 'save']);
+  }
 });

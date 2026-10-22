@@ -57,7 +57,13 @@ test('every HTTP upload path passes captured actor into persistence and only nud
   for (const [path, boundary] of sources) {
     const source = readFileSync(path, 'utf8');
     assert.match(source, /usageActor:\s*getDashboardUploadUsageActor\(/, path);
-    assert.ok(source.indexOf('scheduleDashboardUploadUsageDrain();') > source.indexOf(boundary), path);
+    const persistenceIndex = source.indexOf(boundary);
+    assert.ok(persistenceIndex >= 0, `${path}: expected persistence boundary`);
+    // The nudge can be called directly or passed to the isolated post-commit
+    // runner. Both must occur once, after persistence, never before it resolves.
+    const nudges = [...source.matchAll(/scheduleDashboardUploadUsageDrain\s*\(\s*\)|run:\s*scheduleDashboardUploadUsageDrain\b/g)];
+    assert.equal(nudges.length, 1, `${path}: exactly one post-save nudge`);
+    assert.ok(nudges[0].index > persistenceIndex, path);
     assert.doesNotMatch(source, /await (recordDashboardUploadUsage|recordPersonalSnapshotUploadUsage|scheduleDashboardUploadUsageDrain)/, path);
   }
 });

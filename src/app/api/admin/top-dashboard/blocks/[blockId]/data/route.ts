@@ -24,6 +24,7 @@ import {
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getDashboardUploadUsageActor, scheduleDashboardUploadUsageDrain } from '@/shared/lib/dashboardUploadUsage';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
+import { runPostCommitTasks, type SavedOperationWarning } from '@/shared/lib/postCommitTasks';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import {
   deleteTopDashboardDataFiles,
@@ -203,6 +204,27 @@ export async function PUT(request: Request, context: Context) {
   let pendingFile: PendingTopDashboardDataFile | undefined;
   let databaseAttempted = false;
   let uploadGuard: ReturnType<typeof createUploadRequestGuard> | undefined;
+  let cleanup: Promise<SavedOperationWarning[]> | undefined;
+  // Cleanup must finish before releasing the slot, but a secondary failure must
+  // neither overwrite a confirmed save nor replace a rejection's HTTP status.
+  // Cache the promise so success + finally release each resource exactly once.
+  const finalizeUpload = () => cleanup ??= runPostCommitTasks([
+    {
+      code: 'TOP_DASHBOARD_UPLOAD_GUARD_CLEANUP_FAILED',
+      message: 'Данные сохранены. Служебное завершение загрузки требует проверки; повторно загружать файл не нужно.',
+      run: () => uploadGuard?.dispose(),
+    },
+    {
+      code: 'TOP_DASHBOARD_UPLOAD_TEMP_CLEANUP_FAILED',
+      message: 'Данные сохранены, но очистка временного файла требует проверки. Повторно загружать файл не нужно.',
+      run: () => pendingFile?.discard(),
+    },
+    {
+      code: 'TOP_DASHBOARD_UPLOAD_SLOT_RELEASE_FAILED',
+      message: 'Данные сохранены. Освобождение служебной блокировки прошло с ошибкой; повторно загружать файл не нужно.',
+      run: releaseUploadSlot,
+    },
+  ]);
   try {
     // Count actual transport bytes BEFORE formData() can accumulate them. The
     // same deadline covers receiving and validation, without unlocking work
@@ -370,39 +392,55 @@ export async function PUT(request: Request, context: Context) {
       usageActor: getDashboardUploadUsageActor(session),
     });
     pendingFile?.preserve();
-    scheduleDashboardUploadUsageDrain();
-    if (result.prunedStoragePaths.length > 0) {
-      await deleteTopDashboardDataFiles(result.prunedStoragePaths).catch((error) => {
-        console.error('Failed to remove pruned TOP dashboard data files', error);
-      });
-    }
-
-    await recordSecurityEvent({
-      eventType: 'top_dashboard_data_uploaded',
-      ...actor,
-      sessionId: session.sessionId,
-      entityType: 'top_dashboard_block_data_version',
-      entityId: `${blockId}:${result.version.id}`,
-      ip: getClientIp(request),
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer'),
-      metadata: {
-        blockId,
-        versionId: result.version.id,
-        previousVersionId: result.previousVersionId,
-        originalName: result.version.originalName,
-        fileSize: result.version.fileSize,
-        uncompressedSize: result.version.uncompressedSize,
-        sha256: result.version.sha256,
-        snapshotFormat: result.version.snapshotFormat,
-        dashboardProfile: result.version.dashboardProfile,
-        boundHtmlVersionId: result.version.boundHtmlVersionId,
-        prunedVersionIds: result.prunedVersionIds,
+    const warnings = await runPostCommitTasks([
+      {
+        code: 'TOP_DASHBOARD_UPLOAD_USAGE_DRAIN_FAILED',
+        message: 'Данные сохранены. Запись загрузки ожидает фоновой обработки журнала; повторно загружать файл не нужно.',
+        // The durable usage intent committed atomically with the data version;
+        // failure of this scheduling hint must not report a failed upload.
+        run: scheduleDashboardUploadUsageDrain,
       },
-    });
+      {
+        code: 'TOP_DASHBOARD_UPLOAD_PRUNED_CLEANUP_FAILED',
+        message: 'Данные сохранены, но очистка устаревших файлов требует проверки. Повторно загружать файл не нужно.',
+        run: () => result.prunedStoragePaths.length > 0
+          ? deleteTopDashboardDataFiles(result.prunedStoragePaths)
+          : undefined,
+      },
+      {
+        code: 'TOP_DASHBOARD_UPLOAD_AUDIT_FAILED',
+        message: 'Данные сохранены, но служебный аудит загрузки требует проверки. Повторно загружать файл не нужно.',
+        run: () => recordSecurityEvent({
+          eventType: 'top_dashboard_data_uploaded',
+          ...actor,
+          sessionId: session.sessionId,
+          entityType: 'top_dashboard_block_data_version',
+          entityId: `${blockId}:${result.version.id}`,
+          ip: getClientIp(request),
+          userAgent: request.headers.get('user-agent'),
+          referer: request.headers.get('referer'),
+          metadata: {
+            blockId,
+            versionId: result.version.id,
+            previousVersionId: result.previousVersionId,
+            originalName: result.version.originalName,
+            fileSize: result.version.fileSize,
+            uncompressedSize: result.version.uncompressedSize,
+            sha256: result.version.sha256,
+            snapshotFormat: result.version.snapshotFormat,
+            dashboardProfile: result.version.dashboardProfile,
+            boundHtmlVersionId: result.version.boundHtmlVersionId,
+            prunedVersionIds: result.prunedVersionIds,
+          },
+        }, { required: true }),
+      },
+    ]);
+    warnings.push(...await finalizeUpload());
 
     return Response.json(
       {
+        saved: true,
+        ...(warnings.length > 0 ? { warnings } : {}),
         version: result.version,
         state: {
           activeVersionId: result.activeVersionId,
@@ -458,10 +496,6 @@ export async function PUT(request: Request, context: Context) {
     console.error('Failed to upload TOP dashboard data', error);
     return Response.json({ error: 'Не удалось сохранить данные дашборда' }, { status: 500 });
   } finally {
-    uploadGuard?.dispose();
-    await pendingFile?.discard().catch((error) => {
-      console.error('Failed to discard temporary TOP dashboard data file', error);
-    });
-    await releaseUploadSlot();
+    await finalizeUpload();
   }
 }

@@ -1,5 +1,6 @@
 import { ensureSiteSchema } from '@/shared/lib/db';
 import { withCatalogStockWrite } from '@/shared/lib/db/catalogStockWrite';
+import { runPostCommitTasks } from '@/shared/lib/postCommitTasks';
 import { ensureCatalogSchema } from '../catalogDb';
 import { assertUniqueCatalogArticles } from '../catalogImportValidation';
 import { createCache } from './entityWrites';
@@ -92,10 +93,23 @@ export async function replaceCatalogFromRows(rows: CatalogProductInput[]): Promi
     `);
   }, 'import');
 
-  const stats = await getCatalogAdminStats();
-  return {
-    ...stats,
+  // Resolving the transaction above confirms the catalog is already saved.
+  // Statistics are a separate read, not another condition for a successful import.
+  const result: CatalogImportResult = {
+    saved: true,
+    products: null,
+    activeProducts: null,
+    categories: null,
+    subcategories: null,
+    brands: null,
     importedProducts: normalizedRows.length,
     syncedWholesaleProducts: normalizedRows.length,
+    warnings: [],
   };
+  result.warnings = await runPostCommitTasks([{
+    code: 'CATALOG_IMPORT_STATS_UNAVAILABLE',
+    message: 'Каталог сохранён, но статистика пока недоступна. Обновите каталог позже; повторно загружать Excel не нужно.',
+    run: async () => { Object.assign(result, await getCatalogAdminStats()); },
+  }]);
+  return result;
 }

@@ -181,12 +181,16 @@ export function AdminCatalogSection({ showStatus }: AdminCatalogSectionProps) {
 
         const data = await response.json();
         const result = data.result;
-        if (!result) throw new Error('Missing import result');
-        const summary = `Загружено: ${result.importedProducts ?? 0}; категорий: ${result.categories ?? 0}; подкатегорий: ${result.subcategories ?? 0}; брендов: ${result.brands ?? 0}`;
-        setImportResult(summary); setImportError(null);
+        if (!result || !Number.isSafeInteger(result.importedProducts) || result.importedProducts < 0) throw new Error('Missing import result');
+        const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? String(value) : 'недоступно';
+        const warnings = Array.isArray(data.warnings)
+          ? data.warnings.map((warning: { message?: string } | null) => warning?.message).filter((message: unknown): message is string => typeof message === 'string')
+          : [];
+        const summary = `Загружено: ${result.importedProducts}; категорий: ${count(result.categories)}; подкатегорий: ${count(result.subcategories)}; брендов: ${count(result.brands)}`;
+        setImportResult([summary, ...warnings].join(' ')); setImportError(null);
         setFileName('');
         if (fileInputRef.current) fileInputRef.current.value = '';
-        await refreshAfterSave('Каталог загружен из Excel', '');
+        await refreshAfterSave(['Каталог загружен из Excel', ...warnings].join('. '), '');
       } catch (error) {
         if (isActive()) setImportError({ message: error instanceof AdminRequestError ? error.message
           : 'Не удалось получить подтверждение операции. Изменения могли сохраниться. Обновите данные перед повторной попыткой.' });
