@@ -127,8 +127,11 @@ export {
   getClientChatUnreadCountForAdmin,
   getClientChatUnreadCountForClient,
   getClientChatUnreadCountsForAdmin,
+  markClientChatReadForAdmin,
+  markClientChatReadForClient,
+  ClientChatInputError,
 } from './db/clientChatRepo';
-export type { ClientChatAuthorType, ClientChatConversation, ClientChatMessage, ClientChatUnreadCount } from './db/clientChatRepo';
+export type { ClientChatAuthorType, ClientChatConversation, ClientChatMessage, ClientChatUnreadCount, ClientChatPageOptions, ClientChatReadReceipt } from './db/clientChatRepo';
 export { revokeClientUserSessions } from './db/clientSessionsRepo';
 export { getPhoneSetting, getSiteSettings, updatePhoneSetting, updateSiteSettings } from './db/settingsRepo';
 export { createHeroSlide, deleteHeroSlide, getHeroSlides, updateHeroSlide } from './db/slidesRepo';

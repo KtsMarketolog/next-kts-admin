@@ -1,7 +1,8 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { requireEmployee } from '@/shared/lib/adminAuth';
 import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
-import { createClientChatMessageForAdmin, getClientChatConversationForAdmin, getClientChatUnreadCountForAdmin } from '@/shared/lib/db';
+import { createClientChatMessageForAdmin, getClientChatConversationForAdmin } from '@/shared/lib/db';
+import { clientChatResponse, parseClientChatPage } from '@/shared/lib/clientChatApi';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 
@@ -14,23 +15,19 @@ function parseClientId(value: string) {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-export async function GET(_request: Request, context: Context) {
+export async function GET(request: Request, context: Context) {
   const { denied, session } = await requireEmployee();
-  if (denied) return denied;
+  if (denied) return clientChatResponse(denied);
 
   const { id } = await context.params;
   const clientId = parseClientId(id);
   if (!clientId) return Response.json({ error: 'Некорректный клиент' }, { status: 400 });
 
   try {
-    const unreadBefore = await getClientChatUnreadCountForAdmin(clientId, session);
-    const chat = await getClientChatConversationForAdmin(clientId, session);
-    if (unreadBefore > 0) {
-      publishClientRealtimeEvent({ type: 'chat.updated', companyId: clientId });
-    }
-    return Response.json(chat);
+    const chat = await getClientChatConversationForAdmin(clientId, session, parseClientChatPage(request.url));
+    return clientChatResponse(Response.json(chat));
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : 'Не удалось загрузить чат' }, { status: 400 });
+    return clientChatResponse(Response.json({ error: error instanceof Error ? error.message : 'Не удалось загрузить чат' }, { status: 400 }));
   }
 }
 

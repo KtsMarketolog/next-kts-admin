@@ -140,6 +140,7 @@ export async function getClientCompanies(session: AdminSession, scope: 'active' 
          left join client_chat_read_state crs on crs.company_id = cc.id
          where ccm.company_id = cc.id
            and ccm.author_type = 'client'
+           and ccm.read_by_other_at is null
            and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
        ) as chat_unread_count,
        cc.is_active,
@@ -302,6 +303,7 @@ export async function updateClientCompany(
            left join client_chat_read_state crs on crs.company_id = client_companies.id
            where ccm.company_id = client_companies.id
              and ccm.author_type = 'client'
+             and ccm.read_by_other_at is null
              and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
          ) as chat_unread_count,
          is_active,
@@ -425,6 +427,7 @@ async function changeClientArchiveState(id: number, session: AdminSession, expec
            left join client_chat_read_state crs on crs.company_id = cc.id
            where ccm.company_id = cc.id
              and ccm.author_type = 'client'
+             and ccm.read_by_other_at is null
              and ccm.created_at > coalesce(crs.employee_read_at, 'epoch'::timestamptz)
          ) as chat_unread_count,
          cc.is_active,
@@ -561,6 +564,7 @@ export async function getClientPortalProfile(clientUserId: number): Promise<Clie
          left join client_chat_read_state crs on crs.company_id = cc.id
          where ccm.company_id = cc.id
            and ccm.author_type = 'employee'
+           and ccm.read_by_other_at is null
            and ccm.created_at > coalesce(crs.client_read_at, 'epoch'::timestamptz)
        ) as chat_unread_count
      from client_users cu

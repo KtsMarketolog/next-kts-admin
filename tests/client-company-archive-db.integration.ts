@@ -253,6 +253,8 @@ test('client archive keeps related data, revokes access and never sweeps files',
       const purgeSession = await createStoredClientSession({ clientUserId: userId });
       await createClientChatMessageForClient({ clientUserId: userId, companyId: purgeCompany.id }, 'Purged message');
       await getClientChatConversationForAdmin(purgeCompany.id, admin);
+      // Keep coverage of legacy company-wide read state; opening a chat no longer writes it.
+      await query('insert into client_chat_read_state(company_id) values ($1)', [purgeCompany.id]);
       await query(`insert into admin_2fa_challenges (id,client_user_id,code_hash,expires_at)
         values (gen_random_uuid(),$1,'synthetic-code',now()+interval '1 day')`, [userId]);
       const purgeFile = await saveClientDocumentUpload(purgeCompany.id, new File(['remove exact bytes'], 'purged.txt'));

@@ -152,8 +152,26 @@ test('chat POST/SSE/poll races preserve new messages, deduplicate and keep read 
   assert.deepEqual(mergeClientChatMessages(current, [{ id: 1, readByOther: false, body: 'old' }]), current);
   assert.deepEqual(mergeClientChatMessages(current, [{ id: 2, readByOther: true, body: 'new' }]), [current[0], { ...current[1], readByOther: true }]);
   const many = Array.from({ length: 400 }, (_, id) => ({ id: id + 1, readByOther: false }));
-  assert.equal(mergeClientChatMessages([], many).length, 300);
-  assert.equal(mergeClientChatMessages([], many)[0].id, 101);
+  assert.equal(mergeClientChatMessages([], many).length, 400);
+  assert.equal(mergeClientChatMessages([], many)[0].id, 1);
+});
+
+test('chat history retains older pages and confirmed viewer reads across stale GET responses', () => {
+  const latest = [{ id: 301, readByOther: false, readByViewer: true }];
+  const older = Array.from({ length: 300 }, (_, index) => ({ id: index + 1, readByOther: false, readByViewer: false }));
+  const merged = mergeClientChatMessages(latest, older);
+  assert.equal(merged.length, 301);
+  assert.equal(merged[0].id, 1);
+  assert.equal(mergeClientChatMessages(merged, [{ ...latest[0], readByViewer: false }]).at(-1)?.readByViewer, true);
+});
+
+test('chat chronological merging retains PostgreSQL sub-millisecond precision', () => {
+  const messages = [
+    { id: 1, createdAt: '2026-09-14 10:00:00.000002+00', readByOther: false },
+    { id: 9, createdAt: '2026-09-14T10:00:00.000001Z', readByOther: false },
+    { id: 2, createdAt: '2026-09-14T10:00:00.001000Z', readByOther: false },
+  ];
+  assert.deepEqual(mergeClientChatMessages([], messages).map((message) => message.id), [9, 1, 2]);
 });
 
 test('chat merging preserves server createdAt/id order even when IDs are not chronological', () => {
@@ -336,7 +354,7 @@ test('wholesale assignment sync starts after editor init and uses its exact snap
 
 for (const succeeds of [false, true]) {
   test(`chat send ${succeeds ? 'preserves newly typed draft on success' : 'releases sending state and retains draft on network failure'} without duplicate submissions`, async () => {
-    const parsed = componentCallbacks('../src/features/client-chat/ClientChatPanel.tsx', 'ClientChatPanel');
+    const parsed = componentCallbacks('../src/features/client-chat/ClientChatPanel.tsx', 'ClientChatConversation');
     const declaration = descendants(parsed.component).find((node) => ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'sendMessage');
     assert.ok(declaration && ts.isVariableDeclaration(declaration) && declaration.initializer);
     let draft = 'Outgoing message';
@@ -349,17 +367,18 @@ for (const succeeds of [false, true]) {
     const sendingRef = { current: false };
     const send = executeCallback<(event: { preventDefault: () => void }) => Promise<void>>(declaration.initializer, parsed.source, {
       draft, sendingRef, endpoint: '/authorized/chat', readOnly: false,
+      mounted: { current: true }, lifetime: { current: new AbortController() },
       fetch: (_url: string, options: { body: string; signal: AbortSignal }) => {
         posts += 1;
         assert.deepEqual(JSON.parse(options.body), { message: 'Outgoing message' });
         assert.ok(options.signal instanceof AbortSignal);
         return new Promise((resolve, fail) => { settle = resolve; reject = fail; });
       },
-      AbortSignal: { timeout: () => new AbortController().signal },
+      createChatRequestScope: () => ({ signal: new AbortController().signal, dispose: () => {} }),
       setSending: (value: boolean) => { sending.push(value); },
       setStatus: (value: string) => { status = value; },
       setDraft: (update: (current: string) => string) => { draft = update(draft); },
-      setMessages: (update: (current: typeof messages) => typeof messages) => { messages = update(messages); },
+      replaceMessages: (incoming: typeof messages) => { messages = mergeClientChatMessages(messages, incoming); },
       mergeClientChatMessages, readApiError,
       loadMessages: async () => { assert.fail('POST returned its message; no additional GET expected'); },
       scrollToBottom: () => {},

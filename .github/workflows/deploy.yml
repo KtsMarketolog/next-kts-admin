@@ -87,6 +87,9 @@ jobs:
           test -x "$KTS_TEST_PG_BIN/initdb"
           export KTS_TEST_PG_BIN
           bash scripts/test-client-password-postgres.sh
+          # History pages never mark hidden messages read; exact receipts and
+          # concurrent sends are checked on disposable synthetic PostgreSQL.
+          bash scripts/test-client-chat-postgres.sh
           bash scripts/test-employee-identifiers-postgres.sh
           bash scripts/test-login-credentials-postgres.sh
           bash scripts/test-price-request-outbox-postgres.sh

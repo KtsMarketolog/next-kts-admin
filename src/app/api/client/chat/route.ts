@@ -1,6 +1,7 @@
 import { requireClientSession } from '@/shared/lib/clientAuth';
 import { publishClientRealtimeEvent } from '@/shared/lib/clientRealtime';
-import { createClientChatMessageForClient, getClientChatConversationForClient, getClientChatUnreadCountForClient } from '@/shared/lib/db';
+import { createClientChatMessageForClient, getClientChatConversationForClient } from '@/shared/lib/db';
+import { clientChatResponse, parseClientChatPage } from '@/shared/lib/clientChatApi';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { checkDbRateLimit, getClientIp } from '@/shared/lib/rateLimit';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
@@ -8,16 +9,16 @@ import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
 const CHAT_LIMIT = 30;
 const CHAT_WINDOW_MS = 10 * 60 * 1000;
 
-export async function GET() {
+export async function GET(request: Request) {
   const { denied, session } = await requireClientSession();
-  if (denied) return denied;
+  if (denied) return clientChatResponse(denied);
 
-  const unreadBefore = await getClientChatUnreadCountForClient(session);
-  const chat = await getClientChatConversationForClient(session);
-  if (unreadBefore > 0) {
-    publishClientRealtimeEvent({ type: 'chat.updated', companyId: session.companyId });
+  try {
+    const chat = await getClientChatConversationForClient(session, parseClientChatPage(request.url));
+    return clientChatResponse(Response.json(chat));
+  } catch (error) {
+    return clientChatResponse(Response.json({ error: error instanceof Error ? error.message : 'Не удалось загрузить чат' }, { status: 400 }));
   }
-  return Response.json(chat);
 }
 
 export async function POST(request: Request) {
