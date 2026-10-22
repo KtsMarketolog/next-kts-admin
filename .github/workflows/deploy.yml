@@ -100,6 +100,7 @@ jobs:
           bash scripts/test-wholesale-price-postgres.sh
           bash scripts/test-knowledge-base-postgres.sh
           bash scripts/test-dashboard-usage-postgres.sh
+          bash scripts/test-top-dashboard-postgres.sh
           KTS_PERSONAL_REPLACEMENT_TEST=1 bash scripts/test-personal-dashboard-postgres.sh
           bash scripts/test-catalog-stock-locking-postgres.sh
           # Stale content forms must conflict without interfering with atomic reordering.

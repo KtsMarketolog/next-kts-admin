@@ -1,19 +1,14 @@
 import { ensureSiteSchema } from '../schema';
-import { detectTopDashboardDataContract } from '../../topDashboardContentSecurity';
 import { query } from '../client';
 import type { TopDashboardPublishedBlockOverview, TopDashboardPublishedBlockSummary } from './types';
 import type { TopDashboardPublishedBlockRow } from './records';
 import type { TopDashboardVersionContent } from '../topDashboardDomain';
+import { resolveTopDashboardHtmlReadiness, TOP_DASHBOARD_HTML_READINESS_REVISION, type TopDashboardHtmlReadiness } from './htmlReadiness';
 
-export function publishedBlockReady(row: TopDashboardPublishedBlockRow) {
+export async function publishedBlockReady(row: TopDashboardPublishedBlockRow) {
   return row.has_compatible_data
-    || (typeof row.self_contained_html === 'string' && selfContainedHtmlReady(row.self_contained_html));
-}
-
-function selfContainedHtmlReady(html: string) {
-  const contract = detectTopDashboardDataContract(html);
-  return contract.mode === 'disabled' && contract.snapshotFormat === null
-    && (contract.profile === 'profitability' || contract.profile === 'standalone');
+    || await resolveTopDashboardHtmlReadiness({ ...row, blockId: Number(row.id),
+      versionId: Number(row.active_version_id), htmlContent: row.self_contained_html }) === 'ready';
 }
 
 export async function getPublishedTopDashboardBlocks(): Promise<TopDashboardPublishedBlockSummary[]> {
@@ -30,7 +25,18 @@ export async function getPublishedTopDashboardBlocks(): Promise<TopDashboardPubl
       native_active_data.data_as_of,
       native_active.first_published_at::text as html_published_at,
       native_active_data.id is not null as has_compatible_data,
-      case when native_active_data.id is null then native_active.html_content end as self_contained_html
+      native_active.sha256,
+      native_active.is_self_contained,
+      native_active.self_contained_revision,
+      native_active.self_contained_sha256,
+      native_active.self_contained_error,
+      coalesce(native_active.self_contained_retry_after > now(), false) as self_contained_retry_pending,
+      case when native_active_data.id is null and (
+        native_active.self_contained_revision is distinct from $1
+        or native_active.self_contained_sha256 is distinct from native_active.sha256
+        or (native_active.is_self_contained is null and (native_active.self_contained_error is distinct from 'analysis_limit'
+          or native_active.self_contained_retry_after is null or native_active.self_contained_retry_after <= now()))
+      ) then native_active.html_content end as self_contained_html
     from top_dashboard_blocks blocks
     join top_dashboard_block_state native_state
       on native_state.block_id = blocks.id
@@ -56,9 +62,10 @@ export async function getPublishedTopDashboardBlocks(): Promise<TopDashboardPubl
        )
      )
     order by blocks.created_at asc, blocks.id asc
-  `);
+  `, [TOP_DASHBOARD_HTML_READINESS_REVISION]);
 
-  return result.rows.filter(publishedBlockReady).map((row) => ({
+  const ready = await Promise.all(result.rows.map(publishedBlockReady));
+  return result.rows.filter((_, index) => ready[index]).map((row) => ({
     id: Number(row.id),
     title: row.title,
     activeVersionId: Number(row.active_version_id),
@@ -85,7 +92,18 @@ export async function getPublishedTopDashboardBlockOverview(
        native_active_data.data_as_of,
        native_active.first_published_at::text as html_published_at,
        native_active_data.id is not null as has_compatible_data,
-       case when native_active_data.id is null then native_active.html_content end as self_contained_html
+       native_active.sha256,
+       native_active.is_self_contained,
+       native_active.self_contained_revision,
+       native_active.self_contained_sha256,
+       native_active.self_contained_error,
+       coalesce(native_active.self_contained_retry_after > now(), false) as self_contained_retry_pending,
+       case when native_active_data.id is null and (
+         native_active.self_contained_revision is distinct from $2
+         or native_active.self_contained_sha256 is distinct from native_active.sha256
+         or (native_active.is_self_contained is null and (native_active.self_contained_error is distinct from 'analysis_limit'
+           or native_active.self_contained_retry_after is null or native_active.self_contained_retry_after <= now()))
+       ) then native_active.html_content end as self_contained_html
      from top_dashboard_blocks blocks
      join top_dashboard_block_state native_state
        on native_state.block_id = blocks.id
@@ -112,10 +130,10 @@ export async function getPublishedTopDashboardBlockOverview(
       )
      where blocks.id = $1
      limit 1`,
-    [blockId],
+    [blockId, TOP_DASHBOARD_HTML_READINESS_REVISION],
   );
   const row = result.rows[0];
-  if (!row || !publishedBlockReady(row)) return null;
+  if (!row || !await publishedBlockReady(row)) return null;
 
   return {
     block: {
@@ -186,7 +204,7 @@ export async function getPublishedTopDashboardBlockVersionContent(
 ): Promise<TopDashboardVersionContent | null> {
   await ensureSiteSchema();
 
-  const result = await query<{
+  const result = await query<TopDashboardHtmlReadiness & {
     id: string;
     original_name: string;
     html_content: string;
@@ -200,6 +218,11 @@ export async function getPublishedTopDashboardBlockVersionContent(
        versions.html_content,
        versions.file_size::text,
        versions.sha256,
+       versions.is_self_contained,
+       versions.self_contained_revision,
+       versions.self_contained_sha256,
+       versions.self_contained_error,
+       coalesce(versions.self_contained_retry_after > now(), false) as self_contained_retry_pending,
        data_versions.id is not null as has_compatible_data
      from top_dashboard_block_state state
      join top_dashboard_block_versions versions
@@ -228,7 +251,9 @@ export async function getPublishedTopDashboardBlockVersionContent(
     [blockId, versionId],
   );
   const row = result.rows[0];
-  if (!row || (!row.has_compatible_data && !selfContainedHtmlReady(row.html_content))) return null;
+  if (!row || (!row.has_compatible_data && await resolveTopDashboardHtmlReadiness({
+    ...row, blockId, versionId, htmlContent: row.html_content,
+  }) !== 'ready')) return null;
 
   return {
     id: Number(row.id),

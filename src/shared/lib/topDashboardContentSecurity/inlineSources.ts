@@ -20,7 +20,7 @@ function flatten(value: string) {
  * Keep both parse5 dependencies pinned and retain the large-input regressions
  * when upgrading them: the protected hooks are deliberately version-specific.
  */
-class BoundedTokenizer extends Tokenizer {
+export class BoundedTokenizer extends Tokenizer {
   private inputSteps = 0;
   private attributeActive = false;
   private readonly valueChunks = new WeakMap<Token.Attribute | Token.CommentToken, string[]>();

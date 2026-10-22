@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import sanitizeHtml from 'sanitize-html';
 import { instrumentReviewedProfitabilityUsage } from './dashboardUsageProfiles';
+import { hasProfitabilityInvoiceInput, scanProfitabilityHtml } from './dashboardProfitabilityRecognition';
+export { ProfitabilityHtmlAnalysisLimitError } from './dashboardProfitabilityRecognition';
 
 // This fingerprint covers only the author's application script, never the private embedded stock.
 // Automatic hooks require review; explicit invoice-v1 uses the independent author contract below.
@@ -11,74 +12,54 @@ const SNAPSHOT_SUCCESS = "S.log.push({ file: f.name, kind: 'снимок', ok: t
 
 type SupportedScript = { start: number; end: number; source: string; content: string };
 
-function supportedApplication(html: string): SupportedScript | null {
-  if (html.includes(ADAPTER_ATTRIBUTE)) return null;
-  let result: SupportedScript | null = null;
-  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
-    const attributes = match[1];
-    // V19 has an ordinary, inline, classic script. JSON and bundled PDF worker scripts are data.
-    if (attributes.trim()) continue;
-    const content = match[2];
-    if (!content.includes(INVOICE_SUCCESS) || !content.includes(SNAPSHOT_SUCCESS)) continue;
-    if (content.split(INVOICE_SUCCESS).length !== 2 || content.split(SNAPSHOT_SUCCESS).length !== 2) return null;
-    if (createHash('sha256').update(content, 'utf8').digest('hex') !== V19_APPLICATION_SHA256) continue;
-    if (result) return null;
-    result = { start: match.index!, end: match.index! + match[0].length, source: match[0], content };
+function inspectProfitabilityHtml(html: string) {
+  const alreadyAdapted = html.includes(ADAPTER_ATTRIBUTE);
+  // Most independent reports cannot use either audit contract. Literal-marker
+  // checks are linear and avoid tokenizing large embedded assets needlessly;
+  // the separate privacy candidate check still applies to unknown invoice HTML.
+  const maybeReviewed = !alreadyAdapted && html.includes(INVOICE_SUCCESS) && html.includes(SNAPSHOT_SUCCESS);
+  if (!maybeReviewed && !html.includes('kts-dashboard-audit')) {
+    return { headEnd: null, declaresInvoiceAudit: false, application: null };
   }
-  return result;
+  let result: SupportedScript | null = null;
+  let ambiguous = false;
+  const metadata = scanProfitabilityHtml(html, ({ start, end, contentStart, contentEnd }) => {
+    if (alreadyAdapted || ambiguous) return;
+    // Hash exact author bytes, not parser-normalized text. Only a completed,
+    // ordinary inline classic script can match the reviewed V19 application.
+    const content = html.slice(contentStart, contentEnd);
+    const invoiceAt = content.indexOf(INVOICE_SUCCESS);
+    const snapshotAt = content.indexOf(SNAPSHOT_SUCCESS);
+    if (invoiceAt < 0 || snapshotAt < 0) return;
+    if (content.indexOf(INVOICE_SUCCESS, invoiceAt + INVOICE_SUCCESS.length) >= 0
+      || content.indexOf(SNAPSHOT_SUCCESS, snapshotAt + SNAPSHOT_SUCCESS.length) >= 0) { ambiguous = true; return; }
+    if (createHash('sha256').update(content, 'utf8').digest('hex') !== V19_APPLICATION_SHA256) return;
+    if (result) { ambiguous = true; return; }
+    result = { start, end, source: html.slice(start, end), content };
+  });
+  return { ...metadata, application: ambiguous ? null : result as SupportedScript | null };
 }
 
 export function isSupportedProfitabilityHtml(html: string): boolean {
-  return supportedApplication(html) !== null;
-}
-
-// A conventional, explicit head keeps insertion outside comments, attribute
-// values and author scripts. The declaration below is independently HTML-parsed.
-function protocolHeadEnd(html: string): number | null {
-  const tagAttributes = `(?:[^<>"']|"[^"]*"|'[^']*')*`;
-  const space = `(?:\\s|<!--(?:[\\s\\S]*?)-->)*`;
-  const head = new RegExp(`^${space}(?:<!doctype\\b${tagAttributes}>${space})?(?:<html(?=[\\s>])${tagAttributes}>${space})?<head(?=[\\s>])${tagAttributes}>`, 'i').exec(html);
-  return head ? head[0].length : null;
+  return inspectProfitabilityHtml(html).application !== null;
 }
 
 /** Explicit author opt-in, never inferred from JS strings, comments or filenames. */
 export function declaresDashboardInvoiceAudit(html: string): boolean {
-  if (!html.includes('kts-dashboard-audit') || protocolHeadEnd(html) === null) return false;
-  let inHead = false;
-  let inertDepth = 0;
-  let declarations = 0;
-  let supported = false;
-  const inert = new Set(['script', 'style', 'textarea', 'title', 'noscript', 'template', 'svg', 'math']);
-  try {
-    sanitizeHtml(html, {
-      allowedTags: [], allowedAttributes: {},
-      textFilter: () => '',
-      onOpenTag(name, attributes) {
-        if (inert.has(name)) inertDepth++;
-        if (name === 'head' && !inertDepth) inHead = true;
-        if (name === 'body' && !inertDepth) inHead = false;
-        if (name !== 'meta' || !inHead || inertDepth || attributes.name !== 'kts-dashboard-audit') return;
-        declarations++;
-        supported = attributes.content === 'invoice-v1';
-      },
-      onCloseTag(name) {
-        if (name === 'head' && !inertDepth) inHead = false;
-        if (inert.has(name)) inertDepth = Math.max(0, inertDepth - 1);
-      },
-    });
-  } catch { return false; }
-  return declarations === 1 && supported;
+  if (!html.includes('kts-dashboard-audit')) return false;
+  return inspectProfitabilityHtml(html).declaresInvoiceAudit;
 }
 
 /** Detailed invoice collection is optional and independent of author release numbers. */
 export function supportsDashboardInvoiceAudit(html: string): boolean {
-  return isSupportedProfitabilityHtml(html) || declaresDashboardInvoiceAudit(html);
+  const result = inspectProfitabilityHtml(html);
+  return result.application !== null || result.declaresInvoiceAudit;
 }
 
 /** Local-invoice recognizer: unknown author versions must not share private inputs as generic snapshots. */
 export function isProfitabilityHtmlCandidate(html: string): boolean {
   return /\bkts-rent-snapshot\b/.test(html)
-    && (/<input\b[^>]*\bid\s*=\s*(["'])fInv\1/i.test(html) || /\bparseInvoiceFile\s*\(/.test(html))
+    && (/\bparseInvoiceFile\s*\(/.test(html) || hasProfitabilityInvoiceInput(html))
     && (/Рентабельность\s+(?:сч[её]тов|сделок)/iu.test(html) || /["']kts-rent:/.test(html));
 }
 
@@ -356,18 +337,18 @@ function auditAdapterScript(protocol = false): string {
 
 export function injectProfitabilityAuditAdapter(html: string): string {
   if (html.includes(ADAPTER_ATTRIBUTE)) return html;
-  const application = supportedApplication(html);
+  const inspection = inspectProfitabilityHtml(html);
+  const application = inspection.application;
   if (!application) {
-    const insertAt = protocolHeadEnd(html);
-    if (insertAt === null || !declaresDashboardInvoiceAudit(html)) return html;
+    const insertAt = inspection.headEnd;
+    if (insertAt === null || !inspection.declaresInvoiceAudit) return html;
     return html.slice(0, insertAt) + `\n<script ${ADAPTER_ATTRIBUTE}>${auditAdapterScript(true)}</script>\n` + html.slice(insertAt);
   }
-  const head = /<head(?:\s[^>]*)?>/i.exec(html);
-  if (!head || head.index >= application.start) return html;
+  const insertAt = inspection.headEnd;
+  if (insertAt === null || insertAt > application.start) return html;
   const invoiceHook = INVOICE_SUCCESS + "\n      try { if (!DEMO) window.__ktsProfitabilityAuditV19.recordInvoices([inv], f); } catch (_) { /* Audit must not change report calculations. */ }";
   const snapshotHook = SNAPSHOT_SUCCESS + "\n    try { if (!DEMO) window.__ktsProfitabilityAuditV19.recordInvoices(d.invs, f); } catch (_) { /* Audit must not change report calculations. */ }";
   const source = instrumentReviewedProfitabilityUsage(application.source).replace(INVOICE_SUCCESS, invoiceHook).replace(SNAPSHOT_SUCCESS, snapshotHook);
   const patched = html.slice(0, application.start) + source + html.slice(application.end);
-  const insertAt = head.index + head[0].length;
   return patched.slice(0, insertAt) + `\n<script ${ADAPTER_ATTRIBUTE}>${auditAdapterScript()}</script>\n` + patched.slice(insertAt);
 }

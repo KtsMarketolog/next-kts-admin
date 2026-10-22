@@ -5,6 +5,7 @@ import {
 } from './types';
 import { query } from '../client';
 import type { PoolClient } from 'pg';
+import type { TopDashboardHtmlReadiness } from './htmlReadiness';
 import type {
   TopDashboardBlockDataVersion,
   TopDashboardBlockDataVersionStatus,
@@ -32,7 +33,7 @@ export type TopDashboardBlockSummaryRow = TopDashboardBlockRow & {
   html_published_at: string | null;
 };
 
-export type TopDashboardPublishedBlockRow = {
+export type TopDashboardPublishedBlockRow = TopDashboardHtmlReadiness & {
   id: string;
   title: string;
   created_at: string;

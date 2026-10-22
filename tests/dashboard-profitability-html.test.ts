@@ -8,6 +8,7 @@ import sanitizeHtml from 'sanitize-html';
 import { declaresDashboardInvoiceAudit, injectProfitabilityAuditAdapter, isProfitabilityHtmlCandidate, isSupportedProfitabilityHtml, supportsDashboardInvoiceAudit } from '../src/shared/lib/dashboardProfitabilityHtml';
 import { parseProfitabilityInvoice } from '../src/shared/lib/dashboardProfitabilityAudit';
 import { instrumentReviewedProfitabilityUsage } from '../src/shared/lib/dashboardUsageProfiles';
+import * as profitabilityRecognition from '../src/shared/lib/dashboardProfitabilityRecognition';
 
 const marker = 'kts-profitability-audit-v1';
 const nonce = '01234567-89ab-4def-8123-456789abcdef';
@@ -26,6 +27,7 @@ function syntheticProfile() {
     exports,
     require(name: string) {
       if (name === './dashboardUsageProfiles') return { instrumentReviewedProfitabilityUsage };
+      if (name === './dashboardProfitabilityRecognition') return profitabilityRecognition;
       if (name === 'sanitize-html') return { default: sanitizeHtml };
       assert.equal(name, 'node:crypto');
       return { createHash(algorithm: string) {

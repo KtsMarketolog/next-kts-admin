@@ -27,6 +27,7 @@ import { applyLoginCredentialMigration } from './loginCredentialMigration';
 import { applyKnowledgeBaseMigration } from './knowledgeBaseMigration';
 import { applyPriceBuildMigration } from './priceBuildMigration';
 import { applyClientChatReceiptsMigration } from './clientChatReceiptsMigration';
+import { applyTopDashboardHtmlReadinessMigration } from './topDashboardHtmlReadinessMigration';
 
 type SchemaMigration = {
   id: string;
@@ -877,6 +878,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610220003_dashboard_upload_usage_outbox', description: 'Durable upload journal intents committed with each saved source version', apply: applyDashboardUploadUsageOutboxMigration},
   {id: '202610220004_site_content_write_versions', description: 'Optimistic versions for site content edits without changing saved content or ordering', apply: applySiteContentVersionMigration},
   {id: '202610230001_client_chat_message_receipts', description: 'Exact client chat read receipts without changing correspondence or legacy read state', apply: applyClientChatReceiptsMigration},
+  {id: '202610230002_top_dashboard_html_readiness', description: 'Versioned derived HTML readiness without changing reports, publications or snapshots', apply: applyTopDashboardHtmlReadinessMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

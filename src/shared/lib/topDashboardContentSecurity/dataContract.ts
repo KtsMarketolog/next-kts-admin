@@ -20,7 +20,10 @@ export function detectTopDashboardExpectedProfile(
     || /\bgetElementById\(\s*(?:"snapInp"|'snapInp')\s*\)/i.test(htmlContent);
   const hasPurchasesSignature =
     /\bPARSERS\s*\.\s*purchases\b/i.test(htmlContent)
-    || /(?:<title\b[^>]*>|Дашборд\s*[«"]?)\s*[^<\n]{0,80}Управление\s+закупками/iu.test(htmlContent);
+    // Do not let an unfinished <title consume later opening tags and restart
+    // the same suffix scan for each one. This is only a profile hint, not an
+    // authorization grant; application signatures above remain unchanged.
+    || /(?:<title\b[^<>]*>|Дашборд\s*[«"]?)\s*[^<\n]{0,80}Управление\s+закупками/iu.test(htmlContent);
   if (hasPurchasesInput && hasPurchasesSignature) {
     return 'purchases';
   }

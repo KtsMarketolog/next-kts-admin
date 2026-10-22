@@ -7,6 +7,7 @@ import {
 } from '@/shared/lib/db';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { getDashboardUploadUsageActor, scheduleDashboardUploadUsageDrain } from '@/shared/lib/dashboardUploadUsage';
+import { ProfitabilityHtmlAnalysisLimitError } from '@/shared/lib/dashboardProfitabilityHtml';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
@@ -88,6 +89,9 @@ export async function POST(request: Request, context: Context) {
       },
     );
   } catch (error) {
+    if (error instanceof ProfitabilityHtmlAnalysisLimitError) {
+      return errorResponse(error.message, 422);
+    }
     if (error instanceof TopDashboardBlockNotFoundError) {
       return errorResponse(error.message, 404);
     }

@@ -20,6 +20,7 @@ import {
 } from './records';
 import { withTransaction } from '../client';
 import { enqueueDashboardUploadUsage } from '../dashboardUploadUsageOutboxRepo';
+import { classifyTopDashboardHtmlReadiness, TOP_DASHBOARD_HTML_READINESS_REVISION } from './htmlReadiness';
 
 export const TOP_DASHBOARD_VERSION_LIMIT = 50;
 
@@ -29,6 +30,7 @@ export async function createTopDashboardBlockVersion(
   input: CreateTopDashboardBlockVersionInput,
 ): Promise<CreateTopDashboardBlockVersionResult> {
   await ensureSiteSchema();
+  const selfContained = classifyTopDashboardHtmlReadiness(input.htmlContent);
 
   return withTransaction(async (client) => {
     await requireBlock(input.blockId, client, true);
@@ -62,9 +64,12 @@ export async function createTopDashboardBlockVersion(
          file_size,
          sha256,
          uploaded_by_admin_user_id,
-         uploaded_by_manager_id
+         uploaded_by_manager_id,
+         is_self_contained,
+         self_contained_revision,
+         self_contained_sha256
        )
-       values ($1, $2, $3, $4, $5, $6, $7)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $5)
        returning
          id::text,
          original_name,
@@ -85,6 +90,8 @@ export async function createTopDashboardBlockVersion(
         input.sha256,
         input.uploadedByAdminUserId,
         input.uploadedByManagerId,
+        selfContained,
+        TOP_DASHBOARD_HTML_READINESS_REVISION,
       ],
     );
 

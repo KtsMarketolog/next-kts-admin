@@ -138,6 +138,57 @@ test('TOP retention isolated PostgreSQL acceptance', async (t) => {
     await ensureSiteSchema();
     assert.equal((await query(`select count(*)::int as count from top_dashboard_block_data_context_state`)).rows[0].count, 0);
 
+    await t.test('published readiness is stored once per immutable HTML, with lazy legacy backfill and no source/state changes', async () => {
+      const item = await block();
+      const source = addStandaloneTopDashboardMarker('<!doctype html><html><body>Readiness test<input type="file"></body></html>');
+      const version = (await createTopDashboardBlockVersion({ blockId: item.id, originalName: 'readiness.html',
+        htmlContent: source, fileSize: Buffer.byteLength(source), sha256: hash(source), ...uploader })).version.id;
+      const metadata = async () => (await query<{ is_self_contained: boolean | null; self_contained_revision: number | null;
+        self_contained_sha256: string | null; html_content: string; sha256: string }>(
+        `select is_self_contained, self_contained_revision, self_contained_sha256, html_content, sha256
+         from top_dashboard_block_versions where block_id=$1 and id=$2`, [item.id, version])).rows[0];
+      assert.deepEqual(await metadata(), { is_self_contained: true, self_contained_revision: 1,
+        self_contained_sha256: hash(source), html_content: source, sha256: hash(source) });
+      await activateTopDashboardBlockVersion({ blockId: item.id, versionId: version, expectedActiveVersionId: null,
+        expectedSnapshotFormat: null, expectedProfile: 'standalone', ...actor });
+      const before = await maintenanceSnapshot(item.id);
+      await query(`update top_dashboard_block_versions set is_self_contained=null,
+        self_contained_revision=null, self_contained_sha256=null where block_id=$1 and id=$2`, [item.id, version]);
+      assert.ok((await getPublishedTopDashboardBlocks()).some(value => value.id === item.id));
+      const after = await maintenanceSnapshot(item.id);
+      assert.deepEqual(after, before, 'Lazy recognition changes derived fields only, restoring their original values');
+      assert.equal((await getPublishedTopDashboardBlockOverview(item.id))?.activeVersionId, version);
+      assert.equal((await getPublishedTopDashboardBlockVersionContent(item.id, version))?.htmlContent, source);
+      const noBody = (await query<{ body: string | null }>(`select case when
+        self_contained_revision is distinct from 1 or self_contained_sha256 is distinct from sha256
+        or is_self_contained is null then html_content end as body
+        from top_dashboard_block_versions where block_id=$1 and id=$2`, [item.id, version])).rows[0];
+      assert.equal(noBody.body, null, 'Current metadata avoids returning the large HTML source');
+      await query(`update top_dashboard_block_versions set is_self_contained=false, self_contained_sha256=$3
+        where block_id=$1 and id=$2`, [item.id, version, 'a'.repeat(64)]);
+      assert.equal((await getPublishedTopDashboardBlockOverview(item.id))?.activeVersionId, version);
+      assert.equal((await metadata()).self_contained_sha256, hash(source));
+      await query(`update top_dashboard_block_versions set is_self_contained=null,
+        self_contained_error='analysis_limit', self_contained_retry_after=now()+interval '5 minutes'
+        where block_id=$1 and id=$2`, [item.id, version]);
+      assert.equal((await getPublishedTopDashboardBlocks()).some(value => value.id === item.id), false);
+      assert.equal(await getPublishedTopDashboardBlockOverview(item.id), null);
+      assert.equal(await getPublishedTopDashboardBlockVersionContent(item.id, version), null);
+      assert.ok((await getTopDashboardBlocks()).some(value => value.id === item.id), 'Management listing retains the unchanged report');
+      assert.equal((await metadata()).html_content, source);
+      await query(`update top_dashboard_block_versions set self_contained_retry_after=now()-interval '1 second'
+        where block_id=$1 and id=$2`, [item.id, version]);
+      assert.equal((await getPublishedTopDashboardBlockOverview(item.id))?.activeVersionId, version);
+      assert.deepEqual((await query(`select is_self_contained, self_contained_error, self_contained_retry_after
+        from top_dashboard_block_versions where block_id=$1 and id=$2`, [item.id, version])).rows[0],
+      { is_self_contained: true, self_contained_error: null, self_contained_retry_after: null });
+      await query(`update top_dashboard_block_versions set self_contained_revision=2, is_self_contained=false
+        where block_id=$1 and id=$2`, [item.id, version]);
+      assert.ok((await getPublishedTopDashboardBlocks()).some(value => value.id === item.id));
+      assert.equal((await metadata()).self_contained_revision, 2, 'An old process cannot downgrade a newer revision');
+      await deleteTopDashboardBlock(item.id);
+    });
+
     for (const kind of ['generic', 'native'] as const) {
       await t.test(`standalone HTML publishes without shared data and preserves the ${kind} rollback pair`, async () => {
         const item = await block();

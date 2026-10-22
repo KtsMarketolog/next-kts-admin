@@ -430,9 +430,14 @@ test('TOP viewer keeps connected-data readiness queries and a separate standalon
     assert.match(section, /top_dashboard_block_data_state/);
     assert.match(section, /active_version_id is not null/);
   });
-  assert.match(source, /selfContainedHtmlReady/);
-  assert.match(source, /contract\.mode === 'disabled'/);
-  assert.match(source, /contract\.profile === 'standalone'/);
+  assert.match(source, /resolveTopDashboardHtmlReadiness/);
+  const readiness = readFileSync(new URL(
+    '../src/shared/lib/db/topDashboardBlocksRepo/htmlReadiness.ts', import.meta.url,
+  ), 'utf8');
+  assert.match(readiness, /contract\.mode === 'disabled'/);
+  assert.match(readiness, /contract\.profile === 'standalone'/);
+  assert.match(readiness, /row\.self_contained_revision !== TOP_DASHBOARD_HTML_READINESS_REVISION/);
+  assert.match(readiness, /row\.self_contained_sha256 !== row\.sha256/);
 });
 
 test('TOP viewer component contains no dashboard mutation controls', () => {
