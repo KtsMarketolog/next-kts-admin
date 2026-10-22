@@ -32,6 +32,13 @@ test('new Sanhua columns preserve owned article aliases and merged connection no
   assert.ok(source.items.some((item) => item.brand === 'Danfoss' && item.aliases.includes('020B1010')));
 });
 
+test('identical old and new Sanhua designations never appear as their own alternatives', () => {
+  const response = searchAnalogs('SYJ10L11', null, 'Sanhua');
+  assert.ok(response.matches.length > 0);
+  assert.ok(response.results.length > 0);
+  assert.ok(!response.results.some((row) => row.model === 'SYJ10L11' && row.brand.startsWith('Sanhua')));
+});
+
 test('contradictory Sanhua print names do not supply catalog identifiers', () => {
   const row = data.directGroups.find((group) => group.sourceId === 'sanhua_202608' && group.items.some((item) => item.model === 'YCVSH3H02'))!;
   const entry = row.items.find((item) => item.model === 'YCVSH3H02')!;

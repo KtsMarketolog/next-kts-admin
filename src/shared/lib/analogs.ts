@@ -260,7 +260,7 @@ function buildDirectResults(normalizedQuery: string, requestedBrand: string | nu
       .filter(
         (candidate) =>
           isSpecificDirectItem(group, candidate) && (normalizeAnalogTerm(candidate.model) !== sourceModel ||
-          normalizeAnalogTerm(candidate.brand) !== normalizeAnalogTerm(item.brand)),
+          normalizeAnalogBrand(candidate.brand) !== normalizeAnalogBrand(item.brand)),
       )
       .map<AnalogResult>((candidate) => ({
         id: `${group.id}:${candidate.brand}:${candidate.model}`,
@@ -332,7 +332,7 @@ function buildCapacityResults(normalizedQuery: string, requestedRefrigerant: str
       .filter((candidate) => {
         if (
           normalizeAnalogTerm(candidate.model) === sourceModel &&
-          normalizeAnalogTerm(candidate.brand) === normalizeAnalogTerm(product.brand)
+          normalizeAnalogBrand(candidate.brand) === normalizeAnalogBrand(product.brand)
         ) {
           return false;
         }
