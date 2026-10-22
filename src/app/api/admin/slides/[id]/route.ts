@@ -2,6 +2,7 @@ import { revalidatePath } from 'next/cache';
 
 import { deleteHeroSlide, updateHeroSlide } from '@/shared/lib/db';
 import { requireAdmin } from '@/shared/lib/adminAuth';
+import { saveVersionedContent } from '@/shared/lib/adminContentSave';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -20,13 +21,13 @@ export async function PUT(request: Request, { params }: Params) {
     return Response.json({ error: 'Invalid slide' }, { status: 400 });
   }
   // Old tabs must not split a reorder into independent writes.
-  if (Object.keys(body).length === 1 && Object.prototype.hasOwnProperty.call(body, 'sortOrder')) {
+  if (Object.keys(body).filter((key) => key !== 'revision').length === 1 && Object.prototype.hasOwnProperty.call(body, 'sortOrder')) {
     if (!Number.isInteger(body.sortOrder) || body.sortOrder < 0 || body.sortOrder > 2_147_483_647) {
       return Response.json({ error: 'Invalid sort order' }, { status: 400 });
     }
     return Response.json({ error: 'Обновите страницу: порядок теперь сохраняется одной операцией.', code: 'ATOMIC_REORDER_REQUIRED' }, { status: 409 });
   }
-  await updateHeroSlide(slideId, {
+  return saveVersionedContent(body.revision, (revision) => updateHeroSlide(slideId, {
     title: typeof body.title === 'string' ? body.title.trim() : undefined,
     imageUrl: typeof body.imageUrl === 'string' ? body.imageUrl.trim() : undefined,
     tabletImageUrl: typeof body.tabletImageUrl === 'string' && body.tabletImageUrl.trim() ? body.tabletImageUrl.trim() : null,
@@ -38,10 +39,7 @@ export async function PUT(request: Request, { params }: Params) {
     popupText: typeof body.popupText === 'string' && body.popupText.trim() ? body.popupText.trim() : null,
     linkUrl: typeof body.linkUrl === 'string' && body.linkUrl.trim() ? body.linkUrl.trim() : null,
     isActive: typeof body.isActive === 'boolean' ? body.isActive : undefined,
-  });
-
-  revalidatePath('/');
-  return Response.json({ ok: true });
+  }, revision));
 }
 
 export async function DELETE(_request: Request, { params }: Params) {

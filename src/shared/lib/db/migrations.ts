@@ -19,6 +19,7 @@ import { applyDashboardUsageDetailsMigration } from './dashboardUsageDetailsMigr
 import { applyPersonalDashboardRecipientMigration } from './managerDashboardRecipientMigration';
 import { applyCurrencyDashboardHtmlMigration } from './currencyDashboardHtmlMigration';
 import { applyRecordVersionMigration } from './recordVersionMigration';
+import { applySiteContentVersionMigration } from './siteContentVersionMigration';
 import { applyClientArchiveMigration } from './clientArchiveMigration';
 import { applyEmployeeIdentifierMigration } from './employeeIdentifierMigration';
 import { applyPriceRequestOutboxMigration } from './priceRequestOutboxMigration';
@@ -873,6 +874,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610220001_price_build_admission', description: 'Bounded cross-process derived price builds and private cache receipts; preserve all saved prices and catalogue data', apply: applyPriceBuildMigration},
   {id: '202610220002_dashboard_usage_captured_time', description: 'Distinguish original event clock from server registration without changing historical timestamps', apply: applyDashboardUsageCapturedTimeMigration},
   {id: '202610220003_dashboard_upload_usage_outbox', description: 'Durable upload journal intents committed with each saved source version', apply: applyDashboardUploadUsageOutboxMigration},
+  {id: '202610220004_site_content_write_versions', description: 'Optimistic versions for site content edits without changing saved content or ordering', apply: applySiteContentVersionMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

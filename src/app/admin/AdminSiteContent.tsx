@@ -84,6 +84,8 @@ export function AdminSiteContent({
           moveSlide={slideAdmin.moveSlide}
           createSlide={slideAdmin.createSlide}
           saveSlide={slideAdmin.saveSlide}
+          conflictIds={slideAdmin.conflictIds}
+          reloadSlide={slideAdmin.reloadSlide}
           deleteSlide={slideAdmin.deleteSlide}
           uploadImage={uploadImage}
           showStatus={showStatus}
@@ -105,6 +107,8 @@ export function AdminSiteContent({
           moveNews={newsAdmin.moveNews}
           createNews={newsAdmin.createNews}
           saveNews={newsAdmin.saveNews}
+          conflictIds={newsAdmin.conflictIds}
+          reloadNews={newsAdmin.reloadNews}
           deleteNews={newsAdmin.deleteNews}
           uploadImage={uploadImage}
           showStatus={showStatus}
@@ -126,6 +130,8 @@ export function AdminSiteContent({
           moveGroupCompany={groupCompanyAdmin.moveGroupCompany}
           createGroupCompany={groupCompanyAdmin.createGroupCompany}
           saveGroupCompany={groupCompanyAdmin.saveGroupCompany}
+          conflictIds={groupCompanyAdmin.conflictIds}
+          reloadGroupCompany={groupCompanyAdmin.reloadGroupCompany}
           deleteGroupCompany={groupCompanyAdmin.deleteGroupCompany}
           uploadImage={uploadImage}
           showStatus={showStatus}
@@ -150,6 +156,10 @@ export function AdminSiteContent({
           moveBrandCategory={brandAdmin.moveBrandCategory}
           createBrandCategoryItem={brandAdmin.createBrandCategoryItem}
           saveBrandCategory={brandAdmin.saveBrandCategory}
+          categoryConflictIds={brandAdmin.categoryConflictIds}
+          reloadBrandCategory={brandAdmin.reloadBrandCategory}
+          brandConflictIds={brandAdmin.brandConflictIds}
+          reloadBrand={brandAdmin.reloadBrand}
           deleteBrandCategoryItem={brandAdmin.deleteBrandCategoryItem}
           updateBrand={brandAdmin.updateBrand}
           createBrand={brandAdmin.createBrand}

@@ -13,8 +13,8 @@ import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {useAdminBrandPortfolio} from './src/features/admin/model/useAdminBrandPortfolio';
 import {useAdminPriceGroups} from './src/features/admin/model/useAdminPriceGroups';
-const category=(id,title)=>({id,key:'cat'+id,title,sortOrder:id,isActive:true});
-const brand=(id,categoryId,name)=>({id,categoryId,name,imageUrl:'/'+id+'.png',iconKey:'',sortOrder:id,isActive:true});
+const category=(id,title)=>({id,revision:'1',key:'cat'+id,title,sortOrder:id,isActive:true});
+const brand=(id,categoryId,name)=>({id,revision:'1',categoryId,name,imageUrl:'/'+id+'.png',iconKey:'',sortOrder:id,isActive:true});
 window.server={categories:[category(1,'One'),category(2,'Two')],brands:[brand(1,1,'First'),brand(2,2,'Second')],groups:[{title:'First',imageUrl:'/first.png',productCount:1},{title:'Second',imageUrl:'/second.png',productCount:2}]};
 window.calls=[];window.refreshes=0;window.confirm=()=>true;
 window.fetch=async(url,init={})=>{
@@ -34,6 +34,7 @@ window.fetch=async(url,init={})=>{
   return Response.json({ok:true,items,warnings:window.orderFailure==='warning'?[{code:'cache',message:'Cache refresh pending'}]:undefined});
  }
  const categoryMatch=url.match(/brand-categories\\/(\\d+)$/),brandMatch=url.match(/brands\\/(\\d+)$/);
+ if(method==='PUT'&&window.pauseWrite)await new Promise(resolve=>{window.releaseWrite=resolve});
  if(method==='PUT'&&categoryMatch){
   const id=Number(categoryMatch[1]);
   if(window.failCategory===id)return Response.json({error:'not saved'},{status:500});
@@ -47,6 +48,11 @@ window.fetch=async(url,init={})=>{
   return Response.json({id});
  }else if(method==='DELETE'&&categoryMatch){const id=Number(categoryMatch[1]);window.server.categories=window.server.categories.filter(row=>row.id!==id);window.server.brands=window.server.brands.filter(row=>row.categoryId!==id);
  }else if(method==='DELETE'){window.server.brands=window.server.brands.filter(row=>row.id!==Number(brandMatch[1]));}
+ if(method==='PUT'&&(brandMatch||categoryMatch)) {
+  const item=(brandMatch?window.server.brands:window.server.categories).find(row=>row.id===Number((brandMatch||categoryMatch)[1]));
+  item.revision=String(Number(item.revision)+1);
+  return Response.json({ok:true,item});
+ }
  return Response.json({ok:true});
 };
 function App(){
@@ -105,9 +111,9 @@ async function main() {
           if (scenario === 'save-brand' || scenario === 'saved-refresh-failed') {
             await page.evaluate(async (fail: boolean) => { const w = window as any; w.failRead = fail; await w.model.brands.saveBrand(w.model.brands.brands[0]); }, scenario === 'saved-refresh-failed');
           } else if (scenario === 'late-brand') {
-            await page.evaluate(() => { const w = window as any; w.pauseRead = true; void w.model.brands.saveBrand(w.model.brands.brands[0]); });
-            await page.waitForFunction(() => Boolean((window as any).releaseRead));
-            await page.evaluate(() => { const w = window as any; w.model.brands.updateBrand(1, { name: 'Typed after save' }); w.releaseRead(); });
+            await page.evaluate(() => { const w = window as any; w.pauseWrite = true; void w.model.brands.saveBrand(w.model.brands.brands[0]); });
+            await page.waitForFunction(() => Boolean((window as any).releaseWrite));
+            await page.evaluate(() => { const w = window as any; w.model.brands.updateBrand(1, { name: 'Typed after save' }); w.releaseWrite(); });
           } else if (scenario === 'create-brand') {
             await page.evaluate(() => { const w = window as any; w.model.brands.setBrandDraft({ ...w.model.brands.brandDraft, name: 'New brand', imageUrl: '/created.png' }); });
             await page.waitForFunction(() => JSON.parse(document.querySelector('#state')!.textContent!).brandDraft.name === 'New brand');
@@ -157,7 +163,7 @@ async function main() {
           }
           if (scenario === 'delete-category') { assert.deepEqual(state.brands.map((row: { id: number }) => row.id), [2]); assert.equal(state.brands[0].categoryId, 1); assert.equal(state.categories.length, 1); }
           if (scenario === 'save-price') { assert.equal(state.prices[0].imageUrl, '/new-first.png'); assert.equal(state.priceDirty, 1); assert.equal(state.brandDirty, 3); }
-          if (scenario === 'saved-refresh-failed') { assert.equal(state.brands[0].name, ' Saved first '); assert.match(await page.locator('#status').innerText(), /Изменения уже сохранены/); }
+          if (scenario === 'saved-refresh-failed') { assert.equal(state.brands[0].name, 'Saved first'); assert.equal(calls.length, 1, 'no follow-up read after saving'); }
           await page.close(); tested++;
         }
       } finally { await browser.close(); }

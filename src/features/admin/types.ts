@@ -1,5 +1,6 @@
 export type Slide = {
   id: number;
+  revision?: string;
   title: string;
   imageUrl: string;
   tabletImageUrl: string | null;
@@ -16,6 +17,7 @@ export type Slide = {
 
 export type News = {
   id: number;
+  revision?: string;
   date: string;
   title: string;
   imageUrl: string;
@@ -26,6 +28,7 @@ export type News = {
 
 export type GroupCompany = {
   id: number;
+  revision?: string;
   imageUrl: string;
   linkUrl: string;
   sortOrder: number;
@@ -40,6 +43,7 @@ export type PriceGroupImage = {
 
 export type BrandCategory = {
   id: number;
+  revision?: string;
   key: string;
   title: string;
   sortOrder: number;
@@ -48,6 +52,7 @@ export type BrandCategory = {
 
 export type Brand = {
   id: number;
+  revision?: string;
   categoryId: number;
   name: string;
   imageUrl: string;

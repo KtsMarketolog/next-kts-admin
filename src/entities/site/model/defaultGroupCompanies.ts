@@ -1,5 +1,6 @@
 export type GroupCompany = {
   id?: number;
+  revision?: string;
   imageUrl: string;
   linkUrl: string;
   sortOrder: number;

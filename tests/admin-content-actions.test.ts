@@ -120,7 +120,7 @@ for (const [hook, save, draft] of cases) {
     assert.equal(view.sharedLock.current, false);
     assert.match(view.messages[0], /проверьте результат/);
   });
-  test(`${hook}: confirmed save plus failed scoped read is not reported as failed save`, async () => {
+  test(`${hook}: missing acknowledgement never retries a confirmed save`, async () => {
     let reads = 0, writes = 0, reloads = 0;
     const view = fixture(hook, {
       fetch: async (_url, init) => {
@@ -133,11 +133,11 @@ for (const [hook, save, draft] of cases) {
     assert.deepEqual(view.busy, [true, false]);
     assert.match(view.messages[0], /Изменения уже сохранены/);
     assert.doesNotMatch(view.messages[0], /^Не удалось сохранить/);
-    assert.equal(reads, 1);
+    assert.equal(reads, hook === 'useAdminPriceGroups' ? 1 : 0, 'versioned writes cannot acknowledge a later GET');
     assert.equal(writes, 1, 'failed read never retries a confirmed write');
     assert.equal(reloads, 0, 'no cross-section reload');
   });
-  test(`${hook}: confirmed save plus stalled scoped read releases busy and aborts the read`, async () => {
+  if (hook === 'useAdminPriceGroups') test(`${hook}: confirmed save plus stalled scoped read releases busy and aborts the read`, async () => {
     let reads = 0, writes = 0, readSignal: AbortSignal | undefined;
     const view = fixture(hook, { fetch: async (_url, init) => {
       if (!init?.method || init.method === 'GET') {
@@ -153,6 +153,70 @@ for (const [hook, save, draft] of cases) {
     assert.equal(reads, 1);
     assert.equal(writes, 1);
     assert.equal(readSignal?.aborted, true);
+  });
+}
+
+const versionedCases = [
+  ['useAdminSlides', 'setSlides', 'slides', 'updateSlide', 'saveSlide', 'reloadSlide', 'conflictIds', 'slides'],
+  ['useAdminNews', 'setNews', 'news', 'updateNews', 'saveNews', 'reloadNews', 'conflictIds', 'news'],
+  ['useAdminGroupCompanies', 'setGroupCompanies', 'groupCompanies', 'updateGroupCompany', 'saveGroupCompany', 'reloadGroupCompany', 'conflictIds', 'companies'],
+  ['useAdminBrandPortfolio', 'setBrandCategories', 'brandCategories', 'updateBrandCategory', 'saveBrandCategory', 'reloadBrandCategory', 'categoryConflictIds', 'categories'],
+  ['useAdminBrandPortfolio', 'setBrands', 'brands', 'updateBrand', 'saveBrand', 'reloadBrand', 'brandConflictIds', 'brands'],
+] as const;
+
+for (const [hook, hydrate, rowsKey, update, save, reload, conflictsKey, listKey] of versionedCases) {
+  const initial = { id: 1, revision: '1', title: 'Original', name: 'Original', imageUrl: '/one.png', isActive: true };
+  const sibling = { ...initial, id: 2 };
+  const rows = (view: ReturnType<typeof fixture>) => view.render()[rowsKey] as unknown as Array<typeof initial>;
+  test(`${hook}/${save}: stale save preserves drafts and reload explicitly replaces only the conflicting row`, async () => {
+    let gets = 0, writes = 0;
+    const saved = { ...initial, revision: '2', isActive: false };
+    const view = fixture(hook, { fetch: async (_url, init) => {
+      if (!init?.method || init.method === 'GET') { gets++; return Response.json({ [listKey]: [saved, sibling] }); }
+      writes++;
+      assert.equal(JSON.parse(String(init.body)).revision, '1');
+      return Response.json({ error: 'Данные уже изменены другим пользователем' }, { status: 409 });
+    } });
+    view.render()[hydrate]([initial, sibling]);
+    view.render()[update](1, { title: 'My title', name: 'My title' });
+    view.render()[update](2, { title: 'Other draft', name: 'Other draft' });
+    await view.render()[save](rows(view)[0]);
+    assert.equal(rows(view)[0].title, 'My title');
+    assert.equal(rows(view)[0].revision, '1');
+    assert.equal(rows(view)[0].isActive, true, 'keep the stale draft; never silently rebase');
+    assert.equal(view.render().dirtyCount as unknown, 2);
+    assert.equal((view.render()[conflictsKey] as unknown as Set<number>).has(1), true);
+    assert.equal(gets, 0, 'conflict never silently refreshes');
+    await view.render()[reload](1);
+    assert.deepEqual(rows(view)[0], saved);
+    assert.equal(rows(view)[1].title, 'Other draft');
+    assert.equal(view.render().dirtyCount as unknown, 1);
+    assert.equal((view.render()[conflictsKey] as unknown as Set<number>).has(1), false);
+    assert.equal(gets, 1); assert.equal(writes, 1);
+    assert.deepEqual(view.busy, [true, false, true, false]);
+  });
+
+  test(`${hook}/${save}: exact response revision is used and late typing survives`, async () => {
+    let finish!: (response: Response) => void;
+    const calls: string[] = [];
+    const view = fixture(hook, { timeoutMs: 1000, fetch: async (_url, init) => {
+      calls.push(init?.method ?? 'GET');
+      return new Promise((resolve) => { finish = resolve; });
+    } });
+    view.render()[hydrate]([initial, sibling]);
+    view.render()[update](1, { title: ' Submitted ', name: ' Submitted ' });
+    const submitted = rows(view)[0];
+    const pending = view.render()[save](submitted);
+    view.render()[update](1, { title: 'New typing', name: 'New typing' });
+    finish(Response.json({ ok: true, item: { ...submitted, title: 'Submitted', name: 'Submitted', revision: '2' } }));
+    await pending;
+    assert.equal(rows(view)[0].title, 'New typing');
+    assert.equal(rows(view)[0].revision, '2');
+    assert.equal(view.render().dirtyCount as unknown, 1);
+    assert.deepEqual(calls, ['PUT'], 'a follow-up read could capture a newer competing revision');
+    view.render()[hydrate]([{ ...initial, revision: '3', isActive: false }, sibling]);
+    assert.equal(rows(view)[0].revision, '2');
+    assert.equal(rows(view)[0].isActive, true);
   });
 }
 
@@ -235,6 +299,19 @@ test('creation network failure retains the original draft and never reloads', as
   await view.render().createNews();
   assert.deepEqual(view.render().newsDraft, draft);
   assert.equal(reloads, 0);
+});
+
+test('successful content mutation reports cache-refresh warning without losing acknowledgement', async () => {
+  const saved = { id: 1, revision: '2', title: 'Saved', isActive: false };
+  const view = fixture('useAdminNews', { fetch: async () => Response.json({
+    ok: true, item: saved, warnings: ['Обновление кеша требует повторения.'],
+  }) });
+  view.render().setNews([{ ...saved, revision: '1', title: 'Old' }]);
+  view.render().updateNews(1, { title: 'Saved' });
+  await view.render().saveNews({ ...saved, revision: '1' });
+  assert.match(view.messages[0], /Новость сохранена.*Обновление кеша требует повторения/);
+  assert.deepEqual(view.render().news, [saved]);
+  assert.equal(view.render().dirtyCount as unknown, 0);
 });
 
 test('unmount aborts pending mutation and suppresses stale success callbacks', async () => {

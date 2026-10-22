@@ -2,6 +2,7 @@ import { revalidatePath } from 'next/cache';
 
 import { deleteBrandCategory, updateBrandCategory } from '@/shared/lib/db';
 import { requireAdmin } from '@/shared/lib/adminAuth';
+import { saveVersionedContent } from '@/shared/lib/adminContentSave';
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -19,7 +20,7 @@ export async function PUT(request: Request, context: Context) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return Response.json({ error: 'Invalid brand category' }, { status: 400 });
   }
-  if (Object.keys(body).length === 1 && Object.prototype.hasOwnProperty.call(body, 'sortOrder')) {
+  if (Object.keys(body).filter((key) => key !== 'revision').length === 1 && Object.prototype.hasOwnProperty.call(body, 'sortOrder')) {
     if (!Number.isInteger(body.sortOrder) || body.sortOrder < 0 || body.sortOrder > 2_147_483_647) {
       return Response.json({ error: 'Invalid sort order' }, { status: 400 });
     }
@@ -28,14 +29,11 @@ export async function PUT(request: Request, context: Context) {
   const title = typeof body.title === 'string' ? body.title.trim() : '';
   if (!title) return Response.json({ error: 'Title is required' }, { status: 400 });
 
-  await updateBrandCategory(numericId, {
+  return saveVersionedContent(body.revision, (revision) => updateBrandCategory(numericId, {
     key: typeof body.key === 'string' ? body.key.trim() : undefined,
     title,
     isActive: typeof body.isActive === 'boolean' ? body.isActive : undefined,
-  });
-
-  revalidatePath('/');
-  return Response.json({ ok: true });
+  }, revision));
 }
 
 export async function DELETE(_request: Request, context: Context) {

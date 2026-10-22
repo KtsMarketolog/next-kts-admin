@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import * as jsxRuntime from 'react/jsx-runtime';
 import ts from 'typescript';
+import * as recordVersion from '../src/shared/lib/recordVersion';
 
 function compile(filename: string, modules: Record<string, unknown>) {
   const code = ts.transpileModule(readFileSync(filename, 'utf8'), {
@@ -146,6 +147,7 @@ for (const [filename, getter] of [
   test(`${filename}: empty active query remains empty and requires no data writes`, async () => {
     const queries: string[] = [];
     const repo = compile(`src/shared/lib/db/${filename}.ts`, {
+      '../recordVersion': recordVersion,
       './schema': { ensureSiteSchema: async () => {} },
       './client': { query: async (sql: string) => { queries.push(sql); return { rows: [] }; } },
     });
@@ -164,6 +166,7 @@ for (const [resource, remover] of [
     const removed: number[] = [];
     const revalidated: string[] = [];
     const route = compile(`src/app/api/admin/${resource}/[id]/route.ts`, {
+      '@/shared/lib/adminContentSave': { saveVersionedContent: () => { throw new Error('DELETE must not invoke a content update'); } },
       'next/cache': { revalidatePath: (path: string) => revalidated.push(path) },
       '@/shared/lib/adminAuth': { requireAdmin: async () => null },
       '@/shared/lib/db': { [remover]: async (id: number) => removed.push(id) },

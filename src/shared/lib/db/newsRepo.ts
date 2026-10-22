@@ -1,10 +1,12 @@
 import type { NewsItem } from '@/entities/site/model/defaultNews';
 
+import { parseRecordRevision, RecordVersionConflictError } from '../recordVersion';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
 type NewsRow = {
   id: string | number;
+  revision: string;
   date_label: string;
   title: string;
   image_url: string;
@@ -16,6 +18,7 @@ type NewsRow = {
 function mapNewsItem(row: NewsRow): NewsItem {
   return {
     id: Number(row.id),
+    revision: row.revision,
     date: row.date_label,
     title: row.title,
     imageUrl: row.image_url,
@@ -28,7 +31,7 @@ function mapNewsItem(row: NewsRow): NewsItem {
 export async function getNewsItems({ activeOnly = false } = {}) {
   await ensureSiteSchema();
   const result = await query<NewsRow>(
-    `select id, date_label, title, image_url, link_url, sort_order, is_active
+    `select id, revision::text, date_label, title, image_url, link_url, sort_order, is_active
      from news_items
      ${activeOnly ? 'where is_active = true' : ''}
      order by sort_order asc, id asc`,
@@ -47,9 +50,11 @@ export async function createNewsItem(item: Omit<NewsItem, 'id'>) {
   return Number(result.rows[0].id);
 }
 
-export async function updateNewsItem(id: number, item: Partial<Omit<NewsItem, 'id'>>) {
+export async function updateNewsItem(id: number, item: Partial<Omit<NewsItem, 'id'>>, expectedRevision: string) {
+  const revision = parseRecordRevision(expectedRevision);
+  if (!revision) throw new RecordVersionConflictError();
   await ensureSiteSchema();
-  await query(
+  const result = await query<NewsRow>(
     `update news_items
      set date_label = coalesce($2, date_label),
          title = coalesce($3, title),
@@ -58,7 +63,8 @@ export async function updateNewsItem(id: number, item: Partial<Omit<NewsItem, 'i
          sort_order = coalesce($6, sort_order),
          is_active = coalesce($7, is_active),
          updated_at = now()
-     where id = $1`,
+     where id = $1 and revision = $8::bigint
+     returning id, revision::text, date_label, title, image_url, link_url, sort_order, is_active`,
     [
       id,
       item.date ?? null,
@@ -67,8 +73,11 @@ export async function updateNewsItem(id: number, item: Partial<Omit<NewsItem, 'i
       item.linkUrl ?? null,
       item.sortOrder ?? null,
       item.isActive ?? null,
+      revision,
     ],
   );
+  if (!result.rows[0]) throw new RecordVersionConflictError();
+  return mapNewsItem(result.rows[0]);
 }
 
 export async function deleteNewsItem(id: number) {

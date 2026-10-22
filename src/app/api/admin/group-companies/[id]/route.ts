@@ -2,6 +2,7 @@ import { revalidatePath } from 'next/cache';
 
 import { deleteGroupCompany, updateGroupCompany } from '@/shared/lib/db';
 import { requireAdmin } from '@/shared/lib/adminAuth';
+import { saveVersionedContent } from '@/shared/lib/adminContentSave';
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -27,7 +28,7 @@ export async function PUT(request: Request, context: Context) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return Response.json({ error: 'Invalid company' }, { status: 400 });
   }
-  if (Object.keys(body).length === 1 && Object.prototype.hasOwnProperty.call(body, 'sortOrder')) {
+  if (Object.keys(body).filter((key) => key !== 'revision').length === 1 && Object.prototype.hasOwnProperty.call(body, 'sortOrder')) {
     if (!Number.isInteger(body.sortOrder) || body.sortOrder < 0 || body.sortOrder > 2_147_483_647) {
       return Response.json({ error: 'Invalid sort order' }, { status: 400 });
     }
@@ -37,14 +38,11 @@ export async function PUT(request: Request, context: Context) {
   const linkUrl = normalizeLinkUrl(body.linkUrl);
   if (!imageUrl) return Response.json({ error: 'Image is required' }, { status: 400 });
 
-  await updateGroupCompany(numericId, {
+  return saveVersionedContent(body.revision, (revision) => updateGroupCompany(numericId, {
     imageUrl,
     linkUrl,
     isActive: typeof body.isActive === 'boolean' ? body.isActive : undefined,
-  });
-
-  revalidatePath('/');
-  return Response.json({ ok: true });
+  }, revision));
 }
 
 export async function DELETE(_request: Request, context: Context) {

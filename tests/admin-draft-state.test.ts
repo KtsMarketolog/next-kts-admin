@@ -19,6 +19,7 @@ type Collection<T extends object> = {
   update(id: Key, patch: Partial<T>): void;
   accept(submitted: T, saved: T, fields?: Array<keyof T>): void;
   remove(id: Key): void;
+  replace(saved: T, expected: T): boolean;
   baseline(id: Key): T | undefined;
   dirtyKeys: Set<Key>;
 };
@@ -105,7 +106,7 @@ function hooks(browser = false) {
   };
 }
 
-type Row = { id: number; title: string; imageUrl: string; sortOrder: number; isActive: boolean };
+type Row = { id: number; revision?: string; title: string; imageUrl: string; sortOrder: number; isActive: boolean };
 const row = (id: number, patch: Partial<Row> = {}): Row => ({ id, title: `Title ${id}`, imageUrl: `/image${id}.png`, sortOrder: id, isActive: true, ...patch });
 
 function collection() {
@@ -202,6 +203,50 @@ test('a later read omitting rows retains unsaved rows but drops clean missing ro
   assert.deepEqual(render().baseline(1), row(1));
   assert.equal(render().baseline(2), undefined);
   assert.deepEqual([...render().dirtyKeys], [1]);
+});
+
+test('dirty revisioned row retains its original version and baseline across a newer server read', () => {
+  const render = collection();
+  const first = row(1, { revision: '1' }), second = row(2, { revision: '1' });
+  render().hydrate([first, second]);
+  render().update(1, { title: 'My unsaved title' });
+  render().hydrate([row(1, { revision: '2', isActive: false }), row(2, { revision: '2', isActive: false })]);
+  assert.deepEqual(render().items[0], { ...first, title: 'My unsaved title' });
+  assert.deepEqual(render().baseline(1), first, 'cannot silently rebase a stale edit');
+  assert.equal(render().items[1].revision, '2', 'clean records can refresh');
+  assert.equal(render().items[1].isActive, false);
+  assert.deepEqual([...render().dirtyKeys], [1]);
+});
+
+test('exact mutation acknowledgement advances revision while retaining newer typing', () => {
+  const render = collection();
+  render().hydrate([row(1, { revision: '1' })]);
+  render().update(1, { title: ' Submitted ' });
+  const submitted = render().items[0];
+  render().update(1, { title: 'Typed during save' });
+  render().accept(submitted, { ...submitted, title: 'Submitted', revision: '2' });
+  assert.equal(render().items[0].title, 'Typed during save');
+  assert.equal(render().items[0].revision, '2');
+  assert.equal(render().baseline(1)?.title, 'Submitted');
+  assert.equal(render().baseline(1)?.revision, '2');
+  render().hydrate([row(1, { revision: '3', title: 'Another admin', isActive: false })]);
+  assert.equal(render().items[0].revision, '2', 'subsequent GET cannot acknowledge another admin version');
+  assert.equal(render().items[0].isActive, true);
+});
+
+test('explicit conflict reload replaces one row only and refuses to discard typing after confirmation', () => {
+  const render = collection();
+  render().hydrate([row(1, { revision: '1' }), row(2, { revision: '1' })]);
+  render().update(1, { title: 'Draft one' });
+  render().update(2, { title: 'Draft two' });
+  const expected = render().items[0], saved = row(1, { revision: '2', isActive: false });
+  render().update(1, { title: 'Typed after confirmation' });
+  assert.equal(render().replace(saved, expected), false);
+  assert.equal(render().items[0].title, 'Typed after confirmation');
+  assert.equal(render().replace(saved, render().items[0]), true);
+  assert.deepEqual(render().items[0], saved);
+  assert.deepEqual([...render().dirtyKeys], [2]);
+  assert.equal(render().items[1].title, 'Draft two');
 });
 
 test('partial reorder acknowledgements update order only and keep title drafts dirty', () => {

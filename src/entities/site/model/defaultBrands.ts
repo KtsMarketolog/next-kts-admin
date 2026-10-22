@@ -1,5 +1,6 @@
 export type BrandCategory = {
   id: number;
+  revision?: string;
   key: string;
   title: string;
   sortOrder: number;
@@ -8,6 +9,7 @@ export type BrandCategory = {
 
 export type BrandItem = {
   id: number;
+  revision?: string;
   categoryId: number;
   name: string;
   imageUrl: string;

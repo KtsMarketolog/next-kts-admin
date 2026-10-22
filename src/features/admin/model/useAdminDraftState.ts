@@ -133,6 +133,13 @@ export function useAdminDraftCollection<T extends object>(keyOf: (row: T) => Key
     const base = new Map(rows.map((row) => [key(row), row]));
     const items = rows.map((row) => {
       const id = key(row), local = existing.get(id), old = previous.base.get(id);
+      // A dirty revisioned form must keep the version it was actually edited
+      // against. Three-way merging in a newer revision would bypass server CAS.
+      if (local && old && !sameDraftValue(local, old) && 'revision' in row
+        && (!('revision' in old) || row.revision !== old.revision)) {
+        base.set(id, old);
+        return local;
+      }
       return local && old ? mergeSavedDraft(local, old, row) : local ?? row;
     });
     // Never silently discard a local edit when a later read omits the row.
@@ -164,7 +171,17 @@ export function useAdminDraftCollection<T extends object>(keyOf: (row: T) => Key
     base.delete(id);
     commit({ items: previous.items.filter((row) => key(row) !== id), base });
   }, [commit, key, current]);
+  /** Explicit discard/reload only; typing after confirmation still wins. */
+  const replace = useCallback((saved: T, expected: T) => {
+    const previous = current.current, id = key(saved);
+    const local = previous.items.find((row) => key(row) === id);
+    if (!local || !sameDraftValue(local, expected)) return false;
+    const base = new Map(previous.base);
+    base.set(id, saved);
+    commit({ items: previous.items.map((row) => key(row) === id ? saved : row), base });
+    return true;
+  }, [commit, key, current]);
   const baseline = useCallback((id: Key) => current.current.base.get(id), [current]);
   const dirtyKeys = new Set(state.items.filter((row) => !sameDraftValue(row, state.base.get(key(row)))).map(key));
-  return { items: state.items, hydrate, update, accept, remove, baseline, dirtyKeys };
+  return { items: state.items, hydrate, update, accept, replace, remove, baseline, dirtyKeys };
 }

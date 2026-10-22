@@ -1,10 +1,12 @@
 import type { HeroSlide } from '@/entities/site/model/defaultSlides';
 
+import { parseRecordRevision, RecordVersionConflictError } from '../recordVersion';
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
 
 type SlideRow = {
   id: string | number;
+  revision: string;
   title: string;
   image_url: string;
   tablet_image_url: string | null;
@@ -22,6 +24,7 @@ type SlideRow = {
 function mapSlide(row: SlideRow): HeroSlide {
   return {
     id: Number(row.id),
+    revision: row.revision,
     title: row.title,
     imageUrl: row.image_url,
     tabletImageUrl: row.tablet_image_url,
@@ -40,7 +43,7 @@ function mapSlide(row: SlideRow): HeroSlide {
 export async function getHeroSlides({ activeOnly = false } = {}) {
   await ensureSiteSchema();
   const result = await query<SlideRow>(
-    `select id, title, image_url, tablet_image_url, mobile_image_url,
+    `select id, revision::text, title, image_url, tablet_image_url, mobile_image_url,
             popup_image_url, popup_tablet_image_url, popup_mobile_image_url, popup_title, popup_text,
             link_url, sort_order, is_active
      from hero_slides
@@ -78,18 +81,24 @@ export async function createHeroSlide(slide: Omit<HeroSlide, 'id'>) {
   return Number(result.rows[0].id);
 }
 
-export async function updateHeroSlide(id: number, slide: Partial<Omit<HeroSlide, 'id'>>) {
+export async function updateHeroSlide(id: number, slide: Partial<Omit<HeroSlide, 'id'>>, expectedRevision: string) {
+  const revision = parseRecordRevision(expectedRevision);
+  if (!revision) throw new RecordVersionConflictError();
   await ensureSiteSchema();
   if (Object.keys(slide).length === 1 && typeof slide.sortOrder === 'number') {
     // The normal full-save query intentionally clears explicit nullable image
     // fields. An order-only request must never run those assignments.
-    await query(
-      `update hero_slides set sort_order = $2, updated_at = now() where id = $1`,
-      [id, slide.sortOrder],
+    const result = await query<SlideRow>(
+      `update hero_slides set sort_order = $2, updated_at = now() where id = $1 and revision = $3::bigint
+       returning id, revision::text, title, image_url, tablet_image_url, mobile_image_url,
+                 popup_image_url, popup_tablet_image_url, popup_mobile_image_url, popup_title, popup_text,
+                 link_url, sort_order, is_active`,
+      [id, slide.sortOrder, revision],
     );
-    return;
+    if (!result.rows[0]) throw new RecordVersionConflictError();
+    return mapSlide(result.rows[0]);
   }
-  await query(
+  const result = await query<SlideRow>(
     `update hero_slides
      set title = coalesce($2, title),
          image_url = coalesce($3, image_url),
@@ -104,7 +113,10 @@ export async function updateHeroSlide(id: number, slide: Partial<Omit<HeroSlide,
          sort_order = coalesce($12, sort_order),
          is_active = coalesce($13, is_active),
          updated_at = now()
-     where id = $1`,
+     where id = $1 and revision = $14::bigint
+     returning id, revision::text, title, image_url, tablet_image_url, mobile_image_url,
+               popup_image_url, popup_tablet_image_url, popup_mobile_image_url, popup_title, popup_text,
+               link_url, sort_order, is_active`,
     [
       id,
       slide.title ?? null,
@@ -119,8 +131,11 @@ export async function updateHeroSlide(id: number, slide: Partial<Omit<HeroSlide,
       slide.linkUrl ?? null,
       slide.sortOrder ?? null,
       slide.isActive ?? null,
+      revision,
     ],
   );
+  if (!result.rows[0]) throw new RecordVersionConflictError();
+  return mapSlide(result.rows[0]);
 }
 
 export async function deleteHeroSlide(id: number) {

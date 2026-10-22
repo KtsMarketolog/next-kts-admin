@@ -6,6 +6,7 @@ import styles from '@/app/admin/admin.module.scss';
 import { News } from '@/features/admin/types';
 import { AdminImagePicker } from '@/features/admin/shared/AdminImagePicker';
 import { AdminOrderList } from '@/features/admin/shared/AdminOrderList';
+import { AdminContentConflict } from '@/features/admin/shared/AdminContentConflict';
 
 type AdminNewsSectionProps = {
   news: News[];
@@ -21,6 +22,8 @@ type AdminNewsSectionProps = {
   moveNews: (draggedId: number, targetId: number) => Promise<void>;
   createNews: () => Promise<void>;
   saveNews: (item: News) => Promise<void>;
+  conflictIds: Set<number>;
+  reloadNews: (id: number) => Promise<void>;
   deleteNews: (id: number) => Promise<void>;
   uploadImage: (file: File) => Promise<string>;
   showStatus: (message: string) => void;
@@ -40,6 +43,8 @@ export function AdminNewsSection({
   moveNews,
   createNews,
   saveNews,
+  conflictIds,
+  reloadNews,
   deleteNews,
   uploadImage,
   showStatus,
@@ -162,6 +167,7 @@ export function AdminNewsSection({
                   Удалить
                 </button>
               </div>
+              <AdminContentConflict visible={conflictIds.has(item.id)} busy={busy} onReload={() => reloadNews(item.id)} />
             </div>
           </article>
         ))}

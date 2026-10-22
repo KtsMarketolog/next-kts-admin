@@ -2,7 +2,8 @@
 
 import { useCallback, useState } from 'react';
 
-import { readSavedContentItem } from '@/features/admin/model/adminContentRead';
+import { readContentMutationItem, readSavedContentItem } from '@/features/admin/model/adminContentRead';
+import { useAdminContentRevision } from '@/features/admin/model/useAdminContentRevision';
 import { emptyBrand, emptyBrandCategory } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
 import { readConfirmedOrder, reorderByDrop, reorderRequest } from '@/features/admin/model/reorder';
@@ -19,6 +20,8 @@ export function useAdminBrandPortfolio(options: AdminCrudHookOptions) {
   const perform = useAdminContentAction(options);
   const categories = useAdminDraftCollection<BrandCategory>(categoryKey, options.draftScope && `${options.draftScope}:brand-categories`);
   const brandItems = useAdminDraftCollection<Brand>(brandKey, options.draftScope && `${options.draftScope}:brands`);
+  const categoryRevision = useAdminContentRevision(categories, options, portfolioEndpoint, 'categories');
+  const brandRevision = useAdminContentRevision(brandItems, options, portfolioEndpoint, 'brands');
   const categoryDraft = useAdminDraft(emptyBrandCategory, options.draftScope && `${options.draftScope}:new-brand-category`);
   const newBrandDraft = useAdminDraft(emptyBrand, options.draftScope && `${options.draftScope}:new-brand`);
   const brandCategories = [...categories.items].sort((left, right) => left.sortOrder - right.sortOrder);
@@ -99,10 +102,12 @@ export function useAdminBrandPortfolio(options: AdminCrudHookOptions) {
       } }],
       success: 'Категория брендов сохранена',
       failure: 'Не удалось сохранить категорию брендов',
-      onSaved: async (_responses, signal) => {
-        const saved = await readSavedContentItem<BrandCategory>(portfolioEndpoint, 'categories', (item) => item.id === submitted.id, signal);
+      onConflict: () => categoryRevision.flag(submitted.id),
+      onSaved: async (responses, signal) => {
+        const saved = await readContentMutationItem<BrandCategory>(responses[0], submitted.id);
         if (signal.aborted) return;
         categories.accept(submitted, saved);
+        categoryRevision.clear(submitted.id);
         setSavedBrandCategoryId(submitted.id);
         window.setTimeout(() => setSavedBrandCategoryId((current) => (current === submitted.id ? null : current)), 2000);
       },
@@ -161,10 +166,12 @@ export function useAdminBrandPortfolio(options: AdminCrudHookOptions) {
       } }],
       success: 'Бренд сохранен',
       failure: 'Не удалось сохранить бренд',
-      onSaved: async (_responses, signal) => {
-        const saved = await readSavedContentItem<Brand>(portfolioEndpoint, 'brands', (item) => item.id === submitted.id, signal);
+      onConflict: () => brandRevision.flag(submitted.id),
+      onSaved: async (responses, signal) => {
+        const saved = await readContentMutationItem<Brand>(responses[0], submitted.id);
         if (signal.aborted) return;
         brandItems.accept(submitted, saved);
+        brandRevision.clear(submitted.id);
         setSavedBrandId(submitted.id);
         window.setTimeout(() => setSavedBrandId((current) => (current === submitted.id ? null : current)), 2000);
       },
@@ -192,6 +199,10 @@ export function useAdminBrandPortfolio(options: AdminCrudHookOptions) {
     setBrandDraft: newBrandDraft.setValue,
     initializeBrandDraft,
     dirtyCount: categories.dirtyKeys.size + brandItems.dirtyKeys.size + Number(categoryDraft.dirty) + Number(newBrandDraft.dirty),
+    categoryConflictIds: categoryRevision.conflicts,
+    brandConflictIds: brandRevision.conflicts,
+    reloadBrandCategory: categoryRevision.reload,
+    reloadBrand: brandRevision.reload,
     draggedBrandCategoryId,
     setDraggedBrandCategoryId,
     savedBrandCategoryId,

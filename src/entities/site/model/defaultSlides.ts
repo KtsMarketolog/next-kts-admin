@@ -1,5 +1,6 @@
 export type HeroSlide = {
   id: number;
+  revision?: string;
   title: string;
   imageUrl: string;
   tabletImageUrl: string | null;

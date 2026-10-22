@@ -6,6 +6,7 @@ import styles from '@/app/admin/admin.module.scss';
 import { GroupCompany } from '@/features/admin/types';
 import { AdminImagePicker } from '@/features/admin/shared/AdminImagePicker';
 import { AdminOrderList } from '@/features/admin/shared/AdminOrderList';
+import { AdminContentConflict } from '@/features/admin/shared/AdminContentConflict';
 
 type AdminGroupCompaniesSectionProps = {
   groupCompanies: GroupCompany[];
@@ -21,6 +22,8 @@ type AdminGroupCompaniesSectionProps = {
   moveGroupCompany: (draggedId: number, targetId: number) => Promise<void>;
   createGroupCompany: () => Promise<void>;
   saveGroupCompany: (company: GroupCompany) => Promise<void>;
+  conflictIds: Set<number>;
+  reloadGroupCompany: (id: number) => Promise<void>;
   deleteGroupCompany: (id: number) => Promise<void>;
   uploadImage: (file: File) => Promise<string>;
   showStatus: (message: string) => void;
@@ -40,6 +43,8 @@ export function AdminGroupCompaniesSection({
   moveGroupCompany,
   createGroupCompany,
   saveGroupCompany,
+  conflictIds,
+  reloadGroupCompany,
   deleteGroupCompany,
   uploadImage,
   showStatus,
@@ -146,6 +151,7 @@ export function AdminGroupCompaniesSection({
                   Удалить
                 </button>
               </div>
+              <AdminContentConflict visible={conflictIds.has(company.id)} busy={busy} onReload={() => reloadGroupCompany(company.id)} />
             </div>
           </article>
         ))}

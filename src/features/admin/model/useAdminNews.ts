@@ -6,7 +6,8 @@ import { emptyNews } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
 import { readConfirmedOrder, reorderByDrop, reorderRequest } from '@/features/admin/model/reorder';
 import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
-import { readSavedContentItem } from '@/features/admin/model/adminContentRead';
+import { readContentMutationItem, readSavedContentItem } from '@/features/admin/model/adminContentRead';
+import { useAdminContentRevision } from '@/features/admin/model/useAdminContentRevision';
 import { useAdminDraft, useAdminDraftCollection } from '@/features/admin/model/useAdminDraftState';
 import type { News } from '@/features/admin/types';
 
@@ -16,6 +17,7 @@ export function useAdminNews(options: AdminCrudHookOptions) {
   const { showStatus } = options;
   const perform = useAdminContentAction(options);
   const collection = useAdminDraftCollection(newsKey, options.draftScope && `${options.draftScope}:news`);
+  const revision = useAdminContentRevision(collection, options, '/api/admin/news', 'news');
   const creation = useAdminDraft(emptyNews, options.draftScope && `${options.draftScope}:new-news`);
   const news = useMemo(() => [...collection.items].sort((a, b) => a.sortOrder - b.sortOrder), [collection.items]);
   const newsDraft = creation.value;
@@ -76,10 +78,11 @@ export function useAdminNews(options: AdminCrudHookOptions) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(item),
-    } }], success: 'Новость сохранена', failure: 'Не удалось сохранить новость', onSaved: async (_responses, signal) => {
-      const saved = await readSavedContentItem<News>('/api/admin/news', 'news', (row) => row.id === item.id, signal);
+    } }], success: 'Новость сохранена', failure: 'Не удалось сохранить новость', onConflict: () => revision.flag(item.id), onSaved: async (responses, signal) => {
+      const saved = await readContentMutationItem<News>(responses[0], item.id);
       signal.throwIfAborted();
       collection.accept(item, saved);
+      revision.clear(item.id);
       setSavedNewsId(item.id);
       window.setTimeout(() => {
         setSavedNewsId((current) => (current === item.id ? null : current));
@@ -101,6 +104,8 @@ export function useAdminNews(options: AdminCrudHookOptions) {
     setNewsDraft: creation.setValue,
     dirtyCount: collection.dirtyKeys.size + Number(creation.dirty),
     dirtyKeys: collection.dirtyKeys,
+    conflictIds: revision.conflicts,
+    reloadNews: revision.reload,
     nextNewsOrder,
     draggedNewsId,
     setDraggedNewsId,

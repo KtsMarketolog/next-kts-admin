@@ -79,9 +79,9 @@ async function main() {
             assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isEnabled(), true);
             assert.equal(await page.getByLabel('Draft').inputValue(), 'Keep my draft');
             const calls = await page.evaluate(() => (window as unknown as { calls: Array<{ url: string; method: string }> }).calls);
-            assert.equal(calls.length, mode === 'refresh-fail' ? 2 : 1);
+            assert.equal(calls.length, mode === 'refresh-fail' && kind === 'priceGroups' ? 2 : 1);
             assert.equal(calls.filter((call: { method: string }) => call.method !== 'GET').length, 1, 'no duplicate write or automatic mutation retry');
-            assert.equal(calls.filter((call: { method: string }) => call.method === 'GET').length, mode === 'refresh-fail' ? 1 : 0);
+            assert.equal(calls.filter((call: { method: string }) => call.method === 'GET').length, mode === 'refresh-fail' && kind === 'priceGroups' ? 1 : 0);
             assert.equal(await page.evaluate(() => (window as unknown as { reloads: number }).reloads), 0, 'no cross-section reload');
             if (mode.endsWith('hang')) assert.equal(await page.evaluate(() => (window as unknown as { signals: AbortSignal[] }).signals[0].aborted), true);
             await page.close(); tested++;

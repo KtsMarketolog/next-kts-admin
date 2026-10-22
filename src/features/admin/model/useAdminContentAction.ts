@@ -9,9 +9,11 @@ import { adminRequest, runWithRequestTimeout } from '@/features/admin/shared/adm
 type ContentRequest = { url: string; init: RequestInit };
 type ContentAction = {
   requests: [ContentRequest];
+  mutation?: boolean;
   success: string;
   failure: string;
   onSaved?: (responses: Response[], signal: AbortSignal) => void | string | Promise<void | string>;
+  onConflict?: () => void;
 };
 
 /** One mutation request per action; multi-row operations must be atomic on the server. */
@@ -29,7 +31,7 @@ export function useAdminContentAction({ setBusy, showStatus, actionLock }: Admin
     };
   }, []);
 
-  return async ({ requests, success, failure, onSaved }: ContentAction) => {
+  return async ({ requests, mutation = true, success, failure, onSaved, onConflict }: ContentAction) => {
     if (lock.current || !mounted.current) return false;
     lock.current = true;
     const controller = new AbortController();
@@ -38,15 +40,23 @@ export function useAdminContentAction({ setBusy, showStatus, actionLock }: Admin
     let confirmed = false;
     try {
       const { url, init } = requests[0];
-      const response = await adminRequest(url, { ...init, signal: controller.signal }, { mutation: true });
+      const response = await adminRequest(url, { ...init, signal: controller.signal }, { mutation });
       if (!mounted.current || controller.signal.aborted) return false;
       if (!response.ok) {
         const data = await response.json().catch(() => null);
+        if (response.status === 409 || response.status === 428) onConflict?.();
         showStatus(typeof data?.error === 'string' ? data.error : failure);
         return false;
       }
-      confirmed = true;
-      const message = onSaved ? await runWithRequestTimeout((signal) => Promise.resolve(onSaved([response], signal)), { signal: controller.signal }) : undefined;
+      confirmed = mutation;
+      const message = await runWithRequestTimeout(async (signal) => {
+        const acknowledgement = mutation ? await response.clone().json().catch(() => null) : null;
+        signal.throwIfAborted();
+        const detail = onSaved ? await onSaved([response], signal) : undefined;
+        const warnings = Array.isArray(acknowledgement?.warnings)
+          ? acknowledgement.warnings.filter((warning: unknown): warning is string => typeof warning === 'string') : [];
+        return warnings.length ? `${detail || success}. ${warnings.join(' ')}` : detail;
+      }, { signal: controller.signal });
       if (mounted.current) showStatus(message || success);
       return true;
     } catch (error) {

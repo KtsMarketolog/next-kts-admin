@@ -32,7 +32,7 @@ window.fetch=async(url,init={})=>{
  if(endpoint==='logout')return Response.json({ok:true});
  const key=endpoint==='slides'?'slides':'news';
  window.data[endpoint][key]=window.data[endpoint][key].map(row=>row.id===id?{...row,...body,title:body.title.trim()}:row);
- return Response.json({ok:true});
+ return Response.json({ok:true,item:{...window.data[endpoint][key].find(row=>row.id===id),revision:'2'}});
 };
 const start=location.href;history.replaceState({},'', '/outside');history.pushState({},'',start);
 function RoutedApp(){
@@ -172,8 +172,8 @@ async function main() {
             assert.equal(await page.evaluate('window.confirms.length'), 0, 'section changes keep drafts and need no discard prompt');
             assert.equal(await page.getByRole('button', { name: /^Слайдер/ }).getByText('Не сохранено: 1').count(), 1);
             const calls = await page.evaluate('window.calls') as Call[];
-            assert.equal(calls.length, 8, 'section navigation never reruns all initial GETs');
-            assert.deepEqual(calls.slice(6).map((call) => [call.method, call.url]), [['PUT', '/api/admin/news/1'], ['GET', '/api/admin/news']]);
+            assert.equal(calls.length, 7, 'section navigation never reruns all initial GETs');
+            assert.deepEqual(calls.slice(6).map((call) => [call.method, call.url]), [['PUT', '/api/admin/news/1']]);
             assert.equal(new URL(page.url()).searchParams.get('section'), 'slider');
           } else if (['history-drafts', 'logout-clears', 'user-isolation', 'ssr-clean'].includes(scenario)) {
             await page.getByLabel('Email', { exact: true }).fill('Private unsaved email');

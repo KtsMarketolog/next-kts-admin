@@ -5,6 +5,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import styles from '@/app/admin/admin.module.scss';
 import { Slide } from '@/features/admin/types';
 import { AdminOrderList } from '@/features/admin/shared/AdminOrderList';
+import { AdminContentConflict } from '@/features/admin/shared/AdminContentConflict';
 import { AdminResponsiveImages } from '@/features/admin/shared/AdminResponsiveImages';
 import {
   formatFileSize,
@@ -27,6 +28,8 @@ type AdminSliderSectionProps = {
   moveSlide: (draggedId: number, targetId: number) => Promise<void>;
   createSlide: () => Promise<void>;
   saveSlide: (slide: Slide) => Promise<void>;
+  conflictIds: Set<number>;
+  reloadSlide: (id: number) => Promise<void>;
   deleteSlide: (id: number) => Promise<void>;
   uploadImage: (file: File) => Promise<string>;
   showStatus: (message: string) => void;
@@ -45,6 +48,8 @@ export function AdminSliderSection({
   moveSlide,
   createSlide,
   saveSlide,
+  conflictIds,
+  reloadSlide,
   deleteSlide,
   uploadImage,
   showStatus,
@@ -273,6 +278,7 @@ export function AdminSliderSection({
               <button className={styles.danger} disabled={busy} onClick={() => deleteSlide(slide.id)}>
                 Удалить
               </button>
+              <AdminContentConflict visible={conflictIds.has(slide.id)} busy={busy} onReload={() => reloadSlide(slide.id)} />
             </div>
           </article>
         ))}

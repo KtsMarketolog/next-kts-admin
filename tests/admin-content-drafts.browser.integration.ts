@@ -21,7 +21,8 @@ const config={
  news:{endpoint:'news',key:'news',rows:'news',hydrate:'setNews',draft:'newsDraft',setDraft:'setNewsDraft',field:'title',update:'updateNews',save:'saveNews',create:'createNews',remove:'deleteNews',move:'moveNews'},
  companies:{endpoint:'group-companies',key:'companies',rows:'groupCompanies',hydrate:'setGroupCompanies',draft:'groupCompanyDraft',setDraft:'setGroupCompanyDraft',field:'linkUrl',update:'updateGroupCompany',save:'saveGroupCompany',create:'createGroupCompany',remove:'deleteGroupCompany',move:'moveGroupCompany'},
 };
-const base={title:'Original',date:'2026-10-18',imageUrl:'/fixture.png',linkUrl:'Original',tabletImageUrl:null,mobileImageUrl:null,popupImageUrl:null,popupTabletImageUrl:null,popupMobileImageUrl:null,popupTitle:null,popupText:null,isActive:true};
+const reloadNames={slides:'reloadSlide',news:'reloadNews',companies:'reloadGroupCompany'};
+const base={revision:'1',title:'Original',date:'2026-10-18',imageUrl:'/fixture.png',linkUrl:'Original',tabletImageUrl:null,mobileImageUrl:null,popupImageUrl:null,popupTabletImageUrl:null,popupMobileImageUrl:null,popupTitle:null,popupText:null,isActive:true};
 window.calls=[];window.reloads=0;window.server={slides:[{...base,id:1,sortOrder:1},{...base,id:2,sortOrder:2}],news:[{...base,id:1,sortOrder:1},{...base,id:2,sortOrder:2}],companies:[{...base,id:1,sortOrder:1},{...base,id:2,sortOrder:2}]};
 window.confirm=()=>true;
 window.fetch=async(url,init={})=>{
@@ -29,6 +30,7 @@ window.fetch=async(url,init={})=>{
  const body=init.body?JSON.parse(init.body):null;window.calls.push({url,method,body});
  if(method==='GET'){
   if(window.failRead)throw new TypeError('Read offline');
+  if(window.pauseRead)await new Promise(resolve=>window.resumeRead=resolve);
   return Response.json({[config[selected].key]:window.server[selected]});
  }
  if(window.defer)await new Promise(resolve=>window.resume=resolve);
@@ -44,7 +46,9 @@ window.fetch=async(url,init={})=>{
  if(method==='DELETE'){window.server[selected]=window.server[selected].filter(row=>row.id!==id);return Response.json({ok:true});}
  const normalized=Object.fromEntries(Object.entries(body).map(([key,value])=>[key,typeof value==='string'?value.trim():value]));
  if(method==='POST'){window.server[selected].push({...normalized,id:3});return Response.json({id:3});}
- window.server[selected]=window.server[selected].map(row=>row.id===id?{...row,...normalized}:row);return Response.json({ok:true});
+ if(window.server[selected].find(row=>row.id===id).revision!==body.revision)return Response.json({error:'Данные уже изменены другим пользователем'}, {status:409});
+ window.server[selected]=window.server[selected].map(row=>row.id===id?{...row,...normalized,revision:String(Number(row.revision)+1)}:row);
+ return Response.json({ok:true,item:window.server[selected].find(row=>row.id===id)});
 };
 function App(){
  const[busy,setBusy]=useState(false),[message,showStatus]=useState(''),lock=useRef(false);
@@ -60,6 +64,7 @@ function App(){
   <input aria-label="New draft" value={draft[settings.field]} onChange={event=>form[settings.setDraft]({...draft,[settings.field]:event.target.value,imageUrl:'/draft.png',title:settings.field==='title'?event.target.value:'New company'})}/>
   <input aria-label="Other section" value={cross[crossConfig.rows][0]?.[crossConfig.field]||''} onChange={event=>cross[crossConfig.update](1,{[crossConfig.field]:event.target.value})}/>
   <button disabled={busy} onClick={()=>void form[settings.save](rows.find(row=>row.id===1))}>Save one</button>
+  {form.conflictIds.has(1)&&<button disabled={busy} onClick={()=>void form[reloadNames[kind]](1)}>Reload conflicting row</button>}
   <button disabled={busy} onClick={()=>void form[settings.create]()}>Create</button>
   <button disabled={busy} onClick={()=>void form[settings.remove](1)}>Delete one</button>
   <button disabled={busy} onClick={()=>{void form[settings.move](1,2);void form[settings.move](1,2);}}>Move</button>
@@ -69,7 +74,7 @@ function App(){
 createRoot(document.getElementById('root')).render(<App/>);
 `;
 
-type Row = { id: number; sortOrder: number; title: string; linkUrl: string };
+type Row = { id: number; revision: string; isActive: boolean; sortOrder: number; title: string; linkUrl: string };
 type DraftState = Record<string, { rows: Row[]; draft: Record<string, unknown>; dirtyCount: number }>;
 
 async function main() {
@@ -105,7 +110,7 @@ async function main() {
       try {
         for (const kind of ['slides', 'news', 'companies']) {
           const field = kind === 'companies' ? 'linkUrl' : 'title';
-          for (const scenario of ['save', 'typing-during-save', 'create', 'delete', 'reorder', 'rejected-reorder', 'conflict-reorder', 'network-reorder', 'timeout-reorder', 'malformed-reorder', 'duplicate-reorder', 'late-reorder', 'warning-reorder', 'read-fails']) {
+          for (const scenario of ['save', 'typing-during-save', 'create', 'delete', 'reorder', 'rejected-reorder', 'conflict-reorder', 'network-reorder', 'timeout-reorder', 'malformed-reorder', 'duplicate-reorder', 'late-reorder', 'warning-reorder', 'read-fails', 'save-conflict', 'reload-conflict', 'cancel-reload', 'late-reload']) {
             const page = await browser.newPage();
             await page.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
             await page.goto(`${origin}/?kind=${kind}`);
@@ -117,6 +122,13 @@ async function main() {
             if (scenario === 'typing-during-save' || scenario === 'create' || scenario === 'late-reorder') await page.evaluate('window.defer=true');
             if (scenario.endsWith('-reorder')) await page.evaluate((mode: string) => { (window as any).orderFailure = mode; }, scenario.split('-')[0]);
             if (scenario === 'read-fails') await page.evaluate('window.failRead=true');
+            const conflict = ['save-conflict', 'reload-conflict', 'cancel-reload', 'late-reload'].includes(scenario);
+            if (conflict) await page.evaluate((name: string) => {
+              const w = window as any;
+              w.server[name][0] = { ...w.server[name][0], revision: '2', isActive: false };
+              // A fresh background read must not silently advance this dirty form.
+              w.forms[name][w.config[name].hydrate](structuredClone(w.server[name]));
+            }, kind);
             const button = scenario === 'create' ? 'Create' : scenario === 'delete' ? 'Delete one' : scenario.includes('reorder') ? 'Move' : 'Save one';
             await page.getByRole('button', { name: button, exact: true }).click();
             if (scenario === 'typing-during-save' || scenario === 'create' || scenario === 'late-reorder') {
@@ -126,6 +138,21 @@ async function main() {
               await page.evaluate('window.defer=false;window.resume()');
             }
             await page.waitForFunction('JSON.parse(document.getElementById("state").textContent).busy === false && document.querySelector("[role=status]").textContent.length > 0');
+            if (conflict) {
+              assert.match(await page.getByRole('status').textContent(), /уже изменены/);
+              assert.equal(await page.getByLabel('Row 1', { exact: true }).inputValue(), ' Saved A ');
+              if (scenario !== 'save-conflict') {
+                if (scenario === 'cancel-reload') await page.evaluate('window.confirm=()=>false');
+                if (scenario === 'late-reload') await page.evaluate('window.pauseRead=true');
+                await page.getByRole('button', { name: 'Reload conflicting row', exact: true }).click();
+                if (scenario === 'late-reload') {
+                  await page.waitForFunction('typeof window.resumeRead === "function"');
+                  await page.getByLabel('Row 1', { exact: true }).fill('Typed during reload');
+                  await page.evaluate('window.resumeRead()');
+                }
+                await page.waitForFunction('JSON.parse(document.getElementById("state").textContent).busy === false');
+              }
+            }
             const state = JSON.parse(await page.locator('#state').textContent()) as DraftState;
             const rows = state[kind].rows;
             const cross = kind === 'slides' ? 'news' : 'slides';
@@ -146,6 +173,15 @@ async function main() {
               if (scenario === 'warning-reorder') assert.match(await page.getByRole('status').textContent(), /Cache refresh pending/);
               if (['malformed-reorder', 'duplicate-reorder'].includes(scenario)) assert.match(await page.getByRole('status').textContent(), /не подтвердил/);
               if (['network-reorder', 'timeout-reorder'].includes(scenario)) assert.match(await page.getByRole('status').textContent(), /могло сохраниться/);
+            } else if (conflict) {
+              const row = rows.find((item) => item.id === 1)!;
+              const refreshed = scenario === 'reload-conflict';
+              assert.equal(row[field], refreshed ? 'Original' : scenario === 'late-reload' ? 'Typed during reload' : ' Saved A ');
+              assert.equal(row.revision, refreshed ? '2' : '1');
+              assert.equal(row.isActive, !refreshed);
+              assert.equal(calls.filter((call) => call.method === 'PUT').length, 1, 'no automatic overwrite retry');
+              assert.equal(calls.filter((call) => call.method === 'GET').length, ['reload-conflict', 'late-reload'].includes(scenario) ? 1 : 0);
+              assert.equal(state[kind].dirtyCount, refreshed ? 2 : 3);
             } else if (scenario === 'create') {
               assert.equal(rows.find((row) => row.id === 3)?.[field], 'Keep new');
               assert.equal(state[kind].draft[field], 'Newer typing');
@@ -154,14 +190,10 @@ async function main() {
             } else if (scenario === 'delete') {
               assert.equal(rows.some((row) => row.id === 1), false);
               assert.equal(calls.length, 1, 'delete does not reload any list');
-            } else if (scenario === 'read-fails') {
-              assert.equal(rows.find((row) => row.id === 1)?.[field], ' Saved A ');
-              assert.match(await page.getByRole('status').textContent(), /Изменения уже сохранены/);
-              assert.equal(state[kind].dirtyCount, 3);
             } else {
               assert.equal(rows.find((row) => row.id === 1)?.[field], scenario === 'typing-during-save' ? 'Newer typing' : 'Saved A');
               assert.equal(state[kind].dirtyCount, scenario === 'typing-during-save' ? 3 : 2);
-              assert.equal(calls.length, 2, 'one mutation and one scoped read');
+              assert.equal(calls.length, 1, 'mutation response acknowledges the exact saved version without another read');
               assert.ok(calls.every((call) => call.url.startsWith(`/api/admin/${kind === 'companies' ? 'group-companies' : kind}`)));
             }
             if (scenario !== 'create') assert.equal(state[kind].draft[field], 'Keep new');

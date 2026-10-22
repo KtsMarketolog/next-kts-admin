@@ -1,5 +1,6 @@
 export type NewsItem = {
   id?: number;
+  revision?: string;
   date: string;
   title: string;
   imageUrl: string;

@@ -6,6 +6,7 @@ import styles from '@/app/admin/admin.module.scss';
 import { Brand, BrandCategory } from '@/features/admin/types';
 import { AdminImagePicker } from '@/features/admin/shared/AdminImagePicker';
 import { AdminOrderList } from '@/features/admin/shared/AdminOrderList';
+import { AdminContentConflict } from '@/features/admin/shared/AdminContentConflict';
 import {
   BRAND_LOGO_SIZE_PENDING,
   formatFileSize,
@@ -29,6 +30,10 @@ type AdminBrandPortfolioSectionProps = {
   moveBrandCategory: (draggedId: number, targetId: number) => Promise<void>;
   createBrandCategoryItem: () => Promise<void>;
   saveBrandCategory: (category: BrandCategory) => Promise<void>;
+  categoryConflictIds: Set<number>;
+  reloadBrandCategory: (id: number) => Promise<void>;
+  brandConflictIds: Set<number>;
+  reloadBrand: (id: number) => Promise<void>;
   deleteBrandCategoryItem: (id: number) => Promise<void>;
   updateBrand: (id: number, patch: Partial<Brand>) => void;
   createBrand: () => Promise<void>;
@@ -57,6 +62,10 @@ export function AdminBrandPortfolioSection({
   moveBrandCategory,
   createBrandCategoryItem,
   saveBrandCategory,
+  categoryConflictIds,
+  reloadBrandCategory,
+  brandConflictIds,
+  reloadBrand,
   deleteBrandCategoryItem,
   updateBrand,
   createBrand,
@@ -171,6 +180,7 @@ export function AdminBrandPortfolioSection({
               <button className={styles.danger} disabled={busy} onClick={() => deleteBrandCategoryItem(category.id)}>
                 Удалить
               </button>
+              <AdminContentConflict visible={categoryConflictIds.has(category.id)} busy={busy} onReload={() => reloadBrandCategory(category.id)} />
             </div>
           ))}
         </div>
@@ -296,6 +306,7 @@ export function AdminBrandPortfolioSection({
                     Удалить
                   </button>
                 </div>
+                <AdminContentConflict visible={brandConflictIds.has(brand.id)} busy={busy} onReload={() => reloadBrand(brand.id)} />
               </div>
             </article>
           ))}

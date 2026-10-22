@@ -6,7 +6,8 @@ import { emptySlide } from '@/features/admin/model/defaults';
 import type { AdminCrudHookOptions } from '@/features/admin/model/hookTypes';
 import { readConfirmedOrder, reorderByDrop, reorderRequest } from '@/features/admin/model/reorder';
 import { useAdminContentAction } from '@/features/admin/model/useAdminContentAction';
-import { readSavedContentItem } from '@/features/admin/model/adminContentRead';
+import { readContentMutationItem, readSavedContentItem } from '@/features/admin/model/adminContentRead';
+import { useAdminContentRevision } from '@/features/admin/model/useAdminContentRevision';
 import { useAdminDraft, useAdminDraftCollection } from '@/features/admin/model/useAdminDraftState';
 import type { Slide } from '@/features/admin/types';
 
@@ -16,6 +17,7 @@ export function useAdminSlides(options: AdminCrudHookOptions) {
   const { showStatus } = options;
   const perform = useAdminContentAction(options);
   const collection = useAdminDraftCollection(slideKey, options.draftScope && `${options.draftScope}:slides`);
+  const revision = useAdminContentRevision(collection, options, '/api/admin/slides', 'slides');
   const creation = useAdminDraft(emptySlide, options.draftScope && `${options.draftScope}:new-slide`);
   const slides = useMemo(() => [...collection.items].sort((a, b) => a.sortOrder - b.sortOrder), [collection.items]);
   const draft = creation.value;
@@ -33,10 +35,11 @@ export function useAdminSlides(options: AdminCrudHookOptions) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(slide),
-    } }], success: 'Слайд сохранен', failure: 'Не удалось сохранить слайд', onSaved: async (_responses, signal) => {
-      const saved = await readSavedContentItem<Slide>('/api/admin/slides', 'slides', (item) => item.id === slide.id, signal);
+    } }], success: 'Слайд сохранен', failure: 'Не удалось сохранить слайд', onConflict: () => revision.flag(slide.id), onSaved: async (responses, signal) => {
+      const saved = await readContentMutationItem<Slide>(responses[0], slide.id);
       signal.throwIfAborted();
       collection.accept(slide, saved);
+      revision.clear(slide.id);
       setSavedSlideId(slide.id);
       window.setTimeout(() => {
         setSavedSlideId((current) => (current === slide.id ? null : current));
@@ -98,6 +101,8 @@ export function useAdminSlides(options: AdminCrudHookOptions) {
     setDraft: creation.setValue,
     dirtyCount: collection.dirtyKeys.size + Number(creation.dirty),
     dirtyKeys: collection.dirtyKeys,
+    conflictIds: revision.conflicts,
+    reloadSlide: revision.reload,
     nextSlideOrder,
     savedSlideId,
     draggedSlideId,
