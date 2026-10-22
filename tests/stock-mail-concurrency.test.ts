@@ -369,6 +369,40 @@ test('an actually invalid workbook retains existing ImportErrors behavior and re
   assert.equal(h.state.updates, 0);
 });
 
+test('a compact email workbook truncated before its later warehouse cannot save partial stock or a receipt', async () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['Артикул', 'Сейчас'], ['ЛДМ 2'], ['SYNTHETIC-SKU', 3],
+  ]);
+  XLSX.utils.sheet_add_aoa(sheet, [['1Основной склад Волжск'], ['SYNTHETIC-SKU', 8]], { origin: 'A59999' });
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, 'Synthetic');
+  const buffer = Buffer.from(XLSX.write(book, { type: 'buffer', bookType: 'xlsx', compression: true }));
+  assert.ok(buffer.byteLength < 15 * 1024, 'sparse attachment is small despite containing a warehouse at row 60000');
+  const fullSheet = XLSX.read(buffer, { type: 'buffer' }).Sheets.Synthetic;
+  assert.equal(fullSheet.B3.v, 3);
+  assert.equal(fullSheet.B60000.v, 8, 'the second warehouse exists in the actual attachment');
+
+  const h = await harness({ messages: [{ uid: 100, buffer: workbook() }, { uid: 101, buffer }] });
+  await assert.rejects(h.first.importStockFromEmail(), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /обрезан при чтении/);
+    assert.match(error.message, /Остатки не изменены/);
+    return true;
+  });
+  assert.equal(h.state.updates, 0);
+  assert.equal(h.logs.size, 0);
+  assert.equal(h.receipts.size, 0);
+  assert.deepEqual(h.events.filter((event) => ['write', 'log', 'receipt'].includes(event)), [], 'validation must reject before attempting to save');
+  assert.deepEqual(h.moves, [{ uid: 101, folder: 'ImportErrors' }]);
+  assert.deepEqual(h.flags, []);
+  assert.ok(h.messages.has(100), 'older mail must not be archived after an invalid newest snapshot');
+  assert.equal(h.state.sessionHeld, false);
+  assert.equal(h.state.legacyHeld, false);
+  assert.equal(h.state.sessionReleases, 1);
+  assert.equal(h.state.legacyReleases, 1);
+  assert.deepEqual(h.events.slice(-4), ['mailbox-release', 'logout', 'close', 'session-release']);
+});
+
 test('mailbox MOVE fallback and an empty scan both release the common lock', async () => {
   const fallback = await harness({ fail: 'move' });
   assert.equal((await fallback.first.importStockFromEmail()).processed, 1);

@@ -39,6 +39,26 @@ function stock(rows: [string, number][], suffix = 'regular', mailReceiptKeys?: s
   return importStockFromExcelBuffer({ buffer: stockBuffer(rows), fileName: `Synthetic-${suffix}.xlsx`, mailReceiptKeys });
 }
 
+function warehouseStockBuffer(article: string, sparse: boolean) {
+  const book = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['ЛДМ 2'], ['Артикул', 'Сейчас', 'Ед. изм.', 'Ожидается'], [article, 3, 'шт.', 0],
+  ]);
+  XLSX.utils.sheet_add_aoa(sheet, [
+    ['1Основной склад Волжск'], ['Артикул', 'Сейчас', 'Ед. изм.', 'Ожидается'], [article, 8, 'шт.', 0],
+  ], { origin: sparse ? 'A60001' : 'A4' });
+  XLSX.utils.book_append_sheet(book, sheet, 'Synthetic');
+  return Buffer.from(XLSX.write(book, { type: 'buffer', bookType: 'xlsx', compression: true }));
+}
+
+async function stockImportSnapshot() {
+  const tables = ['catalog_products', 'wholesale_products', 'wholesale_price_lists', 'wholesale_price_list_items',
+    'wholesale_price_list_group_stock_settings', 'site_settings', 'stock_import_logs', 'stock_import_mail_receipts'] as const;
+  return Object.fromEntries(await Promise.all(tables.map(async (table) => [table,
+    (await query<{ row: Record<string, unknown> }>(`select row_to_json(t) as row from ${table} t order by row_to_json(t)::text`)).rows.map(({ row }) => row),
+  ] as const)));
+}
+
 async function connected<T>(run: (client: Client) => Promise<T>) {
   const client = new Client({ connectionString: process.env.DATABASE_URL, application_name: 'synthetic-catalog-stock-test' });
   await client.connect();
@@ -122,6 +142,66 @@ test('catalog/stock writes and transaction policy in isolated PostgreSQL', { tim
     assert.deepEqual((await query('select rolsuper,rolcreatedb,rolcreaterole from pg_roles where rolname=current_user')).rows[0], { rolsuper: false, rolcreatedb: false, rolcreaterole: false });
     // Complete actual import schema initialization before introducing lock gates.
     await stock([['SYNTHETIC-WARMUP-NOT-FOUND', 0]], 'warmup');
+
+    await t.test('a small sparse workbook cannot commit a truncated warehouse snapshot or success receipt', async () => {
+      const { first, second, originalPrices } = await fixture('sparse-stock');
+      for (const table of ['catalog_products', 'wholesale_products'] as const) {
+        await query(`update ${table} set stock=30,stock_moscow=20,stock_volzhsk=10,is_expected=true,
+          unit='Preserved unit',stock_updated_at='2026-01-01T00:00:00Z',updated_at='2026-01-01T00:00:00Z'`);
+      }
+      await query(`update wholesale_price_lists set show_stock=false,show_stock_text=true`);
+      await query(`insert into wholesale_price_list_group_stock_settings(price_list_id,price_group,show_stock_numbers,show_stock_text)
+        select id,'Synthetic preserved group',true,false from wholesale_price_lists`);
+      await query(`insert into site_settings(key,value,updated_at)
+        values('synthetic-stock-regression','Preserved setting','2026-01-01T00:00:00Z')`);
+      const before = await stockImportSnapshot();
+      assert.equal(before.catalog_products.filter(({ id }) => id === second.id).length, 1);
+      assert.equal(before.wholesale_products.filter(({ catalog_product_id }) => catalog_product_id === second.id).length, 1);
+      const receiptKey = 'synthetic-sparse-stock-receipt';
+      const buffer = warehouseStockBuffer(first.article, true);
+      assert.ok(buffer.byteLength < 15 * 1024, 'Sparse workbook must be small enough to bypass the byte-size guard');
+      const limitedSheet = XLSX.read(buffer, { type: 'buffer', sheetRows: 50_005 }).Sheets.Synthetic;
+      assert.equal(limitedSheet['!fullref'], 'A1:D60003', 'The late warehouse must actually lie beyond the SheetJS read cap');
+      assert.equal(limitedSheet['!ref'], 'A1:D3', 'The retained prefix alone appears to be an ordinary small sheet');
+
+      await assert.rejects(importStockFromExcelBuffer({
+        buffer, fileName: 'Synthetic-sparse-stock.xlsx', mailReceiptKeys: [receiptKey],
+      }), /обрезан при чтении.*Остатки не изменены/);
+      assert.deepEqual(await stockImportSnapshot(), before,
+        'Rejected truncation must preserve both SKUs, all stock and row timestamps, saved prices and settings, logs and receipts');
+
+      const result = await importStockFromExcelBuffer({
+        buffer: warehouseStockBuffer(first.article, false), fileName: 'Synthetic-repaired-stock.xlsx', mailReceiptKeys: [receiptKey],
+      });
+      assert.equal(result.status, 'success');
+      assert.equal(result.saved, true);
+      assert.equal(result.totalRows, 2);
+      assert.equal(result.updatedRows, 1);
+      assert.equal(result.notFoundRows, 0);
+      assert.equal(result.failedRows, 0);
+      assert.deepEqual(result.errors, []);
+      assert.notEqual(result.alreadyApplied, true, 'Rejected file must not consume the receipt for a repaired import');
+      for (const table of ['catalog_products', 'wholesale_products'] as const) {
+        const productKey = table === 'catalog_products' ? 'id' : 'catalog_product_id';
+        const row = (await query(`select stock,stock_moscow,stock_volzhsk,is_expected,unit,stock_updated_at,updated_at
+          from ${table} where ${productKey}=$1`, [first.id])).rows[0];
+        assert.deepEqual([row.stock, row.stock_moscow, row.stock_volzhsk, row.is_expected, row.unit], [11, 3, 8, false, 'шт.']);
+        assert.ok(row.stock_updated_at > new Date('2026-01-01T00:00:00Z'));
+        assert.ok(row.updated_at > new Date('2026-01-01T00:00:00Z'));
+      }
+      const after = await stockImportSnapshot();
+      assert.deepEqual(after.catalog_products.filter(({ id }) => id === second.id), before.catalog_products.filter(({ id }) => id === second.id));
+      assert.deepEqual(after.wholesale_products.filter(({ catalog_product_id }) => catalog_product_id === second.id),
+        before.wholesale_products.filter(({ catalog_product_id }) => catalog_product_id === second.id));
+      for (const table of ['wholesale_price_lists', 'wholesale_price_list_items', 'wholesale_price_list_group_stock_settings', 'site_settings']) {
+        assert.deepEqual(after[table], before[table], `Successful stock import must preserve ${table}`);
+      }
+      assert.deepEqual(await prices(), originalPrices);
+      assert.equal(after.stock_import_logs.length, before.stock_import_logs.length + 1);
+      assert.equal(after.stock_import_mail_receipts.length, before.stock_import_mail_receipts.length + 1);
+      assert.deepEqual((await query('select status from stock_import_logs where id=$1', [result.logId])).rows, [{ status: 'success' }]);
+      assert.equal((await query('select log_id::integer as log_id from stock_import_mail_receipts where receipt_key=$1', [receiptKey])).rows[0].log_id, result.logId);
+    });
 
     for (const operation of ['edit', 'create', 'delete', 'replace'] as const) {
       await t.test(`${operation}: catalog-first and stock-second serialize, preserving every saved price position`, async () => {

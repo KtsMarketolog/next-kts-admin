@@ -117,6 +117,11 @@ export function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('В Excel-файле нет листов');
   const sheet = workbook.Sheets[sheetName];
+  // SheetJS preserves the original range when sheetRows truncates a sheet.
+  // Counting parsed rows cannot detect a later warehouse after a sparse gap.
+  if (sheet['!fullref']) {
+    throw new Error('Excel-файл остатков превышает допустимое число строк и был обрезан при чтении. Остатки не изменены.');
+  }
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
   if (rows.length > MAX_STOCK_WORKBOOK_ROWS) throw new Error('Excel-файл с остатками слишком большой');
   const parsedRows: ParsedStockRow[] = [];
