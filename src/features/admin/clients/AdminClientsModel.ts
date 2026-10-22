@@ -93,21 +93,6 @@ export function readClientDeletionPreview(value: unknown, companyId: number): Cl
   return preview;
 }
 
-// A scope switch must not discard drafts for companies hidden by that scope.
-export function mergeClientDrafts(
-  current: Record<number, ClientDraft>,
-  companies: ClientCompany[],
-  previousCompanies: Map<number, ClientCompany>,
-) {
-  const next = { ...current };
-  for (const company of companies) {
-    const previous = previousCompanies.get(company.id);
-    const dirty = current[company.id] && (!previous || JSON.stringify(current[company.id]) !== JSON.stringify(toDraft(previous)));
-    if (!dirty) next[company.id] = toDraft(company);
-  }
-  return next;
-}
-
 export const emptyDraft: ClientDraft = {
   title: '',
   email: '',

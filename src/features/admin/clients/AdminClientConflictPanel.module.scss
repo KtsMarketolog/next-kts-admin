@@ -1,0 +1,152 @@
+.panel {
+  min-width: 0;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid #d9c891;
+  border-radius: 12px;
+  background: #fffcf3;
+  color: #292b38;
+  overflow-wrap: anywhere;
+}
+
+.panel .title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.description,
+.passwordNotice,
+.error {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.passwordNotice {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f3eacb;
+}
+
+.error {
+  color: #9d232b;
+}
+
+.fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.field {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e1dfe8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.fieldHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.changed {
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #f8edca;
+  color: #775611;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.valueBlock {
+  min-width: 0;
+}
+
+.valueLabel,
+.unchanged {
+  color: #666778;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.value {
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.panel .selection {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+
+  input {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    margin: 2px 0 0;
+    padding: 0;
+    border-radius: 3px;
+    accent-color: #2b138d;
+    cursor: pointer;
+  }
+}
+
+.unchanged {
+  margin: 12px 0 0;
+}
+
+.panel .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+
+  button {
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 14px;
+    line-height: 1.4;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 640px) {
+  .panel {
+    padding: 12px;
+  }
+
+  .values {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .panel .actions button {
+    width: 100%;
+  }
+}

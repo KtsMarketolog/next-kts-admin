@@ -6,7 +6,8 @@ import ts from 'typescript';
 
 import { mergeClientChatMessages } from '../src/shared/lib/clientChatState';
 import type { startClientRealtimeSync } from '../src/shared/lib/clientRealtimeSync';
-import { clientMatchesScope, emptyDraft, mergeClientDrafts, readApiError, readApiErrorFallback, toDraft, withoutClientCredentials, type ClientCompany, type ClientDraft } from '../src/features/admin/clients/AdminClientsModel';
+import { clientMatchesScope, emptyDraft, readApiError, readApiErrorFallback, withoutClientCredentials, type ClientCompany, type ClientDraft } from '../src/features/admin/clients/AdminClientsModel';
+import { reconcileClientDrafts } from '../src/features/admin/clients/clientConflict';
 import type { ClientCompanyOption, PriceEditor } from '../src/features/admin/wholesale/AdminWholesaleTypes';
 
 // Run the actual browser helper with isolated events/timers: no HTTP, real timers or server.
@@ -211,15 +212,20 @@ test('clients mount starts one initial GET and background refresh preserves draf
   const mutationRef = { current: false };
   const dataGeneration = { current: 0 };
   let drafts: Record<number, ClientDraft> = {};
+  const companyDraftsRef = { current: drafts };
+  const companyBaselines = { current: new Map<number, ClientCompany>() };
   let managerLoads = 0;
-  const loadClients = executeCallback<(preserve?: boolean, signal?: AbortSignal) => Promise<void>>(declaration.initializer.arguments[0], parsed.source, {
+  const loadClients = executeCallback<(signal?: AbortSignal) => Promise<void>>(declaration.initializer.arguments[0], parsed.source, {
     request: (_url: string, options: { signal?: AbortSignal }) => new Promise((resolve) => { requests.push({ resolve, signal: options.signal }); }),
-    companiesRef, mutationRef, dataGeneration, toDraft, readApiError, clientMatchesScope, mergeClientDrafts, withoutClientCredentials,
-    companyBaselines: { current: new Map<number, ClientCompany>() },
+    companiesRef, mutationRef, dataGeneration, readApiError, clientMatchesScope, reconcileClientDrafts, withoutClientCredentials,
+    companyBaselines, companyDraftsRef, clientPasswordEditIdsRef: { current: {} },
     scope: 'active', scopeRef: { current: 'active' }, loadSequence: { current: 0 },
     isActive: () => true, setLoading: () => {}, setCanPermanentlyDelete: () => {},
     setCompanies: () => {},
-    setCompanyDrafts: (update: (current: Record<number, ClientDraft>) => Record<number, ClientDraft>) => { drafts = update(drafts); },
+    replaceCompanyDrafts: (update: (current: Record<number, ClientDraft>) => Record<number, ClientDraft>) => {
+      drafts = update(companyDraftsRef.current);
+      companyDraftsRef.current = drafts;
+    },
   });
   const cleanups = parsed.effects.map((effect) => executeCallback<() => (() => void) | undefined>(effect, parsed.source, {
     loadClients,
@@ -230,24 +236,29 @@ test('clients mount starts one initial GET and background refresh preserves draf
   await env.flush();
   assert.equal(managerLoads, 1);
   assert.equal(requests.length, 1, 'a second non-preserving mount GET could arrive late and erase typing');
-  const companies = [1, 2].map((id) => ({ ...emptyDraft, id, title: `Company ${id}` }));
+  const companies: ClientCompany[] = [1, 2].map((id) => ({ ...emptyDraft, id, title: `Company ${id}`,
+    managerName: '', supportManagerName: '', userCount: 1, clientLogin: '', clientUserId: id,
+    passwordChangedAt: '', chatUnreadCount: 0, archivedAt: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00.000001Z' }));
   const response = (rows: typeof companies) => ({ ok: true, json: async () => ({ companies: rows }) });
   requests[0].resolve(response(companies));
   await env.flush();
   drafts[1] = { ...drafts[1], title: 'Unsaved local name' };
   await env.advance(15_000);
-  requests[1].resolve(response(companies.map((company) => ({ ...company, title: `Updated ${company.id}` }))));
+  requests[1].resolve(response(companies.map((company) => ({ ...company, title: `Updated ${company.id}`, updatedAt: '2026-10-23T00:00:00.000002Z' }))));
   await env.flush();
   assert.equal(drafts[1].title, 'Unsaved local name');
   assert.equal(drafts[2].title, 'Updated 2');
+  assert.equal(drafts[1].expectedUpdatedAt, companies[0].updatedAt, 'dirty draft keeps its exact original version');
+  assert.equal(companyBaselines.current.get(1)?.updatedAt, companies[0].updatedAt, 'background read must not move the base beneath local edits');
+  assert.equal(drafts[2].expectedUpdatedAt, '2026-10-23T00:00:00.000002Z', 'clean draft advances together with its baseline');
   // A GET started before a save must not restore the old password/ownership DTO.
-  const staleRefresh = loadClients(true);
+  const staleRefresh = loadClients();
   dataGeneration.current += 1;
   requests[2].resolve(response(companies));
   await staleRefresh;
   assert.equal(drafts[2].title, 'Updated 2');
   mutationRef.current = true;
-  await loadClients(true);
+  await loadClients();
   assert.equal(requests.length, 3, 'Background reloads are skipped during a mutation');
   mutationRef.current = false;
   await env.advance(15_000);

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { archiveClientConfirmation, clientMatchesScope, mergeClientDrafts, readClientDeletionPreview, toDraft, withoutClientCredentials, type ClientCompany } from '../src/features/admin/clients/AdminClientsModel';
+import { archiveClientConfirmation, clientMatchesScope, readClientDeletionPreview, toDraft, withoutClientCredentials, type ClientCompany } from '../src/features/admin/clients/AdminClientsModel';
+import { reconcileClientDrafts } from '../src/features/admin/clients/clientConflict';
 
 const company = (id: number, archivedAt: string | null = null): ClientCompany => ({
   id, title: `Synthetic ${id}`, email: `${id}@example.invalid`, phone: '', note: '',
@@ -34,10 +35,10 @@ test('switching scopes preserves hidden and changed drafts, clean forms refresh'
   const first = company(1), second = company(2), archived = company(3, '2026-10-18T00:00:00Z');
   const baseline = new Map([[1, first], [2, second]]);
   const drafts = { 1: { ...toDraft(first), note: 'unsaved' }, 2: toDraft(second) };
-  const archiveDrafts = mergeClientDrafts(drafts, [archived], baseline);
+  const archiveDrafts = reconcileClientDrafts(drafts, [archived], baseline).drafts;
   assert.equal(archiveDrafts[1].note, 'unsaved');
   baseline.set(3, archived);
-  const restored = mergeClientDrafts(archiveDrafts, [{ ...first, note: 'server change' }, { ...second, note: 'new clean value' }], baseline);
+  const restored = reconcileClientDrafts(archiveDrafts, [{ ...first, note: 'server change' }, { ...second, note: 'new clean value' }], baseline).drafts;
   assert.equal(restored[1].note, 'unsaved');
   assert.equal(restored[2].note, 'new clean value');
   assert.deepEqual(restored[3], toDraft(archived));
@@ -61,11 +62,11 @@ test('retained dirty draft keeps the original version through external archive a
   const draft = { ...toDraft(original), note: 'Unsaved before archive' };
   const archived = { ...original, isActive: false, archivedAt: '2026-10-18T01:00:00Z', updatedAt: '2026-10-18T01:00:00Z' };
   const restored = { ...archived, archivedAt: null, updatedAt: '2026-10-18T02:00:00Z' };
-  const afterArchive = mergeClientDrafts({ 1: draft }, [archived], new Map([[1, original]]));
-  const afterRestore = mergeClientDrafts(afterArchive, [restored], new Map([[1, archived]]));
+  const afterArchive = reconcileClientDrafts({ 1: draft }, [archived], new Map([[1, original]])).drafts;
+  const afterRestore = reconcileClientDrafts(afterArchive, [restored], new Map([[1, archived]])).drafts;
   assert.equal(afterRestore[1].expectedUpdatedAt, original.updatedAt, 'server must reject stale isActive=true form');
   assert.equal(afterRestore[1].note, 'Unsaved before archive');
-  const clean = mergeClientDrafts({ 1: toDraft(original) }, [restored], new Map([[1, original]]));
+  const clean = reconcileClientDrafts({ 1: toDraft(original) }, [restored], new Map([[1, original]])).drafts;
   assert.equal(clean[1].expectedUpdatedAt, restored.updatedAt);
   assert.equal(clean[1].isActive, false);
 });

@@ -2,6 +2,16 @@
 @use "./clients-list";
 @use "./clients-detail";
 
+// Persistent save/conflict feedback must not cover the list's recovery actions.
+.clientSectionStatus {
+  position: static;
+  width: auto;
+  max-width: none;
+  margin: 0 0 16px;
+  transform: none;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1024px) {
   .analyticsDashboardLayout {
     grid-template-columns: 1fr;

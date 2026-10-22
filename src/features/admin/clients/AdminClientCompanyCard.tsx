@@ -5,6 +5,8 @@ import { EmployeePasswordField } from '../shared/EmployeePasswordField';
 import passwordStyles from './ClientPasswordField.module.scss';
 
 import { AdminClientManagerSelect } from './AdminClientManagerSelect';
+import { AdminClientConflictPanel } from './AdminClientConflictPanel';
+import type { ClientConflictComparison, ClientEditableField } from './clientConflict';
 import type { ClientCompany, ClientDraft, Manager } from './AdminClientsModel';
 
 type AdminClientCompanyCardProps = {
@@ -18,6 +20,11 @@ type AdminClientCompanyCardProps = {
   isExpanded: boolean;
   isSaved: boolean;
   canPermanentlyDelete: boolean;
+  conflict: { comparison: ClientConflictComparison | null; error: string } | null;
+  managers: Manager[];
+  onLoadConflict: (id: number) => void;
+  onCloseConflict: (id: number) => void;
+  onResolveConflict: (id: number, fields: ClientEditableField[], discardAll?: boolean) => void;
   onDraftChange: (id: number, patch: Partial<ClientDraft>) => void;
   onToggleExpanded: (id: number) => void;
   onTogglePasswordEdit: (id: number) => void;
@@ -39,6 +46,11 @@ export function AdminClientCompanyCard({
   isExpanded,
   isSaved,
   canPermanentlyDelete,
+  conflict,
+  managers,
+  onLoadConflict,
+  onCloseConflict,
+  onResolveConflict,
   onDraftChange,
   onToggleExpanded,
   onTogglePasswordEdit,
@@ -94,8 +106,20 @@ export function AdminClientCompanyCard({
         </button>
       </div>
 
+      {conflict ? <AdminClientConflictPanel
+        comparison={conflict.comparison}
+        busy={busy}
+        error={conflict.error}
+        passwordPending={passwordIsEdited}
+        managers={managers}
+        onLoad={() => onLoadConflict(company.id)}
+        onCancel={() => onCloseConflict(company.id)}
+        onResolve={(fields) => onResolveConflict(company.id, fields)}
+        onReload={() => onResolveConflict(company.id, [], true)}
+      /> : null}
+
       {isExpanded ? (
-        <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <fieldset disabled={busy || Boolean(conflict?.comparison)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <div className={styles.clientCompanyGrid}>
             <label>
               <span>Компания</span>
@@ -177,7 +201,7 @@ export function AdminClientCompanyCard({
             <button className={styles.secondary} type="button" disabled={busy} onClick={() => onTogglePasswordEdit(company.id)}>
               {passwordIsEdited ? 'Отменить пароль' : company.clientUserId ? 'Изменить пароль' : 'Задать пароль'}
             </button>
-            <button className={isSaved ? styles.savedButton : ''} disabled={busy} onClick={() => onSave(company.id)}>
+            <button className={isSaved ? styles.savedButton : ''} disabled={busy || Boolean(conflict)} onClick={() => onSave(company.id)}>
               {isSaved ? 'Сохранено' : 'Сохранить'}
             </button>
             <button className={styles.secondary} type="button" disabled={busy} onClick={() => onArchive(company)}>

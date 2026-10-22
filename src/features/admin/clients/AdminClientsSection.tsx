@@ -9,13 +9,13 @@ import { startClientRealtimeSync } from '@/shared/lib/clientRealtimeSync';
 import { AdminClientCompanyCard } from './AdminClientCompanyCard';
 import { AdminClientCreateForm } from './AdminClientCreateForm';
 import { AdminClientDeletionDialog } from './AdminClientDeletionDialog';
-import { submitClientMutation } from './clientMutation';
+import { ClientMutationError, submitClientMutation } from './clientMutation';
+import { buildClientConflict, reconcileClientDrafts, resolveClientConflict, type ClientConflictComparison, type ClientEditableField } from './clientConflict';
 import { useAdminRequestScope } from '../shared/useAdminRequestScope';
 import {
   emptyDraft,
   archiveClientConfirmation,
   clientMatchesScope,
-  mergeClientDrafts,
   readClientDeletionPreview,
   readApiError,
   readApiErrorFallback,
@@ -46,12 +46,27 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const [managers, setManagers] = useState<Manager[]>([]);
   const [draft, setDraft] = useState<ClientDraft>(emptyDraft);
   const [companyDrafts, setCompanyDrafts] = useState<Record<number, ClientDraft>>({});
+  const companyDraftsRef = useRef<Record<number, ClientDraft>>({});
   const [clientPasswordEditIds, setClientPasswordEditIds] = useState<Record<number, boolean>>({});
+  const clientPasswordEditIdsRef = useRef<Record<number, boolean>>({});
   const [clientPasswordDrafts, setClientPasswordDrafts] = useState<Record<number, string>>({});
+  const [companyConflicts, setCompanyConflicts] = useState<Record<number, { comparison: ClientConflictComparison | null; error: string }>>({});
   const [expandedCompanyIds, setExpandedCompanyIds] = useState<Record<number, boolean>>({});
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [savedCompanyId, setSavedCompanyId] = useState<number | null>(null);
+
+  const replaceCompanyDrafts = useCallback((update: (current: Record<number, ClientDraft>) => Record<number, ClientDraft>) => {
+    const next = update(companyDraftsRef.current);
+    companyDraftsRef.current = next;
+    setCompanyDrafts(next);
+  }, []);
+
+  const replacePasswordEditIds = (update: (current: Record<number, boolean>) => Record<number, boolean>) => {
+    const next = update(clientPasswordEditIdsRef.current);
+    clientPasswordEditIdsRef.current = next;
+    setClientPasswordEditIds(next);
+  };
 
   const developmentManagers = useMemo(
     () => managers.filter((manager) => manager.role === 'manager' && manager.isActive),
@@ -69,7 +84,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     }, 2200);
   };
 
-  const loadClients = useCallback(async (preserveDrafts = false, signal?: AbortSignal) => {
+  const loadClients = useCallback(async (signal?: AbortSignal) => {
     if (mutationRef.current) return;
     const generation = dataGeneration.current;
     const sequence = ++loadSequence.current;
@@ -81,17 +96,19 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       if (!Array.isArray(data.companies)) throw new Error('Получен неполный список клиентов. Обновите список.');
       setCanPermanentlyDelete(data.canPermanentlyDelete === true);
       const nextCompanies = (data.companies as ClientCompany[]).map(withoutClientCredentials).filter((company) => clientMatchesScope(company, scope));
-      const previousCompanies = new Map(companyBaselines.current);
-      for (const company of nextCompanies) companyBaselines.current.set(company.id, company);
+      // Baselines belong to drafts, not to the most recent list response. Moving
+      // them underneath a dirty form makes a later three-way comparison unsafe.
+      const reconciled = reconcileClientDrafts(companyDraftsRef.current, nextCompanies, companyBaselines.current, clientPasswordEditIdsRef.current);
+      companyBaselines.current = reconciled.baselines;
       companiesRef.current = nextCompanies;
       setCompanies(nextCompanies);
-      setCompanyDrafts((current) => preserveDrafts
-        ? mergeClientDrafts(current, nextCompanies, previousCompanies)
-        : { ...current, ...Object.fromEntries(nextCompanies.map((company) => [company.id, toDraft(company)])) });
+      // Even a full list refresh must not discard edits. Explicit conflict
+      // resolution below is the only path that replaces a dirty draft's base.
+      replaceCompanyDrafts(() => reconciled.drafts);
     } finally {
       if (sequence === loadSequence.current && scope === scopeRef.current && isActive()) setLoading(false);
     }
-  }, [request, scope, isActive]);
+  }, [request, scope, isActive, replaceCompanyDrafts]);
 
   const loadManagers = async () => {
     const response = await request('/api/admin/wholesale/managers', { cache: 'no-store' });
@@ -110,7 +127,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     return startClientRealtimeSync({
       eventsEndpoint: '/api/admin/clients/events',
       eventTypes: ['chat.updated', 'client.updated'],
-      refresh: async (signal) => { await loadClients(true, signal); },
+      refresh: async (signal) => { await loadClients(signal); },
       onError: (error) => { setStatus(readApiErrorFallback(error, 'Не удалось обновить клиентов')); },
     });
   }, [loadClients]);
@@ -125,7 +142,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   };
 
   const updateCompanyDraft = (id: number, patch: Partial<ClientDraft>) => {
-    setCompanyDrafts((current) => ({
+    replaceCompanyDrafts((current) => ({
       ...current,
       [id]: { ...(current[id] ?? emptyDraft), ...patch },
     }));
@@ -140,7 +157,8 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
     companyBaselines.current.set(company.id, company);
     companiesRef.current = nextCompanies.filter((item) => clientMatchesScope(item, scopeRef.current));
     setCompanies(companiesRef.current);
-    setCompanyDrafts((current) => ({ ...current, [company.id]: toDraft(company) }));
+    replaceCompanyDrafts((current) => ({ ...current, [company.id]: toDraft(company) }));
+    setCompanyConflicts((current) => { const next = { ...current }; delete next[company.id]; return next; });
   };
 
   const startMutation = () => {
@@ -191,7 +209,13 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   };
 
   const saveCompany = async (companyId: number) => {
-    const nextDraft = companyDrafts[companyId];
+    const nextDraft = companyDraftsRef.current[companyId];
+    const latest = companiesRef.current.find((company) => company.id === companyId);
+    if (companyConflicts[companyId] || (latest && nextDraft?.expectedUpdatedAt !== latest.updatedAt)) {
+      setCompanyConflicts((current) => ({ ...current, [companyId]: current[companyId] ?? { comparison: null, error: '' } }));
+      setStatus('Сначала сравните свои правки с актуальной карточкой клиента. Повторное сохранение старой формы не отправлено.');
+      return;
+    }
     if (!nextDraft?.title.trim()) {
       showStatus('Введите название компании');
       return;
@@ -224,7 +248,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
           delete next[companyId];
           return next;
         });
-        setClientPasswordEditIds((current) => {
+        replacePasswordEditIds((current) => {
           const next = { ...current };
           delete next[companyId];
           return next;
@@ -236,10 +260,71 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         setSavedCompanyId((current) => (current === companyId ? null : current));
       }, 2200);
     } catch (error) {
-      if (isActive()) setStatus(readApiErrorFallback(error, 'Не удалось подтвердить сохранение компании'));
+      if (isActive()) {
+        if (error instanceof ClientMutationError && (error.status === 409 || error.status === 428)) {
+          setCompanyConflicts((current) => ({ ...current, [companyId]: { comparison: null, error: '' } }));
+          setExpandedCompanyIds((current) => ({ ...current, [companyId]: true }));
+          setSavedCompanyId(null);
+        }
+        setStatus(readApiErrorFallback(error, 'Не удалось подтвердить сохранение компании'));
+      }
     } finally {
       finishMutation();
     }
+  };
+
+  const loadCompanyConflict = async (companyId: number) => {
+    if (!startMutation()) return;
+    setCompanyConflicts((current) => ({ ...current, [companyId]: { comparison: null, error: '' } }));
+    try {
+      // Reuse the permission-filtered list, including archives so an archived
+      // client is never mistaken for a writable card or silently reactivated.
+      const response = await request('/api/admin/clients?scope=all', { cache: 'no-store' });
+      if (!response.ok) throw new Error(await readApiError(response, 'Не удалось загрузить актуальную карточку'));
+      const data = await response.json();
+      if (!isActive()) return;
+      if (!Array.isArray(data.companies)) throw new Error('Получены неполные данные. Ваши правки сохранены в форме; повторите загрузку актуальной карточки.');
+      const latest = (data.companies as ClientCompany[]).find((company) => company?.id === companyId);
+      if (!latest) throw new Error('Клиент удалён или больше недоступен. Ваши правки оставлены в форме; сохранение недоступно.');
+      if (latest.archivedAt) throw new Error('Клиент уже в архиве. Сохранение этой формы недоступно. Ваши правки оставлены в форме; восстановление выполняется отдельно в архиве.');
+      const base = companyBaselines.current.get(companyId);
+      const local = companyDraftsRef.current[companyId];
+      if (!base || !local) throw new Error('Не удалось определить исходную версию карточки. Ваши правки не изменены.');
+      const comparison = buildClientConflict(base, local, withoutClientCredentials(latest));
+      companiesRef.current = companiesRef.current.map((company) => company.id === companyId ? comparison.latest : company);
+      setCompanies(companiesRef.current);
+      setCompanyConflicts((current) => ({ ...current, [companyId]: { comparison, error: '' } }));
+    } catch (error) {
+      if (isActive()) setCompanyConflicts((current) => ({ ...current, [companyId]: { comparison: null, error: readApiErrorFallback(error, 'Не удалось загрузить актуальную карточку. Ваши правки не изменены.') } }));
+    } finally {
+      finishMutation();
+    }
+  };
+
+  const applyCompanyConflict = (companyId: number, selectedFields: ClientEditableField[], discardAll = false) => {
+    if (mutationRef.current) return;
+    const comparison = companyConflicts[companyId]?.comparison;
+    if (!comparison) return;
+    const current = companiesRef.current.find((company) => company.id === companyId);
+    if (!current || current.updatedAt !== comparison.latest.updatedAt || current.archivedAt) {
+      setCompanyConflicts((conflicts) => ({ ...conflicts, [companyId]: { comparison: null, error: 'Карточка снова изменилась. Загрузите актуальную карточку ещё раз; ваши правки не изменены.' } }));
+      return;
+    }
+    const passwordPending = Boolean(clientPasswordEditIdsRef.current[companyId]);
+    const prompt = (discardAll ? 'Загрузить актуальную карточку и отказаться от собственных несохранённых правок?' : 'Перенести только отмеченные правки в актуальную карточку? Остальные поля будут взяты с сервера.')
+      + (passwordPending ? '\nНовый пароль не будет перенесён — задайте его заново после сравнения.' : '')
+      + '\nЭто обновит только вашу форму. Для записи потребуется нажать «Сохранить».';
+    if (!window.confirm(prompt)) return;
+    const resolved = resolveClientConflict(comparison, selectedFields);
+    // Invalidate list requests begun before this explicit local rebase.
+    dataGeneration.current += 1;
+    companyBaselines.current.set(companyId, comparison.latest);
+    replaceCompanyDrafts((drafts) => ({ ...drafts, [companyId]: resolved }));
+    setClientPasswordDrafts((drafts) => { const next = { ...drafts }; delete next[companyId]; return next; });
+    replacePasswordEditIds((ids) => { const next = { ...ids }; delete next[companyId]; return next; });
+    setCompanyConflicts((conflicts) => { const next = { ...conflicts }; delete next[companyId]; return next; });
+    setSavedCompanyId(null);
+    setStatus(`Форма обновлена по актуальной карточке. Проверьте её и нажмите «Сохранить».${passwordPending ? ' Новый пароль при необходимости задайте заново.' : ''}`);
   };
 
   const archiveCompany = async (company: ClientCompany) => {
@@ -263,16 +348,17 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         delete next[company.id];
         return next;
       });
-      setClientPasswordEditIds((current) => {
+      replacePasswordEditIds((current) => {
         const next = { ...current };
         delete next[company.id];
         return next;
       });
-      setCompanyDrafts((current) => {
+      replaceCompanyDrafts((current) => {
         const next = { ...current };
         delete next[company.id];
         return next;
       });
+      setCompanyConflicts((current) => { const next = { ...current }; delete next[company.id]; return next; });
       setExpandedCompanyIds((current) => {
         const next = { ...current };
         delete next[company.id];
@@ -350,9 +436,10 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
       companiesRef.current = companiesRef.current.filter((item) => item.id !== preview.id);
       companyBaselines.current.delete(preview.id);
       setCompanies(companiesRef.current);
-      setCompanyDrafts((current) => { const next = { ...current }; delete next[preview.id]; return next; });
+      replaceCompanyDrafts((current) => { const next = { ...current }; delete next[preview.id]; return next; });
+      setCompanyConflicts((current) => { const next = { ...current }; delete next[preview.id]; return next; });
       setClientPasswordDrafts((current) => { const next = { ...current }; delete next[preview.id]; return next; });
-      setClientPasswordEditIds((current) => { const next = { ...current }; delete next[preview.id]; return next; });
+      replacePasswordEditIds((current) => { const next = { ...current }; delete next[preview.id]; return next; });
       setExpandedCompanyIds((current) => { const next = { ...current }; delete next[preview.id]; return next; });
       setDeletionPreview(null);
       const warnings = Array.isArray(data.warnings) ? data.warnings.flatMap((warning: { message?: unknown }) => typeof warning?.message === 'string' ? [warning.message] : []) : [];
@@ -372,7 +459,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   };
 
   const toggleClientPasswordEdit = (companyId: number) => {
-    setClientPasswordEditIds((current) => ({ ...current, [companyId]: !current[companyId] }));
+    replacePasswordEditIds((current) => ({ ...current, [companyId]: !current[companyId] }));
     setClientPasswordDrafts((current) => {
       const next = { ...current };
       delete next[companyId];
@@ -383,7 +470,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
   const refreshClients = async () => {
     setBusy(true);
     try {
-      await loadClients(true);
+      await loadClients();
       setStatus('Список обновлён. Несохранённые изменения в формах оставлены.');
     } catch (error) {
       setStatus(readApiErrorFallback(error, 'Не удалось обновить список клиентов'));
@@ -408,7 +495,7 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
         </button>
       </div>
 
-      {status ? <p role="status" className={styles.status}>{status}</p> : null}
+      {status ? <p role="status" className={`${styles.status} ${styles.clientSectionStatus}`}>{status}</p> : null}
 
       <div className={styles.userRoleTabs} aria-label="Список клиентов">
         <button type="button" aria-pressed={scope === 'active'} disabled={busy} onClick={() => selectScope('active')}>Клиенты</button>
@@ -440,6 +527,11 @@ export function AdminClientsSection({ onBack }: AdminClientsSectionProps) {
             isExpanded={Boolean(expandedCompanyIds[company.id])}
             isSaved={savedCompanyId === company.id}
             canPermanentlyDelete={canPermanentlyDelete}
+            conflict={companyConflicts[company.id] ?? (companyDrafts[company.id]?.expectedUpdatedAt && companyDrafts[company.id].expectedUpdatedAt !== company.updatedAt ? { comparison: null, error: '' } : null)}
+            managers={managers}
+            onLoadConflict={loadCompanyConflict}
+            onCloseConflict={(id) => setCompanyConflicts((conflicts) => ({ ...conflicts, [id]: { comparison: null, error: '' } }))}
+            onResolveConflict={applyCompanyConflict}
             onDraftChange={updateCompanyDraft}
             onToggleExpanded={toggleCompanyExpanded}
             onTogglePasswordEdit={toggleClientPasswordEdit}

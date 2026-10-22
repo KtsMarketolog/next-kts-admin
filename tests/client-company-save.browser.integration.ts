@@ -14,7 +14,7 @@ import {createRoot} from 'react-dom/client';
 import {AdminClientsSection} from './src/features/admin/clients/AdminClientsSection';
 window.calls=[];window.mode='ok';window.failRefresh=false;window.holdRead=false;window.aborts=0;window.password='OriginalSynthetic123';
 const normalTimeout=window.setTimeout.bind(window);window.setTimeout=(fn,ms,...args)=>normalTimeout(fn,window.fastTimeout&&ms===20000?80:ms,...args);
-window.companies=[{id:13,title:'Synthetic company',email:'synthetic@example.invalid',phone:'',note:'Original note',managerId:21,managerName:'Manager',supportManagerId:22,supportManagerName:'Support',requireTwoFactor:false,userCount:1,clientLogin:'synthetic@example.invalid',clientUserId:31,passwordChangedAt:'2026-10-01T00:00:00Z',chatUnreadCount:0,isActive:true,createdAt:'2026-10-01T00:00:00Z',updatedAt:'2026-10-01T00:00:00Z'}];
+window.companies=[{id:13,title:'Synthetic company',email:'synthetic@example.invalid',phone:'',note:'Original note',managerId:21,managerName:'Manager',supportManagerId:22,supportManagerName:'Support',requireTwoFactor:false,userCount:1,clientLogin:'synthetic@example.invalid',clientUserId:31,passwordChangedAt:'2026-10-01T00:00:00Z',chatUnreadCount:0,isActive:true,archivedAt:null,createdAt:'2026-10-01T00:00:00Z',updatedAt:'2026-10-01T00:00:00Z'}];
 window.EventSource=class {addEventListener(){}close(){}};
 window.fetch=async(url,init={})=>{
  const method=init.method||'GET';const body=init.body?JSON.parse(init.body):null;
