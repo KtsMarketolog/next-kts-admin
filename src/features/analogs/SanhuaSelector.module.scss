@@ -1,0 +1,64 @@
+.selector {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  border: 1px solid #dedfeb;
+  border-radius: 16px;
+  padding: 24px;
+  background: #fff;
+  color: #242633;
+  font-size: 14px;
+
+  h3 { margin: 6px 0 10px; font-size: 26px; }
+  p { margin: 8px 0; line-height: 1.5; }
+  label { display: grid; gap: 8px; min-width: 0; }
+  label > span { font-size: 13px; font-weight: 700; }
+  select, input {
+    width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px;
+    border: 1px solid #d8d5e8; border-radius: 8px; background: #fff; color: #242633; font: inherit;
+  }
+  button {
+    min-height: 40px; padding: 10px 14px; border: 0; border-radius: 8px;
+    background: #eceaf4; color: #291b60; font: inherit; font-weight: 700; cursor: pointer;
+  }
+  :is(button, input, select, summary):focus-visible { outline: 2px solid #32149c; outline-offset: 3px; }
+}
+
+.eyebrow { font-size: 12px; font-weight: 800; color: #5d4ca0; }
+.steps, .parameters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.parameters {
+  min-width: 0; margin: 0; padding: 16px; border: 1px solid #dedfeb; border-radius: 10px;
+  legend { padding: 0 8px; font-weight: 700; }
+}
+.checklist {
+  padding: 16px; border-radius: 10px; background: #f5f2fc; color: #483b6c;
+  h4 { margin: 0; }
+  ul { margin: 10px 0; padding-left: 20px; }
+  li { margin: 6px 0; line-height: 1.5; }
+}
+.results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.resultTitle { margin: 0 0 12px; }
+.card {
+  display: grid; align-content: start; gap: 10px; min-width: 0; overflow-wrap: anywhere;
+  border: 1px solid #e0e2ec; border-radius: 12px; padding: 16px; background: #fafbfe;
+  h5 { margin: 0; font-size: 18px; }
+  > span, footer { font-size: 12px; color: #69627d; }
+  dl { display: grid; gap: 8px; margin: 0; }
+  dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+  dt { color: #69627d; font-size: 13px; }
+  dd { margin: 0; font-size: 13px; font-weight: 700; }
+  footer { border-top: 1px solid #e0e2ec; padding-top: 10px; line-height: 1.5; }
+}
+.more { margin-top: 14px; }
+.gaps {
+  border-top: 1px solid #dedfeb; padding-top: 16px; font-size: 13px;
+  summary { cursor: pointer; color: #483b6c; font-weight: 700; }
+  h4 { margin: 16px 0 4px; }
+}
+.error { color: #b42318; }
+.empty { color: #69627d; }
+
+@media (max-width: 760px) {
+  .selector { padding: 16px; h3 { font-size: 22px; } input, select { font-size: 16px; } }
+  .steps, .parameters, .results { grid-template-columns: 1fr; }
+}

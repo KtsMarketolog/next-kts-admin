@@ -1,6 +1,13 @@
 import rawKnowledgeBase from '@/shared/data/analogs.generated.json';
+import { normalizeAnalogBrand } from './analogCatalogMatching';
 
-type SourceId = 'ankang_tecumseh' | 'axial' | 'fans' | 'piston' | 'sanhua' | 'scroll';
+type SourceId = string;
+
+export type AnalogTechnicalSpecification = {
+  label: string;
+  value: string;
+  unit?: string;
+};
 
 type KnowledgeSource = {
   id: SourceId;
@@ -23,8 +30,9 @@ type DirectItem = {
 
 type DirectGroup = {
   id: string;
-  kind: 'ankang_tecumseh' | 'axial_fans' | 'fan_cross' | 'sanhua';
+  kind: string;
   sourceId: SourceId;
+  sourceSheet?: string;
   category: string;
   note?: string;
   items: DirectItem[];
@@ -39,6 +47,7 @@ type CompressorProduct = {
   sourceRow: number;
   sourceFlagged: boolean;
   refrigerant?: string;
+  technicalSpecifications?: AnalogTechnicalSpecification[];
 };
 
 type CompressorSeries = {
@@ -75,6 +84,11 @@ export type AnalogMatch = {
   refrigerant: string | null;
   application: string | null;
   coolingCapacityKw: number | null;
+  technicalSpecifications?: AnalogTechnicalSpecification[];
+  note?: string | null;
+  sourceFileName?: string;
+  sourceSheet?: string | null;
+  sourceRow?: number;
 };
 
 export type AnalogResult = {
@@ -97,12 +111,15 @@ export type AnalogResult = {
   tolerancePercent: number | null;
   sourceFlagged: boolean;
   matchType: 'direct' | 'capacity';
+  technicalSpecifications: AnalogTechnicalSpecification[];
+  catalogAliases?: string[];
 };
 
 export type AnalogSearchResponse = {
   query: string;
   normalizedQuery: string;
   refrigerant: string | null;
+  sourceBrand?: string | null;
   requiresModelSelection: boolean;
   requiresRefrigerant: boolean;
   availableRefrigerants: string[];
@@ -132,6 +149,7 @@ export type AnalogCatalogProductInput = {
   title: string;
   sku: string;
   model: string;
+  brand?: string;
 };
 
 const knowledgeBase = rawKnowledgeBase as unknown as KnowledgeBase;
@@ -202,22 +220,47 @@ function sourceFor(id: SourceId) {
   return source;
 }
 
-function buildDirectResults(normalizedQuery: string) {
+function directSpecifications(item: DirectItem): AnalogTechnicalSpecification[] {
+  const specified = item.metadata.technicalSpecifications;
+  const specs: AnalogTechnicalSpecification[] = Array.isArray(specified)
+    ? specified.filter((value): value is AnalogTechnicalSpecification =>
+      value !== null && typeof value === 'object' && typeof value.label === 'string' && typeof value.value === 'string')
+    : [];
+  if (typeof item.metadata.coolingCapacityW === 'number' && Number.isFinite(item.metadata.coolingCapacityW)
+      && !specs.some((spec) => /холодопроизводительность/i.test(spec.label))) {
+    specs.push({ label: 'Холодопроизводительность по источнику', value: String(item.metadata.coolingCapacityW), unit: 'Вт' });
+  }
+  if (Array.isArray(item.metadata.sizes) && item.metadata.sizes.length > 0 && !specs.some((spec) => /размер|присоединени/i.test(spec.label))) {
+    specs.push({ label: 'Присоединение по источнику', value: item.metadata.sizes.join(' / ') });
+  }
+  return specs;
+}
+
+function isSpecificDirectItem(group: DirectGroup, item: DirectItem) {
+  // These old workbook labels name a component family, not a unique product.
+  // Keep the source data intact but do not turn a family into an equivalence.
+  return !(group.sourceId === 'sanhua' && /^(?:Переходник под пайку|Клап\.?\s*узел)$/iu.test(item.model.trim()));
+}
+
+function buildDirectResults(normalizedQuery: string, requestedBrand: string | null) {
   const matches = knowledgeBase.directGroups.flatMap((group) =>
     group.items
+      .filter((item) => isSpecificDirectItem(group, item) && (!requestedBrand || normalizeAnalogBrand(item.brand) === requestedBrand))
       .map((item) => ({ group, item, score: aliasScore(item.aliases, normalizedQuery) }))
       .filter((entry) => entry.score > 0),
   );
   const bestScore = matches.reduce((best, match) => Math.max(best, match.score), 0);
-  const selectedMatches = matches.filter((match) => match.score === bestScore).slice(0, 20);
+  // A model can occupy many source rows (connections, voltages, operating
+  // conditions). Cutting those rows here loses valid catalog candidates later.
+  const selectedMatches = matches.filter((match) => match.score === bestScore);
   const results = selectedMatches.flatMap(({ group, item }) => {
     const source = sourceFor(group.sourceId);
     const sourceModel = normalizeAnalogTerm(item.model);
     return group.items
       .filter(
         (candidate) =>
-          normalizeAnalogTerm(candidate.model) !== sourceModel ||
-          normalizeAnalogTerm(candidate.brand) !== normalizeAnalogTerm(item.brand),
+          isSpecificDirectItem(group, candidate) && (normalizeAnalogTerm(candidate.model) !== sourceModel ||
+          normalizeAnalogTerm(candidate.brand) !== normalizeAnalogTerm(item.brand)),
       )
       .map<AnalogResult>((candidate) => ({
         id: `${group.id}:${candidate.brand}:${candidate.model}`,
@@ -228,7 +271,7 @@ function buildDirectResults(normalizedQuery: string) {
         sourceId: group.sourceId,
         sourceLabel: source.label,
         sourceFileName: source.fileName,
-        sourceSheet: null,
+        sourceSheet: group.sourceSheet ?? null,
         sourceRow: candidate.sourceRow,
         note: group.note || source.note || null,
         refrigerant: null,
@@ -239,6 +282,9 @@ function buildDirectResults(normalizedQuery: string) {
         tolerancePercent: null,
         sourceFlagged: candidate.sourceFlagged,
         matchType: 'direct',
+        technicalSpecifications: directSpecifications(candidate),
+        catalogAliases: Array.isArray(candidate.metadata.catalogAliases)
+          ? candidate.metadata.catalogAliases.filter((value): value is string => typeof value === 'string') : [],
       }));
   });
 
@@ -250,14 +296,20 @@ function buildDirectResults(normalizedQuery: string) {
       refrigerant: null,
       application: null,
       coolingCapacityKw: null,
+      technicalSpecifications: directSpecifications(item),
+      note: group.note || sourceFor(group.sourceId).note || null,
+      sourceFileName: sourceFor(group.sourceId).fileName,
+      sourceSheet: group.sourceSheet ?? null,
+      sourceRow: item.sourceRow,
     })),
     results,
   };
 }
 
-function buildCapacityResults(normalizedQuery: string, requestedRefrigerant: string | null) {
+function buildCapacityResults(normalizedQuery: string, requestedRefrigerant: string | null, requestedBrand: string | null) {
   const matches = knowledgeBase.compressorSeries.flatMap((series) =>
     series.products
+      .filter((product) => !requestedBrand || normalizeAnalogBrand(product.brand) === requestedBrand)
       .map((product) => ({ series, product, score: aliasScore(product.aliases, normalizedQuery) }))
       .filter((entry) => entry.score > 0),
   );
@@ -271,8 +323,7 @@ function buildCapacityResults(normalizedQuery: string, requestedRefrigerant: str
     .filter(({ series, product }) => {
       if (!requestedRefrigerant) return !requiresRefrigerant;
       return normalizeRefrigerant(product.refrigerant || series.refrigerant) === requestedRefrigerant;
-    })
-    .slice(0, 20);
+    });
 
   const results = selectedMatches.flatMap(({ series, product }) => {
     const source = sourceFor(series.sourceId);
@@ -289,7 +340,7 @@ function buildCapacityResults(normalizedQuery: string, requestedRefrigerant: str
         return difference <= series.tolerancePercent + Number.EPSILON;
       })
       .map<AnalogResult>((candidate) => ({
-        id: `${series.id}:${product.model}:${candidate.brand}:${candidate.model}`,
+        id: `${series.id}:${product.brand}:${product.model}:${product.sourceRow}:${candidate.brand}:${candidate.model}:${candidate.sourceRow}`,
         brand: candidate.brand,
         model: candidate.model,
         displayName: `${candidate.brand} ${candidate.model}`,
@@ -308,6 +359,11 @@ function buildCapacityResults(normalizedQuery: string, requestedRefrigerant: str
         tolerancePercent: series.tolerancePercent,
         sourceFlagged: candidate.sourceFlagged,
         matchType: 'capacity',
+        technicalSpecifications: [
+          { label: 'Хладагент', value: normalizeRefrigerant(candidate.refrigerant || series.refrigerant) ?? 'Не указан' },
+          { label: 'Режим по источнику', value: series.application },
+          ...(candidate.technicalSpecifications ?? []),
+        ],
       }));
   });
 
@@ -321,20 +377,27 @@ function buildCapacityResults(normalizedQuery: string, requestedRefrigerant: str
       refrigerant: normalizeRefrigerant(product.refrigerant || series.refrigerant),
       application: series.application,
       coolingCapacityKw: product.coolingCapacityKw,
+      technicalSpecifications: product.technicalSpecifications ?? [],
+      note: sourceFor(series.sourceId).note ?? null,
+      sourceFileName: sourceFor(series.sourceId).fileName,
+      sourceSheet: series.sourceSheet,
+      sourceRow: product.sourceRow,
     })),
     results,
   };
 }
 
-export function searchAnalogs(query: string, refrigerant?: string | null): AnalogSearchResponse {
+export function searchAnalogs(query: string, refrigerant?: string | null, sourceBrand?: string | null): AnalogSearchResponse {
   const cleanQuery = query.trim().slice(0, 180);
   const normalizedQuery = normalizeAnalogTerm(cleanQuery);
   const requestedRefrigerant = normalizeRefrigerant(refrigerant);
+  const requestedBrand = normalizeAnalogBrand((sourceBrand ?? '').trim().slice(0, 120)) || null;
   if (normalizedQuery.length < 2) {
     return {
       query: cleanQuery,
       normalizedQuery,
       refrigerant: requestedRefrigerant,
+      sourceBrand: requestedBrand,
       requiresModelSelection: false,
       requiresRefrigerant: false,
       availableRefrigerants: [],
@@ -345,23 +408,24 @@ export function searchAnalogs(query: string, refrigerant?: string | null): Analo
     };
   }
 
-  const direct = buildDirectResults(normalizedQuery);
-  const capacity = buildCapacityResults(normalizedQuery, requestedRefrigerant);
-  const results = uniqueBy([...direct.results, ...capacity.results], (result) =>
-    [result.sourceId, result.sourceSheet, normalizeAnalogTerm(result.model)].join(':'),
-  )
+  const direct = buildDirectResults(normalizedQuery, requestedBrand);
+  const capacity = buildCapacityResults(normalizedQuery, requestedRefrigerant, requestedBrand);
+  const results = uniqueBy([...direct.results, ...capacity.results], (result) => JSON.stringify([
+    result.sourceId, result.sourceSheet, result.sourceRow, normalizeAnalogTerm(result.brand), normalizeAnalogTerm(result.model),
+    result.refrigerant, result.application, result.technicalSpecifications,
+  ]))
     .sort((first, second) => {
       if (first.sourceFlagged !== second.sourceFlagged) return first.sourceFlagged ? 1 : -1;
       const firstDifference = Math.abs(first.capacityDifferencePercent ?? 0);
       const secondDifference = Math.abs(second.capacityDifferencePercent ?? 0);
       return firstDifference - secondDifference || first.brand.localeCompare(second.brand, 'ru') || first.model.localeCompare(second.model, 'ru');
-    })
-    .slice(0, 80);
+    });
   const notices = Array.from(new Set(results.map((result) => result.note).filter(Boolean))) as string[];
-  const matches = uniqueBy([...direct.matches, ...capacity.matches], (match) =>
-    [match.brand, normalizeAnalogTerm(match.model), match.refrigerant, match.application].join(':'),
-  );
-  const matchedModels = uniqueBy(matches, (match) => normalizeAnalogTerm(match.model));
+  const matches = uniqueBy([...direct.matches, ...capacity.matches], (match) => JSON.stringify([
+    match.brand, normalizeAnalogTerm(match.model), match.refrigerant, match.application,
+    match.sourceFileName, match.sourceSheet, match.sourceRow, match.technicalSpecifications,
+  ]));
+  const matchedModels = uniqueBy(matches, (match) => `${normalizeAnalogBrand(match.brand)}:${normalizeAnalogTerm(match.model)}`);
   const requiresModelSelection = matchedModels.length > 1;
   const visibleResults = requiresModelSelection ? [] : results;
 
@@ -369,6 +433,7 @@ export function searchAnalogs(query: string, refrigerant?: string | null): Analo
     query: cleanQuery,
     normalizedQuery,
     refrigerant: requestedRefrigerant,
+    sourceBrand: requestedBrand,
     requiresModelSelection,
     requiresRefrigerant: capacity.requiresRefrigerant,
     availableRefrigerants: capacity.availableRefrigerants.sort(),
@@ -379,19 +444,38 @@ export function searchAnalogs(query: string, refrigerant?: string | null): Analo
   };
 }
 
+/** Explicit source rows only. The server must intersect these with the active catalogue. */
+export function getSanhuaKnowledgeCandidates(): AnalogResult[] {
+  return uniqueBy(knowledgeBase.directGroups.filter((group) => group.kind === 'sanhua').flatMap((group) =>
+    group.items.filter((item) => /^sanhua(?:\s|$)/i.test(item.brand)).map((item) => ({
+      id: `${group.id}:${item.brand}:${item.model}`,
+      brand: item.brand, model: item.model, displayName: item.displayName, category: group.category,
+      sourceId: group.sourceId, sourceLabel: sourceFor(group.sourceId).label,
+      sourceFileName: sourceFor(group.sourceId).fileName, sourceSheet: group.sourceSheet ?? null,
+      sourceRow: item.sourceRow, note: group.note || sourceFor(group.sourceId).note || null,
+      refrigerant: null, application: null, coolingCapacityKw: null, sourceCoolingCapacityKw: null,
+      capacityDifferencePercent: null, tolerancePercent: null, sourceFlagged: item.sourceFlagged,
+      matchType: 'direct' as const, technicalSpecifications: directSpecifications(item),
+      catalogAliases: Array.isArray(item.metadata.catalogAliases)
+        ? item.metadata.catalogAliases.filter((value): value is string => typeof value === 'string') : [],
+    }))), (item) => [item.brand, item.model, item.sourceRow, item.sourceId].join(':'));
+}
+
 export function searchAnalogsForCatalogProduct(
   query: string,
   product: AnalogCatalogProductInput,
   refrigerant?: string | null,
+  sourceBrand?: string | null,
 ): AnalogSearchResponse {
   const cleanQuery = query.trim().slice(0, 180);
   const normalizedQuery = normalizeAnalogTerm(cleanQuery);
   const productTerms = Array.from(
     new Set([product.title, product.model, product.sku].map(normalizeAnalogTerm).filter((term) => term.length >= 2)),
   );
-  const directSearch = searchAnalogs(cleanQuery, refrigerant);
+  const requestedBrand = sourceBrand || product.brand;
+  const directSearch = searchAnalogs(cleanQuery, refrigerant, requestedBrand);
   const candidateMatches = uniqueBy(
-    [directSearch, ...productTerms.map((term) => searchAnalogs(term, refrigerant))].flatMap((search) => search.matches),
+    [directSearch, ...productTerms.map((term) => searchAnalogs(term, refrigerant, requestedBrand))].flatMap((search) => search.matches),
     (match) => [normalizeAnalogTerm(match.brand), normalizeAnalogTerm(match.model)].join(':'),
   );
   const specificCandidateMatches = candidateMatches.filter((candidate) => {
@@ -427,7 +511,7 @@ export function searchAnalogsForCatalogProduct(
 
   if (bestScore < 2 || bestMatches.length !== 1) return directSearch;
 
-  const resolvedSearch = searchAnalogs(bestMatches[0].match.model, refrigerant);
+  const resolvedSearch = searchAnalogs(bestMatches[0].match.model, refrigerant, bestMatches[0].match.brand);
   return {
     ...resolvedSearch,
     query: cleanQuery,

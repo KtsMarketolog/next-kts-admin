@@ -1,51 +1,36 @@
-import { normalizeAnalogTerm, type AnalogCatalogProductInput } from '@/shared/lib/analogs';
-
+import {
+  createAnalogCatalogIndex, findCatalogSearchProducts,
+  type AnalogCatalogIdentity, type AnalogCatalogIndex,
+} from '@/shared/lib/analogCatalogMatching';
 import { query } from './client';
 
-export type AnalogCatalogProduct = AnalogCatalogProductInput & {
-  id: number;
+export type AnalogCatalogProduct = AnalogCatalogIdentity & {
+  stock: number; stockVolzhsk: number; stockMoscow: number; unit: string; isExpected: boolean;
 };
 
 type ProductRow = {
-  id: string;
-  title: string;
-  sku: string;
-  model: string;
+  id: string; title: string; sku: string; model: string | null; brand_title: string;
+  stock: string | null; stock_volzhsk: string | null; stock_moscow: string | null;
+  unit: string | null; is_expected: boolean | null;
 };
 
-export async function findAnalogCatalogProducts(searchTerm: string): Promise<AnalogCatalogProduct[]> {
-  const normalizedTerm = normalizeAnalogTerm(searchTerm);
-  if (normalizedTerm.length < 2) return [];
-
+/** One consistent read for input resolution and all stocks. Zero stock stays in
+ * the assortment; no prices, SQL regex cross joins or per-result queries. */
+export async function getActiveAnalogCatalog(): Promise<AnalogCatalogIndex<AnalogCatalogProduct>> {
   const result = await query<ProductRow>(
-    `select id::text, title, sku, model
+    `select id::text, title, sku, model, brand_title,
+            stock::text, stock_volzhsk::text, stock_moscow::text, unit, is_expected
      from wholesale_products
      where is_active = true
-       and (
-         regexp_replace(replace(lower(coalesce(sku, '')), 'ё', 'е'), '[^a-zа-я0-9]+', '', 'g') = $1
-         or regexp_replace(replace(lower(coalesce(model, '')), 'ё', 'е'), '[^a-zа-я0-9]+', '', 'g') = $1
-         or regexp_replace(replace(lower(coalesce(title, '')), 'ё', 'е'), '[^a-zа-я0-9]+', '', 'g') = $1
-         or (
-           length($1) >= 4
-           and regexp_replace(replace(lower(coalesce(title, '')), 'ё', 'е'), '[^a-zа-я0-9]+', '', 'g') like '%' || $1 || '%'
-         )
-       )
-     order by
-       case
-         when regexp_replace(replace(lower(coalesce(sku, '')), 'ё', 'е'), '[^a-zа-я0-9]+', '', 'g') = $1 then 0
-         when regexp_replace(replace(lower(coalesce(model, '')), 'ё', 'е'), '[^a-zа-я0-9]+', '', 'g') = $1 then 1
-         when regexp_replace(replace(lower(coalesce(title, '')), 'ё', 'е'), '[^a-zа-я0-9]+', '', 'g') = $1 then 2
-         else 3
-       end,
-       id asc
-     limit 20`,
-    [normalizedTerm],
+     order by id asc`,
   );
+  return createAnalogCatalogIndex(result.rows.map((row) => ({
+    id: Number(row.id), title: row.title, sku: row.sku, model: row.model ?? '', brand: row.brand_title,
+    stock: Number(row.stock ?? 0), stockVolzhsk: Number(row.stock_volzhsk ?? 0), stockMoscow: Number(row.stock_moscow ?? 0),
+    unit: row.unit?.trim() || 'шт.', isExpected: row.is_expected === true,
+  })));
+}
 
-  return result.rows.map((row) => ({
-    id: Number(row.id),
-    title: row.title,
-    sku: row.sku,
-    model: row.model,
-  }));
+export function findAnalogCatalogProducts(searchTerm: string, catalog: AnalogCatalogIndex<AnalogCatalogProduct>) {
+  return findCatalogSearchProducts(searchTerm, catalog);
 }

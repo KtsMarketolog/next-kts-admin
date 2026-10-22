@@ -9,10 +9,10 @@ import {
   searchAnalogsForCatalogProduct,
 } from '../src/shared/lib/analogs';
 
-test('knowledge base contains all six imported source families', () => {
+test('knowledge base contains legacy families and the supplied newer source tables', () => {
   assert.ok(ANALOG_KNOWLEDGE_STATS.directGroups > 400);
   assert.ok(ANALOG_KNOWLEDGE_STATS.directItems > 1_300);
-  assert.equal(ANALOG_KNOWLEDGE_STATS.compressorSeries, 13);
+  assert.ok(ANALOG_KNOWLEDGE_STATS.compressorSeries >= 21);
   assert.ok(ANALOG_KNOWLEDGE_STATS.compressorItems > 1_000);
 });
 
@@ -31,7 +31,7 @@ test('normalization ignores punctuation, case and visually equivalent separators
 test('direct axial fan lookup returns models from the same group and its source', () => {
   const response = searchAnalogs('YWF.A2S-200S-5DIA00');
   assert.ok(response.results.some((result) => result.model === 'YWF2E-200S-92/15-G'));
-  assert.ok(response.results.every((result) => result.sourceId === 'axial'));
+  assert.ok(response.results.every((result) => result.sourceId === 'axial_202608'));
 });
 
 test('catalog article resolves to the canonical full model before analog lookup', () => {
@@ -62,7 +62,7 @@ test('catalog product prevents a shortened model from merging S and B variants',
   assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L35P4-570N-500S']);
 });
 
-test('catalog article prefers a full title modification over its shortened knowledge-base model', () => {
+test('catalog article resolves the full modification but does not use contradictory new source relations', () => {
   const product = {
     title: 'Вентилятор осевой YDWF102L45P4-522N-450B',
     model: '',
@@ -71,8 +71,10 @@ test('catalog article prefers a full title modification over its shortened knowl
   const response = searchAnalogsForCatalogProduct(product.sku, product);
 
   assert.equal(response.query, product.sku);
-  assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L45P4-522N-450B']);
-  assert.deepEqual(response.results.map((result) => result.model), ['YWF4E-450В-137/35-G']);
+  assert.deepEqual([...new Set(response.matches.map((match) => match.model))], ['YDWF102L45P4-522N-450B']);
+  // The August workbook repeats this model at 220 V (row 446) and 380 V (row 450).
+  assert.deepEqual(response.results, []);
+  assert.ok(response.matches.some((match) => match.note?.includes('различными напряжениями')));
 });
 
 test('full title modification also wins when the catalog model field is shortened', () => {
@@ -83,8 +85,8 @@ test('full title modification also wins when the catalog model field is shortene
   };
   const response = searchAnalogsForCatalogProduct(product.sku, product);
 
-  assert.deepEqual(response.matches.map((match) => match.model), ['YDWF102L45P4-522N-450B']);
-  assert.equal(response.total, 1);
+  assert.deepEqual([...new Set(response.matches.map((match) => match.model))], ['YDWF102L45P4-522N-450B']);
+  assert.equal(response.total, 0);
 });
 
 test('ambiguous direct model asks for a modification instead of merging analog groups', () => {
@@ -131,7 +133,7 @@ test('ambiguous compressor model asks for refrigerant before capacity matching',
 
 test('scroll compressor matching keeps the five-percent tolerance', () => {
   const response = searchAnalogs('YH95C1-100');
-  const scrollResults = response.results.filter((result) => result.sourceId === 'scroll');
+  const scrollResults = response.results.filter((result) => result.sourceId === 'scroll_v6');
   assert.ok(scrollResults.length > 0);
   assert.ok(scrollResults.every((result) => Math.abs(result.capacityDifferencePercent ?? 0) <= 5));
 });

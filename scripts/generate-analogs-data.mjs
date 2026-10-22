@@ -31,6 +31,13 @@ if (!sourceDirectoryArgument) {
 const sourceDir = path.resolve(sourceDirectoryArgument);
 const outputFile = path.resolve(argumentValue('--output', DEFAULT_OUTPUT));
 
+// This generator reads the original batch. Do not roll back newer client
+// sources by accidentally running the old command against the live artifact.
+if (outputFile === DEFAULT_OUTPUT && fs.existsSync(outputFile)
+    && Number(JSON.parse(fs.readFileSync(outputFile, 'utf8')).version) >= 2) {
+  throw new Error('Справочник уже содержит новые источники. Используйте analogs:import-client; для проверки старой базы укажите отдельный --output.');
+}
+
 function readWorkbook(fileName) {
   const filePath = path.join(sourceDir, fileName);
   if (!fs.existsSync(filePath)) throw new Error(`Не найден файл: ${filePath}`);

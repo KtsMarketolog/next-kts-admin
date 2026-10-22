@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
+import * as catalogMatching from '../src/shared/lib/analogCatalogMatching';
 
 type AnalogModule = typeof import('../src/shared/lib/analogs');
 type KnowledgeFixture = {
@@ -33,6 +34,7 @@ function load(useLegacyNormalization = false) {
     module: output, exports: output.exports,
     __normalizationProbe: () => { normalizationCalls++; },
     require: (name: string) => {
+      if (name === './analogCatalogMatching') return catalogMatching;
       assert.equal(name, '@/shared/data/analogs.generated.json');
       return knowledge;
     },

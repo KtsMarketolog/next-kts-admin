@@ -1,24 +1,16 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+
+import { employeeRequest } from '@/features/admin/shared/employeeRequest';
 
 import type { AnalogResult, AnalogSearchResponse } from '@/shared/lib/analogs';
 
 import styles from './AnalogFinder.module.scss';
+import { AnalogCatalogAvailability, type AnalogCatalogStock } from './AnalogCatalogAvailability';
+import { SanhuaSelector } from './SanhuaSelector';
 
-type AnalogStock = {
-  productId: number;
-  title: string;
-  sku: string;
-  model: string;
-  stock: number;
-  stockVolzhsk: number;
-  stockMoscow: number;
-  unit: string;
-  isExpected: boolean;
-};
-
-type AnalogResultWithStock = AnalogResult & { stock: AnalogStock | null };
+type AnalogResultWithStock = AnalogResult & { stock: AnalogCatalogStock | null; catalogMatches: AnalogCatalogStock[] };
 type SearchPayload = Omit<AnalogSearchResponse, 'results'> & {
   results: AnalogResultWithStock[];
   knowledgeBase?: {
@@ -39,56 +31,51 @@ function capacityDifferenceLabel(value: number | null) {
   return `Холодопроизводительность ${sign}${Math.abs(value).toFixed(1).replace('.', ',')}%`;
 }
 
-function StockBadge({ stock }: { stock: AnalogStock | null }) {
-  if (!stock) return <span className={styles.stockUnknown}>Нет совпадения в текущем каталоге</span>;
-  if (stock.stock > 0) {
-    return (
-      <span className={styles.stockAvailable}>
-        В наличии: {stock.stock} {stock.unit}
-      </span>
-    );
-  }
-  if (stock.isExpected) return <span className={styles.stockExpected}>Ожидается поступление</span>;
-  return <span className={styles.stockOrder}>Под заказ</span>;
-}
-
 export function AnalogFinder() {
+  const [mode, setMode] = useState<'search' | 'sanhua'>('search');
   const [query, setQuery] = useState('');
   const [refrigerant, setRefrigerant] = useState('');
+  const [sourceBrand, setSourceBrand] = useState('');
   const [payload, setPayload] = useState<SearchPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const requestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => requestRef.current?.abort(), []);
 
-  const runSearch = async (nextRefrigerant = refrigerant, nextQuery = query) => {
+  const runSearch = async (nextRefrigerant = refrigerant, nextQuery = query, nextBrand = sourceBrand) => {
     const cleanQuery = nextQuery.trim();
     if (cleanQuery.length < 2) {
       setError('Введите модель, артикул или название — минимум 2 символа');
       return;
     }
 
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({ q: cleanQuery });
       if (nextRefrigerant) params.set('refrigerant', nextRefrigerant);
-      const response = await fetch(`/api/analogs/search?${params.toString()}`, { cache: 'no-store' });
-      const data = (await response.json().catch(() => null)) as SearchPayload | { error?: string } | null;
-      if (!response.ok || !data || !('results' in data)) {
-        throw new Error(data && 'error' in data && data.error ? data.error : 'Не удалось выполнить поиск');
-      }
+      if (nextBrand) params.set('sourceBrand', nextBrand);
+      const data = await employeeRequest<SearchPayload>(`/api/analogs/search?${params.toString()}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (!data || !Array.isArray(data.results)) throw new Error('Не удалось выполнить поиск');
       setPayload(data);
     } catch (searchError) {
+      if (controller.signal.aborted) return;
       setPayload(null);
       setError(searchError instanceof Error && searchError.message !== 'Unauthorized' ? searchError.message : 'Не удалось выполнить поиск');
     } finally {
-      setLoading(false);
+      if (requestRef.current === controller) setLoading(false);
     }
   };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setRefrigerant('');
-    void runSearch('');
+    setSourceBrand('');
+    void runSearch('', query, '');
   };
 
   const chooseRefrigerant = (value: string) => {
@@ -96,18 +83,29 @@ export function AnalogFinder() {
     void runSearch(value);
   };
 
-  const chooseModel = (value: string) => {
+  const chooseModel = (value: string, brand = '') => {
+    setMode('search');
     setQuery(value);
     setRefrigerant('');
-    void runSearch('', value);
+    setSourceBrand(brand);
+    void runSearch('', value, brand);
   };
+
+  const matchedModels = [...new Map((payload?.matches ?? []).map((match) => [
+    `${match.brand}:${match.model}`, match,
+  ])).values()];
 
   return (
     <section className={styles.finder}>
+      <div className={styles.modeTabs} role="group" aria-label="Способ подбора">
+        <button type="button" aria-pressed={mode === 'search'} onClick={() => setMode('search')}>Поиск аналогов</button>
+        <button type="button" aria-pressed={mode === 'sanhua'} onClick={() => setMode('sanhua')}>Подбор Sanhua</button>
+      </div>
+      {mode === 'sanhua' ? <SanhuaSelector onChooseModel={(model) => chooseModel(model, 'Sanhua')} /> : <>
       <div className={styles.searchHero}>
         <span className={styles.eyebrow}>База знаний КТС</span>
         <h3>Подобрать аналог</h3>
-        <p>Введите модель, артикул или название оборудования.</p>
+        <p>Введите модель, артикул или название, в том числе конкурента. В результатах — только товары действующего каталога КТС, включая позиции без остатка.</p>
         <form className={styles.searchForm} onSubmit={submit}>
           <label>
             <span className={styles.visuallyHidden}>Модель, артикул или название оборудования</span>
@@ -127,9 +125,22 @@ export function AnalogFinder() {
       </div>
 
       {payload?.matches.length && !payload.requiresModelSelection ? (
+        <div>
         <div className={styles.matchSummary}>
           <span>Найдена исходная позиция</span>
-          <strong>{payload.matches.map((match) => `${match.brand} ${match.model}`).join(' · ')}</strong>
+          <strong>{matchedModels.map((match) => `${match.brand} ${match.model}`).join(' · ')}</strong>
+        </div>
+        {payload.matches.some((match) => match.technicalSpecifications?.length || match.note) ? <details className={styles.sourceDetails}>
+          <summary>Характеристики и условия исходной модели</summary>
+          {payload.matches.map((match, index) => <div key={`${match.brand}:${match.model}:${index}`}>
+            <strong>{match.brand} {match.model}</strong>
+            {match.technicalSpecifications?.length ? <dl className={styles.capacityGrid}>
+              {match.technicalSpecifications.map((spec, i) => <div key={i}><dt>{spec.label}</dt><dd>{spec.value} {spec.unit}</dd></div>)}
+            </dl> : null}
+            {match.note ? <p>{match.note}</p> : null}
+            <small>{match.sourceFileName}{match.sourceSheet ? ` · ${match.sourceSheet}` : ''}{match.sourceRow ? ` · строка ${match.sourceRow}` : ''}</small>
+          </div>)}
+        </details> : null}
         </div>
       ) : null}
 
@@ -141,11 +152,11 @@ export function AnalogFinder() {
             <p>Запрос подходит к нескольким исходным моделям. Их аналоги не смешиваются — выберите нужную модификацию.</p>
           </div>
           <div className={styles.refrigerantButtons}>
-            {payload.matches.map((match) => (
+            {matchedModels.map((match) => (
               <button
-                key={`${match.brand}:${match.model}:${match.refrigerant ?? ''}:${match.application ?? ''}`}
+                key={`${match.brand}:${match.model}`}
                 type="button"
-                onClick={() => chooseModel(match.model)}
+                onClick={() => chooseModel(match.model, match.brand)}
                 disabled={loading}
               >
                 {match.brand} {match.model}
@@ -191,8 +202,8 @@ export function AnalogFinder() {
 
           {payload.results.length === 0 ? (
             <div className={styles.emptyResult}>
-              <h5>В базе пока нет подходящей связи</h5>
-              <p>Проверьте написание модели без лишнего описания. Если модель указана верно, передайте запрос менеджеру.</p>
+              <h5>Нет подтверждённого аналога в действующем каталоге</h5>
+              <p>Проверьте модель и модификацию. Если связь отсутствует или товар не удалось однозначно сопоставить с каталогом, требуется проверка техспециалиста. Это не означает нулевой остаток.</p>
             </div>
           ) : (
             <div className={styles.resultGrid}>
@@ -200,7 +211,7 @@ export function AnalogFinder() {
                 <article className={result.sourceFlagged ? styles.resultCardFlagged : styles.resultCard} key={result.id}>
                   <div className={styles.resultTopline}>
                     <span>{result.brand}</span>
-                    <StockBadge stock={result.stock} />
+                    <span className={styles.stockAvailable}>В каталоге КТС</span>
                   </div>
                   <h5>{result.model}</h5>
                   <p className={styles.category}>{result.category}</p>
@@ -217,6 +228,12 @@ export function AnalogFinder() {
                     </dl>
                   ) : null}
                   {result.application ? <p className={styles.application}>{result.application}</p> : null}
+                  {result.technicalSpecifications?.length ? <dl className={styles.capacityGrid}>
+                    {result.technicalSpecifications.map((spec, index) => <div key={index}>
+                      <dt>{spec.label}</dt><dd>{spec.value} {spec.unit}</dd>
+                    </div>)}
+                  </dl> : null}
+                  <AnalogCatalogAvailability items={result.catalogMatches ?? (result.stock ? [result.stock] : [])} />
                   {result.sourceFlagged ? (
                     <p className={styles.qualityWarning}>В исходной таблице позиция помечена для дополнительной проверки по datasheet.</p>
                   ) : null}
@@ -233,6 +250,7 @@ export function AnalogFinder() {
           )}
         </section>
       ) : null}
+      </>}
     </section>
   );
 }
