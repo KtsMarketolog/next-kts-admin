@@ -222,7 +222,7 @@ function hasNamedCall(node: ts.Node, name: string) {
 
 test('clients mount starts one initial GET and background refresh preserves drafts and respects cleanup', async () => {
   const env = harness();
-  const parsed = componentCallbacks('../src/features/admin/clients/AdminClientsSection.tsx', 'AdminClientsSection');
+  const parsed = componentCallbacks('../src/features/admin/clients/useAdminClientList.ts', 'useAdminClientList');
   const declaration = descendants(parsed.component).find((node) => ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'loadClients');
   assert.ok(declaration && ts.isVariableDeclaration(declaration) && declaration.initializer && ts.isCallExpression(declaration.initializer));
   const requests: Array<{ resolve: (value: unknown) => void; signal?: AbortSignal }> = [];

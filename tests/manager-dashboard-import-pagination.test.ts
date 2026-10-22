@@ -3,6 +3,7 @@ import * as crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { loadManagerDashboardRepo } from './helpers/load-manager-dashboard-repo';
 
 import * as audience from '../src/shared/lib/managerDashboardAudience';
 import * as recipients from '../src/shared/lib/managerDashboardRecipients';
@@ -59,8 +60,7 @@ function repository(ids: string[]) {
         .sort((a, b) => BigInt(a.id) > BigInt(b.id) ? -1 : 1).slice(0, 6) };
     },
   };
-  const repo = compile<typeof import('../src/shared/lib/db/managerDashboardRepo')>(
-    '../src/shared/lib/db/managerDashboardRepo.ts', {
+  const repo = loadManagerDashboardRepo({
       'node:crypto': crypto,
       '../managerDashboardAudience': audience,
       '../managerDashboardRecipients': recipients,

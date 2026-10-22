@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 
-import * as workflow from '../src/shared/lib/wholesalePriceWorkflowStatus';
+import { loadAnalyticsModule } from './helpers/wholesaleAnalyticsHarness';
 
 // Execute the repository code with explicitly injected IO. Unexpected imports
 // fail closed, so these tests cannot connect to an application database.
@@ -118,7 +118,7 @@ for (const period of ['30d', 'all'] as const) {
       { id: '3', items: [] },
     ];
     let itemCountQueries = 0;
-    const query = async (sql: string, params: unknown[]) => {
+    const query = async (sql: string, params: unknown[] = []) => {
       assert.equal(params[0], 9);
       if (sql.includes('from wholesale_managers m')) {
         return { rows: [{ id: '9', name: 'Manager', login: 'manager', email: '', phone: '', role: 'manager', last_login_at: null }] };
@@ -146,22 +146,8 @@ for (const period of ['30d', 'all'] as const) {
       }
       return { rows: [] };
     };
-    const client = { query };
-    const helpers = loadRepository('../src/shared/lib/db/wholesaleAdminRepo/analyticsHelpers.ts', {
-      '../client': client,
-      '../clientCompaniesRepo': {},
-      '@/shared/lib/adminAuth': {},
-      '@/shared/lib/wholesalePriceWorkflowStatus': workflow,
-    });
-    const managerHelpers = loadRepository('../src/shared/lib/db/wholesaleAdminRepo/managerHelpers.ts', { '../client': client });
-    const repository = loadRepository<typeof import('../src/shared/lib/db/wholesaleAdminRepo/managerAnalyticsRepo')>(
-      '../src/shared/lib/db/wholesaleAdminRepo/managerAnalyticsRepo.ts',
-      {
-        '../client': client,
-        '../schema': { ensureSiteSchema: async () => {} },
-        './analyticsHelpers': helpers,
-        './managerHelpers': managerHelpers,
-      },
+    const repository = loadAnalyticsModule<typeof import('../src/shared/lib/db/wholesaleAdminRepo/managerAnalyticsRepo')>(
+      'managerAnalyticsRepo', query,
     );
     const result = await repository.getWholesaleManagerAnalytics(9, period);
     assert.ok(result);

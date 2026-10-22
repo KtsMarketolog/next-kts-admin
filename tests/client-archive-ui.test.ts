@@ -46,10 +46,11 @@ test('switching scopes preserves hidden and changed drafts, clean forms refresh'
 });
 
 test('archive UI guards mutations and uses optimistic archive/restore version', () => {
-  const source = readFileSync('src/features/admin/clients/AdminClientsSection.tsx', 'utf8');
-  assert.equal((source.match(/expectedUpdatedAt: company\.updatedAt/g) ?? []).length, 2);
-  assert.match(source, /sequence !== loadSequence\.current/);
-  assert.match(source, /scope !== scopeRef\.current/);
+  const lifecycle = readFileSync('src/features/admin/clients/useAdminClientLifecycle.ts', 'utf8');
+  const list = readFileSync('src/features/admin/clients/useAdminClientList.ts', 'utf8');
+  assert.equal((lifecycle.match(/expectedUpdatedAt: company\.updatedAt/g) ?? []).length, 2);
+  assert.match(list, /sequence !== loadSequence\.current/);
+  assert.match(list, /scope !== scopeRef\.current/);
   const detail = readFileSync('src/features/admin/clients/AdminClientDetailSection.tsx', 'utf8');
   assert.equal((detail.match(/\/api\/admin\/clients\?scope=all/g) ?? []).length, 2);
   assert.match(detail, /if \(client\?\.archivedAt\)/);

@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import * as crypto from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import ts from 'typescript';
+import { loadManagerDashboardRepo } from './helpers/load-manager-dashboard-repo';
 
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 import * as permissions from '../src/shared/lib/dashboardPermissions';
@@ -77,14 +76,9 @@ function harness(accounts: Account[], grants: Grant[], snapshots: Snapshot[], au
     './schema': { ensureSiteSchema: async () => {} },
     './client': { query, withTransaction: async (run: (client: { query: typeof query }) => Promise<unknown>) => run({ query }) },
   };
-  const source = readFileSync(new URL('../src/shared/lib/db/managerDashboardRepo.ts', import.meta.url), 'utf8');
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const loaded = { exports: {} as typeof import('../src/shared/lib/db/managerDashboardRepo') };
-  new Function('require', 'module', 'exports', code)((key: string) => {
-    assert.ok(key in modules, `Unexpected dependency: ${key}`); return modules[key];
-  }, loaded, loaded.exports);
+  const repo = loadManagerDashboardRepo(modules);
   const queriedRecipients = () => calls.find(({ sql }) => sql.includes('s.manager_id=any($1::bigint[])'))?.params;
-  return { read: loaded.exports.getPersonalDashboardReportDates, calls, queriedRecipients };
+  return { read: repo.getPersonalDashboardReportDates, calls, queriedRecipients };
 }
 
 test('TOP metadata aggregates visible MR team and own leader without conflating equal account IDs', async () => {
