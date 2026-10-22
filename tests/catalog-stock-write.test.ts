@@ -31,6 +31,7 @@ function harness(repeatImport = false) {
       }
     }
     if (/^\s*select 1 from/.test(sql)) return { rows: [], rowCount: 0 };
+    if (sql.includes('select id::text, article from catalog_products')) return { rows: [], rowCount: 0 };
     if (sql.includes('from catalog_products p') && sql.includes('order by p.is_active')) {
       return { rows: [{ id: '1', title: 'Synthetic product', article: 'SYN', sort_order: '0' }], rowCount: 1 };
     }

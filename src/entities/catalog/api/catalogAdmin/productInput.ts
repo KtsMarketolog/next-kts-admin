@@ -1,4 +1,4 @@
-import { normalizeText, normalizeCatalogPriceFields, normalizeStockValue } from './helpers';
+import { normalizeText, normalizeCatalogArticle, normalizeCatalogPriceFields, normalizeStockValue } from './helpers';
 import type { CatalogProductInput } from './types';
 
 export type NormalizedCatalogProductInput = {
@@ -22,7 +22,7 @@ export type NormalizedCatalogProductInput = {
 };
 
 export function normalizeInput(input: CatalogProductInput): NormalizedCatalogProductInput {
-  const article = normalizeText(input.article, 120);
+  const article = normalizeCatalogArticle(input.article);
   const unit = normalizeText(input.unit, 80);
   return {
     title: normalizeText(input.title, 500) || article,

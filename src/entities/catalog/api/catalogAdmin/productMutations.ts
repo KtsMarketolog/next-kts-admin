@@ -7,6 +7,7 @@ import { normalizeInput } from './productInput';
 import { insertCatalogProduct } from './productRowWrites';
 import { syncWholesaleProduct } from './wholesaleSync';
 import { getCatalogAdminProductById } from './productQueries';
+import { assertCatalogArticleAvailable } from './articleUniqueness';
 import type { CatalogProductInput } from './types';
 
 export async function createCatalogAdminProduct(input: CatalogProductInput) {
@@ -16,6 +17,7 @@ export async function createCatalogAdminProduct(input: CatalogProductInput) {
   await ensureSiteSchema();
 
   const id = await withCatalogStockWrite(async (client) => {
+    await assertCatalogArticleAvailable(client, normalized.article);
     const count = await client.query<{ count: string }>('select count(*)::text as count from catalog_products');
     return insertCatalogProduct(client, createCache(), normalized, Number(count.rows[0]?.count ?? 0));
   });
@@ -41,6 +43,8 @@ export async function updateCatalogAdminProduct(id: number, input: CatalogProduc
       [normalizedId],
     );
     if (!existing.rows[0]) throw new Error('Товар не найден');
+
+    await assertCatalogArticleAvailable(client, normalized.article, normalizedId);
 
     const cache = createCache();
     const categoryId = await ensureCategory(client, cache, normalized.category, 0);

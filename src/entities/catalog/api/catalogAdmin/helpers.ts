@@ -40,6 +40,16 @@ export function normalizeText(value: unknown, maxLength = 240) {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, maxLength) : '';
 }
 
+export function normalizeCatalogArticle(value: unknown) {
+  return normalizeText(value, 120);
+}
+
+// Manual writes, Excel validation and import matching share one SKU identity.
+// Preserve leading zeroes and punctuation; only normalize stored whitespace/case.
+export function catalogArticleKey(value: unknown) {
+  return cacheKey(normalizeCatalogArticle(value));
+}
+
 export function normalizeCatalogPrice(value: unknown, field = 'Цена или скидка') {
   if (value === null || value === undefined) return null;
   const invalid = () => new Error(`Некорректное значение поля «${field}». Введите неотрицательное число до 999999999 с максимум двумя знаками после запятой.`);

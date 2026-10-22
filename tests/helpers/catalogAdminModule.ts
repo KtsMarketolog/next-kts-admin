@@ -7,7 +7,7 @@ import * as catalogImportValidation from '../../src/entities/catalog/api/catalog
 // remains an explicit stub; an unknown import fails rather than reaching a DB.
 const modules = new Set([
   './core', './productInput', './entityWrites', './wholesaleSync',
-  './importMatching', './productRowWrites', './stats', './productMutations', './importApply',
+  './importMatching', './productRowWrites', './stats', './productMutations', './importApply', './articleUniqueness',
 ]);
 
 export function loadCatalogAdminModule<T>(dependencies: Record<string, unknown>): T {

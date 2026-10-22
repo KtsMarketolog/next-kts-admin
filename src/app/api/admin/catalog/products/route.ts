@@ -83,6 +83,9 @@ export async function POST(request: Request) {
     });
     return Response.json({ product });
   } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'CATALOG_ARTICLE_CONFLICT') {
+      return Response.json({ error: error.message, code: error.code }, { status: 409 });
+    }
     return badRequest(error instanceof Error ? error.message : 'Не удалось добавить товар');
   }
 }

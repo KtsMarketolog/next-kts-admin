@@ -8,7 +8,7 @@ import { query, withTransaction } from '../src/shared/lib/db/client';
 import { ensureSiteSchema } from '../src/shared/lib/db/schema';
 import { CATALOG_STOCK_WRITE_LOCK } from '../src/shared/lib/db/catalogStockWrite';
 import { ensureCatalogSchema } from '../src/entities/catalog/api/catalogDb';
-import { createCatalogAdminProduct, replaceCatalogFromRows } from '../src/entities/catalog/api/catalogAdmin/core';
+import { createCatalogAdminProduct, updateCatalogAdminProduct, replaceCatalogFromRows } from '../src/entities/catalog/api/catalogAdmin/core';
 import { CatalogExistingArticleConflictError } from '../src/entities/catalog/api/catalogAdmin/importMatching';
 import { parseCatalogExcel } from '../src/entities/catalog/api/catalogExcel';
 import { importStockFromExcelBuffer } from '../src/entities/catalog/api/stockImport';
@@ -65,6 +65,43 @@ async function fixture() {
   return { first, second, priceId };
 }
 
+async function concurrentCatalogWrites(operations: Array<() => Promise<unknown>>) {
+  let ready!: () => void, release!: () => void;
+  const locked = new Promise<void>(resolve => { ready = resolve; });
+  const proceed = new Promise<void>(resolve => { release = resolve; });
+  const holder = withTransaction(async client => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [CATALOG_STOCK_WRITE_LOCK]);
+    ready(); await proceed;
+  });
+  await locked;
+  const pending = Promise.allSettled(operations.map(operation => operation()));
+  try {
+    const deadline = Date.now() + 3000;
+    let waiters = 0;
+    while (Date.now() < deadline) {
+      waiters = Number((await query(`select count(*) as n from pg_locks where locktype='advisory'
+        and objid=(hashtext($1)::bigint & 4294967295)::oid and not granted`, [CATALOG_STOCK_WRITE_LOCK])).rows[0].n);
+      if (waiters >= operations.length) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(waiters, operations.length, 'all writers must wait on the common gate before checking article identity');
+  } finally { release(); await holder; }
+  return pending;
+}
+
+function assertOneArticleConflict(results: PromiseSettledResult<unknown>[]) {
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  const failures = results.filter(result => result.status === 'rejected');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].reason?.code, 'CATALOG_ARTICLE_CONFLICT');
+}
+
+function assertPriceSettingsPreserved(before: Awaited<ReturnType<typeof snapshot>>, after: Awaited<ReturnType<typeof snapshot>>) {
+  for (const table of ['wholesale_price_lists', 'wholesale_price_list_items', 'wholesale_price_list_group_stock_settings'] as const) {
+    assert.deepEqual(after[table], before[table]);
+  }
+}
+
 test('catalog duplicate import preserves real PostgreSQL data and price settings', { timeout: 120_000 }, async t => {
   guard();
   try {
@@ -93,6 +130,103 @@ test('catalog duplicate import preserves real PostgreSQL data and price settings
       }
     });
 
+    await t.test('manual create and edit reject another product article before changing any data or saved price settings', async () => {
+      const { first, second } = await fixture();
+      // Inactive products still own their article; a different brand is not a new identity.
+      await query('update catalog_products set is_active=false where id=$1', [first.id]);
+      await query('update wholesale_products set is_active=false where catalog_product_id=$1', [first.id]);
+      const before = await snapshot();
+      const conflicting = input(' syn-a ', {
+        title: 'Do not write this title', category: 'Do not create this category',
+        subcategory: 'Do not create this subgroup', brand: 'Do not create this brand',
+        stock: 999, priceRub: '9999', isActive: true,
+      });
+      for (const mutation of [() => createCatalogAdminProduct(conflicting), () => updateCatalogAdminProduct(second.id, conflicting)]) {
+        await assert.rejects(mutation, (error: unknown) => {
+          assert.equal((error as { code?: string }).code, 'CATALOG_ARTICLE_CONFLICT');
+          assert.match((error as Error).message, /syn-a/i);
+          assert.match((error as Error).message, /артикул/i);
+          return true;
+        });
+        assert.deepEqual(await snapshot(), before);
+      }
+    });
+
+    await t.test('manual writes use the same whitespace, NBSP and stored-length article identity as Excel imports', async () => {
+      for (const [stored, incoming] of [['SYN  CODE', ' syn\tcode '], ['SYN\u00a0CODE', 'syn CODE'],
+        [`${'x'.repeat(120)}A`, `${'X'.repeat(120)}B`]]) {
+        const { second } = await fixture();
+        await createCatalogAdminProduct(input(stored));
+        const before = await snapshot();
+        await assert.rejects(createCatalogAdminProduct(input(incoming, { brand: 'Another brand' })), code('CATALOG_ARTICLE_CONFLICT'));
+        assert.deepEqual(await snapshot(), before);
+        await assert.rejects(updateCatalogAdminProduct(second.id, input(incoming)), code('CATALOG_ARTICLE_CONFLICT'));
+        assert.deepEqual(await snapshot(), before);
+      }
+    });
+
+    await t.test('editing a product with its own unchanged or normalized article remains allowed and preserves price overrides', async () => {
+      const { first } = await fixture();
+      const before = await snapshot();
+      for (const article of ['SYN-A', ' syn-a ']) {
+        const edited = await updateCatalogAdminProduct(first.id, input(article, { title: 'Allowed own edit', priceRub: '210' }));
+        assert.equal(edited?.id, first.id);
+        assert.equal(edited?.title, 'Allowed own edit');
+        assert.equal(Number(edited?.priceRub), 210);
+      }
+      assert.equal((await query('select count(*)::integer as n from catalog_products')).rows[0].n, 2);
+      assert.equal((await query('select count(*)::integer as n from wholesale_products where catalog_product_id=$1', [first.id])).rows[0].n, 1);
+      assertPriceSettingsPreserved(before, await snapshot());
+    });
+
+    await t.test('two concurrent manual creates cannot reserve the same normalized article', async () => {
+      await fixture(); const before = await snapshot();
+      const results = await concurrentCatalogWrites([
+        () => createCatalogAdminProduct(input('SYN-CREATE-RACE', { title: 'Synthetic race first' })),
+        () => createCatalogAdminProduct(input(' syn-create-race ', { title: 'Synthetic race second', brand: 'Another brand' })),
+      ]);
+      assertOneArticleConflict(results);
+      const products = (await query("select id from catalog_products where lower(article)='syn-create-race'")).rows;
+      assert.equal(products.length, 1);
+      assert.equal((await query('select count(*)::integer as n from wholesale_products where catalog_product_id=$1', [products[0].id])).rows[0].n, 1);
+      assert.equal((await query('select count(*)::integer as n from catalog_products')).rows[0].n, 3);
+      assertPriceSettingsPreserved(before, await snapshot());
+    });
+
+    await t.test('two concurrent manual edits cannot give different products the same article and losing edit changes nothing', async () => {
+      const { first, second } = await fixture(); const before = await snapshot();
+      const results = await concurrentCatalogWrites([
+        () => updateCatalogAdminProduct(first.id, input('SYN-EDIT-RACE', { title: 'Synthetic edit first', stock: 91 })),
+        () => updateCatalogAdminProduct(second.id, input(' syn-edit-race ', { title: 'Synthetic edit second', stock: 92 })),
+      ]);
+      assertOneArticleConflict(results);
+      assert.equal((await query("select count(*)::integer as n from catalog_products where lower(article)='syn-edit-race'")).rows[0].n, 1);
+      const losingId = results[0].status === 'rejected' ? first.id : second.id;
+      const after = await snapshot();
+      for (const [table, field] of [['catalog_products', 'id'], ['wholesale_products', 'catalog_product_id']] as const) {
+        const own = (row: unknown) => Number((row as Record<string, unknown>)[field]) === losingId;
+        assert.deepEqual(after[table].filter(own), before[table].filter(own));
+      }
+      assertPriceSettingsPreserved(before, after);
+    });
+
+    await t.test('concurrent import and manual create share identity and cannot create duplicate catalog or wholesale products', async () => {
+      await fixture(); const before = await snapshot();
+      const results = await concurrentCatalogWrites([
+        () => replaceCatalogFromRows([input('SYN-A'), input('SYN-B'), input('SYN-IMPORT-RACE')]),
+        () => createCatalogAdminProduct(input(' syn-import-race ', { brand: 'Another brand' })),
+      ]);
+      assert.equal(results[0].status, 'fulfilled');
+      if (results[1].status === 'rejected') assert.equal(results[1].reason?.code, 'CATALOG_ARTICLE_CONFLICT');
+      // A manual create committed first may be matched and updated by the import;
+      // when the import wins first the manual create must instead reject.
+      const products = (await query("select id from catalog_products where lower(article)='syn-import-race'")).rows;
+      assert.equal(products.length, 1);
+      assert.equal((await query('select count(*)::integer as n from wholesale_products where catalog_product_id=$1', [products[0].id])).rows[0].n, 1);
+      assert.equal((await query('select count(*)::integer as n from catalog_products')).rows[0].n, 3);
+      assertPriceSettingsPreserved(before, await snapshot());
+    });
+
     await t.test('unique reimport retains product and wholesale IDs and every saved price override and stock value', async () => {
       const { first, second } = await fixture(); const before = await snapshot();
       const identities = (await query('select id,catalog_product_id from wholesale_products order by id')).rows;
@@ -118,8 +252,13 @@ test('catalog duplicate import preserves real PostgreSQL data and price settings
 
     for (const inactive of [false, true]) await t.test(`existing ${inactive ? 'inactive' : 'active'} duplicate rejects before updating the valid prefix`, async () => {
       const { second } = await fixture();
-      const duplicate = await createCatalogAdminProduct(input('syn-b', { brand: 'Different brand', isActive: !inactive, stock: 98 }));
-      assert.ok(duplicate); const before = await snapshot();
+      const duplicate = await createCatalogAdminProduct(input('SYN-LEGACY-DUPLICATE', { brand: 'Different brand', isActive: !inactive, stock: 98 }));
+      assert.ok(duplicate);
+      // Deliberately model pre-fix bad data only inside this disposable database;
+      // normal manual writes are now required to reject duplicate articles.
+      await query("update catalog_products set article='syn-b' where id=$1", [duplicate.id]);
+      await query("update wholesale_products set sku='syn-b' where catalog_product_id=$1", [duplicate.id]);
+      const before = await snapshot();
       await assert.rejects(replaceCatalogFromRows([input('SYN-A', { title: 'Do not write prefix', priceRub: '777' }), input('SYN-B')]), (error: unknown) => {
         assert.ok(error instanceof CatalogExistingArticleConflictError);
         assert.equal(error.duplicateCount, 1);

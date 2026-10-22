@@ -1,10 +1,10 @@
 import type { PoolClient } from 'pg';
-import { cacheKey, normalizeText } from './helpers';
+import { catalogArticleKey } from './helpers';
 import type { NormalizedCatalogProductInput } from './productInput';
 
 export function catalogProductImportKey(input: Pick<NormalizedCatalogProductInput, 'article'>) {
   // An old empty SKU is not an identity, even if its title equals a new SKU.
-  return cacheKey(normalizeText(input.article, 120));
+  return catalogArticleKey(input.article);
 }
 
 type ExistingProducts = Map<string, Array<{ id: number; sortOrder: number }>>;

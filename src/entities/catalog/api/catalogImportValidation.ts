@@ -1,4 +1,4 @@
-import { cacheKey, normalizeText } from './catalogAdmin/helpers';
+import { catalogArticleKey, normalizeCatalogArticle } from './catalogAdmin/helpers';
 import type { CatalogProductInput } from './catalogAdmin/types';
 
 const MAX_DUPLICATE_GROUPS = 100;
@@ -54,8 +54,8 @@ export function assertUniqueCatalogArticles(rows: CatalogProductInput[]): void {
     const input = rows[index];
     // Use exactly the persisted article normalization, including its length cap.
     // Do not convert numeric-looking strings: "0012" and "12" are distinct.
-    const article = normalizeText(input.article, 120).trim();
-    const key = cacheKey(article);
+    const article = normalizeCatalogArticle(input.article).trim();
+    const key = catalogArticleKey(article);
     if (!key) continue;
     const rowNumber = sourceRows.get(input) ?? index + 1;
     const group = groups.get(key);
