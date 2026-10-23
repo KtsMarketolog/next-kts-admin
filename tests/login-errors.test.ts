@@ -6,6 +6,7 @@ import * as crypto from 'node:crypto';
 import ts from 'typescript';
 
 import { isEmailTwoFactorOutageActive } from '../src/shared/lib/emailTwoFactorOutage';
+import { EmployeePasswordVerificationUnavailable } from '../src/shared/lib/employeePasswordVerification';
 
 function load<T>(path: string, modules: Record<string, unknown>, messages: unknown[][] = [], env = {}) {
   const code = ts.transpileModule(readFileSync(path, 'utf8'), {
@@ -80,6 +81,10 @@ function harness(kind: RouteKind, options: {
     sessions++;
   };
   const modules = {
+    '@/shared/lib/employeePasswordVerification': {
+      EmployeePasswordVerificationUnavailable,
+      verifyEmployeePassword: async () => !options.invalidPassword,
+    },
     '@/shared/lib/loginCredentialProof': proofs,
     '@/shared/lib/adminAuth': {
       createAdminSession: createSession, createEmployeeSession: createSession,

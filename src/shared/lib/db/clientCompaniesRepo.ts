@@ -112,7 +112,11 @@ export async function getClientCompanyPriceLists(
   return result.rows.map(mapClientCompanyPriceList);
 }
 
-export async function getClientCompanies(session: AdminSession, scope: 'active' | 'archived' | 'all' = 'active'): Promise<ClientCompany[]> {
+async function readClientCompanies(
+  session: AdminSession,
+  scope: 'active' | 'archived' | 'all',
+  companyId?: number,
+): Promise<ClientCompany[]> {
   await ensureSiteSchema();
   const result = await query<ClientCompanyRow>(
     `select
@@ -160,11 +164,23 @@ export async function getClientCompanies(session: AdminSession, scope: 'active' 
      ) primary_user on true
      where ($1::boolean = true or cc.manager_id = $2 or cc.support_manager_id = $2)
        and ($3::text = 'all' or ($3 = 'archived' and cc.archived_at is not null) or ($3 = 'active' and cc.archived_at is null))
+       ${companyId === undefined ? '' : 'and cc.id = $4'}
      group by cc.id, manager.name, support.name, primary_user.id, primary_user.login, primary_user.password_changed_at
      order by cc.is_active desc, cc.title asc, cc.created_at desc`,
-    [canSeeAllClients(session), session.managerId ?? 0, scope],
+    [canSeeAllClients(session), session.managerId ?? 0, scope, ...(companyId === undefined ? [] : [companyId])],
   );
   return result.rows.map(mapClientCompany);
+}
+
+export async function getClientCompanies(session: AdminSession, scope: 'active' | 'archived' | 'all' = 'active'): Promise<ClientCompany[]> {
+  return readClientCompanies(session, scope);
+}
+
+/** Read only the requested company, with the same ownership and archive scope as the detail screen. */
+export async function getClientCompany(id: number, session: AdminSession): Promise<ClientCompany | null> {
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  const companies = await readClientCompanies(session, 'all', id);
+  return companies[0] ?? null;
 }
 
 export async function createClientCompany(input: ClientCompanyInput, session: AdminSession): Promise<ClientCompany> {

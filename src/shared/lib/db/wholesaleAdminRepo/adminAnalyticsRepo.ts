@@ -1,4 +1,7 @@
 import { ensureSiteSchema } from '../schema';
+import type { AdminSession } from '@/shared/lib/adminAuth';
+import { readCachedAnalytics } from './analytics/readCache';
+import { measureAnalytics, traceAnalytics } from './analytics/performance';
 import { periodSqlInterval } from './analytics/calculations';
 import { getPeriodComparison, getProductInterest } from './analytics/supplemental';
 import {
@@ -15,9 +18,14 @@ import { aggregateAdminAnalytics } from './analytics/adminAggregates';
 import { buildAdminAnalyticsResponse } from './analytics/adminResponse';
 import type { WholesaleAdminAnalytics, WholesaleAdminAnalyticsPeriod } from './types';
 
-export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalyticsPeriod = '30d'): Promise<WholesaleAdminAnalytics> {
-  await ensureSiteSchema();
+export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalyticsPeriod = '30d', session?: AdminSession): Promise<WholesaleAdminAnalytics> {
+  return traceAnalytics('admin', async () => {
+    await measureAnalytics('schema', ensureSiteSchema);
+    return readCachedAnalytics({ session, kind: 'admin', period }, () => loadAdminAnalytics(period));
+  });
+}
 
+async function loadAdminAnalytics(period: WholesaleAdminAnalyticsPeriod): Promise<WholesaleAdminAnalytics> {
   const interval = periodSqlInterval(period);
 
   const managerActionEvents = [
@@ -54,7 +62,7 @@ export async function getWholesaleAdminAnalytics(period: WholesaleAdminAnalytics
   const views24Result = await readAdminViews24();
 
   const data = { managersResult, priceStats, eventSummary, managerActivityResult, lastLoginResult, lastActionResult, recentEventsResult, views24Result };
-  const aggregates = aggregateAdminAnalytics(data, period, Date.now(), new Date(), () => new Date());
+  const aggregates = await measureAnalytics('aggregate_response', async () => aggregateAdminAnalytics(data, period, Date.now(), new Date(), () => new Date()));
   const [productInterest, comparison] = await Promise.all([
     getProductInterest(null, interval),
     getPeriodComparison(null, period),

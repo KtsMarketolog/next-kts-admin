@@ -2,6 +2,7 @@ import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
 import { hashPassword, requireEmployee } from '@/shared/lib/adminAuth';
 import {
   deleteClientCompany,
+  getClientCompany,
   ClientArchiveConflictError,
   updateClientCompany,
   type ClientCompanyInput,
@@ -42,6 +43,30 @@ function inputFromBody(body: Record<string, unknown>, passwordHash?: string, dis
     passwordHash,
     displayPassword,
   };
+}
+
+export async function GET(_request: Request, context: Context) {
+  const headers = { 'Cache-Control': 'private, no-store' };
+  const { denied, session } = await requireEmployee();
+  if (denied) {
+    denied.headers.set('Cache-Control', headers['Cache-Control']);
+    return denied;
+  }
+
+  const { id } = await context.params;
+  const numericId = Number(id);
+  if (!Number.isSafeInteger(numericId) || numericId <= 0) {
+    return Response.json({ error: 'Некорректная компания клиента' }, { status: 400, headers });
+  }
+
+  try {
+    const company = await getClientCompany(numericId, session);
+    if (!company) return Response.json({ error: 'Клиент не найден или недоступен' }, { status: 404, headers });
+    // The read-only detail screen does not need password rotation metadata.
+    return Response.json({ company: { ...company, passwordChangedAt: undefined } }, { headers });
+  } catch {
+    return Response.json({ error: 'Не удалось загрузить клиента. Попробуйте обновить страницу.' }, { status: 503, headers });
+  }
 }
 
 export async function PUT(request: Request, context: Context) {

@@ -1,5 +1,5 @@
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
-import { requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
+import { requireWholesaleAdminSession, type AdminSession } from '@/shared/lib/adminAuth';
 import {
   getWholesaleAdminAnalytics,
   getWholesaleManagerAnalyticsExtended,
@@ -13,6 +13,7 @@ import {
   type WholesaleAnalyticsExportFormat,
 } from '@/shared/lib/wholesaleAnalyticsExport';
 import { normalizeTextField } from '@/shared/lib/wholesaleSecurity';
+import { analyticsUnavailableResponse } from '@/shared/lib/db/wholesaleAdminRepo/analytics/availability';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,14 +45,14 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#039;');
 }
 
-async function loadReport(period: WholesaleAdminAnalyticsPeriod, managerId: number | null) {
+async function loadReport(period: WholesaleAdminAnalyticsPeriod, managerId: number | null, session: AdminSession) {
   if (managerId) {
-    const analytics = await getWholesaleManagerAnalyticsExtended(managerId, period);
+    const analytics = await getWholesaleManagerAnalyticsExtended(managerId, period, session);
     if (!analytics) return null;
     return buildWholesaleAnalyticsReport(analytics, period, 'manager');
   }
 
-  const analytics = await getWholesaleAdminAnalytics(period);
+  const analytics = await getWholesaleAdminAnalytics(period, session);
   return buildWholesaleAnalyticsReport(analytics, period, 'admin');
 }
 
@@ -66,7 +67,8 @@ export async function GET(request: Request) {
   const period = parsePeriod(url.searchParams.get('period'));
   const format = parseFormat(url.searchParams.get('format'));
   const managerId = parseManagerId(url.searchParams.get('managerId'));
-  const report = await loadReport(period, managerId);
+  const report = await loadReport(period, managerId, session).catch(analyticsUnavailableResponse);
+  if (report instanceof Response) return report;
   if (!report) return Response.json({ error: 'Manager not found' }, { status: 404 });
 
   const file = await renderWholesaleAnalyticsExport(report, format);
@@ -98,7 +100,8 @@ export async function POST(request: Request) {
   const period = parsePeriod(body.period);
   const format = parseFormat(body.format);
   const managerId = parseManagerId(body.managerId);
-  const report = await loadReport(period, managerId);
+  const report = await loadReport(period, managerId, session).catch(analyticsUnavailableResponse);
+  if (report instanceof Response) return report;
   if (!report) return Response.json({ error: 'Manager not found' }, { status: 404 });
 
   const file = await renderWholesaleAnalyticsExport(report, format);

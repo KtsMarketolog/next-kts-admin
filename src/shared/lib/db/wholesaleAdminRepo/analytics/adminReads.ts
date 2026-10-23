@@ -1,4 +1,5 @@
-import { query } from '../../client';
+import { analyticsQuery } from './performance';
+import { clientEventAggregate } from './clientEventAggregate';
 import { type AnalyticsEventRow } from './rows';
 
 export type AdminManagerRow = {
@@ -57,7 +58,7 @@ export type AdminEventRow = AnalyticsEventRow & {
 };
 
 export function readAdminManagers() {
-  return query<AdminManagerRow>(
+  return analyticsQuery<AdminManagerRow>("readAdminManagers",
     `select
        m.id::text,
        m.name,
@@ -77,7 +78,7 @@ export function readAdminManagers() {
 }
 
 export function readAdminPriceStats(interval: string | null) {
-  return query<AdminPriceRow>(
+  return analyticsQuery<AdminPriceRow>("readAdminPriceStats",
     `select
        pl.id::text,
        coalesce(nullif(pl.title, ''), 'Без названия') as title,
@@ -90,31 +91,31 @@ export function readAdminPriceStats(interval: string | null) {
        pl.created_at::text,
        pl.updated_at::text,
        coalesce(items.item_count, 0)::text as item_count,
-       coalesce(views.views, 0)::text as views,
-       coalesce(views.views_last_7_days, 0)::text as views_last_7_days,
-       coalesce(views.views_last_30_days, 0)::text as views_last_30_days,
-       coalesce(views.views_period, 0)::text as views_period,
-       views.last_view_at::text,
-       coalesce(view_events.unique_visitors, 0)::text as unique_visitors,
-       coalesce(view_events.repeat_views, 0)::text as repeat_views,
-       coalesce(pdf.pdf_downloads, 0)::text as pdf_downloads,
-       coalesce(pdf.pdf_last_7_days, 0)::text as pdf_last_7_days,
-       coalesce(pdf.pdf_last_30_days, 0)::text as pdf_last_30_days,
-       coalesce(pdf.pdf_period, 0)::text as pdf_period,
-       coalesce(pdf.unique_downloaders, 0)::text as unique_downloaders,
-       pdf.last_pdf_at::text,
-       coalesce(excel.excel_downloads, 0)::text as excel_downloads,
-       coalesce(excel.excel_last_7_days, 0)::text as excel_last_7_days,
-       coalesce(excel.excel_last_30_days, 0)::text as excel_last_30_days,
-       coalesce(excel.excel_period, 0)::text as excel_period,
-       coalesce(excel.unique_downloaders, 0)::text as unique_excel_downloaders,
-       excel.last_excel_at::text,
-       coalesce(requests.requests_sent, 0)::text as requests_sent,
-       coalesce(requests.requests_period, 0)::text as requests_period,
-       requests.last_request_at::text,
-       views.first_view_at::text,
-       pdf.first_pdf_at::text,
-       requests.first_request_at::text,
+       coalesce(client_events.views, 0)::text as views,
+       coalesce(client_events.views_last_7_days, 0)::text as views_last_7_days,
+       coalesce(client_events.views_last_30_days, 0)::text as views_last_30_days,
+       coalesce(client_events.views_period, 0)::text as views_period,
+       client_events.last_view_at::text,
+       coalesce(client_events.unique_visitors, 0)::text as unique_visitors,
+       coalesce(client_events.repeat_views, 0)::text as repeat_views,
+       coalesce(client_events.pdf_downloads, 0)::text as pdf_downloads,
+       coalesce(client_events.pdf_last_7_days, 0)::text as pdf_last_7_days,
+       coalesce(client_events.pdf_last_30_days, 0)::text as pdf_last_30_days,
+       coalesce(client_events.pdf_period, 0)::text as pdf_period,
+       coalesce(client_events.unique_downloaders, 0)::text as unique_downloaders,
+       client_events.last_pdf_at::text,
+       coalesce(client_events.excel_downloads, 0)::text as excel_downloads,
+       coalesce(client_events.excel_last_7_days, 0)::text as excel_last_7_days,
+       coalesce(client_events.excel_last_30_days, 0)::text as excel_last_30_days,
+       coalesce(client_events.excel_period, 0)::text as excel_period,
+       coalesce(client_events.unique_excel_downloaders, 0)::text as unique_excel_downloaders,
+       client_events.last_excel_at::text,
+       coalesce(client_events.requests_sent, 0)::text as requests_sent,
+       coalesce(client_events.requests_period, 0)::text as requests_period,
+       client_events.last_request_at::text,
+       client_events.first_view_at::text,
+       client_events.first_pdf_at::text,
+       client_events.first_request_at::text,
        manager_actions.last_manager_activity_at::text,
        client_activity.last_client_event_type
      from wholesale_price_lists pl
@@ -124,67 +125,7 @@ export function readAdminPriceStats(interval: string | null) {
        from wholesale_price_list_items i
        where i.price_list_id = pl.id and i.visible = true
      ) items on true
-     left join lateral (
-       select
-         count(*)::integer as views,
-         count(*) filter (where e.created_at >= now() - interval '7 days')::integer as views_last_7_days,
-         count(*) filter (where e.created_at >= now() - interval '30 days')::integer as views_last_30_days,
-         count(*) filter (where ($1::text is null or e.created_at >= now() - $1::interval))::integer as views_period,
-         max(e.created_at) as last_view_at,
-         min(e.created_at) as first_view_at
-       from wholesale_analytics_events e
-       where e.price_list_id = pl.id
-         and e.actor_type = 'client'
-         and e.event_type in ('public_price_opened', 'public_price_reopened')
-     ) views on true
-     left join lateral (
-       select
-         count(distinct nullif(session_id, ''))::integer as unique_visitors,
-         count(*) filter (where event_type = 'public_price_reopened')::integer as repeat_views
-       from wholesale_analytics_events e
-       where e.price_list_id = pl.id
-         and e.actor_type = 'client'
-         and e.event_type in ('public_price_opened', 'public_price_reopened')
-         and ($1::text is null or e.created_at >= now() - $1::interval)
-     ) view_events on true
-     left join lateral (
-       select
-         count(*)::integer as pdf_downloads,
-         count(*) filter (where created_at >= now() - interval '7 days')::integer as pdf_last_7_days,
-         count(*) filter (where created_at >= now() - interval '30 days')::integer as pdf_last_30_days,
-         count(*) filter (where ($1::text is null or created_at >= now() - $1::interval))::integer as pdf_period,
-         count(distinct nullif(session_id, ''))::integer as unique_downloaders,
-         max(created_at) as last_pdf_at,
-         min(created_at) as first_pdf_at
-       from wholesale_analytics_events e
-       where e.price_list_id = pl.id
-         and e.actor_type = 'client'
-         and e.event_type = 'public_price_pdf_downloaded'
-     ) pdf on true
-     left join lateral (
-       select
-         count(*)::integer as excel_downloads,
-         count(*) filter (where created_at >= now() - interval '7 days')::integer as excel_last_7_days,
-         count(*) filter (where created_at >= now() - interval '30 days')::integer as excel_last_30_days,
-         count(*) filter (where ($1::text is null or created_at >= now() - $1::interval))::integer as excel_period,
-         count(distinct nullif(session_id, ''))::integer as unique_downloaders,
-         max(created_at) as last_excel_at
-       from wholesale_analytics_events e
-       where e.price_list_id = pl.id
-         and e.actor_type = 'client'
-         and e.event_type = 'public_price_excel_downloaded'
-     ) excel on true
-     left join lateral (
-       select
-         count(*)::integer as requests_sent,
-         count(*) filter (where ($1::text is null or created_at >= now() - $1::interval))::integer as requests_period,
-         max(created_at) as last_request_at,
-         min(created_at) as first_request_at
-       from wholesale_analytics_events e
-       where e.price_list_id = pl.id
-         and e.actor_type = 'client'
-         and e.event_type = 'public_price_request_sent'
-     ) requests on true
+     ${clientEventAggregate("$1")}
      left join lateral (
        select max(e.created_at) as last_manager_activity_at
        from wholesale_analytics_events e
@@ -225,7 +166,7 @@ export function readAdminPriceStats(interval: string | null) {
 }
 
 export function readAdminEventSummary(interval: string | null, managerActionEvents: string[], trackedManagerEvents: string[]) {
-  return query<{
+  return analyticsQuery<{
     actions_last_7_days: string;
     actions_last_30_days: string;
     actions_period: string;
@@ -234,7 +175,7 @@ export function readAdminEventSummary(interval: string | null, managerActionEven
     logins_period: string;
     active_days_period: string;
     active_managers_period: string;
-  }>(
+  }>("readAdminEventSummary",
     `select
        count(*) filter (where event_type = any($2::text[]) and created_at >= now() - interval '7 days')::text as actions_last_7_days,
        count(*) filter (where event_type = any($2::text[]) and created_at >= now() - interval '30 days')::text as actions_last_30_days,
@@ -251,13 +192,13 @@ export function readAdminEventSummary(interval: string | null, managerActionEven
 }
 
 export function readAdminManagerActivity(interval: string | null, managerActionEvents: string[], trackedManagerEvents: string[]) {
-  return query<{
+  return analyticsQuery<{
     manager_id: string;
     actions_period: string;
     logins_period: string;
     active_days_period: string;
     last_action_at: string | null;
-  }>(
+  }>("readAdminManagerActivity",
     `select
        manager_id::text,
        count(*) filter (where event_type = any($2::text[]) and ($1::text is null or created_at >= now() - $1::interval))::text as actions_period,
@@ -274,7 +215,7 @@ export function readAdminManagerActivity(interval: string | null, managerActionE
 }
 
 export function readAdminLastLogin() {
-  return query<{ manager_id: string | null; manager_name: string; created_at: string; }>(
+  return analyticsQuery<{ manager_id: string | null; manager_name: string; created_at: string; }>("readAdminLastLogin",
     `select e.manager_id::text, coalesce(m.name, 'Не назначен') as manager_name, e.created_at::text
      from wholesale_analytics_events e
      left join wholesale_managers m on m.id = e.manager_id
@@ -285,14 +226,14 @@ export function readAdminLastLogin() {
 }
 
 export function readAdminLastAction(managerActionEvents: string[]) {
-  return query<{
+  return analyticsQuery<{
     event_type: string;
     manager_id: string | null;
     manager_name: string;
     price_title: string | null;
     client_name: string | null;
     created_at: string;
-  }>(
+  }>("readAdminLastAction",
     `select
        e.event_type,
        e.manager_id::text,
@@ -311,7 +252,7 @@ export function readAdminLastAction(managerActionEvents: string[]) {
 }
 
 export function readAdminRecentEvents(interval: string | null) {
-  return query<AdminEventRow>(
+  return analyticsQuery<AdminEventRow>("readAdminRecentEvents",
     `select
        e.id::text,
        e.event_type,
@@ -337,7 +278,7 @@ export function readAdminRecentEvents(interval: string | null) {
 }
 
 export function readAdminViews24() {
-  return query<{ client_id: string; views: string; }>(
+  return analyticsQuery<{ client_id: string; views: string; }>("readAdminViews24",
     `select coalesce(nullif(e.client_id, ''), lower(pl.client_name)) as client_id, count(*)::text as views
      from wholesale_analytics_events e
      left join wholesale_price_lists pl on pl.id = e.price_list_id

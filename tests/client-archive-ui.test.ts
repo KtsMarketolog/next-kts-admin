@@ -52,7 +52,8 @@ test('archive UI guards mutations and uses optimistic archive/restore version', 
   assert.match(list, /sequence !== loadSequence\.current/);
   assert.match(list, /scope !== scopeRef\.current/);
   const detail = readFileSync('src/features/admin/clients/AdminClientDetailSection.tsx', 'utf8');
-  assert.equal((detail.match(/\/api\/admin\/clients\?scope=all/g) ?? []).length, 2);
+  assert.doesNotMatch(detail, /\/api\/admin\/clients\?scope=all/);
+  assert.equal((detail.match(/request\(`\/api\/admin\/clients\/\$\{clientId\}`/g) ?? []).length, 2);
   assert.match(detail, /if \(client\?\.archivedAt\)/);
   assert.equal((detail.match(/readOnly=\{Boolean\(client\.archivedAt\)\}/g) ?? []).length, 2);
   assert.match(detail, /typeof data\.warning === 'string'/);

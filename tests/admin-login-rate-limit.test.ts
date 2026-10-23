@@ -5,11 +5,14 @@ import * as net from 'node:net';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { createEmployeePasswordVerifier, EmployeePasswordVerificationUnavailable } from '../src/shared/lib/employeePasswordVerification';
 
 type LimitResult = { allowed: boolean; remaining: number; retryAfter: number };
 type LimitModule = {
   checkRateLimit: (key: string, limit: number, windowMs: number) => LimitResult;
+  checkDbRateLimit: (key: string, limit: number, windowMs: number, options?: { refundable?: boolean }) => Promise<LimitResult>;
   resetRateLimit: (key: string) => void;
+  resetDbRateLimit: (key: string) => Promise<void>;
   getClientIp: (request: Request) => string;
 };
 
@@ -26,7 +29,10 @@ function load<T>(path: string, modules: Record<string, unknown>, env = {}, globa
   return exports as T;
 }
 
-function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boolean } = {}) {
+function harness(options: {
+  twoFactor?: boolean; managerPasswordIsLegacy?: boolean; verificationBusy?: boolean;
+  verificationStarted?: boolean; nativeVerification?: boolean;
+} = {}) {
   let now = Date.now();
   class ClockDate extends Date { static now() { return now; } }
   const limits = load<LimitModule>('src/shared/lib/rateLimit.ts', {
@@ -45,11 +51,15 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
   const lookupInputs: string[] = [];
   let consumedChallenges = 0;
   let legacyPasswordChecks = 0;
+  const nativeVerifier = options.nativeVerification ? createEmployeePasswordVerifier() : null;
+  const nativeHash = nativeVerifier
+    ? `scrypt:${'7'.repeat(32)}:${crypto.scryptSync('valid-password', '7'.repeat(32), 64).toString('hex')}`
+    : null;
   const account = (login: string, role: 'admin' | 'manager') => ({
     id: login.startsWith('office-') ? 100 + Number(login.match(/office-(\d+)/)?.[1]) : role === 'admin' ? 7 : 17,
     login, email: login, role,
     isActive: true,
-    passwordHash: role === 'manager' && options.managerPasswordIsLegacy ? 'synthetic-manager-legacy-hash' : 'synthetic-hash',
+    passwordHash: nativeHash ?? (role === 'manager' && options.managerPasswordIsLegacy ? 'synthetic-manager-legacy-hash' : 'synthetic-hash'),
     passwordChangedAt: null,
   });
   const proofs = load<typeof import('../src/shared/lib/loginCredentialProof')>('src/shared/lib/loginCredentialProof.ts', {
@@ -57,12 +67,18 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
   });
   const modules: Record<string, unknown> = {
     '@/shared/lib/loginCredentialProof': proofs,
+    '@/shared/lib/employeePasswordVerification': {
+      EmployeePasswordVerificationUnavailable,
+      verifyEmployeePassword: async (password: string, hash: string, input: { identity: string }) => {
+        assert.match(input.identity, /^(admin|manager):\d+$/);
+        if (nativeVerifier) return nativeVerifier(password, hash, input);
+        if (options.verificationBusy) throw new EmployeePasswordVerificationUnavailable(Boolean(options.verificationStarted));
+        return password === (hash === 'synthetic-manager-legacy-hash' ? 'valid-legacy-password' : 'valid-password');
+      },
+    },
     '@/shared/lib/adminAuth': {
       createAdminSession: async (role: string) => { sessions.push(role); },
       createEmployeeSession: async (actor: { role: string }) => { sessions.push(actor.role); },
-      verifyPassword: (password: string, hash: string) => password === (
-        hash === 'synthetic-manager-legacy-hash' ? 'valid-legacy-password' : 'valid-password'
-      ),
       validateAdminPassword: (password: string) => {
         legacyPasswordChecks++;
         return password === 'valid-legacy-password';
@@ -109,14 +125,13 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
     '@/shared/lib/loginSource': loginSource,
     '@/shared/lib/rateLimit': {
       ...limits,
-      // Same synchronous, atomic bucket reservation semantics as the shared limiter.
-      // Only persistence is replaced; real route/session/IP/limit logic runs below.
-      checkDbRateLimit: async (key: string, limit: number, windowMs: number) => {
-        const result = limits.checkRateLimit(key, limit, windowMs);
+      // Real bounded fallback reservation/refund logic; no real DB is touched.
+      checkDbRateLimit: async (key: string, limit: number, windowMs: number, options?: { refundable?: boolean }) => {
+        const result = await limits.checkDbRateLimit(key, limit, windowMs, options);
         calls.push({ key, limit, allowed: result.allowed });
         return result;
       },
-      resetDbRateLimit: async (key: string) => { resets.push(key); limits.resetRateLimit(key); },
+      resetDbRateLimit: async (key: string) => { resets.push(key); await limits.resetDbRateLimit(key); },
     },
   };
   const route = load<{ POST: (request: Request) => Promise<Response> }>('src/app/api/admin/login/route.ts', modules);
@@ -147,6 +162,44 @@ function harness(options: { twoFactor?: boolean; managerPasswordIsLegacy?: boole
     },
   };
 }
+
+test('async verifier rejection is not truthy authentication for either employee role', async () => {
+  for (const login of ['admin@example.test', 'manager@example.test']) {
+    const h = harness();
+    assert.equal((await h.post({ login, password: 'wrong-password' })).status, 401);
+    assert.equal(h.sessions.length, 0);
+  }
+});
+
+test('42 real async password checks from one office create 42 employee sessions without a shared IP quota', async () => {
+  const h = harness({ nativeVerification: true });
+  const responses = await Promise.all(Array.from({ length: 42 }, (_, index) => h.post({
+    login: `office-${index}@example.test`, password: 'valid-password', cookie: `synthetic-office-browser-${index}`,
+  })));
+  assert.ok(responses.every((response) => response.status === 200));
+  assert.equal(h.sessions.length, 42);
+  assert.equal(h.counts().legacyPasswordChecks, 0);
+});
+
+test('queue overload returns retryable 503, refunds only unexecuted attempts and never records a bad password', async () => {
+  const h = harness({ verificationBusy: true });
+  for (let i = 0; i < 20; i++) {
+    const response = await h.post();
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('Retry-After'), '2');
+    assert.equal((await response.json()).code, 'LOGIN_UNAVAILABLE');
+  }
+  assert.equal(h.sessions.length, 0);
+  assert.equal(h.resets.length, 0, 'overload must not wipe existing guesses by resetting a bucket');
+  assert.equal(h.events.length, 0, 'capacity rejection is neither invalid password nor a lockout');
+  assert.equal(h.counts().legacyPasswordChecks, 0, 'capacity rejection cannot fall through to legacy admin');
+});
+
+test('already executed verification cannot refund guesses on disconnect or native timeout', async () => {
+  const h = harness({ verificationBusy: true, verificationStarted: true });
+  for (let i = 0; i < 9; i++) assert.equal((await h.post()).status, i < 8 ? 503 : 429);
+  assert.equal(h.sessions.length, 0);
+});
 
 test('employee lookup preserves Unicode identifier while the rate key keeps its existing lowercase policy', async () => {
   const h = harness();

@@ -92,6 +92,12 @@ jobs:
           bash scripts/test-client-chat-postgres.sh
           bash scripts/test-employee-identifiers-postgres.sh
           bash scripts/test-login-credentials-postgres.sh
+          # Bounded async employee checks must not leave office-wide lockouts.
+          bash scripts/test-admin-login-rate-limit-postgres.sh
+          # Single-company reads retain ownership and archive permissions.
+          bash scripts/test-client-company-archive-postgres.sh
+          # Optimized statistics preserve results and invalidate both worker caches.
+          bash scripts/test-wholesale-analytics-postgres.sh
           bash scripts/test-price-request-outbox-postgres.sh
           # Shared price-build admission must work across the two app processes.
           # Only disposable PostgreSQL clusters and synthetic price data are used.

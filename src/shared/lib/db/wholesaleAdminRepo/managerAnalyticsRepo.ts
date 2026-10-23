@@ -1,4 +1,7 @@
 import { ensureSiteSchema } from '../schema';
+import type { AdminSession } from '@/shared/lib/adminAuth';
+import { readCachedAnalytics } from './analytics/readCache';
+import { measureAnalytics, traceAnalytics } from './analytics/performance';
 import { periodSqlInterval } from './analytics/calculations';
 import { getPeriodComparison, getProductInterest } from './analytics/supplemental';
 import {
@@ -24,17 +27,25 @@ import { aggregateManagerAttention } from './analytics/managerAttention';
 import { buildManagerExtendedResponse } from './analytics/managerExtendedResponse';
 import type { WholesaleManagerAnalytics, WholesaleManagerAnalyticsPeriod } from './types';
 
-export async function getWholesaleManagerAnalytics(managerId: number, period: WholesaleManagerAnalyticsPeriod = '30d'): Promise<WholesaleManagerAnalytics | null> {
-  await ensureSiteSchema();
+async function managerReport(managerId: number, period: WholesaleManagerAnalyticsPeriod, session: AdminSession | undefined, kind: 'manager' | 'extended') {
+  return traceAnalytics(kind, async () => {
+    await measureAnalytics('schema', ensureSiteSchema);
+    // Re-read the target before any cache hit. Admins can still inspect inactive
+    // managers' historical statistics; removed managers must immediately be 404.
+    const managerResult = await readManagerManager(managerId);
+    if (!managerResult.rows[0]) return null;
+    return readCachedAnalytics({ session, kind, period, managerId, targetRevision: managerResult.rows[0].analytics_revision }, () => kind === 'manager'
+      ? loadManagerAnalytics(managerId, period, managerResult)
+      : loadManagerAnalyticsExtended(managerId, period, managerResult));
+  });
+}
 
+export async function getWholesaleManagerAnalytics(managerId: number, period: WholesaleManagerAnalyticsPeriod = '30d', session?: AdminSession): Promise<WholesaleManagerAnalytics | null> {
+  return managerReport(managerId, period, session, 'manager');
+}
+
+async function loadManagerAnalytics(managerId: number, period: WholesaleManagerAnalyticsPeriod, managerResult: Awaited<ReturnType<typeof readManagerManager>>) {
   const interval = periodSqlInterval(period);
-
-  const managerResult = await readManagerManager(managerId);
-
-  const managerRow = managerResult.rows[0];
-
-  if (!managerRow) return null;
-
   const summaryResult = await readManagerSummary(managerId, interval);
 
   const lastCreatedResult = await readManagerLastCreated(managerId);
@@ -52,11 +63,12 @@ export async function getWholesaleManagerAnalytics(managerId: number, period: Wh
   return buildManagerAnalyticsResponse({ managerResult, summaryResult, lastCreatedResult, recentChangesResult, lastChangeResult, problemResult, publicViewsResult, topViewsResult }, () => new Date());
 }
 
-export async function getWholesaleManagerAnalyticsExtended(managerId: number, period: WholesaleManagerAnalyticsPeriod = '30d'): Promise<WholesaleManagerAnalytics | null> {
-  const base = await getWholesaleManagerAnalytics(managerId, period);
+export async function getWholesaleManagerAnalyticsExtended(managerId: number, period: WholesaleManagerAnalyticsPeriod = '30d', session?: AdminSession): Promise<WholesaleManagerAnalytics | null> {
+  return managerReport(managerId, period, session, 'extended');
+}
 
-  if (!base) return null;
-
+async function loadManagerAnalyticsExtended(managerId: number, period: WholesaleManagerAnalyticsPeriod, managerResult: Awaited<ReturnType<typeof readManagerManager>>) {
+  const base = await loadManagerAnalytics(managerId, period, managerResult);
   const interval = periodSqlInterval(period);
 
   const priceStats = await readManagerExtendedPriceStats(managerId, interval);

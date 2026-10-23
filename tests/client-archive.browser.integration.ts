@@ -19,6 +19,7 @@ window.fetch=async(url,init={})=>{
  const method=init.method||'GET';const body=init.body?JSON.parse(init.body):null;window.calls.push({url,method,body});
  if(method==='GET'){
   if(url.includes('/wholesale/managers'))return Response.json({managers:[]});
+  if(url==='/api/admin/clients/2')return Response.json({company:structuredClone(window.companies.find(c=>c.id===2))});
   if(url.startsWith('/api/admin/clients')&&!/\\/clients\\/\\d/.test(url)){
    const scope=new URL(url,location.origin).searchParams.get('scope');
    const companies=structuredClone(window.companies.filter(c=>scope==='all'||Boolean(c.archivedAt)===(scope==='archived')));

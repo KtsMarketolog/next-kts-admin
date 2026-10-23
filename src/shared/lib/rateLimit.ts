@@ -15,6 +15,8 @@ export type RateLimitResult = {
   allowed: boolean;
   remaining: number;
   retryAfter: number;
+  /** Only for admitted work that was rejected before password verification. */
+  refundUnconsumedAttempt?: () => Promise<void>;
 };
 
 export function getClientIp(request: Request) {
@@ -84,14 +86,15 @@ function hashRateLimitKey(key: string) {
   return createHash('sha256').update(`${rateLimitSecret()}:${key}`).digest('hex');
 }
 
-export async function checkDbRateLimit(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+export async function checkDbRateLimit(
+  key: string, limit: number, windowMs: number, options: { refundable?: boolean } = {},
+): Promise<RateLimitResult> {
   const hashedKey = hashRateLimitKey(key);
   const resetAt = new Date(Date.now() + windowMs);
 
   try {
     await ensureSiteSchema();
-    const result = await query<{ count: number; reset_at: string }>(
-      `insert into rate_limit_buckets (key, count, reset_at, updated_at)
+    const reservationSql = `insert into rate_limit_buckets (key, count, reset_at, updated_at)
        values ($1, 1, $2, now())
        on conflict (key) do update
        set
@@ -103,22 +106,61 @@ export async function checkDbRateLimit(key: string, limit: number, windowMs: num
            when rate_limit_buckets.reset_at <= now() then $2
            else rate_limit_buckets.reset_at
          end,
-         updated_at = now()
-       returning count, reset_at::text`,
-      [hashedKey, resetAt],
+         updated_at = now()`;
+    const result = await query<{ count: number; reset_at: string; admitted?: boolean }>(
+      options.refundable
+        // Do not charge denied reservations: otherwise a burst arriving while
+        // the queue is full could leave a lockout after admitted work is refunded.
+        ? `with reserved as (
+             ${reservationSql}
+             where rate_limit_buckets.reset_at <= now() or rate_limit_buckets.count < $3
+             returning count, reset_at::text
+           )
+           select count, reset_at, true as admitted from reserved
+           union all
+           select count, reset_at::text, false as admitted from rate_limit_buckets
+           where key = $1 and not exists (select 1 from reserved)
+           limit 1`
+        : `${reservationSql} returning count, reset_at::text`,
+      options.refundable ? [hashedKey, resetAt, limit] : [hashedKey, resetAt],
     );
     const row = result.rows[0];
     const count = Number(row?.count ?? 0);
     const retryAfter = Math.max(0, Math.ceil((new Date(row?.reset_at ?? resetAt).getTime() - Date.now()) / 1000));
 
-    if (count > limit) {
+    if (!row || row.admitted === false || count > limit) {
       return { allowed: false, remaining: 0, retryAfter };
     }
 
-    return { allowed: true, remaining: Math.max(0, limit - count), retryAfter: 0 };
+    let refunded = false;
+    return {
+      allowed: true, remaining: Math.max(0, limit - count), retryAfter: 0,
+      ...(options.refundable ? { refundUnconsumedAttempt: async () => {
+        if (refunded) return;
+        refunded = true;
+        // Never reset other guesses or decrement a later window. The stored
+        // timestamp is returned as text so PostgreSQL precision is preserved.
+        await query(
+          `update rate_limit_buckets set count = greatest(0, count - 1), updated_at = now()
+           where key = $1 and reset_at = $2::timestamptz`,
+          [hashedKey, row.reset_at],
+        );
+      } } : {}),
+    };
   } catch (error) {
     console.error('DB rate limit failed, using in-memory fallback', error);
-    return checkRateLimit(`fallback:${hashedKey}`, limit, windowMs);
+    const fallbackKey = `fallback:${hashedKey}`;
+    const result = checkRateLimit(fallbackKey, limit, windowMs);
+    const reservedBucket = buckets.get(fallbackKey);
+    let refunded = false;
+    if (options.refundable && result.allowed && reservedBucket) {
+      result.refundUnconsumedAttempt = async () => {
+        if (refunded) return;
+        refunded = true;
+        if (buckets.get(fallbackKey) === reservedBucket) reservedBucket.count = Math.max(0, reservedBucket.count - 1);
+      };
+    }
+    return result;
   }
 }
 

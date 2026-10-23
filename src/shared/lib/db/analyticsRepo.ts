@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 import { query } from './client';
 import { ensureSiteSchema } from './schema';
@@ -115,8 +115,14 @@ export async function clearWholesaleAnalyticsEvents() {
     `with deleted as (
        delete from wholesale_analytics_events
        returning 1
+     ), epoch as (
+       insert into site_settings (key, value, updated_at)
+       values ('wholesale_analytics_cache_epoch', $1, now())
+       on conflict (key) do update set value = excluded.value, updated_at = excluded.updated_at
+       returning 1
      )
      select count(*)::text as deleted from deleted`,
+    [randomUUID()],
   );
   return Number(result.rows[0]?.deleted ?? 0);
 }

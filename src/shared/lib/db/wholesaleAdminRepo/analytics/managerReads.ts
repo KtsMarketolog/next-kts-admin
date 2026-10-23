@@ -1,8 +1,8 @@
-import { query } from '../../client';
+import { analyticsQuery } from './performance';
 import { type AnalyticsChangeRow, type AnalyticsProblemRow, type AnalyticsSummaryRow } from './rows';
 
 export function readManagerManager(managerId: number) {
-  return query<{
+  return analyticsQuery<{
     id: string;
     name: string;
     login: string;
@@ -10,13 +10,15 @@ export function readManagerManager(managerId: number) {
     phone: string;
     role: string | null;
     last_login_at: string | null;
-  }>(
+    analytics_revision: string;
+  }>("readManagerManager",
     `select
        m.id::text,
        m.name,
        m.login,
        m.email,
        m.phone,
+       m.updated_at::text as analytics_revision,
        coalesce(nullif(m.role, ''), 'manager') as role,
        last_login.created_at::text as last_login_at
      from wholesale_managers m
@@ -34,7 +36,7 @@ export function readManagerManager(managerId: number) {
 }
 
 export function readManagerSummary(managerId: number, interval: string | null) {
-  return query<AnalyticsSummaryRow>(
+  return analyticsQuery<AnalyticsSummaryRow>("readManagerSummary",
     `with manager_prices as (
        select
          pl.id,
@@ -65,11 +67,11 @@ export function readManagerSummary(managerId: number, interval: string | null) {
 }
 
 export function readManagerLastCreated(managerId: number) {
-  return query<{
+  return analyticsQuery<{
     id: string;
     title: string;
     created_at: string;
-  }>(
+  }>("readManagerLastCreated",
     `select id::text, title, created_at::text
      from wholesale_price_lists
      where manager_id = $1
@@ -80,7 +82,7 @@ export function readManagerLastCreated(managerId: number) {
 }
 
 export function readManagerRecentChanges(managerId: number, interval: string | null) {
-  return query<AnalyticsChangeRow>(
+  return analyticsQuery<AnalyticsChangeRow>("readManagerRecentChanges",
     `select
        e.id::text,
        e.price_list_id::text as price_id,
@@ -111,7 +113,7 @@ export function readManagerRecentChanges(managerId: number, interval: string | n
 }
 
 export function readManagerLastChange(managerId: number) {
-  return query<AnalyticsChangeRow>(
+  return analyticsQuery<AnalyticsChangeRow>("readManagerLastChange",
     `select
        e.id::text,
        e.price_list_id::text as price_id,
@@ -141,7 +143,7 @@ export function readManagerLastChange(managerId: number) {
 }
 
 export function readManagerProblem(managerId: number) {
-  return query<AnalyticsProblemRow>(
+  return analyticsQuery<AnalyticsProblemRow>("readManagerProblem",
     `with manager_prices as (
        select
          pl.id,
@@ -172,13 +174,13 @@ export function readManagerProblem(managerId: number) {
 }
 
 export function readManagerPublicViews(managerId: number, interval: string | null) {
-  return query<{
+  return analyticsQuery<{
     total: string;
     last_7_days: string;
     last_30_days: string;
     period_views: string;
     last_view_at: string | null;
-  }>(
+  }>("readManagerPublicViews",
     `select
        count(e.id)::text as total,
        count(e.id) filter (where e.created_at >= now() - interval '7 days')::text as last_7_days,
@@ -195,12 +197,12 @@ export function readManagerPublicViews(managerId: number, interval: string | nul
 }
 
 export function readManagerTopViews(managerId: number, interval: string | null) {
-  return query<{
+  return analyticsQuery<{
     price_id: string;
     title: string;
     views: string;
     last_view_at: string | null;
-  }>(
+  }>("readManagerTopViews",
     `select
        pl.id::text as price_id,
        coalesce(nullif(pl.title, ''), 'Без названия') as title,

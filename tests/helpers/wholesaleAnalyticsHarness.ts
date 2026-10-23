@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { createRequire } from 'node:module';
+const nativeRequire = createRequire(import.meta.url);
 
 const directory = fileURLToPath(new URL('../../src/shared/lib/db/wholesaleAdminRepo/', import.meta.url));
 const fixedTime = Date.parse('2026-10-23T12:00:00Z');
@@ -24,6 +26,7 @@ export function loadAnalyticsModule<T>(name: string, query: (sql: string, params
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText;
     const require = (specifier: string): unknown => {
+      if (specifier.startsWith('node:')) return nativeRequire(specifier);
       if (specifier === '@/shared/lib/adminAuth') return { isManagerSessionRole: (role: string) => ['manager', 'support_manager'].includes(role) };
       const resolved = specifier.startsWith('@/')
         ? path.resolve(directory, '../../../../', specifier.slice(2)) + '.ts'

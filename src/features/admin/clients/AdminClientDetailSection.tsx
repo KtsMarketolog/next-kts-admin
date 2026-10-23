@@ -28,6 +28,8 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   const { request, cancelAll, isActive } = useAdminRequestScope();
   const documentBusyRef = useRef(false);
   const documentsGeneration = useRef(0);
+  const clientReadSequence = useRef(0);
+  const clientAppliedSequence = useRef(0);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -40,6 +42,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [refreshError, setRefreshError] = useState('');
   const [documentTitle, setDocumentTitle] = useState('');
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentVisible, setDocumentVisible] = useState(true);
@@ -69,6 +72,32 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     setDocuments(Array.isArray(data.documents) ? data.documents : []);
   }, [clientId, request]);
 
+  const refreshClient = useCallback(async (signal: AbortSignal) => {
+    const sequence = ++clientReadSequence.current;
+    try {
+      const response = await request(`/api/admin/clients/${clientId}`, { cache: 'no-store', signal });
+      const data = await response.json().catch(() => null);
+      if (signal.aborted || sequence < clientAppliedSequence.current) return;
+      if (!response.ok) {
+        if ([401, 403, 404].includes(response.status)) {
+          clientAppliedSequence.current = sequence;
+          setClient(null);
+        }
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Не удалось обновить данные клиента');
+      }
+      const nextClient = data?.company as ClientCompany | undefined;
+      if (nextClient?.id !== clientId || typeof nextClient.title !== 'string') {
+        throw new Error('Сервер вернул некорректные данные клиента');
+      }
+      clientAppliedSequence.current = sequence;
+      setClient(withoutClientCredentials(nextClient));
+      setRefreshError('');
+    } catch (refreshFailure) {
+      if (signal.aborted || sequence < clientAppliedSequence.current) return;
+      setRefreshError(refreshFailure instanceof Error ? refreshFailure.message : 'Не удалось обновить данные клиента');
+    }
+  }, [clientId, request]);
+
   useEffect(() => {
     return startClientRealtimeSync({
       eventsEndpoint: `/api/admin/clients/${clientId}/events`,
@@ -77,17 +106,11 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
         await Promise.all([
           loadUnreadCount(signal),
           activeTab === 'documents' ? loadDocuments(signal) : undefined,
-          request('/api/admin/clients?scope=all', { cache: 'no-store', signal })
-            .then((response) => response.ok ? response.json() : null)
-            .then((data) => {
-              if (signal.aborted || !Array.isArray(data?.companies)) return;
-              const nextClient = (data.companies as ClientCompany[]).find((company) => company.id === clientId);
-              if (nextClient) setClient(withoutClientCredentials(nextClient));
-            }),
+          refreshClient(signal),
         ]);
       },
     });
-  }, [activeTab, clientId, loadDocuments, loadUnreadCount, request]);
+  }, [activeTab, clientId, loadDocuments, loadUnreadCount, refreshClient]);
 
   const selectTab = (tab: ClientTab) => {
     setActiveTab(tab);
@@ -106,10 +129,11 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
     const controller = new AbortController();
 
     const loadClient = async () => {
+      const sequence = ++clientReadSequence.current;
       setLoading(true);
       setError('');
       const [clientResponse, priceListResponse, priceRequestResponse, documentsResponse] = await Promise.all([
-        request('/api/admin/clients?scope=all', { cache: 'no-store', signal: controller.signal }),
+        request(`/api/admin/clients/${clientId}`, { cache: 'no-store', signal: controller.signal }),
         request(`/api/admin/clients/${clientId}/price-lists`, { cache: 'no-store', signal: controller.signal }),
         request(`/api/admin/clients/${clientId}/price-requests`, { cache: 'no-store', signal: controller.signal }),
         request(`/api/admin/clients/${clientId}/documents`, { cache: 'no-store', signal: controller.signal }),
@@ -123,15 +147,17 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
       const priceListData = await priceListResponse.json().catch(() => ({}));
       const priceRequestData = await priceRequestResponse.json().catch(() => ({}));
       const documentsData = await documentsResponse.json().catch(() => ({}));
-      const companies = Array.isArray(data.companies) ? (data.companies as ClientCompany[]) : [];
-      const nextClient = companies.find((company) => company.id === clientId) ?? null;
-      if (!nextClient) throw new Error('Клиент не найден');
+      const nextClient = data?.company as ClientCompany | undefined;
+      if (nextClient?.id !== clientId || typeof nextClient.title !== 'string') throw new Error('Клиент не найден');
       if (!cancelled) {
-        setClient(withoutClientCredentials(nextClient));
+        if (sequence >= clientAppliedSequence.current) {
+          clientAppliedSequence.current = sequence;
+          setClient(withoutClientCredentials(nextClient));
+          setChatUnreadCount(nextClient.chatUnreadCount || 0);
+        }
         setPriceLists(Array.isArray(priceListData.priceLists) ? priceListData.priceLists : []);
         setPriceRequests(Array.isArray(priceRequestData.requests) ? priceRequestData.requests : []);
         setDocuments(Array.isArray(documentsData.documents) ? documentsData.documents : []);
-        setChatUnreadCount(nextClient.chatUnreadCount || 0);
       }
     };
 
@@ -355,7 +381,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
             Назад к клиентам
           </button>
         </div>
-        <p className={styles.mutedText}>{error || 'Клиент не найден'}</p>
+        <p className={styles.mutedText}>{error || refreshError || 'Клиент не найден'}</p>
       </section>
     );
   }
@@ -375,6 +401,7 @@ export function AdminClientDetailSection({ clientId, onBack }: AdminClientDetail
       </div>
 
       {client.archivedAt ? <p role="status" className={styles.status}>Клиент в архиве с {formatDate(client.archivedAt)}. Вход закрыт, редактирование документов и отправка сообщений отключены. Данные и файлы сохранены без автоматического удаления. Публичные ссылки на прайсы не отключены. Для восстановления откройте вкладку «Архив» в списке клиентов.</p> : null}
+      {refreshError ? <p role="status" className={styles.status}>{refreshError}. Показаны последние загруженные данные; обновление будет повторено автоматически.</p> : null}
 
       <div className={styles.clientDetailSummary}>
         <DetailRow label="Email" value={client.email} />

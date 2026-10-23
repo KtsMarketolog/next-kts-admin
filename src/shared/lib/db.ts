@@ -81,6 +81,7 @@ export {
   ClientArchiveConflictError,
   getClientCompanyPriceLists,
   getClientCompanies,
+  getClientCompany,
   getClientPortalProfile,
   getClientUserByLogin,
   getClientUserPasswordHash,

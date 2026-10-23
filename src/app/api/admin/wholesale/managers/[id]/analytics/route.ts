@@ -1,5 +1,6 @@
-import { requireWholesaleAdmin } from '@/shared/lib/adminAuth';
+import { requireWholesaleAdminSession } from '@/shared/lib/adminAuth';
 import { getWholesaleManagerAnalyticsExtended, type WholesaleManagerAnalyticsPeriod } from '@/shared/lib/db';
+import { analyticsUnavailableResponse } from '@/shared/lib/db/wholesaleAdminRepo/analytics/availability';
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -11,7 +12,7 @@ function parsePeriod(value: string | null): WholesaleManagerAnalyticsPeriod {
 }
 
 export async function GET(request: Request, context: Context) {
-  const denied = await requireWholesaleAdmin();
+  const { denied, session } = await requireWholesaleAdminSession();
   if (denied) return denied;
 
   const { id } = await context.params;
@@ -21,10 +22,11 @@ export async function GET(request: Request, context: Context) {
   }
 
   const url = new URL(request.url);
-  const analytics = await getWholesaleManagerAnalyticsExtended(managerId, parsePeriod(url.searchParams.get('period')));
+  const analytics = await getWholesaleManagerAnalyticsExtended(managerId, parsePeriod(url.searchParams.get('period')), session).catch(analyticsUnavailableResponse);
+  if (analytics instanceof Response) return analytics;
   if (!analytics) {
     return Response.json({ error: 'Manager not found' }, { status: 404 });
   }
 
-  return Response.json(analytics);
+  return Response.json(analytics, { headers: { 'Cache-Control': 'private, no-store' } });
 }

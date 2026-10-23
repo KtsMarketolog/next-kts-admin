@@ -1,4 +1,5 @@
-import { createAdminSession, createEmployeeSession, validateAdminPassword, verifyPassword } from '@/shared/lib/adminAuth';
+import { createAdminSession, createEmployeeSession, validateAdminPassword } from '@/shared/lib/adminAuth';
+import { EmployeePasswordVerificationUnavailable, verifyEmployeePassword } from '@/shared/lib/employeePasswordVerification';
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import {
   createTwoFactorChallenge,
@@ -218,7 +219,7 @@ async function login(request: Request) {
   const rateLimitKey = isTwoFactorAttempt
     ? `login:source:${ip}:otp:${loginSession.sessionId}`
     : `login:source:${ip}:login:${login || 'empty'}`;
-  const loginRateLimit = await checkDbRateLimit(rateLimitKey, LOGIN_LIMIT, LOGIN_WINDOW_MS);
+  const loginRateLimit = await checkDbRateLimit(rateLimitKey, LOGIN_LIMIT, LOGIN_WINDOW_MS, { refundable: !isTwoFactorAttempt });
 
   if (!loginRateLimit.allowed) {
     await recordSecurityEvent({
@@ -257,8 +258,24 @@ async function login(request: Request) {
     return withSessionCookie(response, loginSession);
   }
 
+  let attemptedPasswordVerification = false;
+  const verifyStoredPassword = async (hash: string, identity: string) => {
+    try {
+      const valid = await verifyEmployeePassword(password, hash, { identity, signal: request.signal });
+      attemptedPasswordVerification = true;
+      return valid;
+    } catch (error) {
+      if (error instanceof EmployeePasswordVerificationUnavailable
+        && !error.verificationStarted && !attemptedPasswordVerification) {
+        await loginRateLimit.refundUnconsumedAttempt?.().catch(() => {
+          console.error('EMPLOYEE_LOGIN_CAPACITY_REFUND_FAILED');
+        });
+      }
+      throw error;
+    }
+  };
   const adminUser = lookupLogin ? await getAdminUserByLogin(lookupLogin) : null;
-  if (adminUser?.isActive && adminUser.passwordHash && verifyPassword(password, adminUser.passwordHash)) {
+  if (adminUser?.isActive && adminUser.passwordHash && await verifyStoredPassword(adminUser.passwordHash, `admin:${adminUser.id}`)) {
     const credentialProof = loginCredentialProof('admin', adminUser.role, adminUser);
     await resetDbRateLimit(rateLimitKey);
     if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
@@ -305,7 +322,7 @@ async function login(request: Request) {
   }
 
   const manager = lookupLogin ? await getWholesaleManagerByLogin(lookupLogin) : null;
-  if (manager?.isActive && manager.passwordHash && verifyPassword(password, manager.passwordHash)) {
+  if (manager?.isActive && manager.passwordHash && await verifyStoredPassword(manager.passwordHash, `manager:${manager.id}`)) {
     const credentialProof = loginCredentialProof('manager', manager.role, manager);
     await resetDbRateLimit(rateLimitKey);
     if (isTwoFactorEnabled() && !isEmailTwoFactorOutageActive()) {
@@ -425,6 +442,12 @@ export async function POST(request: Request) {
   try {
     return await login(request);
   } catch (error) {
+    if (error instanceof EmployeePasswordVerificationUnavailable) {
+      return Response.json(
+        { error: 'Login temporarily unavailable. Try again shortly.', code: 'LOGIN_UNAVAILABLE' },
+        { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '2' } },
+      );
+    }
     if (error instanceof LoginCredentialsChangedError) {
       return Response.json({ error: 'Credentials changed. Sign in again.' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
     }

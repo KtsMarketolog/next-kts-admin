@@ -1,4 +1,4 @@
-import { query } from '../../client';
+import { analyticsQuery } from './performance';
 
 export type PeriodComparisonRow = {
   current_prices: string;
@@ -15,16 +15,39 @@ export function readPeriodComparison(managerId: number | null, interval: string 
   const params = managerId ? [interval, managerId] : [interval];
   const managerClause = managerId ? 'and manager_id = $2' : '';
   const eventManagerClause = managerId ? 'and e.manager_id = $2' : '';
-  return query<PeriodComparisonRow>(
+  // Global filtered index scans were faster than a broad aggregate in the
+  // synthetic benchmark; retain those. The manager-scoped path below benefits
+  // from combining repeated scans of the same manager_id range.
+  if (!managerId) return analyticsQuery<PeriodComparisonRow>('readPeriodComparison',
     `select
-       (select count(*)::text from wholesale_price_lists where created_at >= now() - $1::interval ${managerClause}) as current_prices,
-       (select count(*)::text from wholesale_price_lists where created_at >= now() - ($1::interval * 2) and created_at < now() - $1::interval ${managerClause}) as previous_prices,
-       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type in ('public_price_opened', 'public_price_reopened') and e.created_at >= now() - $1::interval ${eventManagerClause}) as current_views,
-       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type in ('public_price_opened', 'public_price_reopened') and e.created_at >= now() - ($1::interval * 2) and e.created_at < now() - $1::interval ${eventManagerClause}) as previous_views,
-       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type = 'public_price_pdf_downloaded' and e.created_at >= now() - $1::interval ${eventManagerClause}) as current_pdf,
-       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type = 'public_price_pdf_downloaded' and e.created_at >= now() - ($1::interval * 2) and e.created_at < now() - $1::interval ${eventManagerClause}) as previous_pdf,
-       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type = 'public_price_request_sent' and e.created_at >= now() - $1::interval ${eventManagerClause}) as current_requests,
-       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type = 'public_price_request_sent' and e.created_at >= now() - ($1::interval * 2) and e.created_at < now() - $1::interval ${eventManagerClause}) as previous_requests`,
+       (select count(*)::text from wholesale_price_lists where created_at >= now() - $1::interval ) as current_prices,
+       (select count(*)::text from wholesale_price_lists where created_at >= now() - ($1::interval * 2) and created_at < now() - $1::interval ) as previous_prices,
+       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type in ('public_price_opened', 'public_price_reopened') and e.created_at >= now() - $1::interval ) as current_views,
+       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type in ('public_price_opened', 'public_price_reopened') and e.created_at >= now() - ($1::interval * 2) and e.created_at < now() - $1::interval ) as previous_views,
+       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type = 'public_price_pdf_downloaded' and e.created_at >= now() - $1::interval ) as current_pdf,
+       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type = 'public_price_pdf_downloaded' and e.created_at >= now() - ($1::interval * 2) and e.created_at < now() - $1::interval ) as previous_pdf,
+       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type = 'public_price_request_sent' and e.created_at >= now() - $1::interval ) as current_requests,
+       (select count(*)::text from wholesale_analytics_events e where e.actor_type = 'client' and e.event_type = 'public_price_request_sent' and e.created_at >= now() - ($1::interval * 2) and e.created_at < now() - $1::interval ) as previous_requests`, params);
+  return analyticsQuery<PeriodComparisonRow>("readPeriodComparison",
+    `select prices.*, events.* from (
+       select
+         count(*) filter (where created_at >= now() - $1::interval)::text as current_prices,
+         count(*) filter (where created_at < now() - $1::interval)::text as previous_prices
+       from wholesale_price_lists
+       where created_at >= now() - ($1::interval * 2) ${managerClause}
+     ) prices cross join (
+       select
+         count(*) filter (where e.event_type in ('public_price_opened', 'public_price_reopened') and e.created_at >= now() - $1::interval)::text as current_views,
+         count(*) filter (where e.event_type in ('public_price_opened', 'public_price_reopened') and e.created_at < now() - $1::interval)::text as previous_views,
+         count(*) filter (where e.event_type = 'public_price_pdf_downloaded' and e.created_at >= now() - $1::interval)::text as current_pdf,
+         count(*) filter (where e.event_type = 'public_price_pdf_downloaded' and e.created_at < now() - $1::interval)::text as previous_pdf,
+         count(*) filter (where e.event_type = 'public_price_request_sent' and e.created_at >= now() - $1::interval)::text as current_requests,
+         count(*) filter (where e.event_type = 'public_price_request_sent' and e.created_at < now() - $1::interval)::text as previous_requests
+       from wholesale_analytics_events e
+       where e.actor_type = 'client' and e.created_at >= now() - ($1::interval * 2)
+         and e.event_type in ('public_price_opened', 'public_price_reopened', 'public_price_pdf_downloaded', 'public_price_request_sent')
+         ${eventManagerClause}
+     ) events`,
     params,
   );
 }
@@ -41,7 +64,7 @@ export type ProductInterestRow = {
 export function readProductInterest(managerId: number | null, interval: string | null) {
   const params = managerId ? [interval, managerId] : [interval];
   const managerClause = managerId ? 'and e.manager_id = $2' : '';
-  return query<ProductInterestRow>(
+  return analyticsQuery<ProductInterestRow>("readProductInterest",
     `with event_products as (
        select
          nullif(e.metadata->>'productTitle', '') as product_title,

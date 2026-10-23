@@ -1,5 +1,6 @@
 /** Synthetic PostgreSQL acceptance only. Run scripts/test-admin-login-rate-limit-postgres.sh. */
 import assert from 'node:assert/strict';
+import { EmployeePasswordVerificationUnavailable } from '../src/shared/lib/employeePasswordVerification';
 import * as crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import * as net from 'node:net';
@@ -38,7 +39,7 @@ function load<T>(path: string, modules: Record<string, unknown>, errors: unknown
   return exports as T;
 }
 
-function worker(pool: Pool, options: { failDatabase?: boolean } = {}) {
+function worker(pool: Pool, options: { failDatabase?: boolean; verificationBusy?: boolean } = {}) {
   const errors: unknown[][] = [];
   let passwordAttempts = 0;
   let legacyAttempts = 0;
@@ -62,11 +63,18 @@ function worker(pool: Pool, options: { failDatabase?: boolean } = {}) {
   const loginSource = load('src/shared/lib/loginSource.ts', { 'node:net': net }, errors);
   const route = load<{ POST: (request: Request) => Promise<Response> }>('src/app/api/admin/login/route.ts', {
     '@/shared/lib/loginCredentialProof': proofs,
+    '@/shared/lib/employeePasswordVerification': {
+      EmployeePasswordVerificationUnavailable,
+      verifyEmployeePassword: async (password: string) => {
+        if (options.verificationBusy) throw new EmployeePasswordVerificationUnavailable(false);
+        passwordAttempts++;
+        return password === 'synthetic-valid-password';
+      },
+    },
     '@/shared/lib/adminAuth': {
       createAdminSession: async () => { sessions++; },
       createEmployeeSession: async () => { sessions++; },
       validateAdminPassword: (password: string) => { legacyAttempts++; return password === 'synthetic-legacy-password'; },
-      verifyPassword: (password: string) => { passwordAttempts++; return password === 'synthetic-valid-password'; },
     },
     '@/shared/lib/db/securityAuditRepo': { recordSecurityEvent: async () => {} },
     '@/shared/lib/db/twoFactorRepo': {
@@ -132,6 +140,25 @@ test('employee login reservations use isolated PostgreSQL atomically across work
       return result.rows[0]?.count ?? null;
     };
     const workers = () => [worker(pool), worker(pool)];
+
+    await t.test('queue overload refunds unexecuted work across workers without losing earlier guesses or leaving a lockout', async () => {
+      await pool.query('truncate rate_limit_buckets');
+      const initial = worker(pool);
+      assert.equal((await initial.post()).status, 401);
+      assert.equal((await initial.post()).status, 401);
+      const hosts = [worker(pool, { verificationBusy: true }), worker(pool, { verificationBusy: true })];
+      const responses = await Promise.all(Array.from({ length: 300 }, (_, index) => hosts[index % 2].post()));
+      assert.ok(responses.every((response) => response.status === 503 || response.status === 429));
+      assert.equal(await count(`login:source:${sourceIp}:login:employee@example.test`), 2,
+        'only the two previously executed guesses remain after all refused work is refunded');
+      assert.equal(await count(`login:legacy-admin:source:${sourceIp}`), 2, 'overload never evaluates legacy credentials');
+      hosts.forEach((host) => {
+        assert.equal(host.counts().passwordAttempts, 0);
+        assert.equal(host.errors.length, 0, 'exact refunds must use PostgreSQL without falling back');
+      });
+      assert.equal((await initial.post({ validPassword: true })).status, 200, 'queue overload must not leave a 15-minute lockout');
+      await pool.query('truncate rate_limit_buckets');
+    });
 
     await t.test('300 simultaneous failures admit only eight password and legacy checks without blocking colleagues', async () => {
       const hosts = workers();

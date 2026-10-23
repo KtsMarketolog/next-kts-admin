@@ -6,7 +6,7 @@ import type { AdminSession } from '../src/shared/lib/adminAuth';
 import { readClientDocumentFile, saveClientDocumentUpload } from '../src/shared/lib/clientDocumentStorage';
 import { query, withTransaction } from '../src/shared/lib/db/client';
 import {
-  ClientArchiveConflictError, createClientCompany, deleteClientCompany, getClientCompanies,
+  ClientArchiveConflictError, createClientCompany, deleteClientCompany, getClientCompanies, getClientCompany,
   getClientPortalProfile, getClientUserByLogin, restoreClientCompany, updateClientCompany,
   updateClientCompanyManagerAssignments,
 } from '../src/shared/lib/db/clientCompaniesRepo';
@@ -105,6 +105,22 @@ test('client archive keeps related data, revokes access and never sweeps files',
     };
     await createClientPriceRequest(requestInput);
 
+    await t.test('single company reads match the authorized list without exposing other companies or password material', async () => {
+      const before = await preservedState(company.id);
+      for (const session of [admin, { role: 'wholesale_admin' }, { role: 'manager', managerId }, { role: 'support_manager', managerId: supportManagerId }] as AdminSession[]) {
+        const detail = await getClientCompany(company.id, session);
+        assert.deepEqual(detail, (await getClientCompanies(session, 'all')).find((row) => row.id === company.id));
+        assert.equal(detail?.userCount, 1);
+        assert.equal(detail?.chatUnreadCount, 1);
+        assert.equal(detail?.clientLogin, originalInput.email);
+        assert.doesNotMatch(JSON.stringify(detail), /SyntheticArchivePassword|passwordHash|password_hash|passwordCiphertext|password_ciphertext|displayPassword|display_password/);
+      }
+      assert.equal(await getClientCompany(company.id, { role: 'manager', managerId: managerId + supportManagerId + 100 }), null);
+      assert.equal(await getClientCompany(company.id, { role: 'support_manager' }), null);
+      assert.equal(await getClientCompany(company.id + 100000, admin), null);
+      assert.deepEqual(await preservedState(company.id), before, 'detail reads never modify client state');
+    });
+
     await t.test('archiving preserves users, prices/items, correspondence, requests, document rows and actual bytes', async () => {
       const before = await preservedState(company.id);
       const cleanupCount = (await query('select count(*)::int as count from client_document_file_cleanup')).rows[0].count;
@@ -121,6 +137,8 @@ test('client archive keeps related data, revokes access and never sweeps files',
       assert.ok(!(await getClientCompanies(admin)).some((row) => row.id === company.id));
       assert.ok((await getClientCompanies(admin, 'archived')).some((row) => row.id === company.id));
       assert.ok((await getClientCompanies(admin, 'all')).some((row) => row.id === company.id));
+      assert.equal((await getClientCompany(company.id, { role: 'manager', managerId }))?.archivedAt, company.archivedAt);
+      assert.equal((await getClientCompany(company.id, { role: 'support_manager', managerId: supportManagerId }))?.archivedAt, company.archivedAt);
     });
 
     await t.test('archived reads remain available without mutating read state; writes and stale forms are refused', async () => {

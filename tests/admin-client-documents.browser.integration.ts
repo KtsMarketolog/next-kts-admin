@@ -17,10 +17,18 @@ const params=new URLSearchParams(location.search),mode=params.get('mode');
 const client={id:1,title:'Synthetic client',email:'client@example.test',phone:'',note:'',managerId:1,managerName:'Synthetic manager',supportManagerId:null,supportManagerName:'',userCount:1,clientLogin:'synthetic',clientUserId:1,chatUnreadCount:0,isActive:true,createdAt:'2026-10-18T00:00:00Z',updatedAt:'2026-10-18T00:00:00Z'};
 const saved={id:2,companyId:1,title:'Saved document',originalName:'draft.txt',mimeType:'text/plain',fileSize:8,isVisible:true,createdAt:'2026-10-18T00:00:00Z'};
 const previous={...saved,id:1,title:'Existing document',originalName:'existing.txt'};
-window.calls=[];window.signals=[];window.finish=null;window.finishRead=null;
+window.calls=[];window.signals=[];window.reads=[];window.finish=null;window.finishRead=null;window.client=client;window.companyMode='ok';
 window.fetch=async(url,init={})=>{
  if(!init.method||init.method==='GET'){
-  if(url==='/api/admin/clients?scope=all')return Response.json({companies:[client]});
+  window.reads.push(url);
+  if(url==='/api/admin/clients/1'){
+   if(window.companyMode==='offline')throw new TypeError('Synthetic offline');
+   if(window.companyMode==='denied')return Response.json({error:'Клиент не найден или недоступен'},{status:404});
+   if(window.companyMode==='invalid')return Response.json({company:{...window.client,id:2}});
+   const snapshot=structuredClone(window.client);
+   if(window.companyMode==='hold')return new Promise(resolve=>window.releaseCompany=()=>resolve(Response.json({company:snapshot})));
+   return Response.json({company:snapshot});
+  }
   if(url.endsWith('/price-lists'))return Response.json({priceLists:[]});
   if(url.endsWith('/price-requests'))return Response.json({requests:[]});
   if(url.endsWith('/chat/unread'))return Response.json({unreadCount:0});
@@ -87,7 +95,7 @@ async function main() {
     for (const engineName of ['chromium', 'webkit']) {
       const browser = await playwright[engineName].launch({ headless: true });
       try {
-        for (const mode of (process.env.KTS_DOC_UI_MODES?.split(',') ?? ['network', 'headers-hang', 'body-hang', 'cancel', 'duplicate', 'unmount', 'missing', 'invalid-json', 'stale-read', 'patch-network', 'patch-body-hang', 'delete-network', 'delete-headers-hang'])) {
+        for (const mode of (process.env.KTS_DOC_UI_MODES?.split(',') ?? ['network', 'headers-hang', 'body-hang', 'cancel', 'duplicate', 'unmount', 'missing', 'invalid-json', 'stale-read', 'patch-network', 'patch-body-hang', 'delete-network', 'delete-headers-hang', 'client-refresh', 'client-offline', 'client-denied', 'client-invalid', 'client-stale'])) {
           currentCase = `${engineName}/${mode}`;
           const page = await browser.newPage();
           page.setDefaultTimeout(5000);
@@ -98,6 +106,31 @@ async function main() {
           await page.goto(`${origin}/?mode=${mode}${['cancel', 'unmount', 'duplicate'].includes(mode) ? '&manual=1' : ''}`);
           await page.getByPlaceholder('Название документа').fill('Keep document draft');
           await page.locator('input[type=file]').setInputFiles({ name: 'draft.txt', mimeType: 'text/plain', buffer: Buffer.from('Synthetic data') });
+          if (mode.startsWith('client-')) {
+            if (mode === 'client-stale') {
+              await page.evaluate('window.companyMode="hold";window.pendingCompany=window.refresh()');
+              await page.waitForFunction('Boolean(window.releaseCompany)');
+            }
+            await page.evaluate(`window.companyMode=${JSON.stringify(mode === 'client-stale' || mode === 'client-refresh' ? 'ok' : mode.slice('client-'.length))};window.client={...window.client,title:'Updated synthetic client'}`);
+            await page.evaluate('window.refresh()');
+            if (mode === 'client-stale') await page.evaluate('window.releaseCompany();window.pendingCompany');
+            if (mode === 'client-denied') {
+              await page.getByRole('heading', { name: 'Клиент не найден', exact: true }).waitFor();
+              await page.getByText('Клиент не найден или недоступен', { exact: true }).waitFor();
+              assert.equal(await page.locator('form').count(), 0);
+            } else {
+              const updated = mode === 'client-stale' || mode === 'client-refresh';
+              await page.getByRole('heading', { name: updated ? 'Updated synthetic client' : 'Synthetic client', exact: true }).waitFor();
+              if (!updated) await page.getByRole('status').filter({ hasText: /Показаны последние загруженные данные/ }).waitFor();
+              assert.equal(await page.getByPlaceholder('Название документа').inputValue(), 'Keep document draft');
+              assert.equal(await page.locator('input[type=file]').evaluate((element: HTMLInputElement) => element.files?.[0]?.name), 'draft.txt');
+            }
+            assert.equal(await page.evaluate('window.reads.filter(url=>url==="/api/admin/clients/1").length>=2'), true);
+            assert.equal(await page.evaluate('window.reads.some(url=>url.startsWith("/api/admin/clients?"))'), false);
+            assert.equal(await page.evaluate('window.calls.length'), 0);
+            assert.deepEqual(errors, []);
+            await page.close(); tested++; continue;
+          }
           if (mode === 'stale-read') {
             await page.evaluate(() => { const state = window as unknown as { holdRead: boolean; refresh: () => Promise<void> }; state.holdRead = true; void state.refresh(); });
             await page.waitForFunction(() => Boolean((window as unknown as { finishRead: unknown }).finishRead));
