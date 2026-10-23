@@ -12,6 +12,7 @@ import { createCatalogAdminProduct, deleteCatalogAdminProduct, replaceCatalogFro
 import type { CatalogProductInput } from '../src/entities/catalog/api/catalogAdmin/types';
 import { importStockFromExcelBuffer } from '../src/entities/catalog/api/stockImport';
 import { getPublicWholesalePriceListRevision, getPublicWholesaleRequestItems } from '../src/shared/lib/db/wholesaleRepo';
+import { acquireResourceUploadSlot } from '../src/shared/lib/resourceUploadConcurrency';
 
 function guard() {
   assert.equal(process.env.KTS_CATALOG_STOCK_TEST, '1', 'Explicit isolated integration flag is required');
@@ -143,6 +144,45 @@ test('catalog/stock writes and transaction policy in isolated PostgreSQL', { tim
     assert.deepEqual((await query('select rolsuper,rolcreatedb,rolcreaterole from pg_roles where rolname=current_user')).rows[0], { rolsuper: false, rolcreatedb: false, rolcreaterole: false });
     // Complete actual import schema initialization before introducing lock gates.
     await stock([['SYNTHETIC-WARMUP-NOT-FOUND', 0]], 'warmup');
+
+    await t.test('shared upload admission enforces PostgreSQL session ownership and cancels on connection loss without touching prices', async () => {
+      const before = await stockImportSnapshot();
+      await connected(async (otherProcess) => {
+        await otherProcess.query(`select pg_advisory_lock(hashtext('kts_resource_upload_excel_0'))`);
+        assert.equal(await acquireResourceUploadSlot('catalog'), null);
+        assert.equal(await acquireResourceUploadSlot('stock'), null);
+        await otherProcess.query(`select pg_advisory_unlock(hashtext('kts_resource_upload_excel_0'))`);
+      });
+      const release = await acquireResourceUploadSlot('catalog'); assert.ok(release);
+      try {
+        await connected(async (otherProcess) => {
+          assert.equal((await otherProcess.query(`select pg_try_advisory_lock(hashtext('kts_resource_upload_excel_0')) as acquired`)).rows[0].acquired, false);
+        });
+        const pid = (await query(`select pid from pg_locks where locktype='advisory' and granted
+          and objid=(hashtext('kts_resource_upload_excel_0')::bigint & 4294967295)::oid`)).rows[0]?.pid;
+        assert.ok(pid);
+        await query('select pg_terminate_backend($1)', [pid]);
+        await until(async () => release.signal.aborted, 'upload abort after database session loss');
+        assert.equal(await acquireResourceUploadSlot('stock'), null, 'local admission remains occupied until the cancelled parser has finished');
+      } finally { await release(); }
+      const retry = await acquireResourceUploadSlot('stock'); assert.ok(retry); await retry();
+      assert.deepEqual(await stockImportSnapshot(), before);
+    });
+
+    await t.test('Excel resource rejection preserves catalog, stock, saved price choices and import receipts', async () => {
+      await fixture('upload-resource-preservation');
+      const before = await stockImportSnapshot();
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['Артикул', 'Сейчас'], ['MARKER', 3]]), 'Synthetic');
+      const archive = XLSX.CFB.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+      const xml = archive.FileIndex.find((item: { name: string }) => item.name === 'sheet1.xml'); assert.ok(xml);
+      xml.content = Buffer.from(Buffer.from(xml.content).toString('utf8').replace('MARKER', 'x'.repeat(1_000_000)));
+      xml.size = xml.content.length;
+      const buffer = Buffer.from(XLSX.CFB.write(archive, { type: 'buffer', fileType: 'zip', compression: true }));
+      assert.ok(buffer.length < 30_000);
+      await assert.rejects(importStockFromExcelBuffer({ buffer, fileName: 'Synthetic-too-long.xlsx' }), /32767/);
+      assert.deepEqual(await stockImportSnapshot(), before);
+    });
 
     await t.test('catalog disappearance and return preserve each manager visibility choice and every saved price setting', async () => {
       const prefix = 'catalog-return';

@@ -6,6 +6,7 @@ import { build } from 'esbuild';
 import * as XLSX from 'xlsx';
 
 import type { StockEmailImportResult, StockImportResult } from '../src/entities/catalog/api/stockImportTypes';
+import { parseStockWorkbook } from '../src/entities/catalog/api/stockWorkbookParser';
 
 const require = createRequire(import.meta.url);
 type Importer = {
@@ -32,7 +33,7 @@ function gate() {
 }
 
 let compiledImporter: Promise<string> | undefined;
-async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-release'; legacyBusy?: boolean; messages?: Message[]; failMoveAndFlags?: boolean; commitUnknownOnce?: boolean } = {}) {
+async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-release'; legacyBusy?: boolean; parserBusy?: boolean; messages?: Message[]; failMoveAndFlags?: boolean; commitUnknownOnce?: boolean } = {}) {
   delete globalThis.__ktsStockImportSchemaReady;
   // Bundle only in memory. DB and mail dependencies are replaced at resolution,
   // not through environment credentials; the fixture cannot open a real socket.
@@ -45,6 +46,8 @@ async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-releas
       setup(builder) {
         builder.onResolve({ filter: /^synthetic-stock-mail$/ }, ({ path }) => ({ path, external: true }));
         builder.onResolve({ filter: /^(@\/shared\/lib\/db(?:\/client)?|\.\/catalogDb)$/ }, () => ({ path: 'synthetic-stock-database', external: true }));
+        builder.onResolve({ filter: /^\.\/excelProcessing\/client$/ }, () => ({ path: 'synthetic-stock-parser', external: true }));
+        builder.onResolve({ filter: /^@\/shared\/lib\/resourceUploadConcurrency$/ }, () => ({ path: 'synthetic-stock-admission', external: true }));
         builder.onResolve({ filter: /^(imapflow|mailparser)$/ }, ({ path }) => ({ path, namespace: 'synthetic-mail' }));
         builder.onLoad({ filter: /.*/, namespace: 'synthetic-mail' }, ({ path }) => ({
           contents: path === 'imapflow'
@@ -198,6 +201,8 @@ async function harness(options: { fail?: Stage | 'constructor' | 'mailbox-releas
     new Function('require', 'module', 'exports', code)((name: string) => {
       if (name === 'synthetic-stock-database') return database;
       if (name === 'synthetic-stock-mail') return mail;
+      if (name === 'synthetic-stock-parser') return { parseStockWorkbookInWorker: async (buffer: Buffer) => parseStockWorkbook(buffer) };
+      if (name === 'synthetic-stock-admission') return { acquireResourceUploadSlot: async () => options.parserBusy ? null : Object.assign(async () => {}, { signal: new AbortController().signal }) };
       assert.ok(['xlsx', 'node:crypto'].includes(name), 'no unexpected dependency may reach real infrastructure');
       return require(name);
     }, loaded, loaded.exports);
@@ -292,6 +297,24 @@ test('legacy workbook contention returns busy without moving candidate or supers
   h.expireLegacyRow();
   assert.equal((await h.second.importStockFromEmail()).processed, 1);
   assert.deepEqual(h.moves, [{ uid: 101, folder: 'Processed' }, { uid: 100, folder: 'Processed' }]);
+});
+
+test('a busy shared Excel slot leaves mail and all stock intact and permits a later scan', async () => {
+  const options = { parserBusy: true, messages: [{ uid: 100, buffer: workbook() }, { uid: 101, buffer: workbook() }] };
+  const h = await harness(options);
+  const waiting = await h.first.importStockFromEmail();
+  assert.equal(waiting.status, 'busy');
+  assert.equal(waiting.processed, 0);
+  assert.equal(h.state.updates, 0);
+  assert.equal(h.receipts.size, 0);
+  assert.equal(h.logs.size, 0);
+  assert.deepEqual(h.moves, []);
+  assert.deepEqual(h.flags, []);
+  assert.equal(h.state.sessionHeld, false);
+  assert.equal(h.state.legacyHeld, false);
+  options.parserBusy = false;
+  assert.equal((await h.second.importStockFromEmail()).processed, 1);
+  assert.equal(h.state.updates, 1);
 });
 
 for (const stage of ['constructor', 'connect', 'mailbox', 'search', 'fetch', 'parse', 'write', 'log', 'receipt'] as const) {

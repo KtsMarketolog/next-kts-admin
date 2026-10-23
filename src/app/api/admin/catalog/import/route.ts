@@ -1,4 +1,5 @@
-import { parseCatalogExcel } from '@/entities/catalog/api/catalogExcel';
+import { parseCatalogExcelInWorker } from '@/entities/catalog/api/excelProcessing/client';
+import { ExcelProcessingError, ExcelResourceLimitError } from '@/entities/catalog/api/excelProcessing/errors';
 import { replaceCatalogFromRows } from '@/entities/catalog/api/catalogAdmin';
 import { CatalogImportDuplicateError } from '@/entities/catalog/api/catalogImportValidation';
 import { CatalogExistingArticleConflictError } from '@/entities/catalog/api/catalogAdmin/importMatching';
@@ -10,11 +11,14 @@ import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
 import { runPostCommitTasks } from '@/shared/lib/postCommitTasks';
 import { TransactionCommitUnknownError } from '@/shared/lib/db/transactionOutcome';
+import { readBoundedMultipartUpload, BoundedMultipartUploadError } from '@/shared/lib/boundedMultipartUpload';
+import { UploadRequestError } from '@/shared/lib/uploadRequestGuard';
+import { acquireResourceUploadSlot } from '@/shared/lib/resourceUploadConcurrency';
 
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
 
 function badRequest(error: string, status = 400) {
-  return Response.json({ saved: false, error }, { status });
+  return Response.json({ saved: false, error }, { status, headers: { 'Cache-Control': 'private, no-store' } });
 }
 
 export async function POST(request: Request) {
@@ -25,8 +29,20 @@ export async function POST(request: Request) {
   const limited = await enforceAdminActionRateLimit(session, 'catalog_import', 10, 30 * 60 * 1000);
   if (limited) return limited;
 
+  let release: Awaited<ReturnType<typeof acquireResourceUploadSlot>> = null;
   try {
-    const formData = await request.formData();
+    release = await acquireResourceUploadSlot('catalog');
+    if (!release) return Response.json({ saved: false, code: 'UPLOAD_BUSY', error: 'Сейчас обрабатывается другой Excel-файл. Дождитесь его завершения и повторите загрузку. Каталог не изменён.' }, {
+      status: 503, headers: { 'Retry-After': '10', 'Cache-Control': 'private, no-store' },
+    });
+    const uploadSignal = AbortSignal.any([request.signal, release.signal]);
+    const formData = await readBoundedMultipartUpload(request, {
+      maxBodyBytes: MAX_IMPORT_BYTES + 256 * 1024,
+      maxFileBytes: MAX_IMPORT_BYTES,
+      maxFields: 0,
+      allowedTextFields: [],
+      signal: uploadSignal,
+    });
     const file = formData.get('file');
     if (!(file instanceof File)) return badRequest('Excel-файл обязателен');
     if (file.size <= 0) return badRequest('Файл пустой');
@@ -34,7 +50,10 @@ export async function POST(request: Request) {
     if (!/\.(xlsx|xls)$/i.test(file.name)) return badRequest('Загрузите файл .xlsx или .xls');
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const rows = parseCatalogExcel(buffer);
+    const rows = await parseCatalogExcelInWorker(buffer, { signal: uploadSignal });
+    // Cancellation is a pre-commit decision only. A disconnect or cleanup
+    // failure after COMMIT must not relabel an already-saved import as failed.
+    if (uploadSignal.aborted) throw new UploadRequestError('ABORTED');
     const result = await replaceCatalogFromRows(rows);
     const warnings = [...result.warnings, ...await runPostCommitTasks([{
       code: 'CATALOG_IMPORT_CACHE_UNAVAILABLE',
@@ -66,6 +85,12 @@ export async function POST(request: Request) {
 
     return Response.json({ saved: true, result, warnings }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof UploadRequestError || error instanceof BoundedMultipartUploadError
+      || error instanceof ExcelProcessingError || error instanceof ExcelResourceLimitError) {
+      return Response.json({ saved: false, code: error.code, error: error.message }, {
+        status: error.status, headers: { 'Cache-Control': 'private, no-store', ...(error.status === 503 ? { 'Retry-After': '10' } : {}) },
+      });
+    }
     if (error instanceof CatalogImportDuplicateError || error instanceof CatalogExistingArticleConflictError) {
       // Both errors are raised before the first catalog write. Keep the structured
       // diagnostics separate from generic/unknown save errors in the interface.
@@ -81,5 +106,10 @@ export async function POST(request: Request) {
       });
     }
     return badRequest(error instanceof Error ? error.message : 'Не удалось загрузить каталог');
+  } finally {
+    if (release) {
+      try { await release(); }
+      catch { console.warn(JSON.stringify({ event: 'catalog_upload_slot_release_failed' })); }
+    }
   }
 }

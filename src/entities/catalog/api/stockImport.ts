@@ -5,6 +5,9 @@ import { ensureSiteSchema } from '@/shared/lib/db';
 import { query, tryAcquireSessionAdvisoryLock, withTransaction } from '@/shared/lib/db/client';
 import { withCatalogStockWrite } from '@/shared/lib/db/catalogStockWrite';
 import { runPostCommitTasks } from '@/shared/lib/postCommitTasks';
+import { acquireResourceUploadSlot } from '@/shared/lib/resourceUploadConcurrency';
+import { parseStockWorkbookInWorker } from './excelProcessing/client';
+import { ExcelProcessingError } from './excelProcessing/errors';
 
 import { ensureCatalogSchema } from './catalogDb';
 import {
@@ -15,7 +18,6 @@ import {
   normalizeStockProductName,
   parseCurrentStock,
   parseExpected,
-  parseStockWorkbook,
   readCellByAliases,
   readRawCellByAliases,
 } from './stockWorkbookParser';
@@ -168,7 +170,7 @@ async function releaseLegacyImportLock() {
 }
 
 class StockImportBusyError extends Error {
-  constructor() { super('Импорт остатков уже выполняется'); }
+  constructor(message = 'Импорт остатков уже выполняется') { super(message); }
 }
 
 class StockWorkbookValidationError extends Error {}
@@ -248,9 +250,22 @@ async function importStockFromExcelBufferLocked(input: StockWorkbookInput): Prom
   let result: StockImportResult | undefined;
   try {
     await ensureStockImportSchema();
-    let rows: ReturnType<typeof parseStockWorkbook>;
-    try { rows = parseStockWorkbook(input.buffer); }
-    catch (error) { throw new StockWorkbookValidationError(error instanceof Error ? error.message : 'Невозможно прочитать Excel-файл остатков'); }
+    const releaseParser = await acquireResourceUploadSlot('stock');
+    if (!releaseParser) throw new StockImportBusyError('Сейчас обрабатывается другой Excel-файл. Повторите импорт остатков после его завершения.');
+    let rows: Awaited<ReturnType<typeof parseStockWorkbookInWorker>>;
+    try {
+      rows = await parseStockWorkbookInWorker(input.buffer, { signal: releaseParser.signal });
+      if (releaseParser.signal.aborted) throw new ExcelProcessingError('EXCEL_PROCESSING_ABORTED');
+    }
+    catch (error) {
+      // A saturated/crashed worker or timeout is not proof of an invalid mail
+      // attachment: leave the message in INBOX for a later retry.
+      if (error instanceof ExcelProcessingError) throw error;
+      throw new StockWorkbookValidationError(error instanceof Error ? error.message : 'Невозможно прочитать Excel-файл остатков');
+    } finally {
+      try { await releaseParser(); }
+      catch { console.warn(JSON.stringify({ event: 'stock_excel_slot_release_failed' })); }
+    }
     const validationErrors: StockImportError[] = [];
     let totalRows = 0;
     let invalidRows = 0;

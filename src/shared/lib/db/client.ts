@@ -113,18 +113,38 @@ export async function withTransaction<T>(
   }
 }
 
-export async function tryAcquireSessionAdvisoryLock(lockName: string) {
+export async function tryAcquireSessionAdvisoryLock(lockName: string, options: { onDisconnect?: () => void } = {}) {
   const client = await getPool().connect();
+  let disconnected = false;
+  const onDisconnect = () => {
+    if (disconnected) return;
+    disconnected = true;
+    options.onDisconnect?.();
+  };
+  // A checked-out pg client does not use the pool's idle error handler. Upload
+  // owners need a cancellation signal if their session-owned admission vanishes.
+  if (options.onDisconnect) {
+    client.on('error', onDisconnect);
+    client.on('end', onDisconnect);
+  }
+  const detach = () => {
+    if (!options.onDisconnect) return;
+    client.removeListener('error', onDisconnect);
+    client.removeListener('end', onDisconnect);
+  };
   try {
     const result = await client.query<{ acquired: boolean }>(
       `select pg_try_advisory_lock(hashtext($1::text)) as acquired`,
       [lockName],
     );
+    if (disconnected) throw new Error('Database admission connection was lost');
     if (!result.rows[0]?.acquired) {
+      detach();
       client.release();
       return null;
     }
   } catch (error) {
+    detach();
     client.release(true);
     throw error;
   }
@@ -133,13 +153,16 @@ export async function tryAcquireSessionAdvisoryLock(lockName: string) {
   return async () => {
     if (released) return;
     released = true;
-    let discard = false;
+    let discard = disconnected;
     try {
+      if (disconnected) return;
       await client.query(`select pg_advisory_unlock(hashtext($1::text))`, [lockName]);
     } catch (error) {
       discard = true;
       throw error;
     } finally {
+      discard ||= disconnected;
+      detach();
       // An uncertain unlock must not return a session-owned lock to the pool.
       client.release(discard);
     }

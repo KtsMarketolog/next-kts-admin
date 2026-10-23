@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { constants } from 'fs';
-import { lstat, mkdir, open, realpath, unlink, writeFile } from 'fs/promises';
+import { lstat, mkdir, open, realpath, unlink } from 'fs/promises';
 import path from 'path';
 
 export const MAX_CLIENT_DOCUMENT_SIZE = 20 * 1024 * 1024;
@@ -26,7 +26,11 @@ export type SavedClientDocumentFile = {
   fileSize: number;
 };
 
-export async function saveClientDocumentUpload(companyId: number, file: File): Promise<SavedClientDocumentFile> {
+export async function saveClientDocumentUpload(
+  companyId: number,
+  file: File,
+  options: { signal?: AbortSignal } = {},
+): Promise<SavedClientDocumentFile> {
   if (!Number.isSafeInteger(companyId) || companyId <= 0) throw new Error('Некорректный клиент');
   if (file.size <= 0) throw new Error('Файл пустой');
   if (file.size > MAX_CLIENT_DOCUMENT_SIZE) throw new Error('Файл должен быть не больше 20 МБ');
@@ -36,6 +40,14 @@ export async function saveClientDocumentUpload(companyId: number, file: File): P
   if (!extension) {
     throw new Error('Можно загрузить PDF, Word, Excel, CSV, TXT или изображение');
   }
+  options.signal?.throwIfAborted();
+  // Finish reading the bounded in-memory File before creating directories or
+  // files. A failed/aborted read must not leave an upload behind.
+  const bytes = Buffer.from(await file.arrayBuffer());
+  if (bytes.length !== file.size || bytes.length > MAX_CLIENT_DOCUMENT_SIZE) {
+    throw new Error('Размер документа не соответствует загруженному файлу');
+  }
+  options.signal?.throwIfAborted();
 
   // Keep legacy relative paths and backup references, but never let the public
   // web-server user traverse this private subtree. Deployment also protects
@@ -49,8 +61,31 @@ export async function saveClientDocumentUpload(companyId: number, file: File): P
 
   const filename = `${Date.now()}-${randomUUID()}.${extension}`;
   const filePath = path.posix.join('client-documents', String(companyId), filename);
-  const bytes = Buffer.from(await file.arrayBuffer());
-  await writeFile(/*turbopackIgnore: true*/ path.join(uploadDir, filename), bytes, { flag: 'wx', mode: 0o600 });
+  const fullPath = path.join(uploadDir, filename);
+  options.signal?.throwIfAborted();
+  // Keep the handle so a partial write can remove only the exact newly created
+  // file, never an existing document or a replacement at the same path.
+  const handle = await open(/*turbopackIgnore: true*/ fullPath, 'wx', 0o600);
+  let createdIdentity: { ino: number; dev: number } | null = null;
+  try {
+    createdIdentity = await handle.stat();
+    await handle.writeFile(bytes, { signal: options.signal });
+    await handle.close();
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    try {
+      const current = await lstat(/*turbopackIgnore: true*/ fullPath);
+      if (createdIdentity && current.isFile() && !current.isSymbolicLink()
+        && current.ino === createdIdentity.ino && current.dev === createdIdentity.dev) {
+        await unlink(/*turbopackIgnore: true*/ fullPath);
+      }
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn(JSON.stringify({ event: 'client_document_partial_upload_cleanup_failed', companyId }));
+      }
+    }
+    throw error;
+  }
 
   return {
     originalName,

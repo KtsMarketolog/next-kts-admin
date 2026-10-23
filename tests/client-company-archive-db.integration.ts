@@ -14,7 +14,7 @@ import type { ClientCompanyInput } from '../src/shared/lib/db/clientCompanyTypes
 import {
   createClientChatMessageForAdmin, createClientChatMessageForClient, getClientChatConversationForAdmin,
 } from '../src/shared/lib/db/clientChatRepo';
-import { createClientDocument, deleteClientDocument, getClientDocumentsForAdmin } from '../src/shared/lib/db/clientDocumentsRepo';
+import { assertClientDocumentUploadAllowed, createClientDocument, deleteClientDocument, getClientDocumentsForAdmin } from '../src/shared/lib/db/clientDocumentsRepo';
 import { processClientDocumentCleanup } from '../src/shared/lib/db/clientDocumentCleanupRepo';
 import { createClientPriceRequest } from '../src/shared/lib/db/clientPriceRequestsRepo';
 import { createStoredClientSession, getStoredClientSession } from '../src/shared/lib/db/clientSessionsRepo';
@@ -121,6 +121,32 @@ test('client archive keeps related data, revokes access and never sweeps files',
       assert.deepEqual(await preservedState(company.id), before, 'detail reads never modify client state');
     });
 
+    await t.test('document upload preflight retains admin and assigned employee access without reading or changing document data', async () => {
+      const before = await preservedState(company.id);
+      for (const session of [admin, { role: 'wholesale_admin' }, { role: 'manager', managerId }, { role: 'support_manager', managerId: supportManagerId }] as AdminSession[]) {
+        await assertClientDocumentUploadAllowed(company.id, session);
+      }
+      await assert.rejects(assertClientDocumentUploadAllowed(company.id, { role: 'manager', managerId: managerId + 100_000 }), /не найдена/);
+      await assert.rejects(assertClientDocumentUploadAllowed(company.id, { role: 'support_manager' }), /не найдена/);
+      await assert.rejects(assertClientDocumentUploadAllowed(company.id + 100_000, admin), /не найдена/);
+      assert.deepEqual(await preservedState(company.id), before);
+    });
+
+    await t.test('preflight releases the company lock and the final document write rejects access revoked while receiving the file', async () => {
+      const raceCompany = await createClientCompany({ ...input(), managerId, supportManagerId }, admin);
+      const owner: AdminSession = { role: 'manager', managerId };
+      await assertClientDocumentUploadAllowed(raceCompany.id, owner);
+      await withTransaction(async (client) => {
+        await client.query('select id from client_companies where id=$1 for update nowait', [raceCompany.id]);
+      });
+      await updateClientCompanyManagerAssignments(raceCompany.id, { managerId: null, supportManagerId: null }, admin);
+      await assert.rejects(createClientDocument(raceCompany.id, {
+        title: 'Rejected stale upload', originalName: 'rejected.txt', mimeType: 'text/plain',
+        filePath: `client-documents/${raceCompany.id}/rejected.txt`, fileSize: 1, isVisible: true,
+      }, owner), /не найдена/);
+      assert.equal((await query('select count(*)::int as count from client_documents where company_id=$1', [raceCompany.id])).rows[0].count, 0);
+    });
+
     await t.test('archiving preserves users, prices/items, correspondence, requests, document rows and actual bytes', async () => {
       const before = await preservedState(company.id);
       const cleanupCount = (await query('select count(*)::int as count from client_document_file_cleanup')).rows[0].count;
@@ -150,6 +176,9 @@ test('client archive keeps related data, revokes access and never sweeps files',
       await assert.rejects(createClientChatMessageForAdmin(company.id, admin, 'Forbidden'), /архиве/);
       await assert.rejects(createClientChatMessageForClient(clientSession, 'Forbidden'), /архиве|отключена/);
       await assert.rejects(createClientDocument(company.id, { ...savedFile, title: 'Forbidden', isVisible: true }, admin), /архиве/);
+      for (const session of [admin, { role: 'wholesale_admin' }, { role: 'manager', managerId }, { role: 'support_manager', managerId: supportManagerId }] as AdminSession[]) {
+        await assert.rejects(assertClientDocumentUploadAllowed(company.id, session), /архиве/);
+      }
       await assert.rejects(deleteClientDocument(company.id, document.id, admin), /архиве/);
       await assert.rejects(withTransaction((client) => lockPriceListCompany(client, company.id, { managerId, supportManagerId }, admin)), /Клиент/);
       assert.deepEqual(await preservedState(company.id), before);

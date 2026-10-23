@@ -1,9 +1,13 @@
 import { randomUUID } from 'crypto';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, open, unlink } from 'fs/promises';
 import path from 'path';
 import sanitizeHtml from 'sanitize-html';
 
 import { requireAdmin } from '@/shared/lib/adminAuth';
+import { BoundedMultipartUploadError, readBoundedMultipartUpload } from '@/shared/lib/boundedMultipartUpload';
+import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
+import { acquireResourceUploadSlot } from '@/shared/lib/resourceUploadConcurrency';
+import { UploadRequestError } from '@/shared/lib/uploadRequestGuard';
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
 const MAX_CATEGORY_ICON_FILE_SIZE = 500 * 1024;
@@ -95,8 +99,43 @@ const SVG_ALLOWED_ATTRIBUTES: sanitizeHtml.AllowedAttribute[] = [
 export async function POST(request: Request) {
   const denied = await requireAdmin();
   if (denied) return denied;
+  const originDenied = enforceSameOriginRequest(request);
+  if (originDenied) return originDenied;
 
-  const formData = await request.formData();
+  let releaseSlot: Awaited<ReturnType<typeof acquireResourceUploadSlot>> = null;
+  try {
+    releaseSlot = await acquireResourceUploadSlot('image');
+    if (!releaseSlot) {
+      return Response.json({ error: 'Сейчас загружаются другие файлы. Повторите через несколько секунд.' }, {
+        status: 503, headers: { 'Retry-After': '5', 'Cache-Control': 'no-store' },
+      });
+    }
+    const uploadSignal = AbortSignal.any([request.signal, releaseSlot.signal]);
+    const formData = await readBoundedMultipartUpload(request, {
+      maxBodyBytes: MAX_FILE_SIZE + 256 * 1024,
+      maxFileBytes: MAX_FILE_SIZE,
+      maxFields: 1,
+      allowedTextFields: ['kind'],
+      signal: uploadSignal,
+    });
+    return await saveImageForm(formData, uploadSignal);
+  } catch (error) {
+    if (error instanceof UploadRequestError || error instanceof BoundedMultipartUploadError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
+    console.error('[image-upload] Upload failed', error);
+    return Response.json({ error: 'Не удалось загрузить изображение. Повторите попытку.' }, { status: 500 });
+  } finally {
+    try {
+      await releaseSlot?.();
+    } catch (error) {
+      // An unlock failure must not replace a confirmed upload with a false error.
+      console.warn('[image-upload] Failed to release upload slot', error);
+    }
+  }
+}
+
+async function saveImageForm(formData: FormData, signal: AbortSignal) {
   const file = formData.get('file');
   const rawKind = formData.get('kind');
   const kind = rawKind === 'brandLogo' || rawKind === 'priceGroup' || rawKind === 'categoryIcon' ? rawKind : 'image';
@@ -114,6 +153,7 @@ export async function POST(request: Request) {
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
+  if (signal.aborted) throw new UploadRequestError('ABORTED');
   const detectedType = detectImageType(bytes);
 
   if (file.type === 'image/svg+xml' || detectedType === 'svg') {
@@ -129,12 +169,15 @@ export async function POST(request: Request) {
       return Response.json({ error: 'SVG слишком большой. Максимальный размер файла: 2 МБ' }, { status: 400 });
     }
 
+    let cleaned: Buffer;
     try {
       const clean = sanitizeSvg(bytes);
-      return saveUpload(kind === 'priceGroup' ? normalizePriceGroupSvgSize(clean) : clean, 'svg');
+      cleaned = kind === 'priceGroup' ? normalizePriceGroupSvgSize(clean) : clean;
     } catch {
       return Response.json({ error: 'Некорректный SVG файл' }, { status: 400 });
     }
+    if (signal.aborted) throw new UploadRequestError('ABORTED');
+    return saveUpload(cleaned, 'svg', signal);
   }
 
   const ext = RASTER_TYPES.get(file.type);
@@ -142,15 +185,29 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Unsupported image type' }, { status: 400 });
   }
 
-  return saveUpload(bytes, ext);
+  return saveUpload(bytes, ext, signal);
 }
 
-async function saveUpload(bytes: Buffer, ext: string) {
+async function saveUpload(bytes: Buffer, ext: string, signal: AbortSignal) {
+  if (signal.aborted) throw new UploadRequestError('ABORTED');
   const uploadDir = path.join(getUploadRoot(), 'hero');
   await mkdir(uploadDir, { recursive: true });
+  if (signal.aborted) throw new UploadRequestError('ABORTED');
 
   const filename = `${Date.now()}-${randomUUID()}.${ext}`;
-  await writeFile(path.join(uploadDir, filename), bytes);
+  const filePath = path.join(uploadDir, filename);
+  const handle = await open(filePath, 'wx', 0o644);
+  try {
+    if (signal.aborted) throw new UploadRequestError('ABORTED');
+    await handle.writeFile(bytes, { signal });
+    await handle.close();
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    // Only the newly, exclusively created file is eligible for cleanup.
+    await unlink(filePath).catch((cleanupError) => console.warn('[image-upload] Partial file cleanup failed', cleanupError));
+    if (signal.aborted) throw new UploadRequestError('ABORTED');
+    throw error;
+  }
 
   return Response.json({ url: `/uploads/hero/${filename}` });
 }

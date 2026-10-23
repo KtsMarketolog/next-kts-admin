@@ -71,6 +71,9 @@ jobs:
           npm test
           # Route CSP must survive Next's real HTTP header merge, not only mocks.
           node --import tsx tests/top-dashboard-header-policy.next.integration.ts
+          # Streaming upload guards must run before proxy body cloning and keep
+          # existing 8/20/25 MiB payloads working through real HTTP.
+          node --import tsx tests/resource-upload.next.integration.ts
           # Exercise legacy password migration against real PostgreSQL, including
           # numeric IDs crossing batch boundaries; mocks cannot catch SQL aliases.
           KTS_TEST_PG_BIN="$(pg_config --bindir 2>/dev/null || true)"

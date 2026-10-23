@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 
 import type { ParsedStockRow, RawRow, StockLocationKey } from './stockImportTypes';
+import { assertExcelArchiveResources, assertExcelWorkbookResources } from './excelProcessing/resources';
 
 export const HEADER_ARTICLE_ALIASES = ['Номенклатура.Код', 'Номенклатура. Код', 'Артикул'];
 export const HEADER_STOCK_ALIASES = ['Сейчас', 'Сейчас Доступно', 'Остаток', 'Остатки'];
@@ -113,7 +114,8 @@ function detectStockLocationMarker(row: unknown[]): StockLocationKey | null {
 
 export function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
   if (buffer.byteLength > MAX_STOCK_WORKBOOK_BYTES) throw new Error('Excel-файл с остатками слишком большой');
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, sheetRows: MAX_STOCK_WORKBOOK_ROWS + 5 });
+  assertExcelArchiveResources(buffer);
+  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, cellText: false, cellHTML: false, sheetRows: MAX_STOCK_WORKBOOK_ROWS + 5 });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('В Excel-файле нет листов');
   const sheet = workbook.Sheets[sheetName];
@@ -122,6 +124,7 @@ export function parseStockWorkbook(buffer: Buffer): ParsedStockRow[] {
   if (sheet['!fullref']) {
     throw new Error('Excel-файл остатков превышает допустимое число строк и был обрезан при чтении. Остатки не изменены.');
   }
+  assertExcelWorkbookResources(workbook);
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
   if (rows.length > MAX_STOCK_WORKBOOK_ROWS) throw new Error('Excel-файл с остатками слишком большой');
   const parsedRows: ParsedStockRow[] = [];

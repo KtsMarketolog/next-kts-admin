@@ -6,6 +6,7 @@ import { build } from 'esbuild';
 
 import type { StockEmailImportResult } from '../src/entities/catalog/api/stockImportTypes';
 import { TransactionCommitUnknownError } from '../src/shared/lib/db/transactionOutcome';
+import { ExcelProcessingError } from '../src/entities/catalog/api/excelProcessing/errors';
 
 const require = createRequire(import.meta.url);
 const compiled = new Map<string, Promise<string>>();
@@ -44,6 +45,7 @@ async function harness(kind: 'admin' | 'cron', options: { importError?: unknown;
     async enforceAdminActionRateLimit() { return null; },
     getClientIp() { return '127.0.0.1'; },
     TransactionCommitUnknownError,
+    ExcelProcessingError,
   };
   const loaded = { exports: {} as { POST(request: Request): Promise<Response> } };
   new Function('require', 'module', 'exports', await compiled.get(kind)!)((name: string) => {
@@ -58,6 +60,17 @@ async function harness(kind: 'admin' | 'cron', options: { importError?: unknown;
     })),
   };
 }
+
+test('admin: isolated Excel worker failure is retryable and never reports a saved import', async () => {
+  const h = await harness('admin', { importError: new ExcelProcessingError('EXCEL_PROCESSING_FAILED') });
+  const response = await h.run();
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get('retry-after'), '10');
+  const body = await response.json();
+  assert.equal(body.saved, false);
+  assert.equal(body.code, 'EXCEL_PROCESSING_FAILED');
+  assert.doesNotMatch(body.error, /разделите/);
+});
 
 for (const kind of ['admin', 'cron'] as const) {
   test(`${kind}: committed stock returns success plus warnings when revalidation and security audit fail`, async () => {

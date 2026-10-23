@@ -1,4 +1,5 @@
 import { importStockFromEmail } from '@/entities/catalog/api/stockImport';
+import { ExcelProcessingError } from '@/entities/catalog/api/excelProcessing/errors';
 import { revalidatePublicCatalog } from '@/entities/catalog/api/catalogRevalidation';
 import { requireAdminSession } from '@/shared/lib/adminAuth';
 import { enforceAdminActionRateLimit } from '@/shared/lib/adminSecurity';
@@ -59,6 +60,11 @@ export async function POST(request: Request) {
     }, { required: true }) }]);
     if (error instanceof TransactionCommitUnknownError) {
       return Response.json({ saved: null, code: error.code, error: 'Не удалось подтвердить результат сохранения остатков. Проверьте журнал импорта; не повторяйте ручную загрузку, пока результат не выяснен. При следующей проверке почты уже сохранённое письмо не будет применено заново.' }, { status: 503 });
+    }
+    if (error instanceof ExcelProcessingError) {
+      return Response.json({ saved: false, code: error.code, error: error.message }, {
+        status: error.status, headers: { 'Cache-Control': 'private, no-store', ...(error.status === 503 ? { 'Retry-After': '10' } : {}) },
+      });
     }
     return Response.json(
       { saved: false, error: error instanceof Error ? error.message : 'Не удалось проверить почту' },

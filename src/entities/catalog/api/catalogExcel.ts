@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 
 import type { CatalogProductInput } from './catalogAdmin';
 import { assertUniqueCatalogArticles, setCatalogImportSourceRow } from './catalogImportValidation';
+import { assertExcelArchiveResources, assertExcelWorkbookResources } from './excelProcessing/resources';
 
 type RawRow = Record<string, unknown>;
 type RawMatrixRow = unknown[];
@@ -144,7 +145,8 @@ function parseCatalogMatrix(sheet: XLSX.WorkSheet): CatalogProductInput[] | null
 
 export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
   if (buffer.byteLength > MAX_CATALOG_EXCEL_BYTES) throw new Error('Excel-файл слишком большой');
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, sheetRows: MAX_CATALOG_EXCEL_ROWS + 5 });
+  assertExcelArchiveResources(buffer);
+  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, cellText: false, cellHTML: false, sheetRows: MAX_CATALOG_EXCEL_ROWS + 5 });
   if (workbook.SheetNames.length > MAX_CATALOG_EXCEL_SHEETS) throw new Error('Excel-файл содержит слишком много листов');
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('В Excel-файле нет листов');
@@ -155,6 +157,7 @@ export function parseCatalogExcel(buffer: Buffer): CatalogProductInput[] {
   if (sheet['!fullref']) {
     throw new Error('Excel-файл превышает допустимое число строк и был обрезан при чтении. Каталог не изменён.');
   }
+  assertExcelWorkbookResources(workbook);
   const matrixProducts = parseCatalogMatrix(sheet);
   if (matrixProducts) {
     if (matrixProducts.length === 0) {

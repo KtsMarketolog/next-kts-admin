@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { constants, readFileSync } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
+import ts from 'typescript';
 import { readClientDocumentFile, saveClientDocumentUpload } from '../src/shared/lib/clientDocumentStorage';
 import { createClientDocumentDownloadResponse } from '../src/shared/lib/clientDocumentDownloadResponse';
 
@@ -66,4 +69,74 @@ test('a symlinked private root cannot redirect uploads or change the target perm
   await assert.rejects(saveClientDocumentUpload(13, new File(['secret'], 'test.pdf')), /Небезопасный каталог/);
   assert.equal((await lstat(outside)).mode & 0o777, 0o755);
   assert.deepEqual(await readdir(outside), []);
+});
+
+test('failed, aborted or inconsistent document reads create no directories or files', async (t) => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'kts-document-read-failure-')));
+  const oldRoot = process.env.UPLOAD_DIR;
+  process.env.UPLOAD_DIR = root;
+  t.after(async () => {
+    if (oldRoot === undefined) delete process.env.UPLOAD_DIR;
+    else process.env.UPLOAD_DIR = oldRoot;
+    await rm(root, { recursive: true, force: true });
+  });
+  const unreadable = new File(['synthetic'], 'example.pdf');
+  Object.defineProperty(unreadable, 'arrayBuffer', { value: async () => { throw new Error('synthetic read failure'); } });
+  await assert.rejects(saveClientDocumentUpload(13, unreadable), /synthetic read failure/);
+
+  const inconsistent = new File(['synthetic'], 'example.pdf');
+  Object.defineProperty(inconsistent, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+  await assert.rejects(saveClientDocumentUpload(13, inconsistent), /Размер документа/);
+
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(saveClientDocumentUpload(13, new File(['synthetic'], 'example.pdf'), { signal: controller.signal }), { name: 'AbortError' });
+  assert.deepEqual(await readdir(root), []);
+});
+
+test('partial document writes remove only the new file and keep existing documents', async (t) => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'kts-document-partial-write-')));
+  const oldRoot = process.env.UPLOAD_DIR;
+  process.env.UPLOAD_DIR = root;
+  t.after(async () => {
+    if (oldRoot === undefined) delete process.env.UPLOAD_DIR;
+    else process.env.UPLOAD_DIR = oldRoot;
+    await rm(root, { recursive: true, force: true });
+  });
+  const companyDirectory = path.join(root, 'client-documents', '13');
+  await mkdir(companyDirectory, { recursive: true });
+  await writeFile(path.join(companyDirectory, 'existing.pdf'), 'existing private bytes');
+
+  const compiled = ts.transpileModule(readFileSync('src/shared/lib/clientDocumentStorage.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const instance = { exports: {} };
+  const dependencies: Record<string, unknown> = {
+    crypto: { randomUUID: () => 'synthetic-unique-file' },
+    fs: { constants },
+    path: { default: path },
+    'fs/promises': {
+      ...fsPromises,
+      open: async (filename: string, flags: string | number, mode?: number) => {
+        const handle = await fsPromises.open(filename, flags, mode);
+        if (flags !== 'wx') return handle;
+        return {
+          stat: () => handle.stat(),
+          close: () => handle.close(),
+          writeFile: async (bytes: Buffer) => {
+            await handle.writeFile(bytes.subarray(0, 3));
+            throw Object.assign(new Error('synthetic disk-full failure'), { code: 'ENOSPC' });
+          },
+        };
+      },
+    },
+  };
+  new Function('require', 'module', 'exports', compiled)((name: string) => {
+    assert.ok(name in dependencies, `Unexpected dependency ${name}`);
+    return dependencies[name];
+  }, instance, instance.exports);
+  const storage = instance.exports as typeof import('../src/shared/lib/clientDocumentStorage');
+  await assert.rejects(storage.saveClientDocumentUpload(13, new File(['partial synthetic upload'], 'example.pdf')), /disk-full/);
+  assert.deepEqual(await readdir(companyDirectory), ['existing.pdf']);
+  assert.equal(await readFile(path.join(companyDirectory, 'existing.pdf'), 'utf8'), 'existing private bytes');
 });

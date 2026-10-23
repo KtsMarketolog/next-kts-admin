@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["pdfkit"],
   outputFileTracingRoot: __dirname,
   outputFileTracingIncludes: {
-    '/*': ['./.runtime-build/price-build-worker.cjs'],
+    '/*': ['./.runtime-build/price-build-worker.cjs', './.runtime-build/excel-processing-worker.cjs'],
     '/api/admin/currency-dashboard/frame': ['./assets/currency-dashboard/**/*'],
     '/api/admin/currency-dashboard/html': ['./assets/currency-dashboard/**/*'],
     '/api/admin/dashboard-instructions/*': ['./assets/dashboard-instructions/*.{pdf,mp4}'],
@@ -92,6 +92,16 @@ const nextConfig: NextConfig = {
         source: GLOBAL_CSP_SOURCE,
         headers: [contentSecurityPolicy],
       },
+      // These bounded streaming routes bypass the body-cloning proxy. Keep
+      // private cache/robots headers for every response, including auth errors
+      // and the GET document list; authorization/origin checks live in routes.
+      ...["/api/admin/uploads", "/api/admin/catalog/import", "/api/admin/clients/:id/documents"].map(source => ({
+        source,
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+        ],
+      })),
       {
         source: "/:all*(js|css|png|jpg|jpeg|gif|svg|webp|avif|woff2|ico)",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],

@@ -5,6 +5,11 @@ const MAX_DUPLICATE_GROUPS = 100;
 const MAX_DUPLICATE_ROWS = 100;
 const sourceRows = new WeakMap<CatalogProductInput, number>();
 
+/** Explicit worker transport; the WeakMap is intentionally not product data. */
+export function getCatalogImportSourceRow(input: CatalogProductInput): number | undefined {
+  return sourceRows.get(input);
+}
+
 export type CatalogImportDuplicate = {
   article: string;
   rows: number[];

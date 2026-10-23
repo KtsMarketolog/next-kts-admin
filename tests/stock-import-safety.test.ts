@@ -75,6 +75,8 @@ async function importerWithSyntheticDatabase(stocks = originalStocks, options: {
       name: 'synthetic-stock-database',
       setup(builder) {
         builder.onResolve({ filter: /^(@\/shared\/lib\/db(?:\/client)?|\.\/catalogDb)$/ }, () => ({ path: 'synthetic-stock-database', external: true }));
+        builder.onResolve({ filter: /^\.\/excelProcessing\/client$/ }, () => ({ path: 'synthetic-stock-parser', external: true }));
+        builder.onResolve({ filter: /^@\/shared\/lib\/resourceUploadConcurrency$/ }, () => ({ path: 'synthetic-stock-admission', external: true }));
       },
     }],
   }).then((result) => result.outputFiles[0].text);
@@ -140,6 +142,8 @@ async function importerWithSyntheticDatabase(stocks = originalStocks, options: {
   const loaded = { exports: {} as { importStockFromExcelBuffer: (input: { buffer: Buffer; fileName: string }) => Promise<StockImportResult> } };
   new Function('require', 'module', 'exports', await compiledImporter)((name: string) => {
     if (name === 'synthetic-stock-database') return database;
+    if (name === 'synthetic-stock-parser') return { parseStockWorkbookInWorker: async (buffer: Buffer) => parseStockWorkbook(buffer) };
+    if (name === 'synthetic-stock-admission') return { acquireResourceUploadSlot: async () => Object.assign(async () => {}, { signal: new AbortController().signal }) };
     assert.ok(['xlsx', 'node:crypto'].includes(name), 'unexpected dependency must not reach real infrastructure');
     return require(name);
   }, loaded, loaded.exports);

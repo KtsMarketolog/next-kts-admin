@@ -9,6 +9,9 @@ import { parseCatalogExcel } from '../src/entities/catalog/api/catalogExcel';
 import { enforceSameOriginRequest } from '../src/shared/lib/originProtection';
 import * as postCommitTasks from '../src/shared/lib/postCommitTasks';
 import { TransactionCommitUnknownError } from '../src/shared/lib/db/transactionOutcome';
+import * as boundedMultipart from '../src/shared/lib/boundedMultipartUpload';
+import * as uploadGuard from '../src/shared/lib/uploadRequestGuard';
+import * as excelErrors from '../src/entities/catalog/api/excelProcessing/errors';
 
 function workbook(rows: unknown[][], bookType: 'xlsx' | 'biff8' = 'xlsx') {
   const book = XLSX.utils.book_new();
@@ -22,10 +25,19 @@ function request(bytes: Buffer, name = 'Каталог.xlsx', origin = 'https://
   return new Request('https://example.test/api/admin/catalog/import', { method: 'POST', headers: { origin }, body: data });
 }
 
-function harness(options: { denied?: boolean; limited?: boolean; dbFailure?: Error; statsUnavailable?: boolean; cacheFailure?: boolean; auditFailure?: boolean } = {}) {
+function harness(options: { denied?: boolean; limited?: boolean; busy?: boolean; parseFailure?: Error; releaseFailure?: boolean; dbFailure?: Error; statsUnavailable?: boolean; cacheFailure?: boolean; auditFailure?: boolean } = {}) {
   const calls: string[] = [];
   const deps: Record<string, unknown> = {
-    '@/entities/catalog/api/catalogExcel': { parseCatalogExcel: (buffer: Buffer) => { calls.push('parse'); return parseCatalogExcel(buffer); } },
+    '@/entities/catalog/api/excelProcessing/client': { parseCatalogExcelInWorker: async (buffer: Buffer) => {
+      calls.push('parse'); if (options.parseFailure) throw options.parseFailure;
+      return parseCatalogExcel(buffer);
+    } },
+    '@/entities/catalog/api/excelProcessing/errors': excelErrors,
+    '@/shared/lib/boundedMultipartUpload': boundedMultipart,
+    '@/shared/lib/uploadRequestGuard': uploadGuard,
+    '@/shared/lib/resourceUploadConcurrency': { acquireResourceUploadSlot: async () => options.busy ? null : Object.assign(async () => {
+      if (options.releaseFailure) throw new Error('Synthetic unlock failure');
+    }, { signal: new AbortController().signal }) },
     '@/entities/catalog/api/catalogImportValidation': validation,
     '@/entities/catalog/api/catalogAdmin/importMatching': matching,
     '@/entities/catalog/api/catalogAdmin': { replaceCatalogFromRows: async (rows: unknown[]) => {
@@ -155,4 +167,41 @@ test('a failed or unconfirmed catalog commit never reports saved success or runs
     }
     assert.deepEqual(h.calls, ['parse', 'save']);
   }
+});
+
+test('catalog resource admission rejects before reading a body or changing data', async () => {
+  const h = harness({ busy: true });
+  const req = request(workbook([['Артикул'], ['SYN-KEPT']]));
+  const response = await h.run(req);
+  assert.equal(response.status, 503);
+  assert.equal(req.bodyUsed, false);
+  assert.equal((await response.json()).saved, false);
+  assert.deepEqual(h.calls, []);
+});
+
+test('catalog announced oversized body is refused without parsing or saving', async () => {
+  const h = harness();
+  const req = request(workbook([['Артикул'], ['SYN-KEPT']]));
+  req.headers.set('Content-Length', String(26 * 1024 * 1024));
+  const response = await h.run(req);
+  assert.equal(response.status, 413);
+  assert.equal(req.bodyUsed, false);
+  assert.equal((await response.json()).saved, false);
+  assert.deepEqual(h.calls, []);
+});
+
+test('a parser resource failure never reaches the catalog transaction', async () => {
+  const h = harness({ parseFailure: new uploadGuard.UploadRequestError('TOTAL_TIMEOUT') });
+  const response = await h.run(request(workbook([['Артикул'], ['SYN-KEPT']])));
+  assert.equal(response.status, 408);
+  assert.equal((await response.json()).saved, false);
+  assert.deepEqual(h.calls, ['parse']);
+});
+
+test('an upload-slot cleanup error does not relabel a committed catalog as failed', async () => {
+  const h = harness({ releaseFailure: true });
+  const response = await h.run(request(workbook([['Артикул'], ['SYN-SAVED']])));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).saved, true);
+  assert.deepEqual(h.calls, ['parse', 'save', 'revalidate', 'audit']);
 });

@@ -154,6 +154,8 @@ export const config = {
     // Image requests must pass the private-document guard before cache lookup.
     // The KB upload handler likewise checks session/role/origin before consuming
     // its size/deadline-bounded stream. Never clone that body in the proxy.
-    '/((?!_next/static|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$|api/admin/manager-dashboard/shared/json/?$|api/admin/knowledge-base/upload/?$).*)',
+    // Multipart image/document/catalog handlers now perform those checks too;
+    // buffering here would precede authorization and bypass their byte budgets.
+    '/((?!_next/static|favicon.ico|robots.txt|sitemap.xml|api/admin/top-dashboard/blocks/[^/]+/data/?$|api/admin/manager-dashboard/shared/json/?$|api/admin/knowledge-base/upload/?$|api/admin/uploads/?$|api/admin/catalog/import/?$|api/admin/clients/[^/]+/documents/?$).*)',
   ],
 };

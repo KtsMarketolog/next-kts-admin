@@ -70,6 +70,16 @@ function withoutFilePath(document: ClientDocumentFile): ClientDocument {
   };
 }
 
+/** Reject uploads before reading the body; the write transaction checks again. */
+export async function assertClientDocumentUploadAllowed(companyId: number, session: AdminSession): Promise<void> {
+  await ensureSiteSchema();
+  // Release the company lock before receiving the file. An archive or access
+  // change during the upload is still caught by createClientDocument below.
+  await withTransaction(async (client) => {
+    await assertClientCompanyWritable(companyId, session, client);
+  }, { retryOnConflict: true });
+}
+
 export async function getClientDocumentsForAdmin(companyId: number, session: AdminSession): Promise<ClientDocument[]> {
   await ensureSiteSchema();
   await assertClientCompanyVisible(companyId, session);
