@@ -16,6 +16,7 @@ import { framePrintScript } from '../src/shared/lib/topDashboardContentSecurity/
 // exact fragment so the pre-existing snapshots/data/download logic stays pinned.
 // Trusted-frame hashes were reviewed and advanced for the intentional post-save
 // warning relay. All other frame fragments and sandbox-adapter bytes are unchanged.
+const compiledReadonlySelectors = ',button[data-kts-handler-onclick*="pickFiles("],button[data-kts-handler-onclick*="connectFolder("],button[data-kts-handler-onclick*="refreshFromFolder("]';
 const adapterCases: Array<{
   name: string;
   args: Parameters<typeof getTopDashboardDataAdapterScript>;
@@ -52,7 +53,9 @@ for (const fixture of adapterCases) {
   test(`sandbox adapter preserves pre-refactor bytes: ${fixture.name}`, () => {
     const script = getTopDashboardDataAdapterScript(...fixture.args);
     assert.equal(script.split(sandboxPrintScript()).length, 2);
-    assert.equal(sha256(script.replace(sandboxPrintScript(), '')), fixture.sha256);
+    // The only new readonly change is a selector alias for compiled callbacks.
+    assert.equal(script.split(compiledReadonlySelectors).length, 2);
+    assert.equal(sha256(script.replace(sandboxPrintScript(), '').replace(compiledReadonlySelectors, '')), fixture.sha256);
   });
 }
 

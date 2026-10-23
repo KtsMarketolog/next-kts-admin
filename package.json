@@ -30,6 +30,7 @@
     "@streamparser/json": "0.0.26",
     "@types/pdfkit": "^0.17.6",
     "@types/sanitize-html": "^2.16.1",
+    "acorn": "8.16.0",
     "busboy": "1.6.0",
     "imapflow": "^1.7.1",
     "mailparser": "3.9.32",

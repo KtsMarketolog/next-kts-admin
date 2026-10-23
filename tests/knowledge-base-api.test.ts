@@ -8,6 +8,7 @@ import * as shared from '../src/shared/lib/knowledgeBase';
 import * as origin from '../src/shared/lib/originProtection';
 import * as uploadGuard from '../src/shared/lib/uploadRequestGuard';
 import * as transactionOutcome from '../src/shared/lib/db/transactionOutcome';
+import * as preparedHtml from '../src/shared/lib/topDashboardContentSecurity/preparedHtml';
 
 function load<T>(filename: string, deps: Record<string, unknown>): T {
   const code = ts.transpileModule(readFileSync(new URL(filename, import.meta.url), 'utf8'), {
@@ -61,6 +62,7 @@ function harness(options: { role?: AdminSessionRole | null; denied?: boolean; li
     './originProtection': origin, './uploadRequestGuard': uploadGuard, './knowledgeBase': shared, './db/transactionOutcome': transactionOutcome,
   });
   const deps = { '@/shared/lib/knowledgeBaseApi': api, '@/shared/lib/knowledgeBase': shared, '@/shared/lib/db/knowledgeBaseRepo': repo, crypto,
+    '@/shared/lib/topDashboardContentSecurity/preparedHtml': preparedHtml,
     '@/shared/lib/knowledgeBaseStorage': {
       saveKnowledgeBaseUpload: async () => { calls.push('save'); if (options.storageFailure) throw new Error('private path'); return storedFile; },
       removeUncommittedKnowledgeBaseFile: async (path: string) => { cleanup.push(path); if (options.cleanupFailure) throw new Error('synthetic cleanup private path'); },

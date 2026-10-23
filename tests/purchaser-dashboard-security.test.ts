@@ -9,6 +9,7 @@ import ts from 'typescript';
 import { type AdminSession, isTopDashboardManagementSession, isTopDashboardSession } from '../src/shared/lib/adminAuth';
 import * as access from '../src/shared/lib/dashboardAccess';
 import * as security from '../src/shared/lib/topDashboardContentSecurity';
+import * as preparedHtml from '../src/shared/lib/topDashboardContentSecurity/preparedHtml';
 import * as officeView from '../src/shared/lib/dashboardOfficeView';
 import * as profitability from '../src/shared/lib/dashboardProfitabilityHtml';
 import * as dashboardLimits from '../src/shared/lib/topDashboardLimits';
@@ -141,6 +142,7 @@ function harness(relative: string, session: AdminSession | null, published = tru
     '@/shared/lib/topDashboardDataStorage': {
       async openTopDashboardDataFile() { calls.push('storage'); return Readable.from([Buffer.from('{}')]); },
     },
+    '@/shared/lib/topDashboardContentSecurity/preparedHtml': preparedHtml,
     '@/shared/lib/topDashboardContentSecurity': {
       ...security,
       detectTopDashboardDataContract(html: string) {

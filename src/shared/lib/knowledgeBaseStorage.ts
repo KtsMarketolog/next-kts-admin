@@ -4,6 +4,7 @@ import { lstat, mkdir, open, realpath, unlink, type FileHandle } from 'fs/promis
 import path from 'path';
 import { KNOWLEDGE_BASE_MAX_FILE_BYTES, KnowledgeBaseError, knowledgeBaseInvalid } from './knowledgeBase';
 import { buildTopDashboardContentSecurityPolicy } from './topDashboardContentSecurity/policy';
+import { prepareInteractiveDashboardHtml } from './topDashboardContentSecurity/preparedHtml';
 import { createUploadRequestGuard } from './uploadRequestGuard';
 
 const FILE_TYPES: Record<string, string> = {
@@ -154,7 +155,8 @@ export async function saveKnowledgeBaseUpload(request: Request, originalName: st
       let html: string;
       try { html = new TextDecoder('utf-8', { fatal: true }).decode(await file.readFile()); }
       catch { throw new KnowledgeBaseError(415, 'INVALID_HTML_ENCODING', 'Сохраните HTML в кодировке UTF-8 и загрузите снова'); }
-      knowledgeBaseHtmlPolicy(html);
+      // Validate the exact derived preview, but retain the original file bytes.
+      knowledgeBaseHtmlPolicy(prepareInteractiveDashboardHtml(html));
     }
     guard.assertActive();
     await file.sync();

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { prepareInteractiveDashboardHtml } from '@/shared/lib/topDashboardContentSecurity/preparedHtml';
 import { knowledgeBaseQueryId, knowledgeBaseRoute } from '@/shared/lib/knowledgeBaseApi';
 import { assertKnowledgeBaseUuid, knowledgeBaseInvalid, knowledgeBaseNotFound } from '@/shared/lib/knowledgeBase';
 import { getKnowledgeBaseFileForRead, recordKnowledgeBaseEvent } from '@/shared/lib/db/knowledgeBaseRepo';
@@ -34,8 +35,11 @@ async function read(request: Request, context: Context, head: boolean) {
       let html: Buffer | null = null;
       if (!inline) headers.set('Content-Security-Policy', `${headers.get('Content-Security-Policy')}; sandbox`);
       if (inline && type.mimeType === 'text/html') {
-        html = await file.readFile();
-        headers.set('Content-Security-Policy', knowledgeBaseHtmlPolicy(new TextDecoder('utf-8', { fatal: true }).decode(html)));
+        const original = new TextDecoder('utf-8', { fatal: true }).decode(await file.readFile());
+        const prepared = prepareInteractiveDashboardHtml(original);
+        html = Buffer.from(prepared, 'utf8');
+        headers.set('Content-Length', String(html.length));
+        headers.set('Content-Security-Policy', knowledgeBaseHtmlPolicy(prepared));
       }
       if (!head) {
         const eventId = query.get('eventId') ?? randomUUID(); assertKnowledgeBaseUuid(eventId);

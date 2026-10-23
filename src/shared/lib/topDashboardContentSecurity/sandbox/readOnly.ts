@@ -30,7 +30,7 @@ export function readOnlyAdapterScript() {
 
   if (READ_ONLY) {
     const readOnlyStyle = document.createElement('style');
-    readOnlyStyle.textContent = 'input[type="file"],label[for="file"],label[for="folder"],label[for="snapInp"],#drop,#btnFiles,#btnDir,#btnSnapLoad,button[onclick*="pickFiles("],button[onclick*="connectFolder("],button[onclick*="refreshFromFolder("]{display:none!important}';
+    readOnlyStyle.textContent = 'input[type="file"],label[for="file"],label[for="folder"],label[for="snapInp"],#drop,#btnFiles,#btnDir,#btnSnapLoad,button[onclick*="pickFiles("],button[onclick*="connectFolder("],button[onclick*="refreshFromFolder("],button[data-kts-handler-onclick*="pickFiles("],button[data-kts-handler-onclick*="connectFolder("],button[data-kts-handler-onclick*="refreshFromFolder("]{display:none!important}';
     document.head.appendChild(readOnlyStyle);
     ['click', 'change', 'dragenter', 'dragover', 'drop'].forEach((type) => {
       document.addEventListener(type, blockOwnerFileInteraction, true);

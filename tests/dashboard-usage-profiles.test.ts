@@ -4,12 +4,18 @@ import path from 'node:path';
 import vm from 'node:vm';
 import test from 'node:test';
 import ts from 'typescript';
-import { instrumentReviewedDashboardUsage } from '../src/shared/lib/dashboardUsageProfiles';
+import { instrumentReviewedDashboardUsage, withCompiledDashboardHandlerSelectors } from '../src/shared/lib/dashboardUsageProfiles';
 import { dashboardUsageAdapterScript } from '../src/shared/lib/dashboardUsageBridge';
 
 const marker = 'kts-dashboard-usage-v1';
 const nonce = '12345678901234567890123456789012';
 const profile = { id: 'fixture', tabs: '.actual-tab', filterClicks: '.actual-filter', filterInputs: '.actual-input', calculationInputs: '.actual-calculation' };
+
+test('reviewed selectors retain static controls and recognize compiled handlers without mixing event types', () => {
+  assert.equal(withCompiledDashboardHandlerSelectors('.yr,#gran'), '.yr,#gran');
+  assert.equal(withCompiledDashboardHandlerSelectors('button[onclick^="setView("],input[oninput^="S.q="]'),
+    'button[onclick^="setView("],input[oninput^="S.q="],button[data-kts-handler-onclick^="setView("],input[data-kts-handler-oninput^="S.q="]');
+});
 function fixture(autoInit = true) {
   const docEvents = new Map<string, Array<(event: object) => void>>();
   const winEvents = new Map<string, Array<(event: object) => void>>();

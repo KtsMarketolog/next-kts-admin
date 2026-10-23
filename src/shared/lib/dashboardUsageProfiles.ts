@@ -77,6 +77,13 @@ const PROFILES: readonly ReviewedProfile[] = [
   },
 ];
 
+/** Compiled templates keep an inert copy for existing reviewed UI selectors.
+ * This expands only selectors, never calculation hooks or profile fingerprints. */
+export function withCompiledDashboardHandlerSelectors(selector: string): string {
+  const compiled = selector.replace(/\[(on[a-z]+)(?=[~|^$*]?=)/g, '[data-kts-handler-$1');
+  return compiled === selector ? selector : `${selector},${compiled}`;
+}
+
 function instrument(html: string, profitability: boolean): string {
   return html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi, (tag: string, attributes: string, source: string) => {
     if (attributes.trim()) return tag;
@@ -97,8 +104,12 @@ function instrument(html: string, profitability: boolean): string {
       const instrumented = `{\nconst __ktsUsageDone = window.__ktsDashboardUsage?.beginRender();\nlet __ktsUsageFailed = false;\nconst __ktsUsageResult = (function(){${body}\n}).apply(this, arguments);\nif (!__ktsUsageFailed) __ktsUsageDone?.(${range.calculated});\nreturn __ktsUsageResult;\n}`;
       patched = patched.slice(0,range.bodyStart) + instrumented + patched.slice(range.bodyEnd);
     }
-    const configuration: DashboardUsageProfile = { id: profile.id, tabs: profile.tabs,
-      filterClicks: profile.filterClicks, filterInputs: profile.filterInputs, calculationClicks: profile.calculationClicks, calculationInputs: profile.calculationInputs };
+    const configuration: DashboardUsageProfile = { id: profile.id,
+      tabs: withCompiledDashboardHandlerSelectors(profile.tabs),
+      filterClicks: withCompiledDashboardHandlerSelectors(profile.filterClicks),
+      filterInputs: withCompiledDashboardHandlerSelectors(profile.filterInputs),
+      calculationClicks: profile.calculationClicks && withCompiledDashboardHandlerSelectors(profile.calculationClicks),
+      calculationInputs: profile.calculationInputs && withCompiledDashboardHandlerSelectors(profile.calculationInputs) };
     const setup = `(()=>{const configure=()=>window.__ktsDashboardUsage?.configure(${JSON.stringify(configuration).replace(/</g, '\\u003c')});configure();document.addEventListener('DOMContentLoaded',configure,{once:true});})();\n`;
     // Keep the author's directive prologue (notably "use strict") first. The
     // initial render is not user activity; configure after application startup.

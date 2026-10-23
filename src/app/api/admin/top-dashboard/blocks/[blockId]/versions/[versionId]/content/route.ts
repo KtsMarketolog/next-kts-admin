@@ -1,5 +1,6 @@
 import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
 import { injectSalesOfficeView } from '@/shared/lib/dashboardOfficeView';
+import { prepareInteractiveDashboardHtml } from '@/shared/lib/topDashboardContentSecurity/preparedHtml';
 import { injectProfitabilityAuditAdapter, supportsDashboardInvoiceAudit } from '@/shared/lib/dashboardProfitabilityHtml';
 import { isActiveTopDashboardHtmlVersion } from '@/shared/lib/db/topDashboardBlocksRepo';
 import {
@@ -68,7 +69,10 @@ export async function GET(request: Request, context: Context) {
       readOnly: officeView || !canManage,
       localInvoiceMode: localReport && !officeView,
     });
-    const htmlContent = officeView ? injectSalesOfficeView(adapted) : invoiceAudit ? injectProfitabilityAuditAdapter(adapted) : adapted;
+    const viewHtml = officeView ? injectSalesOfficeView(adapted) : invoiceAudit ? injectProfitabilityAuditAdapter(adapted) : adapted;
+    // Compile author event templates for this response only. Stored versions,
+    // profile fingerprints, snapshots and the original download stay untouched.
+    const htmlContent = prepareInteractiveDashboardHtml(viewHtml);
     const bytes = Buffer.from(htmlContent, 'utf8');
     return new Response(new Uint8Array(bytes), {
       headers: {
