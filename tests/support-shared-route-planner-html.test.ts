@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildSupportSharedRoutePlannerFrame, detectSupportSharedHtmlFormat, injectSupportSharedRoutePlannerAdapter, supportSharedRoutePlannerCsp } from '../src/shared/lib/supportSharedRoutePlannerHtml';
+import { readTopDashboardDownloadMessage, TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER } from '../src/shared/lib/topDashboardDownloadBridge';
+import { SUPPORT_SHARED_JSON_MAX_BYTES } from '../src/shared/lib/supportSharedRoutePlannerLimits';
 
 const fixture = '<html><head></head><body><input id="snapIn" type="file"><script>const S={}; function revive(x){return x;} function loadSnapshot(j){S.orders = revive(j.orders);} function handleFiles(list){} const snapshot={app:"компоновщик"};window.UI = {};</script></body></html>';
 test('shared format detector accepts the specific planner contract, not generic HTML or partial marker', () => {
@@ -25,12 +27,26 @@ test('trusted wrapper pins data IDs, bounds downloads and never gives inner repo
   assert.match(result.html, /shared\/json\?version=7&snapshot=9/);
   assert.match(result.html, /sandbox="allow-scripts"/);
   assert.match(result.html, /event\.origin !== 'null'/);
-  assert.match(result.html, /size > 104857600/);
+  assert.match(result.html, /size > 524288000/);
+  assert.match(result.html, /pipeThrough\(bounded/);
+  assert.doesNotMatch(result.html.slice(result.html.indexOf('else fetch(')), /chunks\.push/);
   assert.match(result.html, /'sandbox','allow-same-origin allow-modals'/);
   assert.match(result.html, /script-src 'none'/);
   assert.match(result.html, /navigator\.userActivation\.isActive/);
   assert.doesNotThrow(() => new Function(result.html.match(/<script>([\s\S]*?)<\/script>/)![1]));
   assert.match(result.csp, /connect-src 'self'/);
+});
+
+test('500 MiB exports are scoped to the planner, not all TOP reports', () => {
+  const blob = new Blob(['synthetic']);
+  Object.defineProperty(blob, 'size', {value: SUPPORT_SHARED_JSON_MAX_BYTES, configurable: true});
+  const message = {marker: TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, type:'download-request', name:'snapshot.json', blob};
+  assert.equal(readTopDashboardDownloadMessage(message), null);
+  assert.ok(readTopDashboardDownloadMessage(message, SUPPORT_SHARED_JSON_MAX_BYTES));
+  for (const limit of [0, -1, NaN, Infinity]) assert.equal(readTopDashboardDownloadMessage(message, limit), null);
+  Object.defineProperty(blob, 'size', {value: SUPPORT_SHARED_JSON_MAX_BYTES + 1});
+  assert.equal(readTopDashboardDownloadMessage(message, SUPPORT_SHARED_JSON_MAX_BYTES), null);
+  assert.match(injectSupportSharedRoutePlannerAdapter(fixture), /const DOWNLOAD_MAX_BYTES = 524288000;/);
 });
 
 test('administrator preview loads its pinned shared JSON via the explicit preview endpoint', () => {

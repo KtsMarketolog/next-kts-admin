@@ -2,11 +2,12 @@ import { isPersonalDashboardHtml } from './managerDashboardHtml';
 import { dashboardUsageRelayScript } from './dashboardUsageBridge';
 import { instrumentReviewedDashboardUsage } from './dashboardUsageProfiles';
 import { buildTopDashboardContentSecurityPolicy, buildTopDashboardFrameSecurityPolicy, getTopDashboardDataAdapterScript } from './topDashboardContentSecurity';
-import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_MAX_BYTES, TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE, TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE } from './topDashboardDownloadBridge';
+import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE, TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE } from './topDashboardDownloadBridge';
+import { SUPPORT_SHARED_JSON_MAX_BYTES } from './supportSharedRoutePlannerLimits';
 
 export type SupportSharedHtmlFormat = 'ktsp' | 'route-planner-v1';
 const MARKER = 'kts-support-route-planner-v1';
-const MAX_JSON_BYTES = 100 * 1024 * 1024;
+const MAX_JSON_BYTES = SUPPORT_SHARED_JSON_MAX_BYTES;
 const LOAD_HOOK = /\bwindow\.UI\s*=\s*\{/;
 
 // Compatibility detection, not a trust decision: all supplied code remains in
@@ -26,7 +27,7 @@ export function injectSupportSharedRoutePlannerAdapter(html: string) {
   // Expose only the existing loading boundary, not the internal state. The
   // supplied calculations and render functions are not rewritten.
   const hooked = html.replace(LOAD_HOOK, 'window.__ktsLoadSharedSnapshot = loadSnapshot; window.UI = {');
-  const early = `<script data-kts-shared-downloads="1">${getTopDashboardDataAdapterScript(null, null, true)}</script>`;
+  const early = `<script data-kts-shared-downloads="1">${getTopDashboardDataAdapterScript(null, null, true, null, false, MAX_JSON_BYTES)}</script>`;
   const withEarly = hooked.replace(/<head\b[^>]*>/i, (tag) => tag + early);
   const adapter = `<script data-kts-shared-route-planner="1">${routePlannerAdapterScript()}</script>`;
   // Unicode lowercasing may expand characters in bundled libraries (e.g. İ).
@@ -170,7 +171,7 @@ export function buildSupportSharedRoutePlannerFrame(input: {versionId: number; s
     };
     const timer = setTimeout(() => {
       if (hasSnapshot && !status.hidden) { controller.abort(); status.textContent = 'Отчёт не открылся. Перезагрузите отчёт или обратитесь к администратору.'; }
-    }, 120000);
+    }, 1200000);
     function printDocument(source) {
       if (printing || !navigator.userActivation || !navigator.userActivation.isActive || typeof source !== 'string' || source.length > 5 * 1024 * 1024) return;
       printing = true;
@@ -209,7 +210,7 @@ export function buildSupportSharedRoutePlannerFrame(input: {versionId: number; s
         && typeof d.name === 'string' && d.name.length > 0 && d.name.length <= 255
         && new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE)}, 'i').test(d.name)
         && !new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE)}).test(d.name)
-        && d.blob instanceof Blob && d.blob.size > 0 && d.blob.size <= ${TOP_DASHBOARD_DOWNLOAD_MAX_BYTES}
+        && d.blob instanceof Blob && d.blob.size > 0 && d.blob.size <= ${MAX_JSON_BYTES}
         && navigator.userActivation && navigator.userActivation.isActive) {
         window.parent.postMessage(d, window.location.origin);
       }
@@ -219,13 +220,18 @@ export function buildSupportSharedRoutePlannerFrame(input: {versionId: number; s
       if (!res.ok || !res.body || res.headers.get('x-kts-shared-version') !== '${input.versionId}'
         || res.headers.get('x-kts-shared-snapshot') !== '${input.snapshotId ?? ''}'
         || !/^[a-f0-9]{64}$/.test(res.headers.get('x-kts-shared-sha256') || '')) throw new Error('invalid');
-      const reader = res.body.getReader(), chunks = []; let size = 0;
-      try { while (true) { const part = await reader.read(); if (part.done) break; size += part.value.byteLength;
-        if (size > ${MAX_JSON_BYTES}) throw new Error('size'); chunks.push(part.value); } }
-      catch (error) { await reader.cancel().catch(() => {}); throw error; }
-      finally { reader.releaseLock(); }
+      let size = 0;
+      const bounded = new TransformStream({ transform(chunk, output) {
+        size += chunk.byteLength;
+        if (size > ${MAX_JSON_BYTES}) throw new Error('size');
+        output.enqueue(chunk);
+      }});
+      // Let the browser manage Blob storage instead of keeping a second full
+      // list of all network chunks in the cabinet JavaScript heap.
+      snapshot = await new Response(res.body.pipeThrough(bounded, {signal:controller.signal}),
+        {headers:{'Content-Type':'application/json'}}).blob();
       if (!size) throw new Error('empty');
-      snapshot = new Blob(chunks, {type:'application/json'}); deliver();
+      deliver();
     }).catch(() => { clearTimeout(timer); status.textContent = 'Общий файл недоступен. Обновите страницу или обратитесь к администратору.'; });
     window.addEventListener('pagehide', () => { controller.abort(); snapshot = null; clearTimeout(timer); tileQueue.length = 0; tileControllers.forEach((item) => item.abort()); });
   })();`;

@@ -10,7 +10,7 @@ import { ADMIN_SNAPSHOT_TIMEOUT_MS, ADMIN_UPLOAD_TIMEOUT_MS } from '@/features/a
 
 import { ManagerDashboardManagement } from './ManagerDashboardManagement';
 import { RoutePlannerViewer } from './ManagerDashboardViewer';
-import type { ManagerDashboardMutationResult, RoutePlannerOverview } from './types';
+import type { ManagerDashboardMutationFeedback, ManagerDashboardMutationResult, RoutePlannerOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
 const API_PATH = '/api/admin/manager-dashboard/shared';
@@ -98,7 +98,7 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось обновить отчёт.'); return false; }
   }
 
-  async function mutate(path: string, init: RequestInit, successMessage: string): Promise<ManagerDashboardMutationResult | null> {
+  async function mutate(path: string, init: RequestInit, successMessage: string, feedback?: ManagerDashboardMutationFeedback): Promise<ManagerDashboardMutationResult | null> {
     if (mutating.current || !path.startsWith('/shared/')) return null;
     mutating.current = true;
     const controller = new AbortController();
@@ -114,15 +114,21 @@ export function RoutePlannerDashboard({ mode, canAssignAccess = false }: { mode:
         timeoutMs: path.includes('snapshots') || path === '/shared/json' ? ADMIN_SNAPSHOT_TIMEOUT_MS
           : init.body instanceof FormData ? ADMIN_UPLOAD_TIMEOUT_MS : undefined,
       })) as ManagerDashboardMutationResult;
-      setMessage(result.message || successMessage);
-      try { await load(controller.signal); } catch { setError('Операция выполнена, но список не удалось обновить. Нажмите «Обновить».'); }
+      if (!feedback) setMessage(result.message || successMessage);
+      try { await load(controller.signal); } catch {
+        const warning = 'Операция выполнена, но список не удалось обновить. Нажмите «Обновить». Повторно отправлять файл не нужно.';
+        if (feedback?.onWarning) feedback.onWarning(warning);
+        else setError(warning);
+      }
       if (controller.signal.aborted) {
-        setMessage('Текущая операция сохранена. Дальнейшая отправка остановлена.');
+        if (!feedback) setMessage('Текущая операция сохранена. Дальнейшая отправка остановлена.');
         return { ...result, cancelledAfterSave: true };
       }
       return result;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Не удалось выполнить операцию.');
+      const failure = cause instanceof Error ? cause.message : 'Не удалось выполнить операцию.';
+      if (feedback?.onError) feedback.onError(failure);
+      else setError(failure);
       return null;
     } finally {
       init.signal?.removeEventListener('abort', cancel);

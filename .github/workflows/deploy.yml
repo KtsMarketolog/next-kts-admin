@@ -74,6 +74,8 @@ jobs:
           # Streaming upload guards must run before proxy body cloning and keep
           # existing 8/20/25 MiB payloads working through real HTTP.
           node --import tsx tests/resource-upload.next.integration.ts
+          # Route-planner JSON streams through the real Next proxy up to 500 MiB.
+          node --import tsx tests/route-planner-json.next.integration.ts
           # Exercise legacy password migration against real PostgreSQL, including
           # numeric IDs crossing batch boundaries; mocks cannot catch SQL aliases.
           KTS_TEST_PG_BIN="$(pg_config --bindir 2>/dev/null || true)"
@@ -111,6 +113,7 @@ jobs:
           bash scripts/test-dashboard-usage-postgres.sh
           bash scripts/test-top-dashboard-postgres.sh
           KTS_PERSONAL_REPLACEMENT_TEST=1 bash scripts/test-personal-dashboard-postgres.sh
+          KTS_PERSONAL_TEST_BUNDLE=tests/support-shared-route-planner-migration.integration.ts bash scripts/test-personal-dashboard-postgres.sh
           bash scripts/test-catalog-stock-locking-postgres.sh
           # Stale content forms must conflict without interfering with atomic reordering.
           bash scripts/test-site-content-version-postgres.sh

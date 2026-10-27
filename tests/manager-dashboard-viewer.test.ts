@@ -723,7 +723,7 @@ test('shared JSON mode hides legacy email/password fields and binds upload to th
   const overview = { ...managementOverview(), supportShared: sharedJsonOverview() };
   const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview, section: 'shared', busy: false, mutate: async () => null }));
   assert.match(html, /manager-dashboard-shared-json/);
-  assert.match(html, /JSON-снимок компоновщика · до 100 МБ/);
+  assert.match(html, /JSON-снимок компоновщика · до 500 МиБ/);
   assert.match(html, /route-current.json/);
   assert.doesNotMatch(html, /manager-dashboard-shared-email|manager-dashboard-shared-snapshot|shared-current.ktsp/);
   assert.doesNotMatch(html, /manager-dashboard-html-development|manager-dashboard-html-support|manager-dashboard-snapshots|Журнал импорта|Only development|Only support/);
@@ -782,13 +782,16 @@ test('shared JSON upload sends one bounded gzip request with exact version and s
 test('shared JSON cancelled confirmation and preparation failure preserve files and do not mutate', async () => {
   for (const confirm of [false, true]) {
     const view = sharedManagement({ overview: { ...managementOverview(), supportShared: sharedJsonOverview() }, confirm: () => confirm });
-    view.selectFiles('manager-dashboard-shared-json', [new File(['bad extension'], 'personal.ktsp')]);
+    view.selectFiles('manager-dashboard-shared-json', [confirm ? new File(['bad extension'], 'personal.ktsp') : new File(['{}'], 'snapshot.json')]);
     view.submit('manager-dashboard-shared-json');
     await view.settle();
     assert.equal(view.requests.length, 0);
     assert.equal(view.inputs.get('manager-dashboard-shared-json')!.value, 'synthetic-selection');
     assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-shared-json').props.disabled, false);
-    if (confirm) assert.match(text(view.render()), /JSON-снимок.*100 МБ/);
+    if (confirm) {
+      assert.match(text(view.find('p', (props) => props.id === 'manager-dashboard-shared-json-error')), /Выберите непустой JSON-снимок компоновщика \(\.json\)/);
+      assert.equal(view.confirmations.length, 0, 'invalid file is rejected before publication confirmation');
+    } else assert.equal(view.confirmations.length, 1, 'valid file reaches the cancelled confirmation');
   }
 });
 

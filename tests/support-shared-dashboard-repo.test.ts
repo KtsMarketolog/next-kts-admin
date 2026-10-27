@@ -7,6 +7,8 @@ import ts from 'typescript';
 
 import * as domain from '../src/shared/lib/managerDashboardDomain';
 import * as limits from '../src/shared/lib/topDashboardLimits';
+import * as sharedJsonLimits from '../src/shared/lib/supportSharedRoutePlannerLimits';
+import { applySupportSharedJsonLimitMigration } from '../src/shared/lib/db/supportSharedJsonLimitMigration';
 
 function compile<T>(filename: string, modules: Record<string, unknown>): T {
   const source = readFileSync(new URL(filename, import.meta.url), 'utf8');
@@ -64,8 +66,7 @@ function repository(steps: Step[] = [], options: {openFile?: () => Readable | Pr
   const repo = compile<typeof import('../src/shared/lib/db/supportSharedDashboardRepo')>('../src/shared/lib/db/supportSharedDashboardRepo.ts', {
     'node:crypto': crypto, '../managerDashboardDomain': {...domain, ...options.domainOverrides},
     '../supportSharedRoutePlannerHtml': { detectSupportSharedHtmlFormat: () => 'ktsp' },
-    '../supportSharedRoutePlannerData': { SUPPORT_SHARED_JSON_MAX_BYTES: 100 * 1024 * 1024,
-      SUPPORT_SHARED_JSON_MAX_VERSIONS: 2, SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES: 1024 * 1024 * 1024,
+    '../supportSharedRoutePlannerData': { ...sharedJsonLimits,
       openVerifiedSupportSharedRoutePlannerFile: async (...args: unknown[]) => {
         fileReads.push(args);
         return options.openFile ? options.openFile() : assert.fail('unexpected JSON file read');
@@ -125,6 +126,7 @@ test('shared migration only creates new report tables and does not migrate or co
     './clientArchiveMigration': { applyClientArchiveMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './clientChatReceiptsMigration': { applyClientChatReceiptsMigration: async () => { throw new Error('Unrelated migration must not run'); } },
     './topDashboardHtmlReadinessMigration': { applyTopDashboardHtmlReadinessMigration: async () => { throw new Error('Unrelated migration must not run'); } },
+    './supportSharedJsonLimitMigration': { applySupportSharedJsonLimitMigration },
   });
   await migrations.applySupportSharedDashboardMigration({ query: async (sql: string) => { statements.push(sql); } } as never);
   assert.equal(statements.length, 1);
@@ -133,6 +135,19 @@ test('shared migration only creates new report tables and does not migrate or co
   assert.match(statements[0], /create table support_shared_dashboard_snapshots/);
   assert.match(statements[0], /create table support_shared_dashboard_state/);
   assert.doesNotMatch(statements[0], /password|secret|decrypted/i);
+});
+
+test('route planner limit migration changes only the existing named byte constraint and preserves all data', async () => {
+  const statements: string[] = [];
+  await applySupportSharedJsonLimitMigration({ query: async (sql: string) => { statements.push(sql); } } as never);
+  assert.equal(statements.length, 1);
+  assert.match(statements[0], /alter table support_shared_dashboard_json_snapshots/);
+  assert.match(statements[0], /drop constraint if exists support_shared_dashboard_json_snapshots_file_size_check/);
+  assert.match(statements[0], /add constraint support_shared_dashboard_json_snapshots_file_size_check/);
+  assert.match(statements[0], /check \(file_size between 1 and 524288000\)/);
+  assert.doesNotMatch(statements[0], /\b(?:delete|update|insert|truncate)\b|\bpersonal_dashboard_|\bwholesale_/i);
+  const registry = readFileSync(new URL('../src/shared/lib/db/migrations.ts', import.meta.url), 'utf8');
+  assert.match(registry, /id: '202610270001_support_shared_json_500_mib'.*apply: applySupportSharedJsonLimitMigration/);
 });
 
 test('all viewer reads recheck active manager role and explicit route-planner grant under shared locks', async () => {

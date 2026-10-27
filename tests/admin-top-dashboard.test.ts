@@ -1120,7 +1120,8 @@ test('top-level dashboard download hook accepts messages only from its exact fra
   assert.match(hookSource, /event\.source !== frameWindow/);
   assert.match(hookSource, /event\.origin !== window\.location\.origin/);
   assert.match(hookSource, /navigator\.userActivation\.isActive/);
-  assert.match(hookSource, /readTopDashboardDownloadMessage\(event\.data\)/);
+  assert.match(hookSource, /readTopDashboardDownloadMessage\(event\.data, maxBytes\)/);
+  assert.match(hookSource, /maxBytes = TOP_DASHBOARD_DOWNLOAD_MAX_BYTES/);
   assert.match(hookSource, /document\.body\.appendChild\(anchor\)/);
   assert.match(hookSource, /anchor\.download = message\.name/);
   assert.match(hookSource, /URL\.revokeObjectURL\(activeObjectUrl\)/);

@@ -28,6 +28,7 @@ import { applyKnowledgeBaseMigration } from './knowledgeBaseMigration';
 import { applyPriceBuildMigration } from './priceBuildMigration';
 import { applyClientChatReceiptsMigration } from './clientChatReceiptsMigration';
 import { applyTopDashboardHtmlReadinessMigration } from './topDashboardHtmlReadinessMigration';
+import { applySupportSharedJsonLimitMigration } from './supportSharedJsonLimitMigration';
 
 type SchemaMigration = {
   id: string;
@@ -879,6 +880,7 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610220004_site_content_write_versions', description: 'Optimistic versions for site content edits without changing saved content or ordering', apply: applySiteContentVersionMigration},
   {id: '202610230001_client_chat_message_receipts', description: 'Exact client chat read receipts without changing correspondence or legacy read state', apply: applyClientChatReceiptsMigration},
   {id: '202610230002_top_dashboard_html_readiness', description: 'Versioned derived HTML readiness without changing reports, publications or snapshots', apply: applyTopDashboardHtmlReadinessMigration},
+  {id: '202610270001_support_shared_json_500_mib', description: 'Allow route-planner JSON snapshots up to 500 MiB without changing saved files or publications', apply: applySupportSharedJsonLimitMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

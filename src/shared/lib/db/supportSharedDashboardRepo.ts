@@ -440,7 +440,7 @@ export async function importSupportSharedDashboardJson(input: {
     const remove = current.rows.filter((row) => row.id !== jsonState.rows[0].active_snapshot_id);
     const quota = await client.query<{ bytes: string }>(`select coalesce(sum(file_size),0)::text as bytes from support_shared_dashboard_json_snapshots`);
     if (Number(quota.rows[0].bytes) - remove.reduce((sum, row) => sum + Number(row.file_size), 0) + input.fileSize > SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES) {
-      throw new PersonalDashboardError('SNAPSHOT_QUOTA', 'Достигнут лимит хранения общих JSON: 1 ГиБ; текущие данные сохранены');
+      throw new PersonalDashboardError('SNAPSHOT_QUOTA', `Достигнут лимит хранения общих JSON: ${SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES / (1024 * 1024 * 1024)} ГиБ; текущие данные сохранены`);
     }
     const created = await client.query<Omit<JsonRow, 'active_snapshot_id' | 'previous_snapshot_id'>>(`insert into support_shared_dashboard_json_snapshots
       (html_version_id,original_name,file_size,sha256,storage_path,saved_at,uploaded_by) values ($1,$2,$3,$4,$5,$6,$7)

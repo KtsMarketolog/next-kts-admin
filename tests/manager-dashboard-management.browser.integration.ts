@@ -24,6 +24,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ManagerDashboardManagement } from './src/features/admin/manager-dashboard/ManagerDashboardManagement';
 import { ManagerDashboard } from './src/features/admin/manager-dashboard/ManagerDashboard';
+import { RoutePlannerDashboard } from './src/features/admin/manager-dashboard/RoutePlannerDashboard';
 import adminStyles from './src/app/admin/admin.module.scss';
 import dashboardStyles from './src/features/admin/manager-dashboard/ManagerDashboard.module.scss';
 const date = '2026-09-15T08:00:00Z';
@@ -31,6 +32,7 @@ const makeVersion = (id, audience, suffix) => ({id, audience, originalName: audi
 const requestedAudience = new URLSearchParams(location.search).get('audience');
 const managementAudience = ['development', 'support'].includes(requestedAudience) ? requestedAudience : null;
 const sharedOnly = new URLSearchParams(location.search).get('section') === 'shared';
+const routeManage = new URLSearchParams(location.search).has('routeManage');
 const canAssignAccess = new URLSearchParams(location.search).has('access');
 const supportMany = new URLSearchParams(location.search).get('support') === 'many';
 const sharedSnapshot = {id: 301, originalName: 'общий_файл.ktsp', email: 'shared.synthetic@example.test', issued: '2026-09-15', expires: '2999-10-30', receivedAt: date};
@@ -74,8 +76,17 @@ window.fixtureViewerOverview = {
   supportShared: sharedInitial
 };
 const originalFetch = window.fetch.bind(window);
-window.fetch = async (input, init) => input === '/api/admin/manager-dashboard/shared'
-  ? new Response(JSON.stringify({mode: 'view', supportShared: window.fixtureViewerOverview.supportShared}), {status: 200, headers: {'Content-Type': 'application/json'}})
+window.fixtureRouteStatus = 0;
+window.fixtureRouteReloadFailure = false;
+window.fetch = async (input, init) => input === '/api/admin/manager-dashboard/shared/json' && init?.method === 'POST'
+  ? (() => {
+    window.fixtureCalls.push({path:'/shared/json', method: init.method, bytes: init.body.size});
+    if (window.fixtureRouteStatus === -1) throw new TypeError('Synthetic connection failure');
+    if (window.fixtureRouteStatus) return new Response(JSON.stringify({error:'Синтетическая ошибка JSON: ' + window.fixtureRouteStatus}), {status: window.fixtureRouteStatus, headers: {'Content-Type':'application/json'}});
+    return new Response(JSON.stringify({message:'Синтетический JSON опубликован.'}), {status:200, headers: {'Content-Type':'application/json'}});
+  })()
+  : input === '/api/admin/manager-dashboard/shared'
+  ? new Response(JSON.stringify(window.fixtureRouteReloadFailure && window.fixtureCalls.length ? {error:'Synthetic reload failure'} : {mode: routeManage ? 'manage' : 'view', supportShared: window.fixtureViewerOverview.supportShared}), {status: window.fixtureRouteReloadFailure && window.fixtureCalls.length ? 503 : 200, headers: {'Content-Type': 'application/json'}})
   : input === '/api/admin/manager-dashboard'
   ? new Response(JSON.stringify(window.fixtureViewerOverview), {status: 200, headers: {'Content-Type': 'application/json'}})
   : originalFetch(input, init);
@@ -151,7 +162,7 @@ function Fixture() {
     <ManagerDashboardManagement section={sharedOnly ? 'shared' : 'personal'} audience={managementAudience} overview={sharedOnly ? {mode: 'manage', supportShared: overview.supportShared} : overview} busy={false} mutate={mutate} canAssignAccess={canAssignAccess}/>
   </main><aside className={adminStyles.page} id="fixture-unrelated"><button>Другая страница администратора</button></aside></>;
 }
-createRoot(document.getElementById('root')).render(viewerAudience ? <ManagerDashboard section={viewerAudience === 'shared' ? 'shared' : 'personal'} mode="view" audience={managementAudience}/> : <Fixture/>);
+createRoot(document.getElementById('root')).render(routeManage ? <RoutePlannerDashboard mode="manage"/> : viewerAudience ? <ManagerDashboard section={viewerAudience === 'shared' ? 'shared' : 'personal'} mode="view" audience={managementAudience}/> : <Fixture/>);
 `;
 
 async function main() {
@@ -181,7 +192,8 @@ async function main() {
         const classNames = [...css.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map((match) => match[1]);
         // Preserve the real admin cascade without colliding unrelated CSS Modules
         // (e.g. admin .danger !important must not match dashboard .danger).
-        const prefix = args.path.endsWith('/admin.module.scss') ? 'admin_' : '';
+        const prefix = args.path.endsWith('/admin.module.scss') ? 'admin_' : args.path.endsWith('/ManagerDashboard.module.scss') ? ''
+          : path.relative(root, args.path).replace(/\W/g, '_') + '_';
         const parsed = postcss.parse(css);
         if (prefix) parsed.walkRules(rule => {rule.selector = rule.selector.replace(/\.([a-zA-Z_][\w-]*)/g, (_, name) => `.${prefix}${name}`);});
         styles.set(args.path, parsed.toString());
@@ -267,7 +279,64 @@ async function main() {
             void (acceptConfirmation ? dialog.accept() : dialog.dismiss());
           });
           page.setDefaultTimeout(7000);
+          const verifyJsonFeedback = async () => {
+            await page.goto(`${origin}/?routeManage=1&section=shared&json=1`);
+            const jsonFile = page.locator('#manager-dashboard-shared-json');
+            await jsonFile.waitFor({state: 'visible'});
+            const publishJson = page.getByRole('button', {name: 'Опубликовать общий JSON', exact: true});
+            const jsonForm = page.locator('form').filter({has: jsonFile});
+            const jsonError = jsonForm.locator('#manager-dashboard-shared-json-error');
+            assert.match(await jsonForm.innerText(), /до 500 МиБ/);
+            await jsonFile.setInputFiles({name: 'слишком_большой.json', mimeType: 'application/json', buffer: Buffer.from('{}')});
+            await page.evaluate(() => {
+              // WebKit may return fresh File wrappers; mock only this named fixture
+              // at the prototype boundary instead of allocating 500 MiB in the test.
+              const size = Object.getOwnPropertyDescriptor(Blob.prototype, 'size')!.get!;
+              Object.defineProperty(File.prototype, 'size', {configurable: true, get() {
+                return this.name === 'слишком_большой.json' ? 500 * 1024 * 1024 + 1 : size.call(this);
+              }});
+            });
+            await publishJson.click();
+            await jsonError.waitFor({state: 'visible'});
+            assert.match(await jsonError.innerText(), /Допустимо до 500 МиБ.*Файл не отправлен/);
+            assert.equal((await page.evaluate('window.fixtureCalls')).length, 0, 'oversized file causes no HTTP request');
+            assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.length), 1, 'preparation rejection preserves the selected file');
+            assert.equal(await jsonFile.getAttribute('aria-invalid'), 'true');
+            await jsonForm.screenshot({path: path.join(output, `${engineName}-${width}-json-error.png`)});
+            for (const status of [409, 413, 503, -1]) {
+              await jsonFile.setInputFiles({name: 'проверка_ошибки.json', mimeType: 'application/json', buffer: Buffer.from('{"snapshot":true,"orders":[]}')});
+              assert.equal(await jsonError.count(), 0, 'choosing another file clears only its stale notification');
+              await page.evaluate((status: number) => {(window as unknown as {fixtureRouteStatus: number}).fixtureRouteStatus = status;}, status);
+              await publishJson.click();
+              await jsonError.waitFor({state: 'visible'});
+              assert.match(await jsonError.innerText(), status === -1 ? /Изменение могло сохраниться/ : new RegExp(`Синтетическая ошибка JSON: ${status}`));
+              await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.disabled);
+              assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.length), 1, 'server or network failure preserves selected JSON for explicit retry');
+              assert.equal(await page.evaluate(() => document.activeElement?.id), 'manager-dashboard-shared-json-error', 'the adjacent alert receives accessible focus');
+              const bounds = await jsonError.boundingBox();
+              assert.ok(bounds && bounds.y >= 0 && bounds.y + bounds.height <= 1001, 'error is scrolled into view even below the report preview');
+              assert.equal(await jsonForm.getByRole('button', {name: 'Прервать загрузку JSON'}).count(), 0, 'failure releases preparation/upload state');
+            }
+            await page.evaluate(() => {
+              (window as unknown as {fixtureRouteStatus: number}).fixtureRouteStatus = 0;
+              (window as unknown as {fixtureRouteReloadFailure: boolean}).fixtureRouteReloadFailure = true;
+            });
+            await publishJson.click();
+            await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.disabled && document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.files?.length === 0);
+            assert.equal(await jsonError.count(), 0, 'failed refresh after confirmed save does not become an upload failure');
+            assert.match(await jsonForm.innerText(), /Синтетический JSON опубликован/);
+            assert.equal(await jsonForm.getByRole('status').filter({hasText: 'Синтетический JSON опубликован.'}).isVisible(), true);
+            assert.match(await jsonForm.innerText(), /Операция выполнена.*Повторно отправлять файл не нужно/);
+            await jsonForm.screenshot({path: path.join(output, `${engineName}-${width}-json-feedback.png`)});
+          };
           try {
+            if (process.env.KTS_JSON_UPLOAD_ONLY === '1') {
+              await verifyJsonFeedback();
+              assert.deepEqual(errors, []);
+              assert.deepEqual(external, []);
+              console.log(`PASS ${engineName}/${width}: JSON 500MiB boundary, inline preparation/HTTP/network errors, preserved selection, accessible focus and confirmed-save warning.`);
+              continue;
+            }
             const pageHistoryStart = historyRequests.length;
             await page.goto(origin);
             await page.locator('#manager-dashboard-group-support').waitFor({state: 'visible'});
@@ -787,6 +856,9 @@ async function main() {
             await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('#manager-dashboard-html-preview iframe')?.src.includes('revision=502'));
             assert.equal(await previewFrame.getAttribute('data-mount-token'), null, 'first JSON upload replaces an already open empty preview');
             assert.equal((await page.evaluate('window.fixtureCalls'))[0].headers['X-KTS-Shared-Expected-Snapshot'], 'null');
+            // Exercise the real parent request handler as well as the management form:
+            // preparation, HTTP and network errors must all remain beside JSON upload.
+            await verifyJsonFeedback();
             await page.goto(`${origin}/?view=shared&json=1`);
             await commonFrame.waitFor({state: 'visible'});
             assert.equal(new URL((await commonFrame.getAttribute('src'))!, origin).searchParams.get('snapshot'), '501');
@@ -851,6 +923,7 @@ async function main() {
         }
         // A narrow desktop viewport is not a touchscreen. Exercise the actual
         // coarse-pointer/hover:none media features in a separate touch context.
+        if (process.env.KTS_JSON_UPLOAD_ONLY === '1') continue;
         const touchContext = await browser.newContext({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
         const touchExternal: string[] = [];
         try {

@@ -5,12 +5,13 @@ import { useEffect, useRef } from 'react';
 import {
   getTopDashboardDownloadMimeType,
   readTopDashboardDownloadMessage,
+  TOP_DASHBOARD_DOWNLOAD_MAX_BYTES,
 } from '@/shared/lib/topDashboardDownloadBridge';
 
 const DOWNLOAD_URL_LIFETIME_MS = 60_000;
 const DOWNLOAD_THROTTLE_MS = 750;
 
-export function useTopDashboardDownloadBridge(showStatus: (message: string) => void) {
+export function useTopDashboardDownloadBridge(showStatus: (message: string) => void, maxBytes = TOP_DASHBOARD_DOWNLOAD_MAX_BYTES) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const showStatusRef = useRef(showStatus);
   const lastDownloadAtRef = useRef(0);
@@ -40,7 +41,7 @@ export function useTopDashboardDownloadBridge(showStatus: (message: string) => v
         return;
       }
 
-      const message = readTopDashboardDownloadMessage(event.data);
+      const message = readTopDashboardDownloadMessage(event.data, maxBytes);
       if (!message) return;
       if (!navigator.userActivation || !navigator.userActivation.isActive) {
         showStatusRef.current('Скачивание разрешено только после нажатия кнопки');
@@ -80,7 +81,7 @@ export function useTopDashboardDownloadBridge(showStatus: (message: string) => v
       window.removeEventListener('message', handleMessage);
       releaseObjectUrl();
     };
-  }, []);
+  }, [maxBytes]);
 
   return frameRef;
 }

@@ -31,7 +31,9 @@ export function getTopDashboardDataAdapterScript(
   readOnly = false,
   legacyReadyFunction: TopDashboardLegacyReadyFunction | null = null,
   localInvoiceMode = false,
+  downloadMaxBytes = TOP_DASHBOARD_DOWNLOAD_MAX_BYTES,
 ) {
+  if (!Number.isSafeInteger(downloadMaxBytes) || downloadMaxBytes < 1) throw new RangeError('Invalid download byte limit');
   const expectedFormatJson = JSON.stringify(expectedFormat);
   const expectedProfileJson = JSON.stringify(expectedProfile);
   const readOnlyJson = JSON.stringify(readOnly && !localInvoiceMode);
@@ -54,7 +56,7 @@ export function getTopDashboardDataAdapterScript(
   const RESTORE_TIMEOUT_MS = 120000;
   const MULTI_INPUT_DISPATCH_GAP_MS = 150;
   const DOWNLOAD_MARKER = '${TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER}';
-  const DOWNLOAD_MAX_BYTES = ${TOP_DASHBOARD_DOWNLOAD_MAX_BYTES};
+  const DOWNLOAD_MAX_BYTES = ${downloadMaxBytes};
   const DOWNLOAD_MAX_NAME_LENGTH = ${TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH};
   const DOWNLOAD_NAME = new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE)}, 'i');
   const DOWNLOAD_INVALID_NAME = new RegExp(${JSON.stringify(TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE)}, 'i');

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useTopDashboardDownloadBridge } from '@/features/admin/top-dashboard/useTopDashboardDownloadBridge';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
 import type { PersonalDashboardAudience } from '@/shared/lib/managerDashboardAudience';
+import { SUPPORT_SHARED_JSON_MAX_BYTES } from '@/shared/lib/supportSharedRoutePlannerLimits';
 
 import type { ManagerDashboardImport, ManagerDashboardSnapshot, ManagerDashboardSnapshotStatus } from './types';
 import styles from './ManagerDashboard.module.scss';
@@ -128,7 +129,7 @@ export function SharedDashboardFrame({
   revision?: number;
 }) {
   const [downloadStatus, setDownloadStatus] = useState('');
-  const frameRef = useTopDashboardDownloadBridge(setDownloadStatus);
+  const frameRef = useTopDashboardDownloadBridge(setDownloadStatus, SUPPORT_SHARED_JSON_MAX_BYTES);
   useDashboardUsage({ dashboardKey: 'route-planner', iframeRef: frameRef, preview, versionId });
   const params = new URLSearchParams({ version: String(versionId), revision: String(revision) });
   if (snapshotId && !preview) params.set('snapshot', String(snapshotId));

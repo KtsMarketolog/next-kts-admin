@@ -107,6 +107,12 @@ export type ManagerDashboardOverview = {
   expectedBy?: string | null;
 };
 
+/** Optional scoped notifications; existing forms can keep their page-level messages. */
+export type ManagerDashboardMutationFeedback = {
+  onError?: (message: string) => void;
+  onWarning?: (message: string) => void;
+};
+
 export type ManagerDashboardMutationResult = {
   preview?: PersonalSnapshotReplacementPreview;
   /** Client-only: the write succeeded, but cancellation must stop a batch. */

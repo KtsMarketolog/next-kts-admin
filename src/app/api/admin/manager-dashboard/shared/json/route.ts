@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     }
     const length = request.headers.get('content-length');
     if (length !== null && (!/^\d+$/.test(length) || Number(length) > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES)) {
-      return personalJson({error: 'Сжатый файл должен быть не больше 16 МиБ'}, 413);
+      return personalJson({error: `Сжатый файл должен быть не больше ${SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES / (1024 * 1024)} МиБ; текущие данные сохранены`}, 413);
     }
     await assertSupportSharedJsonUploadTarget(htmlVersionId, expectedId);
     releaseSlot = await acquireDistributedTopDashboardDataUploadSlot();

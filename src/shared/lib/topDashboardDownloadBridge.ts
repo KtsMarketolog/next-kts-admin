@@ -33,14 +33,14 @@ export function normalizeTopDashboardDownloadName(value: unknown) {
   return name;
 }
 
-export function isTopDashboardDownloadBlob(value: unknown): value is Blob {
-  return typeof Blob !== 'undefined'
+export function isTopDashboardDownloadBlob(value: unknown, maxBytes = TOP_DASHBOARD_DOWNLOAD_MAX_BYTES): value is Blob {
+  return Number.isSafeInteger(maxBytes) && maxBytes > 0 && typeof Blob !== 'undefined'
     && value instanceof Blob
     && value.size > 0
-    && value.size <= TOP_DASHBOARD_DOWNLOAD_MAX_BYTES;
+    && value.size <= maxBytes;
 }
 
-export function readTopDashboardDownloadMessage(value: unknown): TopDashboardDownloadMessage | null {
+export function readTopDashboardDownloadMessage(value: unknown, maxBytes = TOP_DASHBOARD_DOWNLOAD_MAX_BYTES): TopDashboardDownloadMessage | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<TopDashboardDownloadMessage>;
   if (
@@ -50,7 +50,7 @@ export function readTopDashboardDownloadMessage(value: unknown): TopDashboardDow
     return null;
   }
   const name = normalizeTopDashboardDownloadName(candidate.name);
-  if (!name || !isTopDashboardDownloadBlob(candidate.blob)) return null;
+  if (!name || !isTopDashboardDownloadBlob(candidate.blob, maxBytes)) return null;
   return {
     marker: TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER,
     type: 'download-request',

@@ -8,6 +8,7 @@ import * as security from '../src/shared/lib/managerDashboardSecurity';
 import * as origin from '../src/shared/lib/originProtection';
 import * as dashboardAccess from '../src/shared/lib/dashboardAccess';
 import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
+import { SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES } from '../src/shared/lib/supportSharedRoutePlannerLimits';
 
 function compile<T>(filename: string, modules: Record<string, unknown>): T {
   const code = ts.transpileModule(readFileSync(new URL(filename, import.meta.url), 'utf8'), {
@@ -73,7 +74,7 @@ function api(role: Role = 'admin', options: {
           return options.missingSnapshot ? null : {...snapshot, stream: Readable.from([Buffer.from('{"synthetic":true}')])};
         }),
       },
-      '@/shared/lib/supportSharedRoutePlannerData': {SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES: 16 * 1024 * 1024,
+      '@/shared/lib/supportSharedRoutePlannerData': {SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES,
         prepareSupportSharedRoutePlannerUpload: observe('prepare', async (request) => {
           if (options.prepareError) throw options.prepareError;
           await options.prepare?.(request as Request);
@@ -113,7 +114,7 @@ test('shared JSON rejects malformed headers, scope injection and request sizes b
     {'x-kts-shared-version': '01'}, {'x-kts-shared-version': '8,9'}, {'x-kts-shared-expected-snapshot': ''},
     {'x-kts-shared-confirm': 'false'}, {'x-kts-shared-filename': '../data.json'}, {'x-kts-shared-filename': '%'},
     {'x-kts-shared-filename': 'data.ktsp'}, {'content-type': 'application/json'}, {'content-encoding': 'gzip'},
-    {'content-length': String(16 * 1024 * 1024 + 1)}, {'content-length': '-1'},
+    {'content-length': String(SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES + 1)}, {'content-length': '-1'},
   ];
   for (const headers of invalidHeaders) {
     const harness = api();
@@ -125,6 +126,16 @@ test('shared JSON rejects malformed headers, scope injection and request sizes b
   const harness = api();
   assert.equal((await harness.route.POST(upload({}, '?managerId=21'))).status, 400);
   assert.deepEqual(harness.calls, []);
+});
+
+test('shared JSON admits transport up to 501 MiB and reports the correct cap before body work', async () => {
+  const accepted = api();
+  assert.equal((await accepted.route.POST(upload({'content-length': String(SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES)}))).status, 201);
+  const rejected = api();
+  const response = await rejected.route.POST(upload({'content-length': String(SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES + 1)}));
+  assert.equal(response.status, 413);
+  assert.match((await response.json()).error, /501 МиБ/);
+  assert.deepEqual(rejected.calls, []);
 });
 
 test('HTML/CAS conflicts and cross-worker contention prevent JSON body inspection', async () => {

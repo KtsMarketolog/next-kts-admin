@@ -9,8 +9,8 @@ import { RoutePlannerViewer } from './ManagerDashboardViewer';
 import { formatDashboardTimestamp, formatDashboardDataDate } from '@/shared/lib/dashboardDates';
 import { DashboardAudienceEditor } from '@/features/admin/dashboard-access/DashboardAudienceEditor';
 import { DashboardInstructions } from '@/features/admin/dashboard-instructions/DashboardInstructions';
-import { prepareSharedJsonUpload } from './sharedJsonUpload';
-import type { ManagerDashboardGroup, ManagerDashboardHtmlVersion, ManagerDashboardImport, ManagerDashboardMutationResult, ManagerDashboardOverview, RoutePlannerOverview } from './types';
+import { MAX_SHARED_JSON_BYTES, prepareSharedJsonUpload, validateSharedJsonFile } from './sharedJsonUpload';
+import type { ManagerDashboardGroup, ManagerDashboardHtmlVersion, ManagerDashboardImport, ManagerDashboardMutationFeedback, ManagerDashboardMutationResult, ManagerDashboardOverview, RoutePlannerOverview } from './types';
 import styles from './ManagerDashboard.module.scss';
 
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
@@ -27,7 +27,7 @@ type ManagementProps = {
   section?: 'personal' | 'shared';
   audience?: PersonalDashboardAudience | null;
   busy: boolean;
-  mutate: (path: string, init: RequestInit, successMessage: string) => Promise<ManagerDashboardMutationResult | null>;
+  mutate: (path: string, init: RequestInit, successMessage: string, feedback?: ManagerDashboardMutationFeedback) => Promise<ManagerDashboardMutationResult | null>;
   onAccessDenied?: () => void;
   onReload?: () => Promise<boolean>;
 };
@@ -41,6 +41,9 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
   const [fileErrors, setFileErrors] = useState<Partial<Record<PersonalDashboardAudience, string>>>({});
   const [results, setResults] = useState<ManagerDashboardImport[]>([]);
   const [sharedError, setSharedError] = useState('');
+  const [sharedJsonError, setSharedJsonError] = useState('');
+  const [sharedJsonMessage, setSharedJsonMessage] = useState('');
+  const [sharedJsonWarning, setSharedJsonWarning] = useState('');
   const [sharedJsonProgress, setSharedJsonProgress] = useState('');
   const developmentHtmlInput = useRef<HTMLInputElement>(null);
   const supportHtmlInput = useRef<HTMLInputElement>(null);
@@ -50,11 +53,17 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
   const sharedSnapshotInput = useRef<HTMLInputElement>(null);
   const sharedEmailInput = useRef<HTMLInputElement>(null);
   const sharedJsonInput = useRef<HTMLInputElement>(null);
+  const sharedJsonErrorPanel = useRef<HTMLParagraphElement>(null);
   const previewPanel = useRef<HTMLElement>(null);
   const audienceGrid = useRef<HTMLDivElement>(null);
   const mutationRef = useRef(false);
   const uploadController = useRef<AbortController | null>(null);
   useEffect(() => () => { uploadController.current?.abort(); }, []);
+  useEffect(() => {
+    if (!sharedJsonError) return;
+    sharedJsonErrorPanel.current?.focus({ preventScroll: true });
+    sharedJsonErrorPanel.current?.scrollIntoView({ block: 'nearest' });
+  }, [sharedJsonError]);
   const busy = externalBusy || pending;
   const previewGroup = groups.find((item) => item.audience === previewSelection?.audience);
   const shared = section === 'shared' ? overview.supportShared : undefined;
@@ -325,7 +334,11 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
     if (busy || mutationRef.current || !sharedUsesJson || !sharedActiveHtml) return;
     const file = sharedJsonInput.current?.files?.[0];
     if (!file) return;
-    setSharedError('');
+    setSharedJsonError('');
+    setSharedJsonMessage('');
+    setSharedJsonWarning('');
+    try { validateSharedJsonFile(file); }
+    catch (cause) { setSharedJsonError(cause instanceof Error ? cause.message : 'Не удалось проверить выбранный JSON.'); return; }
     if (!window.confirm(`Опубликовать JSON «${file.name}» для ВСЕХ сотрудников с доступом к компоновщику?\n\nHTML: «${sharedActiveHtml.originalName}», версия #${sharedActiveHtml.id}.\nОн заменит текущий общий JSON этой версии. Предыдущий файл сохранится, личные дашборды не изменятся.`)) return;
     // Hold the same guard while compressing, not only while the request runs.
     mutationRef.current = true;
@@ -335,8 +348,10 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
     setPending(true);
     try {
       setSharedJsonProgress('Подготавливаем JSON к загрузке…');
-      const body = await prepareSharedJsonUpload(file, { signal: controller.signal });
+      const body = await prepareSharedJsonUpload(file, { signal: controller.signal, onProgress: (percent) => setSharedJsonProgress(`Подготавливаем JSON к загрузке: ${percent}%…`) });
       setSharedJsonProgress('Загружаем и проверяем JSON… Не закрывайте страницу.');
+      let failureReported = false;
+      const successMessage = 'Общий JSON опубликован для всех сотрудников с доступом к компоновщику. При открытии отчёта он загрузится автоматически.';
       const result = await performMutation('/shared/json', {
         method: 'POST', body, signal: controller.signal,
         headers: {
@@ -346,10 +361,18 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
           'X-KTS-Shared-Filename': encodeURIComponent(file.name),
           'X-KTS-Shared-Confirm': 'true',
         },
-      }, 'Общий JSON опубликован для всех сотрудников с доступом к компоновщику. При открытии отчёта он загрузится автоматически.');
-      if (result && sharedJsonInput.current) sharedJsonInput.current.value = '';
+      }, successMessage, {
+        onError: (message) => { failureReported = true; setSharedJsonError(message); },
+        onWarning: setSharedJsonWarning,
+      });
+      if (result) {
+        if (sharedJsonInput.current) sharedJsonInput.current.value = '';
+        setSharedJsonMessage(result.cancelledAfterSave ? 'JSON сохранён. Ожидание дальнейшего обновления остановлено. Перед повторной отправкой обновите страницу и проверьте результат.' : result.message || successMessage);
+      } else if (!failureReported) {
+        setSharedJsonError('Не удалось подтвердить результат загрузки JSON. Обновите данные и проверьте текущую версию перед повторной отправкой. Выбранный файл сохранён в форме.');
+      }
     } catch (cause) {
-      setSharedError(cause instanceof Error ? cause.message : 'Не удалось подготовить или загрузить JSON. Проверьте текущую версию перед повторной попыткой.');
+      setSharedJsonError(cause instanceof Error ? cause.message : 'Не удалось подготовить или загрузить JSON. Проверьте текущую версию перед повторной попыткой.');
     } finally {
       uploadController.current = null;
       setCancelableUpload(false);
@@ -383,7 +406,7 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
 
   return (
     <div className={styles.stack}>
-      {cancelableUpload ? <div role="status"><button type="button" className={styles.secondary} onClick={() => uploadController.current?.abort()}>Прервать загрузку</button><p>Прерывание ожидания не отменяет уже сохранённые данные. Перед повторной отправкой проверьте журнал.</p></div> : null}
+      {cancelableUpload && !sharedJsonProgress ? <div role="status"><button type="button" className={styles.secondary} onClick={() => uploadController.current?.abort()}>Прервать загрузку</button><p>Прерывание ожидания не отменяет уже сохранённые данные. Перед повторной отправкой проверьте журнал.</p></div> : null}
       {section === 'shared' ? <RoutePlannerViewer shared={shared} loading={busy} onReload={onReload ?? (async () => true)} showHistory={false} /> : null}
       {personalOverview ? <div ref={audienceGrid} className={`${styles.audienceGrid}${audience ? ` ${styles.audienceGridSingle}` : ''}`}>
         {(audience ? [audience] : AUDIENCES).map((audience) => {
@@ -454,13 +477,16 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
               <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(shared.jsonSnapshot.receivedAt)}</dd></div>
             </dl> : null}
             <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedJson(event)}>
-              <label htmlFor="manager-dashboard-shared-json">JSON-снимок компоновщика · до 100 МБ</label>
+              <label htmlFor="manager-dashboard-shared-json">JSON-снимок компоновщика · до {MAX_SHARED_JSON_BYTES / (1024 * 1024)} МиБ</label>
               <div className={styles.actions}>
-                <input ref={sharedJsonInput} id="manager-dashboard-shared-json" type="file" accept=".json,application/json" required disabled={busy} aria-describedby="manager-dashboard-shared-json-help" />
+                <input ref={sharedJsonInput} id="manager-dashboard-shared-json" type="file" accept=".json,application/json" required disabled={busy} aria-invalid={!!sharedJsonError} aria-describedby={`manager-dashboard-shared-json-help${sharedJsonError ? ' manager-dashboard-shared-json-error' : ''}`} onChange={() => { setSharedJsonError(''); setSharedJsonMessage(''); setSharedJsonWarning(''); }} />
                 <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий JSON</button>
               </div>
-              <p id="manager-dashboard-shared-json-help" className={styles.muted}>Для HTML «{sharedActiveHtml.originalName}», версия #{sharedActiveHtml.id}. Файл сжимается перед отправкой: до 16 МБ после сжатия. Публикация происходит только после проверки; предыдущая версия данных сохраняется.</p>
-              {sharedJsonProgress ? <p className={styles.notice} role="status">{sharedJsonProgress}</p> : null}
+              <p id="manager-dashboard-shared-json-help" className={styles.muted}>Для HTML «{sharedActiveHtml.originalName}», версия #{sharedActiveHtml.id}. Файл сжимается перед отправкой. Публикация происходит только после проверки; предыдущая версия данных сохраняется. Большой снимок может обрабатываться несколько минут.</p>
+              {sharedJsonProgress ? <div><p className={styles.notice} role="status">{sharedJsonProgress}</p><button type="button" className={styles.secondary} onClick={() => uploadController.current?.abort()}>Прервать загрузку JSON</button><p className={styles.muted}>Прерывание ожидания не отменяет уже сохранённые данные. Перед повторной отправкой проверьте текущую версию.</p></div> : null}
+              {sharedJsonError ? <p ref={sharedJsonErrorPanel} id="manager-dashboard-shared-json-error" className={styles.error} role="alert" tabIndex={-1}>{sharedJsonError}</p> : null}
+              {sharedJsonMessage ? <p className={styles.notice} role="status">{sharedJsonMessage}</p> : null}
+              {sharedJsonWarning ? <p className={styles.warning} role="status">{sharedJsonWarning}</p> : null}
             </form>
           </div> : <div>
             <div className={styles.sectionHeading}><div><h3>Общий файл данных .ktsp</h3><p>Один файл открывается у всех сотрудников с доступом. Личные файлы остаются в личных дашбордах.</p></div><SnapshotStatus snapshot={shared?.snapshot ?? null} /></div>

@@ -7,16 +7,20 @@ import { Tokenizer, TokenParser, TokenType, type ParsedTokenInfo } from '@stream
 
 import { PersonalDashboardError } from './managerDashboardDomain';
 import {
+  SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, SUPPORT_SHARED_JSON_COMPRESSED_MAX_MIB,
+  SUPPORT_SHARED_JSON_MAX_BYTES, SUPPORT_SHARED_JSON_MAX_MIB,
+} from './supportSharedRoutePlannerLimits';
+import {
   openTopDashboardDataFile,
   TopDashboardDataStreamError,
   writeTopDashboardRequestToPendingFile,
   type PendingTopDashboardDataFile,
 } from './topDashboardDataStorage';
 
-export const SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES = 16 * 1024 * 1024;
-export const SUPPORT_SHARED_JSON_MAX_BYTES = 100 * 1024 * 1024;
-export const SUPPORT_SHARED_JSON_MAX_VERSIONS = 2;
-export const SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES = 1024 * 1024 * 1024;
+export {
+  SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, SUPPORT_SHARED_JSON_MAX_BYTES,
+  SUPPORT_SHARED_JSON_MAX_VERSIONS, SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES,
+} from './supportSharedRoutePlannerLimits';
 
 const MAX_DEPTH = 64;
 const MAX_TOKEN_BYTES = 1024 * 1024;
@@ -39,7 +43,13 @@ function invalid(): never {
 }
 
 function tooLarge(): never {
-  throw new PersonalDashboardError('SNAPSHOT_SIZE', 'Превышен допустимый размер или сложность JSON-снимка');
+  throw new PersonalDashboardError('SNAPSHOT_SIZE', 'Превышена допустимая сложность JSON-снимка: длина значения, количество элементов или глубина вложенности');
+}
+
+function exceedsBytes(compressed = false): never {
+  throw new PersonalDashboardError('SNAPSHOT_SIZE', compressed
+    ? `Сжатый файл должен быть не больше ${SUPPORT_SHARED_JSON_COMPRESSED_MAX_MIB} МиБ; текущие данные сохранены`
+    : `JSON-снимок должен быть не больше ${SUPPORT_SHARED_JSON_MAX_MIB} МиБ до сжатия; текущие данные сохранены`);
 }
 
 function validSavedAt(value: unknown): string {
@@ -187,7 +197,7 @@ function snapshotValidator() {
   return {
     write(chunk: Buffer) {
       totalBytes += chunk.length;
-      if (totalBytes > SUPPORT_SHARED_JSON_MAX_BYTES) tooLarge();
+      if (totalBytes > SUPPORT_SHARED_JSON_MAX_BYTES) exceedsBytes();
       // Even a single oversized upstream chunk cannot grow a token unboundedly.
       for (let offset = 0; offset < chunk.length; offset += PARSER_CHUNK_BYTES) {
         const part = chunk.subarray(offset, offset + PARSER_CHUNK_BYTES);
@@ -209,7 +219,7 @@ function snapshotValidator() {
 function uploadError(error: unknown): PersonalDashboardError {
   if (error instanceof PersonalDashboardError) return error;
   if (error instanceof TopDashboardDataStreamError && error.code === 'TOO_LARGE') {
-    return new PersonalDashboardError('SNAPSHOT_SIZE', 'Превышен допустимый размер JSON-снимка');
+    return new PersonalDashboardError('SNAPSHOT_SIZE', `JSON-снимок должен быть не больше ${SUPPORT_SHARED_JSON_MAX_MIB} МиБ до сжатия; текущие данные сохранены`);
   }
   if (error instanceof TopDashboardDataStreamError && error.code === 'UNAVAILABLE') {
     return new PersonalDashboardError('STORAGE_UNAVAILABLE', 'Хранилище JSON-снимков недоступно');
@@ -232,12 +242,12 @@ export async function prepareSupportSharedRoutePlannerUpload(request: Request): 
   try {
     let transportSize = 0;
     const declaredSize = request.headers.get('content-length');
-    if (declaredSize && (!/^\d+$/u.test(declaredSize) || Number(declaredSize) > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES)) tooLarge();
+    if (declaredSize && (!/^\d+$/u.test(declaredSize) || Number(declaredSize) > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES)) exceedsBytes(true);
     const input = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         try {
           transportSize += chunk.length;
-          if (transportSize > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES) tooLarge();
+          if (transportSize > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES) exceedsBytes(true);
           callback(null, chunk);
         } catch (error) { callback(uploadError(error)); }
       },

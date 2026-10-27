@@ -1100,7 +1100,7 @@ test('personal dashboards isolated PostgreSQL acceptance', async (t) => {
           (html_version_id,original_name,file_size,sha256,storage_path,saved_at,uploaded_by)
           select $1,'quota-fixture.json',104857600,lpad(n::text,64,'0'),
             '00/' || lpad(n::text,64,'0') || '-00000000-0000-0000-0000-000000000000.bin',now(),'admin:integration-test'
-          from generate_series(1,11) n returning id::text`, [secondHtml.id]);
+          from generate_series(1,21) n returning id::text`, [secondHtml.id]);
         try {
           await assert.rejects(() => upload(9, active), {code: 'SNAPSHOT_QUOTA'});
           assert.equal((await getSupportSharedDashboardOverview()).jsonSnapshot!.id, active);

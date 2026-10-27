@@ -67,10 +67,13 @@ async function rejectsUpload(input: Request, code = 'INVALID_SNAPSHOT') {
 }
 
 test('route planner storage limits match the upload and retention contract', () => {
-  assert.equal(SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, 16 * 1024 * 1024);
-  assert.equal(SUPPORT_SHARED_JSON_MAX_BYTES, 100 * 1024 * 1024);
+  assert.equal(SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, 501 * 1024 * 1024);
+  assert.equal(SUPPORT_SHARED_JSON_MAX_BYTES, 500 * 1024 * 1024);
   assert.equal(SUPPORT_SHARED_JSON_MAX_VERSIONS, 2);
-  assert.equal(SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES, 1024 * 1024 * 1024);
+  assert.equal(SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES, 2 * 1024 * 1024 * 1024);
+  assert.ok(SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES > SUPPORT_SHARED_JSON_MAX_BYTES, 'Gzip overhead must not reject valid incompressible source JSON');
+  assert.ok(SUPPORT_SHARED_JSON_TOTAL_MAX_BYTES >= 2 * SUPPORT_SHARED_JSON_MAX_VERSIONS * SUPPORT_SHARED_JSON_MAX_BYTES,
+    'Both the current and previous HTML publication can retain their current and previous JSON');
 });
 
 test('gzip upload preserves JSON bytes, uses private files, and supports commit/preserve/delete', async () => {
@@ -228,30 +231,38 @@ test('rejects unsupported transport and enforces compressed limits with and with
   });
 });
 
-test('stops a gzip expansion bomb at 100 MiB and removes the partial file', async () => {
+test('accepts exactly 500 MiB, then stops a gzip expansion at the next byte without touching the retained file', async () => {
   await inStorage(async (directory) => {
-    function* whitespaceBomb() {
+    function* paddedSnapshot(size: number) {
+      const json = Buffer.from(JSON.stringify(snapshot()));
+      yield json;
       const spaces = Buffer.alloc(64 * 1024, 0x20);
-      for (let size = 0; size <= SUPPORT_SHARED_JSON_MAX_BYTES; size += spaces.length) yield spaces;
-      yield Buffer.from(JSON.stringify(snapshot()));
+      for (let offset = json.length; offset < size; offset += spaces.length) yield spaces.subarray(0, Math.min(spaces.length, size - offset));
     }
-    await rejectsUpload(streamed(whitespaceBomb(), true), 'SNAPSHOT_SIZE');
+    const { pending } = await prepareSupportSharedRoutePlannerUpload(streamed(paddedSnapshot(SUPPORT_SHARED_JSON_MAX_BYTES), true));
+    assert.equal(pending.fileSize, SUPPORT_SHARED_JSON_MAX_BYTES);
+    const storagePath = await pending.commit();
+    pending.preserve();
+    await rejectsUpload(streamed(paddedSnapshot(SUPPORT_SHARED_JSON_MAX_BYTES + 1), true), 'SNAPSHOT_SIZE');
     assert.deepEqual(await readdir(path.join(directory, '.incoming')), []);
+    assert.equal((await stat(path.join(directory, storagePath))).size, SUPPORT_SHARED_JSON_MAX_BYTES);
+    const verified = await openVerifiedSupportSharedRoutePlannerFile(storagePath, pending.fileSize, pending.sha256);
+    verified.destroy();
   });
 });
 
-test('streams a synthetic 42,568-row export without materializing its document', async () => {
+test('streams a synthetic export above the old 100 MiB limit without materializing its document', async () => {
   await inStorage(async () => {
     const template = JSON.stringify(snapshot({ orders: [] }));
     const [before, after] = template.split('"orders":[]');
     function* rows() {
       yield Buffer.from(`${before}"orders":[`);
-      const row = JSON.stringify({ id: 'synthetic', label: 'x'.repeat(1300) });
+      const row = JSON.stringify({ id: 'synthetic', label: 'x'.repeat(2600) });
       for (let index = 0; index < 42_568; index++) yield Buffer.from((index ? ',' : '') + row);
       yield Buffer.from(`]${after}`);
     }
     const { pending } = await prepareSupportSharedRoutePlannerUpload(streamed(rows(), true));
-    assert.ok(pending.fileSize > 50 * 1024 * 1024);
+    assert.ok(pending.fileSize > 100 * 1024 * 1024);
     await pending.discard();
   });
 });
