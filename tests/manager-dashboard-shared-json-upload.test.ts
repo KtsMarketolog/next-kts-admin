@@ -4,6 +4,24 @@ import { gunzipSync } from 'node:zlib';
 
 import { MAX_SHARED_JSON_BYTES, MAX_SHARED_JSON_GZIP_BYTES, prepareSharedJsonUpload, validateSharedJsonFile } from '../src/features/admin/manager-dashboard/sharedJsonUpload';
 
+function observeCancellation() {
+  let notify!: () => void;
+  const completed = new Promise<void>((resolve) => { notify = resolve; });
+  return {
+    notify,
+    async wait() {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Web Streams propagate cancellation through each pipe asynchronously;
+        // one setImmediate tick is not a completion boundary on Node 24/Linux.
+        await Promise.race([completed, new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('Source stream was not cancelled within 2 seconds')), 2_000);
+        })]);
+      } finally { clearTimeout(timer); }
+    },
+  };
+}
+
 test('shared JSON upload streams gzip bytes without reading the full source as text or arrayBuffer', async () => {
   const source = '{"snapshot":true,"orders":[],"app":"компоновщик"}';
   const file = new File([source], 'общий_снимок.json');
@@ -59,6 +77,7 @@ test('shared JSON upload explains unsupported browser capability without falling
 
 test('shared JSON compressed-body bound aborts streaming before an oversized request is produced', async () => {
   const original = globalThis.CompressionStream;
+  const cancellation = observeCancellation();
   let cancelled = false;
   try {
     Object.defineProperty(globalThis, 'CompressionStream', { configurable: true, writable: true,
@@ -70,11 +89,11 @@ test('shared JSON compressed-body bound aborts streaming before an oversized req
     const file = { name: 'snapshot.json', size: MAX_SHARED_JSON_BYTES, stream() {
       return new ReadableStream<Uint8Array>({
         pull(controller) { sent++; controller.enqueue(new Uint8Array(1024 * 1024)); },
-        cancel() { cancelled = true; },
+        cancel() { cancelled = true; cancellation.notify(); },
       });
     } } as unknown as File;
     await assert.rejects(prepareSharedJsonUpload(file), /После сжатия JSON превышает 501 МиБ/);
-    await new Promise((resolve) => setImmediate(resolve));
+    await cancellation.wait();
     assert.equal(cancelled, true);
     assert.ok(sent < MAX_SHARED_JSON_BYTES / (1024 * 1024));
   } finally {
@@ -83,25 +102,27 @@ test('shared JSON compressed-body bound aborts streaming before an oversized req
 });
 
 test('shared JSON preparation times out a stalled source, cancels reading and permits a new upload', async () => {
+  const cancellation = observeCancellation();
   let cancelled = false;
   const file = { name: 'snapshot.json', size: 100, stream() {
-    return new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+    return new ReadableStream<Uint8Array>({ cancel() { cancelled = true; cancellation.notify(); } });
   } } as unknown as File;
   await assert.rejects(prepareSharedJsonUpload(file, { timeoutMs: 15 }), /Подготовка JSON.*слишком много времени.*не отправлен/);
-  await new Promise((resolve) => setImmediate(resolve));
+  await cancellation.wait();
   assert.equal(cancelled, true);
   assert.ok((await prepareSharedJsonUpload(new File(['{}'], 'next.json'))).size > 0);
 });
 
 test('shared JSON preparation supports explicit abort without sending any source bytes to a server', async () => {
   const controller = new AbortController();
+  const cancellation = observeCancellation();
   let cancelled = false;
   const file = { name: 'snapshot.json', size: 100, stream() {
-    return new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+    return new ReadableStream<Uint8Array>({ cancel() { cancelled = true; cancellation.notify(); } });
   } } as unknown as File;
   const pending = prepareSharedJsonUpload(file, { signal: controller.signal });
   controller.abort();
   await assert.rejects(pending, /Подготовка JSON прервана.*не отправлен/);
-  await new Promise((resolve) => setImmediate(resolve));
+  await cancellation.wait();
   assert.equal(cancelled, true);
 });
