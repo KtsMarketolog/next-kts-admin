@@ -49,6 +49,64 @@ async function successfulCompression() {
   check(progress.every((value, index) => value >= 0 && value <= 100 && (!index || value > progress[index - 1])), 'Progress must be bounded and monotonic');
   return {rawBytes: file.size, gzipBytes: body.size};
 }
+async function successfulExistingGzip() {
+  const json = JSON.stringify({snapshot: true, app: 'компоновщик', orders: [{label: 'данные '.repeat(2000)}]});
+  const compressed = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+  const original = new Uint8Array(await compressed.arrayBuffer());
+  const file = new File([compressed], 'snapshot.JSON.GZ', {type: 'application/octet-stream'});
+  const nativeSlice = file.slice.bind(file), slices = [], progress = [];
+  Object.defineProperties(file, {
+    text: {value() {throw new Error('Full gzip text read is forbidden');}},
+    arrayBuffer: {value() {throw new Error('Full gzip arrayBuffer read is forbidden');}},
+    stream: {value() {throw new Error('Full gzip stream read is unnecessary');}},
+    slice: {value(start, end, type) {slices.push([start, end, type]); return nativeSlice(start, end, type);}},
+  });
+  const compression = globalThis.CompressionStream, decompression = globalThis.DecompressionStream;
+  let body;
+  try {
+    Object.defineProperty(globalThis, 'CompressionStream', {configurable: true, writable: true, value: undefined});
+    Object.defineProperty(globalThis, 'DecompressionStream', {configurable: true, writable: true, value: undefined});
+    body = await prepareSharedJsonUpload(file, {timeoutMs: 1500, onProgress: percent => progress.push(percent)});
+  } finally {
+    Object.defineProperty(globalThis, 'CompressionStream', {configurable: true, writable: true, value: compression});
+    Object.defineProperty(globalThis, 'DecompressionStream', {configurable: true, writable: true, value: decompression});
+  }
+  const sent = new Uint8Array(await body.arrayBuffer());
+  check(body.type === 'application/gzip' && body.size === file.size, 'Existing gzip transport metadata changed');
+  check(sent.length === original.length && sent.every((value, index) => value === original[index]), 'Existing gzip bytes were changed or compressed again');
+  check(slices.length === 2 && slices[0][0] === 0 && slices[0][1] === 3 && slices[1][0] === 0 && slices[1][1] === file.size,
+    'Only a three-byte signature read and immutable body slice are allowed');
+  const restored = await new Response(body.stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  check(restored === json, 'Existing archive must decode to JSON in one step');
+  check(progress.length === 1 && progress[0] === 100, 'Existing archive preparation reports completion');
+  return {rawBytes: new Blob([json]).size, gzipBytes: body.size};
+}
+async function existingGzipFailure(name) {
+  if (name === 'gzip-invalid') {
+    await failure(prepareSharedJsonUpload(new File(['{}'], 'renamed.json.gz')), /не является архивом gzip/);
+    await failure(prepareSharedJsonUpload(new File([new Uint8Array([31, 139, 0])], 'wrong-method.json.gz')), /не является архивом gzip/);
+    await failure(prepareSharedJsonUpload({name: 'oversized.json.gz', size: MAX_SHARED_JSON_BYTES + 1,
+      slice() {throw new Error('Oversized archive must not be read');}}), /Допустимо до 500 МиБ/);
+    return {invalidArchivesRejected: 3};
+  }
+  let resume, slices = 0, progress = 0;
+  const signature = new Promise(resolve => {resume = resolve;});
+  const controller = new AbortController();
+  const file = {name: 'stalled.json.gz', size: 100, slice(start, end) {
+    slices++; check(start === 0 && end === 3, 'Only bounded signature may be inspected before cancellation');
+    return {arrayBuffer() {return signature;}};
+  }};
+  const pending = prepareSharedJsonUpload(file, {signal: controller.signal,
+    timeoutMs: name === 'gzip-timeout' ? 30 : 1500, onProgress() {progress++;}});
+  const rejected = failure(pending, name === 'gzip-timeout' ? /Подготовка JSON.*слишком много времени/ : /Подготовка JSON прервана/);
+  if (name === 'gzip-abort') controller.abort();
+  const message = await rejected;
+  resume(new Uint8Array([31, 139, 8]).buffer);
+  await delay(0);
+  check(slices === 1 && progress === 0, 'Late cancelled signature read must not prepare an upload body');
+  await successfulExistingGzip();
+  return {message, signatureReads: slices};
+}
 function observedSource(mode) {
   let cancelled = 0;
   let chunks = 0;
@@ -93,6 +151,8 @@ function observedSource(mode) {
 globalThis.compressionFixture = {
   async run(name) {
     check(typeof CompressionStream === 'function' && typeof DecompressionStream === 'function', 'Native compression APIs are required');
+    if (name === 'gzip-success') return successfulExistingGzip();
+    if (name.startsWith('gzip-')) return existingGzipFailure(name);
     if (name === 'success') {
       check(MAX_SHARED_JSON_BYTES === 500 * 1024 * 1024, 'Production raw cap changed');
       check(MAX_SHARED_JSON_GZIP_BYTES === 501 * 1024 * 1024, 'Production gzip cap changed');
@@ -176,7 +236,7 @@ async function main() {
       await access(engine.executablePath());
       const browser = await engine.launch({headless: true});
       try {
-        for (const scenario of ['success', 'oversized', 'abort', 'timeout']) {
+        for (const scenario of ['success', 'oversized', 'abort', 'timeout', 'gzip-success', 'gzip-invalid', 'gzip-abort', 'gzip-timeout']) {
           const context = await browser.newContext();
           const unexpected: string[] = [];
           const errors: string[] = [];
@@ -205,7 +265,7 @@ async function main() {
     }
     assert.ok(requests.every(request => request.startsWith('GET ')), 'Preparation must not upload any file');
     assert.deepEqual(failures, [], 'Native browser compression regression failures');
-    console.log('PASS: native gzip success, oversized cancellation, explicit abort and stalled timeout in Chromium and WebKit.');
+    console.log('PASS: native JSON compression and existing gzip passthrough, signature/size rejection, cancellation and timeout in Chromium and WebKit.');
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 }
 

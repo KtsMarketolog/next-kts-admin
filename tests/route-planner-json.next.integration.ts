@@ -13,6 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createGzip, gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, SUPPORT_SHARED_JSON_MAX_BYTES } from '../src/shared/lib/supportSharedRoutePlannerLimits';
+import { prepareSharedJsonUpload } from '../src/features/admin/manager-dashboard/sharedJsonUpload';
 
 const PATHNAME = '/api/admin/manager-dashboard/shared/json';
 
@@ -195,6 +196,16 @@ export async function POST(request: Request) {
       if(status!==403) assert.equal(rejected.headers['x-test-body-used'],'false');
     }
     assert.deepEqual(await readdir(storage), [], 'Denied requests must not create private files');
+    const gzipPlain = Buffer.from(JSON.stringify(snapshot()));
+    const gzipBytes = gzipSync(gzipPlain);
+    const readyArchive = await prepareSharedJsonUpload(new File([new Uint8Array(gzipBytes)], 'готовый_снимок.json.gz'));
+    assert.deepEqual(Buffer.from(await readyArchive.arrayBuffer()), gzipBytes);
+    const uploadedArchive = await fetch(origin + PATHNAME, { method: 'POST',
+      headers: { origin, 'x-synthetic-auth': 'yes', 'content-type': 'application/gzip' }, body: readyArchive });
+    assert.equal(uploadedArchive.status, 201);
+    assert.deepEqual((await uploadedArchive.json()).snapshot, {
+      fileSize: gzipPlain.length, sha256: createHash('sha256').update(gzipPlain).digest('hex'),
+    }, 'ready gzip passes through the actual Next proxy and is decoded once');
     let expectedHash = '';
     const started = performance.now();
     const accepted = await uploadStream(origin, syntheticRows(SUPPORT_SHARED_JSON_MAX_BYTES, hash => { expectedHash = hash; }));
@@ -212,7 +223,7 @@ export async function POST(request: Request) {
     assert.doesNotMatch(output,/Body exceeded|exceeded.*proxyClientMaxBodySize/i);
     console.log(JSON.stringify({result:'passed',rawBytes:SUPPORT_SHARED_JSON_MAX_BYTES,compressedBytes:accepted.compressedBytes,
       elapsedSeconds:Math.round((performance.now()-started)/100)/10,
-      checks:'real Next/proxy 500 MiB streamed JSON, SHA-256, pre-body auth/origin/rate/501 MiB headers, rejection preserves current file'}));
+      checks:'real Next/proxy ready json.gz passthrough and 500 MiB streamed JSON, SHA-256, pre-body auth/origin/rate/501 MiB headers, rejection preserves current file'}));
   } catch(error) { console.error(output); throw error; }
   finally {
     if(child && child.exitCode===null && child.signalCode===null) {

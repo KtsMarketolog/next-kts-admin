@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { gunzipSync } from 'node:zlib';
+import { gzipSync, gunzipSync } from 'node:zlib';
 
 import { MAX_SHARED_JSON_BYTES, MAX_SHARED_JSON_GZIP_BYTES, prepareSharedJsonUpload, validateSharedJsonFile } from '../src/features/admin/manager-dashboard/sharedJsonUpload';
 
@@ -32,6 +32,106 @@ test('shared JSON upload streams gzip bytes without reading the full source as t
   const body = await prepareSharedJsonUpload(file);
   assert.equal(body.type, 'application/gzip');
   assert.equal(gunzipSync(Buffer.from(await body.arrayBuffer())).toString('utf8'), source);
+});
+
+test('existing JSON.gz is sent byte-for-byte without compression, decompression or full source reads', async () => {
+  const json = JSON.stringify({ snapshot: true, app: 'компоновщик', orders: [], label: 'данные '.repeat(2000) });
+  const gzip = gzipSync(json);
+  const file = new File([gzip], 'общий_снимок.JSON.GZ', { type: 'application/octet-stream' });
+  const nativeSlice = file.slice.bind(file);
+  const slices: Array<[number | undefined, number | undefined, string | undefined]> = [];
+  Object.defineProperties(file, {
+    text: { value: () => { throw new Error('full text read is forbidden'); } },
+    arrayBuffer: { value: () => { throw new Error('full arrayBuffer read is forbidden'); } },
+    stream: { value: () => { throw new Error('full archive stream read is unnecessary'); } },
+    slice: { value: (start?: number, end?: number, type?: string) => {
+      slices.push([start, end, type]);
+      return nativeSlice(start, end, type);
+    } },
+  });
+  const compression = globalThis.CompressionStream, decompression = globalThis.DecompressionStream;
+  try {
+    Object.defineProperty(globalThis, 'CompressionStream', { configurable: true, writable: true, value: undefined });
+    Object.defineProperty(globalThis, 'DecompressionStream', { configurable: true, writable: true, value: undefined });
+    const progress: number[] = [];
+    const body = await prepareSharedJsonUpload(file, { onProgress: value => progress.push(value) });
+    assert.equal(body.type, 'application/gzip');
+    assert.equal(body.size, gzip.length);
+    const bytes = Buffer.from(await body.arrayBuffer());
+    assert.deepEqual(bytes, gzip, 'no second layer of compression and no archive rewrite');
+    assert.equal(gunzipSync(bytes).toString('utf8'), json);
+    assert.deepEqual(slices, [[0, 3, undefined], [0, file.size, 'application/gzip']]);
+    assert.deepEqual(progress, [100]);
+  } finally {
+    Object.defineProperty(globalThis, 'CompressionStream', { configurable: true, writable: true, value: compression });
+    Object.defineProperty(globalThis, 'DecompressionStream', { configurable: true, writable: true, value: decompression });
+  }
+});
+
+test('existing JSON.gz rejects empty, renamed JSON, ZIP and non-gzip compression signatures', async () => {
+  await assert.rejects(prepareSharedJsonUpload(new File([], 'empty.json.gz')), /непустой JSON-снимок/);
+  for (const bytes of [Buffer.from('{}'), Buffer.from([0x1f, 0x8b]), Buffer.from([0x50, 0x4b, 3, 4]), Buffer.from([0x1f, 0x8b, 0])]) {
+    await assert.rejects(prepareSharedJsonUpload(new File([bytes], 'wrong.json.gz')), /не является архивом gzip.*Файл не отправлен/);
+  }
+  await assert.rejects(prepareSharedJsonUpload(new File([gzipSync('{}')], 'snapshot.gz')), /непустой JSON-снимок/);
+});
+
+test('existing JSON.gz keeps the 500 MiB input limit before inspecting any bytes', async () => {
+  for (const size of [MAX_SHARED_JSON_BYTES - 1, MAX_SHARED_JSON_BYTES]) {
+    assert.doesNotThrow(() => validateSharedJsonFile({ name: 'snapshot.json.gz', size }));
+  }
+  const file = { name: 'large.json.gz', size: MAX_SHARED_JSON_BYTES + 1,
+    slice() { throw new Error('must not read'); } } as unknown as File;
+  await assert.rejects(prepareSharedJsonUpload(file), /Допустимо до 500 МиБ.*Файл не отправлен/);
+});
+
+test('existing JSON.gz honors cancellation before and during its bounded signature read', async () => {
+  const before = new AbortController(); before.abort();
+  await assert.rejects(prepareSharedJsonUpload({ name: 'cancel.json.gz', size: 100,
+    slice() { throw new Error('must not read'); } } as unknown as File, { signal: before.signal }), /Подготовка JSON прервана/);
+  let resume!: (value: ArrayBuffer) => void;
+  const signature = new Promise<ArrayBuffer>(resolve => { resume = resolve; });
+  const controller = new AbortController();
+  let slices = 0, progress = 0;
+  const file = { name: 'cancel.json.gz', size: 100, slice(start: number, end: number) {
+    slices++; assert.equal(start, 0); assert.equal(end, 3);
+    return { arrayBuffer: () => signature };
+  } } as unknown as File;
+  const pending = prepareSharedJsonUpload(file, { signal: controller.signal, onProgress: () => { progress++; } });
+  controller.abort();
+  await assert.rejects(pending, /Подготовка JSON прервана.*не отправлен/);
+  resume(new Uint8Array([0x1f, 0x8b, 8]).buffer);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(slices, 1, 'cancelled signature read must not prepare the full body later');
+  assert.equal(progress, 0);
+});
+
+test('existing JSON.gz signature timeout releases the operation and ignores a late read result', async () => {
+  let resume!: (value: ArrayBuffer) => void;
+  const signature = new Promise<ArrayBuffer>(resolve => { resume = resolve; });
+  let slices = 0, progress = 0;
+  const file = { name: 'stalled.json.gz', size: 100, slice(start: number, end: number) {
+    slices++; assert.equal(start, 0); assert.equal(end, 3);
+    return { arrayBuffer: () => signature };
+  } } as unknown as File;
+  await assert.rejects(prepareSharedJsonUpload(file, { timeoutMs: 15, onProgress: () => { progress++; } }), /Подготовка JSON.*слишком много времени/);
+  resume(new Uint8Array([0x1f, 0x8b, 8]).buffer);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(slices, 1);
+  assert.equal(progress, 0);
+  const next = await prepareSharedJsonUpload(new File([gzipSync('{}')], 'next.json.gz'));
+  assert.equal(gunzipSync(Buffer.from(await next.arrayBuffer())).toString(), '{}');
+});
+
+test('existing JSON.gz keeps read and progress failures without sending a body', async () => {
+  const failure = new Error('Synthetic signature read error');
+  const file = { name: 'read-failure.json.gz', size: 100, slice() {
+    return { arrayBuffer: () => Promise.reject(failure) };
+  } } as unknown as File;
+  await assert.rejects(prepareSharedJsonUpload(file), error => error === failure);
+  await assert.rejects(prepareSharedJsonUpload(new File([gzipSync('{}')], 'progress.json.gz'), {
+    onProgress() { throw failure; },
+  }), error => error === failure);
 });
 
 test('shared JSON upload rejects empty and wrong extension before reading', async () => {

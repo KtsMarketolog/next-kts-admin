@@ -18,6 +18,7 @@ import {
 } from '../src/shared/lib/supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles } from '../src/shared/lib/topDashboardDataStorage';
 import { createUploadRequestGuard } from '../src/shared/lib/uploadRequestGuard';
+import { prepareSharedJsonUpload } from '../src/features/admin/manager-dashboard/sharedJsonUpload';
 
 function snapshot(overrides: Record<string, unknown> = {}) {
   return {
@@ -104,6 +105,44 @@ test('supports one-byte transport chunks and valid UTC timestamps without millis
     const prepared = await prepareSupportSharedRoutePlannerUpload(streamed(Array.from(bytes, (byte) => Buffer.from([byte]))));
     assert.equal(prepared.savedAt, '2026-09-17T08:00:00Z');
     await prepared.pending.discard();
+  });
+});
+
+test('ordinary JSON and ready json.gz reach private storage as the same original JSON bytes', async () => {
+  await inStorage(async () => {
+    const plain = Buffer.from(` \n${JSON.stringify(snapshot({ orders: [{ id: 'gzip-fixture', label: 'Снимок 🚚' }] }), null, 2)}\n`);
+    const archive = gzipSync(plain);
+    for (const [name, bytes] of [['снимок.json', plain], ['снимок.JSON.GZ', archive]] as const) {
+      const body = await prepareSharedJsonUpload(new File([new Uint8Array(bytes)], name, { type: 'application/octet-stream' }));
+      if (/\.gz$/i.test(name)) assert.deepEqual(Buffer.from(await body.arrayBuffer()), archive, 'ready archive is never recompressed');
+      const prepared = await prepareSupportSharedRoutePlannerUpload(new Request('http://localhost/upload', {
+        method: 'POST', headers: { 'content-type': 'application/gzip' }, body,
+      }));
+      assert.equal(prepared.pending.fileSize, plain.length);
+      assert.equal(prepared.pending.sha256, createHash('sha256').update(plain).digest('hex'));
+      assert.deepEqual(await readFile(prepared.pending.temporaryPath), plain);
+      await prepared.pending.discard();
+    }
+  });
+});
+
+test('ready archives with damaged CRC, truncation or nested gzip cannot replace the retained JSON', async () => {
+  await inStorage(async directory => {
+    const previous = await prepareSupportSharedRoutePlannerUpload(request());
+    const previousPath = await previous.pending.commit();
+    previous.pending.preserve();
+    const previousBytes = await readFile(path.join(directory, previousPath));
+    const archive = gzipSync(JSON.stringify(snapshot()));
+    const badCrc = Buffer.from(archive);
+    badCrc[badCrc.length - 8] ^= 1;
+    for (const bytes of [badCrc, archive.subarray(0, archive.length - 4), gzipSync(archive)]) {
+      const body = await prepareSharedJsonUpload(new File([new Uint8Array(bytes)], 'повреждённый.json.gz'));
+      await rejectsUpload(new Request('http://localhost/upload', {
+        method: 'POST', headers: { 'content-type': 'application/gzip' }, body,
+      }));
+      assert.deepEqual(await readdir(path.join(directory, '.incoming')), []);
+      assert.deepEqual(await readFile(path.join(directory, previousPath)), previousBytes);
+    }
   });
 });
 

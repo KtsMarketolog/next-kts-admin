@@ -5,13 +5,43 @@ export const MAX_SHARED_JSON_BYTES = SUPPORT_SHARED_JSON_MAX_BYTES;
 export const MAX_SHARED_JSON_GZIP_BYTES = SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES;
 
 export function validateSharedJsonFile(file: Pick<File, 'name' | 'size'>) {
-  if (!/\.json$/i.test(file.name) || file.size === 0) {
-    throw new Error('Выберите непустой JSON-снимок компоновщика (.json).');
+  if (!/\.json(?:\.gz)?$/i.test(file.name) || file.size === 0) {
+    throw new Error('Выберите непустой JSON-снимок компоновщика (.json или .json.gz).');
   }
   if (file.size > MAX_SHARED_JSON_BYTES) {
     const size = (file.size / (1024 * 1024)).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
     throw new Error(`Размер файла — ${size} МиБ (${file.size.toLocaleString('ru-RU')} байт). Допустимо до ${MAX_SHARED_JSON_BYTES / (1024 * 1024)} МиБ. Файл не отправлен; действующие данные не изменены.`);
   }
+}
+
+type SharedJsonPreparationOptions = { signal?: AbortSignal; timeoutMs?: number; onProgress?: (percent: number) => void };
+
+function preparationError(error: unknown): never {
+  if (error instanceof AdminRequestError) throw new Error(error.code === 'cancelled'
+    ? 'Подготовка JSON прервана. Файл не отправлен.'
+    : 'Подготовка JSON заняла слишком много времени. Файл не отправлен. Попробуйте подготовить его заново.');
+  throw error;
+}
+
+/** A File is immutable: inspect only its signature, then send the same archive without a memory-sized copy. */
+async function prepareExistingSharedGzip(file: File, options: SharedJsonPreparationOptions): Promise<Blob> {
+  if (typeof file.slice !== 'function') {
+    throw new Error('Этот браузер не поддерживает безопасную загрузку JSON.gz. Откройте страницу в актуальной версии Chrome, Firefox или Safari.');
+  }
+  try {
+    return await runWithRequestTimeout(async (signal) => {
+      const signature = new Uint8Array(await file.slice(0, 3).arrayBuffer());
+      signal.throwIfAborted();
+      if (signature.length !== 3 || signature[0] !== 0x1f || signature[1] !== 0x8b || signature[2] !== 8) {
+        throw new Error('Файл .json.gz не является архивом gzip. Выберите исходный .json или корректный .json.gz. Файл не отправлен; действующие данные не изменены.');
+      }
+      options.onProgress?.(100);
+      signal.throwIfAborted();
+      // Complete gzip integrity, JSON structure and expanded-size checks stay on
+      // the server before publication. Do not decompress or gzip again here.
+      return file.slice(0, file.size, 'application/gzip');
+    }, { signal: options.signal, timeoutMs: options.timeoutMs ?? ADMIN_UPLOAD_TIMEOUT_MS, mutation: false });
+  } catch (error) { return preparationError(error); }
 }
 
 /** Own the file reader so stopping does not depend on gzip/pipe cancellation. */
@@ -47,9 +77,10 @@ function openSharedJsonSource(file: File, signal: AbortSignal, onError: (error: 
   return { stream, dispose() { signal.removeEventListener('abort', abort); stop(); } };
 }
 
-/** Compress the file as a stream; never read the large JSON into a JS string. */
-export async function prepareSharedJsonUpload(file: File, options: { signal?: AbortSignal; timeoutMs?: number; onProgress?: (percent: number) => void } = {}): Promise<Blob> {
+/** Compress JSON as a stream or pass an existing gzip archive through unchanged. */
+export async function prepareSharedJsonUpload(file: File, options: SharedJsonPreparationOptions = {}): Promise<Blob> {
   validateSharedJsonFile(file);
+  if (/\.json\.gz$/i.test(file.name)) return prepareExistingSharedGzip(file, options);
   if (typeof CompressionStream === 'undefined' || typeof file.stream !== 'function') {
     throw new Error('Этот браузер не поддерживает безопасную загрузку большого JSON. Откройте страницу в актуальной версии Chrome, Firefox или Safari.');
   }
@@ -97,9 +128,6 @@ export async function prepareSharedJsonUpload(file: File, options: { signal?: Ab
       }
     }, { signal: options.signal, timeoutMs: options.timeoutMs ?? ADMIN_UPLOAD_TIMEOUT_MS, mutation: false });
   } catch (error) {
-    if (error instanceof AdminRequestError) throw new Error(error.code === 'cancelled'
-      ? 'Подготовка JSON прервана. Файл не отправлен.'
-      : 'Подготовка JSON заняла слишком много времени. Файл не отправлен. Попробуйте подготовить его заново.');
-    throw error;
+    return preparationError(error);
   }
 }

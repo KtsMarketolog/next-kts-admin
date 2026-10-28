@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
+import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 import ts from 'typescript';
 import { PersonalDashboardError } from '../src/shared/lib/managerDashboardDomain';
@@ -8,7 +9,7 @@ import * as security from '../src/shared/lib/managerDashboardSecurity';
 import * as origin from '../src/shared/lib/originProtection';
 import * as dashboardAccess from '../src/shared/lib/dashboardAccess';
 import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
-import { SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES } from '../src/shared/lib/supportSharedRoutePlannerLimits';
+import { SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, SUPPORT_SHARED_JSON_MAX_BYTES } from '../src/shared/lib/supportSharedRoutePlannerLimits';
 
 function compile<T>(filename: string, modules: Record<string, unknown>): T {
   const code = ts.transpileModule(readFileSync(new URL(filename, import.meta.url), 'utf8'), {
@@ -29,6 +30,7 @@ function api(role: Role = 'admin', options: {
   guardLimits?: {maxBytes?: number; idleTimeoutMs?: number; totalTimeoutMs?: number};
 } = {}) {
   const calls: Array<{name: string; args: unknown[]}> = [];
+  const guardMaxBytes: number[] = [];
   const uploadUsage: Array<Record<string, unknown>> = [];
   const observe = (name: string, fn: (...args: unknown[]) => unknown = () => undefined) => async (...args: unknown[]) => {
     calls.push({name, args}); return fn(...args);
@@ -74,7 +76,7 @@ function api(role: Role = 'admin', options: {
           return options.missingSnapshot ? null : {...snapshot, stream: Readable.from([Buffer.from('{"synthetic":true}')])};
         }),
       },
-      '@/shared/lib/supportSharedRoutePlannerData': {SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES,
+      '@/shared/lib/supportSharedRoutePlannerData': {SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, SUPPORT_SHARED_JSON_MAX_BYTES,
         prepareSupportSharedRoutePlannerUpload: observe('prepare', async (request) => {
           if (options.prepareError) throw options.prepareError;
           await options.prepare?.(request as Request);
@@ -83,9 +85,12 @@ function api(role: Role = 'admin', options: {
       '@/shared/lib/topDashboardDataStorage': {deleteTopDashboardDataFiles: observe('prune')},
       '@/shared/lib/topDashboardUploadConcurrency': {acquireDistributedTopDashboardDataUploadSlot: observe('lock', () => options.busy ? null : observe('release'))},
       '@/shared/lib/uploadRequestGuard': {...uploadRequestGuard,
-        createUploadRequestGuard: (request: Request, limits: {maxBytes: number}) => uploadRequestGuard.createUploadRequestGuard(request, {...limits, ...options.guardLimits})},
+        createUploadRequestGuard: (request: Request, limits: {maxBytes: number}) => {
+          guardMaxBytes.push(limits.maxBytes);
+          return uploadRequestGuard.createUploadRequestGuard(request, {...limits, ...options.guardLimits});
+        }},
     });
-  return {route, calls, snapshot, uploadUsage};
+  return {route, calls, snapshot, uploadUsage, guardMaxBytes};
 }
 const URL_ROOT = 'https://example.test/api/admin/manager-dashboard/shared/json';
 function upload(headers: Record<string, string> = {}, suffix = '') {
@@ -114,6 +119,8 @@ test('shared JSON rejects malformed headers, scope injection and request sizes b
     {'x-kts-shared-version': '01'}, {'x-kts-shared-version': '8,9'}, {'x-kts-shared-expected-snapshot': ''},
     {'x-kts-shared-confirm': 'false'}, {'x-kts-shared-filename': '../data.json'}, {'x-kts-shared-filename': '%'},
     {'x-kts-shared-filename': 'data.ktsp'}, {'content-type': 'application/json'}, {'content-encoding': 'gzip'},
+    ...['../data.json.gz', 'folder\\data.json.gz', 'data.gz', 'data.json.gz.gz', '.json.gz',
+      'data\u0000.json.gz', 'data\n.json.gz', 'x'.repeat(249) + '.json.gz'].map(name => ({'x-kts-shared-filename': encodeURIComponent(name)})),
     {'content-length': String(SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES + 1)}, {'content-length': '-1'},
   ];
   for (const headers of invalidHeaders) {
@@ -136,6 +143,79 @@ test('shared JSON admits transport up to 501 MiB and reports the correct cap bef
   assert.equal(response.status, 413);
   assert.match((await response.json()).error, /501 МиБ/);
   assert.deepEqual(rejected.calls, []);
+  assert.deepEqual(accepted.guardMaxBytes, [SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES]);
+});
+
+test('ready JSON gzip archives are passed once to validation and stored under the plain JSON name', async () => {
+  const bytes = gzipSync(Buffer.from('{"snapshot":true,"app":"компоновщик"}'));
+  for (const [uploadedName, storedName] of [
+    ['компоновщик_снимок (1).json.gz', 'компоновщик_снимок (1).json'],
+    ['Snapshot.JSON.GZ', 'Snapshot.JSON'],
+  ]) {
+    const harness = api('admin', {prepare: async request => {
+      assert.equal(request.headers.get('content-type'), 'application/gzip');
+      assert.deepEqual(Buffer.from(await request.arrayBuffer()), bytes, 'archive bytes reach the single existing decoder unchanged');
+    }});
+    const headers = upload({'x-kts-shared-filename': encodeURIComponent(uploadedName)}).headers;
+    const response = await harness.route.POST(new Request(URL_ROOT, {method: 'POST', headers, body: bytes}));
+    assert.equal(response.status, 201);
+    assert.match(response.headers.get('cache-control')!, /private.*no-store/);
+    assert.deepEqual(harness.guardMaxBytes, [SUPPORT_SHARED_JSON_MAX_BYTES]);
+    const imported = harness.calls.find(call => call.name === 'import')!.args[0] as {originalName: string; fileSize: number; sha256: string};
+    assert.equal(imported.originalName, storedName);
+    assert.equal(imported.fileSize, 18, 'decoded pending-file size remains authoritative');
+    assert.equal(imported.sha256, 'a'.repeat(64), 'decoded pending-file digest remains authoritative');
+    assert.equal(harness.calls.filter(call => call.name === 'prepare').length, 1);
+    assert.deepEqual(harness.calls.map(call => call.name), ['preflight', 'lock', 'prepare', 'commit', 'import', 'preserve', 'prune', 'discard', 'release']);
+  }
+});
+
+test('ready gzip archives retain a 500 MiB input limit before and during body consumption', async () => {
+  const filename = {'x-kts-shared-filename': 'snapshot.json.gz'};
+  const accepted = api();
+  assert.equal((await accepted.route.POST(upload({...filename, 'content-length': String(SUPPORT_SHARED_JSON_MAX_BYTES)}))).status, 201);
+  assert.deepEqual(accepted.guardMaxBytes, [SUPPORT_SHARED_JSON_MAX_BYTES]);
+  for (const length of [SUPPORT_SHARED_JSON_MAX_BYTES + 1, SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES]) {
+    const rejected = api();
+    const response = await rejected.route.POST(upload({...filename, 'content-length': String(length)}));
+    assert.equal(response.status, 413);
+    assert.match((await response.json()).error, /500 МиБ.*текущие данные сохранены/);
+    assert.deepEqual(rejected.calls, [], 'oversized archive rejected before target checks, locks, files or import');
+    assert.deepEqual(rejected.guardMaxBytes, []);
+  }
+  const streamedHeaders: Record<string, string>[] = [filename, {...filename, 'content-length': '1'}];
+  for (const headers of streamedHeaders) {
+    const bounded = api('admin', {guardLimits: {maxBytes: 4}, prepare: async request => { await request.arrayBuffer(); }});
+    const response = await bounded.route.POST(upload(headers));
+    assert.equal(response.status, 413);
+    assert.equal((await response.json()).code, 'TOO_LARGE');
+    assert.deepEqual(bounded.guardMaxBytes, [SUPPORT_SHARED_JSON_MAX_BYTES], 'same archive cap is passed to the streaming guard');
+    assert.deepEqual(bounded.calls.map(call => call.name), ['preflight', 'lock', 'prepare', 'release']);
+  }
+});
+
+test('gzip uploads retain auth, target conflict, duplicate and uncertain-commit protections', async () => {
+  const filename = {'x-kts-shared-filename': 'snapshot.json.gz'};
+  for (const role of [null, 'manager', 'support_manager', 'top'] as const) {
+    const denied = api(role);
+    assert.ok([401, 403].includes((await denied.route.POST(upload(filename))).status));
+    assert.deepEqual(denied.calls, []);
+  }
+  const conflict = api('admin', {preflightError: new PersonalDashboardError('STATE_CONFLICT', 'Changed')});
+  assert.equal((await conflict.route.POST(upload(filename))).status, 409);
+  assert.deepEqual(conflict.calls.map(call => call.name), ['preflight']);
+  const corrupt = api('admin', {prepareError: new PersonalDashboardError('INVALID_JSON_SNAPSHOT', 'Invalid gzip or JSON')});
+  assert.equal((await corrupt.route.POST(upload(filename))).status, 400);
+  assert.deepEqual(corrupt.calls.map(call => call.name), ['preflight', 'lock', 'prepare', 'release']);
+  for (const [options, preserve] of [[{duplicate: true}, false], [{importError: new Error('Uncertain commit')}, true]] as const) {
+    const harness = api('admin', options);
+    await harness.route.POST(upload(filename));
+    assert.equal(harness.calls.find(call => call.name === 'import')!.args[0] !== undefined, true);
+    assert.equal(harness.calls.some(call => call.name === 'preserve'), preserve);
+    assert.equal(harness.calls.filter(call => call.name === 'discard').length, 1);
+    assert.equal(harness.calls.filter(call => call.name === 'release').length, 1);
+    assert.equal(harness.uploadUsage.length, 0);
+  }
 });
 
 test('HTML/CAS conflicts and cross-worker contention prevent JSON body inspection', async () => {

@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 import { build } from 'esbuild';
 import postcss from 'postcss';
@@ -105,6 +106,7 @@ function Fixture() {
     else if (init.body instanceof Blob) {
       call.headers = init.headers;
       call.gzipSize = init.body.size;
+      call.gzipBytes = [...new Uint8Array(await init.body.arrayBuffer())];
       call.json = await new Response(init.body.stream().pipeThrough(new DecompressionStream('gzip'))).json();
     }
     else if (init.body) call.body = JSON.parse(init.body);
@@ -146,7 +148,7 @@ function Fixture() {
     }
     if (requestPath === '/shared/json') {
       setOverview(current => ({...current, supportShared: {...current.supportShared,
-        jsonSnapshot: {...sharedJsonSnapshot, id: (current.supportShared.jsonSnapshot?.id ?? 501) + 1, originalName: decodeURIComponent(call.headers['X-KTS-Shared-Filename'])}}}));
+        jsonSnapshot: {...sharedJsonSnapshot, id: (current.supportShared.jsonSnapshot?.id ?? 501) + 1, originalName: decodeURIComponent(call.headers['X-KTS-Shared-Filename']).replace(/\\.gz$/i, '')}}}));
     }
     if (requestPath === '/snapshots') {
       if (window.fixtureHoldSnapshots) await new Promise(resolve => {window.fixtureReleaseSnapshot = resolve;});
@@ -287,6 +289,8 @@ async function main() {
             const jsonForm = page.locator('form').filter({has: jsonFile});
             const jsonError = jsonForm.locator('#manager-dashboard-shared-json-error');
             assert.match(await jsonForm.innerText(), /до 500 МиБ/);
+            assert.match(await jsonFile.getAttribute('accept') ?? '', /\.json\.gz/);
+            assert.match(await jsonForm.innerText(), /Размер JSON после распаковки — тоже до 500 МиБ/);
             await jsonFile.setInputFiles({name: 'слишком_большой.json', mimeType: 'application/json', buffer: Buffer.from('{}')});
             await page.evaluate(() => {
               // WebKit may return fresh File wrappers; mock only this named fixture
@@ -303,8 +307,17 @@ async function main() {
             assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.length), 1, 'preparation rejection preserves the selected file');
             assert.equal(await jsonFile.getAttribute('aria-invalid'), 'true');
             await jsonForm.screenshot({path: path.join(output, `${engineName}-${width}-json-error.png`)});
+            await jsonFile.setInputFiles({name: 'повреждённый.json.gz', mimeType: 'application/gzip', buffer: Buffer.from('{}')});
+            await publishJson.click();
+            await jsonError.waitFor({state: 'visible'});
+            assert.match(await jsonError.innerText(), /gzip|\.json\.gz/i);
+            assert.equal((await page.evaluate('window.fixtureCalls')).length, 0, 'renaming plain JSON to gzip does not publish a snapshot');
+            assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), 'повреждённый.json.gz', 'invalid gzip remains selected for inspection');
             for (const status of [409, 413, 503, -1]) {
-              await jsonFile.setInputFiles({name: 'проверка_ошибки.json', mimeType: 'application/json', buffer: Buffer.from('{"snapshot":true,"orders":[]}')});
+              const compressed = status === 413 || status === -1;
+              const payload = Buffer.from('{"snapshot":true,"orders":[]}');
+              const filename = `проверка_ошибки.json${compressed ? '.gz' : ''}`;
+              await jsonFile.setInputFiles({name: filename, mimeType: compressed ? 'application/gzip' : 'application/json', buffer: compressed ? gzipSync(payload) : payload});
               assert.equal(await jsonError.count(), 0, 'choosing another file clears only its stale notification');
               await page.evaluate((status: number) => {(window as unknown as {fixtureRouteStatus: number}).fixtureRouteStatus = status;}, status);
               await publishJson.click();
@@ -312,6 +325,7 @@ async function main() {
               assert.match(await jsonError.innerText(), status === -1 ? /Изменение могло сохраниться/ : new RegExp(`Синтетическая ошибка JSON: ${status}`));
               await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.disabled);
               assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.length), 1, 'server or network failure preserves selected JSON for explicit retry');
+              assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), filename, 'failed upload never clears or silently changes the selected format');
               assert.equal(await page.evaluate(() => document.activeElement?.id), 'manager-dashboard-shared-json-error', 'the adjacent alert receives accessible focus');
               const bounds = await jsonError.boundingBox();
               assert.ok(bounds && bounds.y >= 0 && bounds.y + bounds.height <= 1001, 'error is scrolled into view even below the report preview');
@@ -329,12 +343,51 @@ async function main() {
             assert.match(await jsonForm.innerText(), /Операция выполнена.*Повторно отправлять файл не нужно/);
             await jsonForm.screenshot({path: path.join(output, `${engineName}-${width}-json-feedback.png`)});
           };
+          const verifyPrecompressedUpload = async () => {
+            await page.goto(`${origin}/?section=shared&json=1`);
+            const jsonFile = page.locator('#manager-dashboard-shared-json');
+            await jsonFile.waitFor({state: 'visible'});
+            const publishJson = page.getByRole('button', {name: 'Опубликовать общий JSON', exact: true});
+            const panel = page.locator('#manager-dashboard-shared-data-upload');
+            const payload = {snapshot: true, app: 'компоновщик', orders: [], savedAt: '2026-10-29T07:00:00Z'};
+            await jsonFile.setInputFiles({name: 'обычный_маршрут.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(payload))});
+            await publishJson.click();
+            await page.waitForFunction(() => (window as unknown as {fixtureCalls: Array<{path: string}>}).fixtureCalls.filter(call => call.path === '/shared/json').length === 1);
+            await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.disabled);
+            const plainCall = (await page.evaluate('window.fixtureCalls'))[0];
+            assert.deepEqual(plainCall.json, payload, 'ordinary JSON still reaches the server after one gzip decompression');
+            assert.equal(plainCall.headers['X-KTS-Shared-Expected-Snapshot'], '501');
+            const gzipBytes = gzipSync(Buffer.from(JSON.stringify(payload)));
+            const gzipFilename = 'сжатый_маршрут.JSON.GZ';
+            await jsonFile.setInputFiles({name: gzipFilename, mimeType: 'application/octet-stream', buffer: gzipBytes});
+            acceptConfirmation = false;
+            await publishJson.click();
+            assert.equal((await page.evaluate('window.fixtureCalls')).length, 1, 'cancelled gzip confirmation never sends or activates a snapshot');
+            assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.[0]?.name), gzipFilename);
+            acceptConfirmation = true;
+            await publishJson.click();
+            await page.waitForFunction(() => (window as unknown as {fixtureCalls: Array<{path: string}>}).fixtureCalls.filter(call => call.path === '/shared/json').length === 2);
+            await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.disabled);
+            const gzipCall = (await page.evaluate('window.fixtureCalls'))[1];
+            assert.deepEqual(gzipCall.gzipBytes, [...gzipBytes], 'precompressed gzip bytes are sent unchanged, not compressed a second time');
+            assert.deepEqual(gzipCall.json, payload, 'one decompression yields the same JSON as the source snapshot');
+            assert.equal(gzipCall.headers['X-KTS-Shared-Filename'], encodeURIComponent(gzipFilename));
+            assert.equal(gzipCall.headers['Content-Type'], 'application/gzip');
+            assert.equal(gzipCall.headers['X-KTS-Shared-Version'], '201');
+            assert.equal(gzipCall.headers['X-KTS-Shared-Expected-Snapshot'], '502', 'gzip keeps the same conflict protection');
+            assert.equal(await jsonFile.evaluate((input: HTMLInputElement) => input.files?.length), 0);
+            assert.match(await panel.innerText(), /сжатый_маршрут\.JSON/);
+            assert.doesNotMatch(await panel.innerText(), /сжатый_маршрут\.JSON\.GZ/);
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'gzip help and filename fit mobile width');
+            await panel.screenshot({path: path.join(output, `${engineName}-${width}-json-gzip-management.png`)});
+          };
           try {
             if (process.env.KTS_JSON_UPLOAD_ONLY === '1') {
+              await verifyPrecompressedUpload();
               await verifyJsonFeedback();
               assert.deepEqual(errors, []);
               assert.deepEqual(external, []);
-              console.log(`PASS ${engineName}/${width}: JSON 500MiB boundary, inline preparation/HTTP/network errors, preserved selection, accessible focus and confirmed-save warning.`);
+              console.log(`PASS ${engineName}/${width}: JSON/gzip single compression, unchanged archive bytes, 500MiB boundary, CAS, inline preparation/HTTP/network errors, preserved selection, accessible focus and confirmed-save warning.`);
               continue;
             }
             const pageHistoryStart = historyRequests.length;
@@ -847,6 +900,8 @@ async function main() {
             await page.waitForFunction(() => (window as unknown as {fixtureCalls: Array<{path: string}>}).fixtureCalls.filter(call => call.path === '/shared/json').length === 2);
             await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('#manager-dashboard-shared-json')?.disabled);
             assert.equal(await previewFrame.getAttribute('data-mount-token'), 'previous-html-preview-kept', 'JSON upload for active HTML preserves another HTML version preview');
+
+            await verifyPrecompressedUpload();
             await page.goto(`${origin}/?section=shared&json=empty`);
             await page.locator('#manager-dashboard-history-support-shared').getByRole('button', {name: 'Предпросмотр общего HTML', exact: true}).first().click();
             assert.equal(new URL((await previewFrame.getAttribute('src'))!, origin).searchParams.get('revision'), '0');

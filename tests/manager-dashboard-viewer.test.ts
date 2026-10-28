@@ -723,7 +723,7 @@ test('shared JSON mode hides legacy email/password fields and binds upload to th
   const overview = { ...managementOverview(), supportShared: sharedJsonOverview() };
   const html = renderToStaticMarkup(createElement(ManagerDashboardManagement, { overview, section: 'shared', busy: false, mutate: async () => null }));
   assert.match(html, /manager-dashboard-shared-json/);
-  assert.match(html, /JSON-снимок компоновщика · до 500 МиБ/);
+  assert.match(html, /Снимок компоновщика \.json или \.json\.gz · до 500 МиБ/);
   assert.match(html, /route-current.json/);
   assert.doesNotMatch(html, /manager-dashboard-shared-email|manager-dashboard-shared-snapshot|shared-current.ktsp/);
   assert.doesNotMatch(html, /manager-dashboard-html-development|manager-dashboard-html-support|manager-dashboard-snapshots|Журнал импорта|Only development|Only support/);
@@ -789,7 +789,7 @@ test('shared JSON cancelled confirmation and preparation failure preserve files 
     assert.equal(view.inputs.get('manager-dashboard-shared-json')!.value, 'synthetic-selection');
     assert.equal(view.find('input', (props) => props.id === 'manager-dashboard-shared-json').props.disabled, false);
     if (confirm) {
-      assert.match(text(view.find('p', (props) => props.id === 'manager-dashboard-shared-json-error')), /Выберите непустой JSON-снимок компоновщика \(\.json\)/);
+      assert.match(text(view.find('p', (props) => props.id === 'manager-dashboard-shared-json-error')), /Выберите непустой JSON-снимок компоновщика \(\.json или \.json\.gz\)/);
       assert.equal(view.confirmations.length, 0, 'invalid file is rejected before publication confirmation');
     } else assert.equal(view.confirmations.length, 1, 'valid file reaches the cancelled confirmation');
   }

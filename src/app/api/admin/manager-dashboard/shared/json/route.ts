@@ -7,7 +7,7 @@ import {
 } from '@/shared/lib/db/supportSharedDashboardRepo';
 import { PersonalDashboardError } from '@/shared/lib/managerDashboardDomain';
 import { PERSONAL_PRIVATE_HEADERS, parsePersonalDashboardId } from '@/shared/lib/managerDashboardSecurity';
-import { prepareSupportSharedRoutePlannerUpload, SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES } from '@/shared/lib/supportSharedRoutePlannerData';
+import { prepareSupportSharedRoutePlannerUpload, SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES, SUPPORT_SHARED_JSON_MAX_BYTES } from '@/shared/lib/supportSharedRoutePlannerData';
 import { deleteTopDashboardDataFiles, type PendingTopDashboardDataFile } from '@/shared/lib/topDashboardDataStorage';
 import { acquireDistributedTopDashboardDataUploadSlot } from '@/shared/lib/topDashboardUploadConcurrency';
 import { createUploadRequestGuard } from '@/shared/lib/uploadRequestGuard';
@@ -57,19 +57,23 @@ export async function POST(request: Request) {
     try { filename = decodeURIComponent(request.headers.get('x-kts-shared-filename') ?? ''); }
     catch { return personalJson({error: 'Некорректное имя JSON'}, 400); }
     if (!htmlVersionId || !(expected === 'null' || expectedId) || request.headers.get('x-kts-shared-confirm') !== 'true'
-      || filename.length > 255 || !/^[^/\\\u0000-\u001f\u007f]+\.json$/i.test(filename)
+      || filename.length > 255 || !/^[^/\\\u0000-\u001f\u007f]+\.json(?:\.gz)?$/i.test(filename)
       || request.headers.get('content-type')?.trim().toLowerCase() !== 'application/gzip'
       || request.headers.has('content-encoding')) {
       return personalJson({error: 'Нужен сжатый JSON, версия HTML и подтверждение публикации всей группе'}, 400);
     }
+    const isGzipFile = /\.gz$/i.test(filename);
+    // User-supplied archives have the same 500 MiB file cap as JSON. The existing
+    // .json transport retains its small gzip expansion allowance for browser compression.
+    const maxTransportBytes = isGzipFile ? SUPPORT_SHARED_JSON_MAX_BYTES : SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES;
     const length = request.headers.get('content-length');
-    if (length !== null && (!/^\d+$/.test(length) || Number(length) > SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES)) {
-      return personalJson({error: `Сжатый файл должен быть не больше ${SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES / (1024 * 1024)} МиБ; текущие данные сохранены`}, 413);
+    if (length !== null && (!/^\d+$/.test(length) || Number(length) > maxTransportBytes)) {
+      return personalJson({error: `Сжатый файл должен быть не больше ${maxTransportBytes / (1024 * 1024)} МиБ; текущие данные сохранены`}, 413);
     }
     await assertSupportSharedJsonUploadTarget(htmlVersionId, expectedId);
     releaseSlot = await acquireDistributedTopDashboardDataUploadSlot();
     if (!releaseSlot) return personalJson({error: 'Уже выполняется загрузка данных; повторите после её завершения'}, 409);
-    uploadGuard = createUploadRequestGuard(request, {maxBytes: SUPPORT_SHARED_JSON_COMPRESSED_MAX_BYTES});
+    uploadGuard = createUploadRequestGuard(request, {maxBytes: maxTransportBytes});
     const prepared = await prepareSupportSharedRoutePlannerUpload(uploadGuard.request);
     pending = prepared.pending;
     uploadGuard.assertActive();
@@ -79,8 +83,11 @@ export async function POST(request: Request) {
     // The global slot remains held until the complete operation and cleanup have finished.
     uploadGuard.dispose();
     databaseAttempted = true;
+    // Storage, hashes and the HTML loader all consume the validated plain JSON.
+    // Do not label those decoded bytes as a gzip archive when serving them later.
+    const storedFilename = isGzipFile ? filename.slice(0, -3) : filename;
     const result = await importSupportSharedDashboardJson({htmlVersionId, expectedActiveSnapshotId: expectedId,
-      originalName: filename, savedAt: prepared.savedAt, fileSize: pending.fileSize, sha256: pending.sha256, storagePath, actorId: access.actorId,
+      originalName: storedFilename, savedAt: prepared.savedAt, fileSize: pending.fileSize, sha256: pending.sha256, storagePath, actorId: access.actorId,
       usageActor: getDashboardUploadUsageActor(access.session)});
     if (result.status === 'imported') pending.preserve();
     if (result.status === 'imported') scheduleDashboardUploadUsageDrain();

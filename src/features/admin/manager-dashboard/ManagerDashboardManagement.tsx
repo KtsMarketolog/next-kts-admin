@@ -477,12 +477,12 @@ export function ManagerDashboardManagement({ overview, section = 'personal', aud
               <div><dt>Данные загружены</dt><dd>{formatDashboardTimestamp(shared.jsonSnapshot.receivedAt)}</dd></div>
             </dl> : null}
             <form className={styles.uploadForm} onSubmit={(event) => void uploadSharedJson(event)}>
-              <label htmlFor="manager-dashboard-shared-json">JSON-снимок компоновщика · до {MAX_SHARED_JSON_BYTES / (1024 * 1024)} МиБ</label>
+              <label htmlFor="manager-dashboard-shared-json">Снимок компоновщика .json или .json.gz · до {MAX_SHARED_JSON_BYTES / (1024 * 1024)} МиБ</label>
               <div className={styles.actions}>
-                <input ref={sharedJsonInput} id="manager-dashboard-shared-json" type="file" accept=".json,application/json" required disabled={busy} aria-invalid={!!sharedJsonError} aria-describedby={`manager-dashboard-shared-json-help${sharedJsonError ? ' manager-dashboard-shared-json-error' : ''}`} onChange={() => { setSharedJsonError(''); setSharedJsonMessage(''); setSharedJsonWarning(''); }} />
+                <input ref={sharedJsonInput} id="manager-dashboard-shared-json" type="file" accept=".json,.json.gz,application/json,application/gzip,application/x-gzip" required disabled={busy} aria-invalid={!!sharedJsonError} aria-describedby={`manager-dashboard-shared-json-help${sharedJsonError ? ' manager-dashboard-shared-json-error' : ''}`} onChange={() => { setSharedJsonError(''); setSharedJsonMessage(''); setSharedJsonWarning(''); }} />
                 <button className={styles.primary} type="submit" disabled={busy}>Опубликовать общий JSON</button>
               </div>
-              <p id="manager-dashboard-shared-json-help" className={styles.muted}>Для HTML «{sharedActiveHtml.originalName}», версия #{sharedActiveHtml.id}. Файл сжимается перед отправкой. Публикация происходит только после проверки; предыдущая версия данных сохраняется. Большой снимок может обрабатываться несколько минут.</p>
+              <p id="manager-dashboard-shared-json-help" className={styles.muted}>Для HTML «{sharedActiveHtml.originalName}», версия #{sharedActiveHtml.id}. Обычный .json сжимается перед отправкой; готовый .json.gz отправляется без повторного сжатия. Размер JSON после распаковки — тоже до {MAX_SHARED_JSON_BYTES / (1024 * 1024)} МиБ. Публикация происходит только после проверки; предыдущая версия данных сохраняется. Большой снимок может обрабатываться несколько минут.</p>
               {sharedJsonProgress ? <div><p className={styles.notice} role="status">{sharedJsonProgress}</p><button type="button" className={styles.secondary} onClick={() => uploadController.current?.abort()}>Прервать загрузку JSON</button><p className={styles.muted}>Прерывание ожидания не отменяет уже сохранённые данные. Перед повторной отправкой проверьте текущую версию.</p></div> : null}
               {sharedJsonError ? <p ref={sharedJsonErrorPanel} id="manager-dashboard-shared-json-error" className={styles.error} role="alert" tabIndex={-1}>{sharedJsonError}</p> : null}
               {sharedJsonMessage ? <p className={styles.notice} role="status">{sharedJsonMessage}</p> : null}
