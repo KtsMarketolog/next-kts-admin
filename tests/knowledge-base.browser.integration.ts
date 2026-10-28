@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { compile } from 'sass';
 import { canManageKnowledgeBase } from '../src/shared/lib/knowledgeBase';
-import type { KnowledgeBaseNode } from '../src/shared/lib/knowledgeBase';
+import type { KnowledgeBaseAccess, KnowledgeBaseNode } from '../src/shared/lib/knowledgeBase';
 import type { AdminSession } from '../src/shared/lib/adminAuth';
 
 async function main() {
@@ -72,6 +72,9 @@ async function main() {
   assert.equal(canManageKnowledgeBase(readerSession), false, 'unrelated TOP-dashboard management flag does not grant KB management');
   let readOnly = false, failList = false, failSave = false, archived = false;
   let searchFixture = false;
+  let accessFixture = false, failAccessPreview = false;
+  let delayedAccess: { started: Promise<void>; onStart: () => void; release: Promise<void>; finish: () => void } | null = null;
+  const accessSelections = [...Array.from({ length: 27 }, (_, index) => `manager:${index + 1}`), 'admin:7', 'manager:999'];
   let delayedSearch: { started: Promise<void>; onStart: () => void; release: Promise<void>; finish: () => void } | null = null;
   let moveFixture = false, movePagination = false;
   let moveFailure: 'none' | 'conflict' | 'unknown' = 'none';
@@ -100,10 +103,35 @@ async function main() {
     const body = request.headers['content-type']?.includes('application/json') && raw ? JSON.parse(raw) : raw;
     calls.push({ path: url.pathname + url.search, method: request.method ?? 'GET', body, headers: { ...request.headers } });
     const json = (data: unknown, code = 200) => response.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(data));
-    if (url.pathname.endsWith('/employees')) return void json({ actors: [
+    if (url.pathname.endsWith('/access-preview')) {
+      assert.equal(request.method, 'POST');
+      const input = body as { parentId: number | null; access: KnowledgeBaseAccess };
+      const totalActive = accessFixture ? 40 : 2;
+      const byRole = accessFixture ? 9 : 1;
+      const active = Array.from({ length: totalActive - byRole }, (_, index) => `manager:${index + 1}`);
+      const allowed = input.parentId !== null && accessFixture ? active.slice(0, 26) : active;
+      const bySelection = input.access.mode === 'custom' ? allowed.filter((key) => input.access.actorKeys.includes(key)).length : 0;
+      const byInheritance = input.access.mode === 'inherit' ? allowed.length : 0;
+      const withAccess = byRole + bySelection + byInheritance;
+      const selectedInactive = input.access.actorKeys.filter((key) => !active.includes(key) && key !== 'admin:7').length;
+      const selectedBlockedByParent = input.access.actorKeys.filter((key) => active.includes(key) && !allowed.includes(key)).length;
+      if (failAccessPreview) return void json({ error: 'Не удалось получить сведения о доступе.' }, 503);
+      if (delayedAccess && !input.access.actorKeys.includes('manager:1')) {
+        delayedAccess.onStart(); await delayedAccess.release;
+      }
+      return void json({ totalActive, withAccess, byRole, bySelection, byInheritance,
+        withoutAccess: totalActive - withAccess, selectedInactive, selectedBlockedByParent });
+    }
+    if (url.pathname.endsWith('/employees')) {
+      if (accessFixture && url.searchParams.get('search')) return void json({ actors: [], nextCursor: null });
+      if (accessFixture && url.searchParams.get('after')) return void json({ actors: [
+        { actorKey: 'manager:28', actorName: 'Дополнительный сотрудник', actorRole: 'manager' },
+      ], nextCursor: null });
+      return void json({ actors: [
       { actorKey: 'manager:1', actorName: 'Тестовый сотрудник', actorRole: 'manager' },
       { actorKey: 'admin:7', actorName: 'Тестовый руководитель', actorRole: 'top' },
-    ], nextCursor: null });
+      ], nextCursor: accessFixture ? 'manager:1' : null });
+    }
     if (url.pathname.endsWith('/events')) return void json({ recorded: true });
     if (url.pathname.includes('/files/')) return void response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "sandbox allow-scripts; default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" })
       .end('<!doctype html><html><h1>Тестовый регламент</h1><button onclick="this.textContent=\'Работает\'">Проверить</button><script>try{parent.document.body.dataset.exposed="yes"}catch(e){}</script></html>');
@@ -146,6 +174,9 @@ async function main() {
     }
     if (failList) return void json({ error: 'Не удалось загрузить папку' }, 503);
     const parent = url.searchParams.get('parentId');
+    if (accessFixture) return void json({ nodes: [{ ...(parent ? nestedFolder : folder),
+      access: { mode: 'custom', actorKeys: accessSelections } }], nextCursor: null,
+      breadcrumbs: parent ? [folder] : [], canManage: true });
     if (searchFixture) {
       const parentId = parent === null ? null : Number(parent);
       const search = url.searchParams.get('search') ?? '';
@@ -188,7 +219,8 @@ async function main() {
       const browser = await playwright[engine].launch({ headless: true });
       try {
         for (const width of [1440, 390, 320]) {
-          readOnly = false; failList = false; failSave = false; archived = false; moveFixture = false; searchFixture = false; calls.length = 0;
+          readOnly = false; failList = false; failSave = false; archived = false; moveFixture = false; searchFixture = false;
+          accessFixture = false; failAccessPreview = false; delayedAccess = null; calls.length = 0;
           const page = await browser.newPage({ viewport: { width, height: 1000 } });
           page.setDefaultTimeout(10_000);
           let scenario = 'existing KB flows';
@@ -228,7 +260,7 @@ async function main() {
           await page.getByRole('button', { name: 'Создать папку', exact: true }).click();
           let dialog = page.getByRole('dialog');
           await dialog.getByLabel('Название', { exact: true }).fill('Новая папка');
-          const topAccess = dialog.getByRole('checkbox', { name: /Тестовый руководитель.*управляет разделом/ });
+          const topAccess = dialog.getByRole('checkbox', { name: /Тестовый руководитель.*доступ по роли/ });
           await topAccess.waitFor();
           assert.equal(await topAccess.isChecked(), true, 'TOP always has access without a per-folder grant');
           assert.equal(await topAccess.isDisabled(), true, 'TOP management access cannot be unchecked');
@@ -346,6 +378,89 @@ async function main() {
           await backToRoot.click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'failed-load fallback returns to root');
+
+          scenario = 'total access summary';
+          accessFixture = true;
+          await gotoPage(origin + '/admin/knowledge-base');
+          assert.equal(await page.getByText(/Выбрано сотрудников:/).count(), 0, 'cards do not present selected grants as the total access count');
+          await page.getByRole('button', { name: 'Настроить', exact: true }).click();
+          dialog = page.getByRole('dialog');
+          await dialog.getByText('Доступ имеют: 36 из 40 сотрудников', { exact: true }).waitFor();
+          assert.match(await dialog.innerText(), /По выбору: 27 · По роли: 9 · Без доступа: 4/);
+          assert.match(await dialog.innerText(), /недействующие учётные записи: 1/);
+          assert.equal(await dialog.getByText('Выбрано: 27', { exact: false }).count(), 0);
+          const selectedEmployee = dialog.getByRole('checkbox', { name: /^Тестовый сотрудник/ });
+          const automaticEmployee = dialog.getByRole('checkbox', { name: /^Тестовый руководитель/ });
+          assert.equal(await automaticEmployee.isDisabled(), true);
+          assert.equal(await automaticEmployee.isChecked(), true);
+          assert.equal(await selectedEmployee.isChecked(), true);
+          assert.match(await dialog.innerText(), /изменения применятся после сохранения/);
+          assert.equal(await dialog.evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth + 1), true, 'access summary wraps on narrow screens');
+          await dialog.screenshot({ path: path.join(output, `${engine}-${width}-total-access.png`) });
+          const previewCalls = () => calls.filter((call) => call.path.endsWith('/access-preview'));
+          const beforeEmployeeSearch = previewCalls().length;
+          await dialog.getByRole('searchbox', { name: 'Найти сотрудника по ФИО', exact: true }).fill('Нет такого сотрудника');
+          await dialog.getByRole('button', { name: 'Найти', exact: true }).click();
+          await dialog.getByText('Сотрудники не найдены.', { exact: true }).waitFor();
+          assert.equal(await dialog.getByText('Доступ имеют: 36 из 40 сотрудников', { exact: true }).isVisible(), true,
+            'empty employee search does not change the global count');
+          assert.equal(previewCalls().length, beforeEmployeeSearch, 'search does not refetch the access calculation');
+          await dialog.getByRole('searchbox', { name: 'Найти сотрудника по ФИО', exact: true }).fill('');
+          await dialog.getByRole('button', { name: 'Найти', exact: true }).click();
+          await selectedEmployee.waitFor();
+          await dialog.getByRole('button', { name: 'Ещё сотрудники', exact: true }).click();
+          const extraEmployee = dialog.getByRole('checkbox', { name: /^Дополнительный сотрудник/ });
+          await extraEmployee.waitFor();
+          assert.equal(previewCalls().length, beforeEmployeeSearch, 'directory pagination does not change the total or refetch it');
+          await extraEmployee.check();
+          await dialog.getByText('Доступ имеют: 37 из 40 сотрудников', { exact: true }).waitFor();
+          await extraEmployee.uncheck();
+          await dialog.getByText('Доступ имеют: 36 из 40 сотрудников', { exact: true }).waitFor();
+
+          let startAccess = () => {}, releaseAccess = () => {};
+          delayedAccess = { started: new Promise<void>((resolve) => { startAccess = resolve; }), onStart: () => startAccess(),
+            release: new Promise<void>((resolve) => { releaseAccess = resolve; }), finish: () => releaseAccess() };
+          await selectedEmployee.uncheck();
+          await delayedAccess.started;
+          assert.equal(await dialog.getByText(/^Доступ имеют:/).count(), 0, 'outdated count is hidden while changed settings are pending');
+          await dialog.getByText('Рассчитываем общий доступ…', { exact: true }).waitFor();
+          await selectedEmployee.check();
+          await dialog.getByText('Доступ имеют: 36 из 40 сотрудников', { exact: true }).waitFor();
+          delayedAccess.finish();
+          await page.waitForLoadState('networkidle');
+          delayedAccess = null;
+          assert.equal(await dialog.getByText('Доступ имеют: 35 из 40 сотрудников', { exact: true }).count(), 0,
+            'late cancelled preview cannot overwrite the current count');
+
+          failAccessPreview = true;
+          await selectedEmployee.uncheck();
+          await dialog.getByRole('alert').filter({ hasText: 'Общее число доступов сейчас недоступно' }).waitFor();
+          assert.equal(await dialog.getByText(/^Доступ имеют:/).count(), 0, 'failed calculation never displays the previous total');
+          failAccessPreview = false;
+          await dialog.getByRole('button', { name: 'Повторить расчёт', exact: true }).click();
+          await dialog.getByText('Доступ имеют: 35 из 40 сотрудников', { exact: true }).waitFor();
+          await selectedEmployee.check();
+          await dialog.getByText('Доступ имеют: 36 из 40 сотрудников', { exact: true }).waitFor();
+          await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click();
+          await page.getByText('Изменения сохранены.', { exact: true }).waitFor();
+          const savedSelection = calls.filter((call) => call.method === 'PATCH').at(-1)!.body as { access: KnowledgeBaseAccess };
+          assert.deepEqual([...savedSelection.access.actorKeys].sort(), [...accessSelections].sort(),
+            'summary leaves stored grants, including existing management and inactive keys, unchanged');
+
+          await gotoPage(origin + '/admin/knowledge-base?folder=1');
+          await page.getByRole('button', { name: 'Настроить', exact: true }).click();
+          dialog = page.getByRole('dialog');
+          await dialog.getByText('Доступ имеют: 35 из 40 сотрудников', { exact: true }).waitFor();
+          assert.equal((previewCalls().at(-1)!.body as { parentId: number }).parentId, 1, 'preview uses the edited node parent');
+          assert.match(await dialog.innerText(), /не имеют доступа к родительской папке: 1/);
+          assert.match(await dialog.innerText(), /По выбору: 26 · По роли: 9 · Без доступа: 5/);
+          await dialog.getByRole('combobox', { name: 'Правило доступа', exact: true }).selectOption('inherit');
+          await dialog.getByText(/Как у родительской папки: 26 · По роли: 9 · Без доступа: 5/).waitFor();
+          assert.equal(await dialog.getByText('Доступ имеют: 35 из 40 сотрудников', { exact: true }).isVisible(), true);
+          assert.equal(await dialog.getByRole('checkbox').count(), 0, 'inherited access has a summary without an individual-selection list');
+          await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+          accessFixture = false;
+          assert.deepEqual(errors, []);
 
           scenario = 'recursive search';
           searchFixture = true;

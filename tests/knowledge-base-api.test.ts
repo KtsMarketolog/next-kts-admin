@@ -26,6 +26,8 @@ const folder: shared.KnowledgeBaseNode = { id: 19, parentId: null, kind: 'folder
   createdAt: '', updatedAt: '', originalName: null, mimeType: null, size: null };
 const fileNode = { ...folder, kind: 'file' as const, parentId: 9, originalName: 'doc.pdf', mimeType: 'application/pdf', size: 12 };
 const storedFile = { storagePath: `knowledge-base/${uuid}.pdf`, originalName: 'doc.pdf', mimeType: 'application/pdf', size: 12, sha256: '0'.repeat(64) };
+const accessSummary = { totalActive: 40, withAccess: 36, byRole: 9, bySelection: 27, byInheritance: 0,
+  withoutAccess: 4, selectedInactive: 0, selectedBlockedByParent: 0 };
 function req(endpoint = '', method = 'GET', body?: unknown, headers: HeadersInit = {}) {
   return new Request(`https://example.test/api/admin/knowledge-base${endpoint}`, { method,
     headers: { origin: 'https://example.test', ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers },
@@ -40,7 +42,7 @@ function harness(options: { role?: AdminSessionRole | null; denied?: boolean; li
   let released = 0; let closed = 0;
   const repo = Object.fromEntries(['listKnowledgeBase', 'listKnowledgeBaseActors', 'listKnowledgeBaseStats', 'createKnowledgeBaseFolder',
     'createKnowledgeBaseFile', 'updateKnowledgeBaseNode', 'setKnowledgeBaseArchive', 'recordKnowledgeBaseEvent', 'getKnowledgeBaseNode', 'getKnowledgeBaseFileForRead',
-    'previewKnowledgeBaseMove', 'moveKnowledgeBaseNode']
+    'previewKnowledgeBaseMove', 'moveKnowledgeBaseNode', 'getKnowledgeBaseAccessSummary']
     .map(name => [name, async (...args: unknown[]) => {
       calls.push(name); inputs.push(args); assert.equal(args[0], session, 'current authenticated session always reaches ACL repository');
       if (options.failure && name !== 'getKnowledgeBaseNode') throw new Error('synthetic private DB path secret');
@@ -54,6 +56,7 @@ function harness(options: { role?: AdminSessionRole | null; denied?: boolean; li
       if (name === 'listKnowledgeBase') return { nodes: [folder], breadcrumbs: [], nextCursor: null, canManage: shared.canManageKnowledgeBase(session) };
       if (name === 'listKnowledgeBaseActors') return { actors: [], nextCursor: null };
       if (name === 'listKnowledgeBaseStats') return { rows: [], nextCursor: null };
+      if (name === 'getKnowledgeBaseAccessSummary') return accessSummary;
       return folder;
     }]));
   const api = load<typeof import('../src/shared/lib/knowledgeBaseApi')>('../src/shared/lib/knowledgeBaseApi.ts', {
@@ -77,6 +80,7 @@ function harness(options: { role?: AdminSessionRole | null; denied?: boolean; li
     patch: load<typeof import('../src/app/api/admin/knowledge-base/[id]/route')>('../src/app/api/admin/knowledge-base/[id]/route.ts', deps),
     move: load<typeof import('../src/app/api/admin/knowledge-base/[id]/move/route')>('../src/app/api/admin/knowledge-base/[id]/move/route.ts', deps),
     actors: load<typeof import('../src/app/api/admin/knowledge-base/employees/route')>('../src/app/api/admin/knowledge-base/employees/route.ts', deps),
+    accessPreview: load<typeof import('../src/app/api/admin/knowledge-base/access-preview/route')>('../src/app/api/admin/knowledge-base/access-preview/route.ts', deps),
     usage: load<typeof import('../src/app/api/admin/knowledge-base/usage/route')>('../src/app/api/admin/knowledge-base/usage/route.ts', deps),
     events: load<typeof import('../src/app/api/admin/knowledge-base/events/route')>('../src/app/api/admin/knowledge-base/events/route.ts', deps),
     upload: load<typeof import('../src/app/api/admin/knowledge-base/upload/route')>('../src/app/api/admin/knowledge-base/upload/route.ts', deps),
@@ -103,6 +107,68 @@ test('KB read accepts all authenticated employee roles; Admin/Admin TOP/TOP mana
     for (const response of [await h.actors.GET(req('/employees')), await h.usage.GET(req('/usage'))]) {
       assert.equal(response.status, manage ? 200 : role ? 403 : 401); privateResponse(response);
     }
+  }
+});
+
+const accessPreviewInput = { parentId: null, access: { mode: 'custom', actorKeys: ['manager:7'] } };
+test('KB access preview is private, management-only and uses the authenticated session without writing grants', async () => {
+  for (const role of [...roles, null]) {
+    const h = harness({ role });
+    const manages = role === 'admin' || role === 'admintop' || role === 'top';
+    const response = await h.accessPreview.POST(req('/access-preview', 'POST', accessPreviewInput));
+    assert.equal(response.status, manages ? 200 : role ? 403 : 401, String(role));
+    privateResponse(response);
+    assert.deepEqual(h.calls, manages ? ['getKnowledgeBaseAccessSummary'] : []);
+    if (manages) {
+      assert.deepEqual(await response.json(), accessSummary);
+      assert.deepEqual(h.inputs[0].slice(1), [accessPreviewInput]);
+    }
+  }
+  const nested = harness();
+  const input = { parentId: 19, access: { mode: 'inherit', actorKeys: [] } };
+  assert.equal((await nested.accessPreview.POST(req('/access-preview', 'POST', input))).status, 200);
+  assert.deepEqual(nested.inputs[0].slice(1), [input]);
+});
+
+test('KB access preview rejects invalid, oversized and cross-origin inputs before querying access', async () => {
+  for (const body of [
+    {}, { parentId: null }, { access: accessPreviewInput.access },
+    ...[0, -1, '19', 1.5, false, Number.MAX_SAFE_INTEGER + 1].map(parentId => ({ ...accessPreviewInput, parentId })),
+    { ...accessPreviewInput, actorKey: 'admin:primary' }, { ...accessPreviewInput, totalActive: 40 },
+    { ...accessPreviewInput, access: null },
+    { ...accessPreviewInput, access: { mode: 'inherit', actorKeys: [] } },
+    { parentId: 19, access: { mode: 'inherit', actorKeys: ['manager:7'] } },
+    { ...accessPreviewInput, access: { mode: 'all', actorKeys: [] } },
+    { ...accessPreviewInput, access: { mode: 'custom', actorKeys: ['admin:primary'] } },
+    { ...accessPreviewInput, access: { mode: 'custom', actorKeys: ['manager:7', 'manager:7'] } },
+    { ...accessPreviewInput, access: { mode: 'custom', actorKeys: Array.from({ length: 1001 }, (_, i) => `manager:${i + 1}`) } },
+    '{bad', ' '.repeat(65 * 1024),
+  ]) {
+    const h = harness();
+    const response = await h.accessPreview.POST(req('/access-preview', 'POST', body));
+    assert.ok([400, 413].includes(response.status));
+    privateResponse(response);
+    assert.deepEqual(h.calls, []);
+  }
+  const invalidHeaders: HeadersInit[] = [{ origin: 'https://evil.test' }, { origin: '' }, { 'content-type': 'text/plain' }];
+  for (const headers of invalidHeaders) {
+    const h = harness();
+    const response = await h.accessPreview.POST(req('/access-preview', 'POST', accessPreviewInput, headers));
+    assert.ok([400, 403].includes(response.status));
+    assert.deepEqual(h.calls, []);
+  }
+  const limited = harness({ limited: true });
+  const limitedResponse = await limited.accessPreview.POST(req('/access-preview', 'POST', accessPreviewInput));
+  assert.equal(limitedResponse.status, 429); privateResponse(limitedResponse); assert.deepEqual(limited.calls, []);
+});
+
+test('KB access preview reports unavailable parents and safe errors without returning made-up totals', async () => {
+  for (const [options, expected] of [[{ denied: true }, 404], [{ failure: true }, 503]] as const) {
+    const h = harness(options);
+    const response = await h.accessPreview.POST(req('/access-preview', 'POST', { ...accessPreviewInput, parentId: 19 }));
+    assert.equal(response.status, expected); privateResponse(response);
+    assert.doesNotMatch(await response.text(), /private DB|storage_path|withAccess|totalActive/);
+    assert.deepEqual(h.calls, ['getKnowledgeBaseAccessSummary']);
   }
 });
 

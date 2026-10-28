@@ -154,7 +154,7 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
             <button type="button" className={styles.text} onClick={() => navigate(ancestor.id)}>{ancestor.title}</button></span>)}
         </nav>}
         <div><p className={styles.muted}>{node.kind === 'file' ? `${kbSize(node.size)} · ` : ''}{kbDate(node.updatedAt)} МСК</p>
-          {canManage && <span className={styles.badge}>{node.access?.mode === 'inherit' ? 'Доступ как у папки' : `Выбрано сотрудников: ${node.access?.actorKeys.length ?? 0}`}</span>}</div>
+          {canManage && <span className={styles.badge}>{node.access?.mode === 'inherit' ? 'Доступ как у папки' : 'По списку сотрудников'}</span>}</div>
         <div className={styles.cardActions}>{!archived && node.kind === 'folder' && <button type="button" className={`${styles.primary} ${styles.openFolder}`}
           aria-label={`Открыть папку «${node.title}»`} onClick={() => navigate(node.id)}>Открыть папку <span aria-hidden="true">→</span></button>}
           {!archived && node.kind === 'file' && <button type="button" onClick={() => download(node)}>Скачать</button>}

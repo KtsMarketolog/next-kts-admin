@@ -56,7 +56,7 @@ export function KnowledgeBaseEditor({ node, parentId, upload, onClose, onSaved }
       }} /></label><p className={styles.muted}>PDF, Word, Excel, PowerPoint, TXT, CSV, изображения и HTML. До 25 МБ. {file ? `Выбрано: ${kbSize(file.size)}.` : ''}</p>
         <p className={styles.muted}>HTML открывается изолированно. Встроенные стили и сценарии поддерживаются; внешние ресурсы, сетевые запросы и доступ к кабинету запрещены. Загрузите самодостаточный HTML.</p></>}
       <label className={styles.field}>Название<input value={title} maxLength={200} required disabled={busy} onChange={(event) => setTitle(event.target.value)} /></label>
-      <KnowledgeBaseAccessEditor value={access} onChange={setAccess} isRoot={parentId === null} disabled={busy} />
+      <KnowledgeBaseAccessEditor value={access} onChange={setAccess} parentId={parentId} disabled={busy} />
       {error && <p className={styles.error} role="alert">{error}</p>}
       <div className={styles.actions}><button type="button" disabled={busy} onClick={onClose}>Отмена</button>
         <button className={styles.primary} type="submit" disabled={busy}>{busy ? (upload ? 'Загружаем…' : 'Сохраняем…') : upload ? 'Загрузить файл' : 'Сохранить'}</button></div>

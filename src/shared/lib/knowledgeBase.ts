@@ -6,6 +6,12 @@ export const KNOWLEDGE_BASE_PAGE_SIZE = 50;
 export const KNOWLEDGE_BASE_MAX_GRANTS = 1000;
 export const KNOWLEDGE_BASE_MAX_FILE_BYTES = 25 * 1024 * 1024;
 export type KnowledgeBaseAccess = { mode: 'inherit' | 'custom'; actorKeys: string[] };
+/** Preview of effective access for active directory accounts, without changing any grants. */
+export type KnowledgeBaseAccessSummary = {
+  totalActive: number; withAccess: number; byRole: number; bySelection: number; byInheritance: number;
+  withoutAccess: number; selectedInactive: number; selectedBlockedByParent: number;
+};
+export type KnowledgeBaseAccessPreviewInput = { parentId: number | null; access: KnowledgeBaseAccess };
 export type KnowledgeBaseNode = {
   id: number; parentId: number | null; kind: 'folder' | 'file'; title: string; revision: string;
   archivedAt: string | null; createdAt: string; updatedAt: string;
