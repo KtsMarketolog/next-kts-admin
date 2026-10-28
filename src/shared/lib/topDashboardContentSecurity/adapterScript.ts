@@ -52,6 +52,7 @@ export function getTopDashboardDataAdapterScript(
   const LEGACY_READY_FUNCTION = ${legacyReadyFunctionJson};
   const RESTORE_START_EVENT = 'kts-top-dashboard-restore-start';
   const RESTORE_READY_EVENT = 'kts-top-dashboard-data-ready';
+  const RESTORE_ERROR_EVENT = 'kts-top-dashboard-data-error';
   const RESTORE_DOM_QUIET_MS = 1000;
   const RESTORE_TIMEOUT_MS = 120000;
   const MULTI_INPUT_DISPATCH_GAP_MS = 150;
@@ -71,6 +72,8 @@ export function getTopDashboardDataAdapterScript(
   let inputTimeout = 0;
   let multiFileRestorePending = false;
   let legacyRestoreId = 0;
+  let legacySnapshotRestoreSequence = 0;
+  let legacySnapshotPending = false;
 
   function dispatchDashboardReady(restoreId) {
     if (!validRestoreId(restoreId)) return;
@@ -144,6 +147,9 @@ ${multiFileAdapterScript()}${readOnlyAdapterScript()}  function stopWaitingForIn
   }
 
   async function installSnapshot(snapshot) {
+    // Do not relabel a late completion from an older asynchronous loader as a
+    // new restore. Refreshing the outer frame remains available after a timeout.
+    if (legacySnapshotPending) return;
     const input = findSnapshotInput();
     if (!input) {
       pendingSnapshot = snapshot;
@@ -166,6 +172,34 @@ ${multiFileAdapterScript()}${readOnlyAdapterScript()}  function stopWaitingForIn
       return;
     }
 
+    legacySnapshotPending = true;
+    const restoreId = ++legacySnapshotRestoreSequence;
+    let failed = false;
+    let confirmed = false;
+    let settled = false;
+    let usesChangeHandler = false;
+    let handlerStarted = false;
+    let timeout = 0;
+    const cleanup = () => {
+      if (timeout) window.clearTimeout(timeout);
+      window.removeEventListener(RESTORE_READY_EVENT, handleResult);
+      window.removeEventListener(RESTORE_ERROR_EVENT, handleResult);
+    };
+    const handleResult = (event) => {
+      if (!event.detail || event.detail.restoreId !== restoreId) return;
+      confirmed = true;
+      if (event.type === RESTORE_ERROR_EVENT) failed = true;
+      // Input change handlers do not expose their Promise. Only their explicit
+      // completion can release the next delivery; dispatch alone is not ready.
+      if (settled) {
+        legacySnapshotPending = false;
+        cleanup();
+        if (failed) report('SNAPSHOT_INSTALL_FAILED');
+      }
+    };
+    window.addEventListener(RESTORE_READY_EVENT, handleResult);
+    window.addEventListener(RESTORE_ERROR_EVENT, handleResult);
+    window.dispatchEvent(new CustomEvent(RESTORE_START_EVENT, { detail: { restoreId, fileCount: 1 } }));
     try {
       const type = /\.gz$/i.test(snapshot.name) ? 'application/gzip' : 'application/json';
       const file = new File([snapshot.buffer], snapshot.name, { type });
@@ -176,18 +210,42 @@ ${multiFileAdapterScript()}${readOnlyAdapterScript()}  function stopWaitingForIn
         ? window.handleFiles
         : null;
       if (dashboardHandler) {
+        handlerStarted = true;
+        const processing = Promise.resolve().then(() => dashboardHandler(input.files));
+        // Keep serialization until the actual handler settles, even when the
+        // user-facing timeout has already reported failure.
+        void processing.then(() => { legacySnapshotPending = false; }, () => { legacySnapshotPending = false; });
         await Promise.race([
-          Promise.resolve(dashboardHandler(input.files)),
-          new Promise((_, reject) => window.setTimeout(() => reject(new Error('timeout')), 45000)),
+          processing,
+          new Promise((_, reject) => { timeout = window.setTimeout(() => reject(new Error('timeout')), RESTORE_TIMEOUT_MS); }),
         ]);
       } else {
+        usesChangeHandler = true;
         input.dispatchEvent(new Event('change', { bubbles: true }));
         await new Promise((resolve) => window.setTimeout(resolve, 750));
       }
+      settled = true;
+      if (failed) throw new Error('Dashboard processing failed');
       lockFileInputs();
+      // This acknowledges delivery only. Office mode waits for the explicit
+      // native completion event, never this transfer ACK or a resolved Promise.
       send('snapshot-installed');
     } catch {
+      cleanup();
+      if (!failed) window.dispatchEvent(new CustomEvent(RESTORE_ERROR_EVENT, { detail: { restoreId } }));
       report('SNAPSHOT_INSTALL_FAILED');
+    } finally {
+      settled = true;
+      if (usesChangeHandler && !confirmed && EXPECTED_PROFILE === 'sales-analytics') {
+        // Keep listening for async change-handler completion, but do not infer
+        // readiness (or permit another ambiguous delivery) from elapsed time.
+        timeout = window.setTimeout(cleanup, RESTORE_TIMEOUT_MS);
+      } else {
+        // Other legacy reports retain their delivery-only protocol. A failure
+        // before any handler starts is also safe to retry.
+        if (usesChangeHandler || !handlerStarted) legacySnapshotPending = false;
+        cleanup();
+      }
     }
   }
 

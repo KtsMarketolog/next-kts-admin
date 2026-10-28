@@ -1,4 +1,5 @@
 import { instrumentReviewedDashboardUsage } from '../dashboardUsageProfiles';
+import { instrumentReviewedSalesRestoreReady } from './salesRestoreReady';
 import { detectTopDashboardDataContract } from './dataContract';
 import { detectTopDashboardLegacyReadyFunction } from './legacyReady';
 import { getTopDashboardDataAdapterScript } from './adapterScript';
@@ -19,6 +20,7 @@ export function injectTopDashboardDataAdapter(
     && (contract.profile === 'profitability' || contract.profile === 'standalone');
   const readOnly = options.readOnly === true;
   htmlContent = instrumentReviewedDashboardUsage(htmlContent);
+  htmlContent = instrumentReviewedSalesRestoreReady(htmlContent);
   const adapter = `<script ${TOP_DASHBOARD_DATA_ADAPTER_ATTRIBUTE}>${getTopDashboardDataAdapterScript(expectedFormat, expectedProfile, readOnly, legacyReadyFunction, localInvoiceMode)}</script>`;
   const head = HEAD_OPEN_PATTERN.exec(htmlContent);
   if (head) {
