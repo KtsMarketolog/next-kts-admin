@@ -27,3 +27,4 @@ unset EMPLOYEE_PASSWORD_ENCRYPTION_KEY
 export NODE_ENV=test
 node --import tsx --test tests/knowledge-base-db.integration.ts
 node --import tsx --test tests/knowledge-base-move-db.integration.ts
+node --import tsx --test tests/knowledge-base-search-db.integration.ts

@@ -52,14 +52,27 @@ async function main() {
   const longFolder = { ...folder, id: 5, title: 'Положения и инструкции по работе с региональными партнёрами — СправочникДляНовыхСотрудниковПодразделенияПродажИЗакупок' };
   const archivedFolder = { ...folder, id: 6, title: 'Архив регламентов', archivedAt: stamp };
   const openFolderName = (title: string) => `Открыть папку «${title}»`;
-  const material = { ...folder, id: 2, parentId: 1, kind: 'file', title: 'Порядок работы с клиентом', originalName: 'regulation.html',
+  const material: KnowledgeBaseNode = { ...folder, id: 2, parentId: 1, kind: 'file', title: 'Порядок работы с клиентом', originalName: 'regulation.html',
     mimeType: 'text/html', size: 1200, access: { mode: 'inherit', actorKeys: [] } };
+  const deepFolder: KnowledgeBaseNode = { ...folder, id: 7, parentId: nestedFolder.id,
+    title: 'ПодробныеПравилаВозмещенияКомандировочныхРасходовСотрудниковРегиональныхПодразделений' };
+  const deepMaterial: KnowledgeBaseNode = { ...material, id: 8, parentId: deepFolder.id, kind: 'file', title: 'Командировочные расходы' };
+  const secondMaterial: KnowledgeBaseNode = { ...deepMaterial, id: 9, parentId: nestedFolder.id, title: 'Командировочные расходы: отчёт' };
+  const outsideMaterial: KnowledgeBaseNode = { ...deepMaterial, id: 10, parentId: longFolder.id, title: 'Командировочные расходы: партнёры' };
+  const searchNodes = [folder, nestedFolder, longFolder, deepFolder, deepMaterial, secondMaterial, outsideMaterial];
+  const searchPath = (id: number | null): KnowledgeBaseNode[] => {
+    if (id === null) return [];
+    const node = searchNodes.find((item) => item.id === id)!;
+    return [...searchPath(node.parentId), node];
+  };
   const calls: { path: string; method: string; body: unknown; headers: Record<string, unknown> }[] = [];
   const topSession: AdminSession = { role: 'top', adminUserId: 7, sessionId: '00000000-0000-4000-8000-000000000007' };
   const readerSession: AdminSession = { role: 'manager', managerId: 1, canManageTopDashboard: true, sessionId: '00000000-0000-4000-8000-000000000001' };
   assert.equal(canManageKnowledgeBase(topSession), true, 'real KB policy grants TOP management');
   assert.equal(canManageKnowledgeBase(readerSession), false, 'unrelated TOP-dashboard management flag does not grant KB management');
   let readOnly = false, failList = false, failSave = false, archived = false;
+  let searchFixture = false;
+  let delayedSearch: { started: Promise<void>; onStart: () => void; release: Promise<void>; finish: () => void } | null = null;
   let moveFixture = false, movePagination = false;
   let moveFailure: 'none' | 'conflict' | 'unknown' = 'none';
   let movePreviewConflict = false;
@@ -133,6 +146,24 @@ async function main() {
     }
     if (failList) return void json({ error: 'Не удалось загрузить папку' }, 503);
     const parent = url.searchParams.get('parentId');
+    if (searchFixture) {
+      const parentId = parent === null ? null : Number(parent);
+      const search = url.searchParams.get('search') ?? '';
+      const inArchive = url.searchParams.get('archived') === '1';
+      if (search === 'отложенный' && delayedSearch) {
+        delayedSearch.onStart(); await delayedSearch.release;
+        return void json({ nodes: [{ ...deepMaterial, title: 'Устаревший результат', path: searchPath(deepMaterial.parentId) }], nextCursor: null,
+          breadcrumbs: searchPath(parentId), canManage: true });
+      }
+      let nodes = inArchive ? [] : search ? searchNodes.filter((node) => node.title.toLocaleLowerCase('ru').includes(search.toLocaleLowerCase('ru'))
+        && (parentId === null || searchPath(node.parentId).some((ancestor) => ancestor.id === parentId)))
+        .map((node) => ({ ...node, path: searchPath(node.parentId).map(({ id, title }) => ({ id, title })) }))
+        : searchNodes.filter((node) => node.parentId === parentId);
+      nodes = nodes.filter((node) => node.id > Number(url.searchParams.get('after') ?? 0));
+      const nextCursor = search && nodes.length > 1 ? nodes[0].id : null;
+      if (search) nodes = nodes.slice(0, 1);
+      return void json({ nodes, nextCursor, breadcrumbs: searchPath(parentId), canManage: canManageKnowledgeBase(readOnly ? readerSession : topSession) });
+    }
     if (moveFixture) {
       let nodes = moveNodes.filter((node) => node.parentId === (parent === null ? null : Number(parent)));
       let nextCursor: number | null = null;
@@ -157,7 +188,7 @@ async function main() {
       const browser = await playwright[engine].launch({ headless: true });
       try {
         for (const width of [1440, 390, 320]) {
-          readOnly = false; failList = false; failSave = false; archived = false; moveFixture = false; calls.length = 0;
+          readOnly = false; failList = false; failSave = false; archived = false; moveFixture = false; searchFixture = false; calls.length = 0;
           const page = await browser.newPage({ viewport: { width, height: 1000 } });
           page.setDefaultTimeout(10_000);
           let scenario = 'existing KB flows';
@@ -233,7 +264,7 @@ async function main() {
           assert.ok(calls.some((call) => call.method === 'GET' && call.path.includes('parentId=4')), 'keyboard open loads nested folder');
           const backToParent = page.getByRole('button', { name: `Назад в папку «${folder.title}»`, exact: true });
           await backToParent.waitFor();
-          await page.getByRole('searchbox', { name: 'Поиск в текущей папке', exact: true }).fill('порядок');
+          await page.getByRole('searchbox', { name: 'Поиск в папке и вложенных папках', exact: true }).fill('порядок');
           const searchResponse = page.waitForResponse((response: { url(): string }) => new URL(response.url()).searchParams.get('search') === 'порядок');
           await page.getByRole('button', { name: 'Найти', exact: true }).click();
           await searchResponse;
@@ -243,7 +274,7 @@ async function main() {
           await backToParent.focus(); await backToParent.press('Enter');
           await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), '1', 'nested folder-back opens its actual parent');
-          assert.equal(await page.getByRole('searchbox', { name: 'Поиск в текущей папке', exact: true }).inputValue(), '', 'back clears folder search');
+          assert.equal(await page.getByRole('searchbox', { name: 'Поиск в папке и вложенных папках', exact: true }).inputValue(), '', 'back clears folder search');
           assert.equal(await page.getByRole('button', { name: 'К материалам', exact: true }).count(), 0, 'back leaves archive mode');
           const parentReload = new URL(calls.filter((call) => call.method === 'GET' && new URL(call.path, origin).pathname === '/api/admin/knowledge-base').at(-1)!.path, origin);
           assert.equal(parentReload.searchParams.get('search'), null, 'parent list does not inherit search filter');
@@ -315,6 +346,94 @@ async function main() {
           await backToRoot.click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'failed-load fallback returns to root');
+
+          scenario = 'recursive search';
+          searchFixture = true;
+          await gotoPage(origin + '/admin/knowledge-base');
+          const searchBox = page.getByRole('searchbox');
+          const lastListRequest = () => new URL(calls.filter((call) => call.method === 'GET'
+            && new URL(call.path, origin).pathname === '/api/admin/knowledge-base').at(-1)!.path, origin);
+          const searchFor = async (value: string) => {
+            await searchBox.fill(value);
+            const response = page.waitForResponse((item: { url(): string }) => new URL(item.url()).pathname === '/api/admin/knowledge-base'
+              && new URL(item.url()).searchParams.get('search') === value);
+            await page.getByRole('button', { name: 'Найти', exact: true }).click();
+            await response;
+          };
+          assert.equal(await page.getByRole('searchbox', { name: 'Поиск по всей Базе знаний', exact: true }).count(), 1);
+          assert.equal(await page.getByRole('navigation', { name: /^Расположение/ }).count(), 0, 'ordinary root listing has no search paths');
+          await searchFor('командировочные');
+          const resultPath = page.getByRole('navigation', { name: `Расположение «${deepMaterial.title}»`, exact: true });
+          await resultPath.waitFor();
+          assert.equal(await resultPath.innerText(), `База знаний / ${folder.title} / ${nestedFolder.title} / ${deepFolder.title}`,
+            'deep result shows the complete root-to-parent path');
+          assert.equal(await resultPath.getByRole('button', { name: deepMaterial.title, exact: true }).count(), 0, 'path does not duplicate matching file');
+          assert.equal(lastListRequest().searchParams.get('parentId'), null, 'root search spans the full accessible tree');
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'deep long paths do not overflow the page');
+          assert.equal(await resultPath.evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth + 1), true, 'long path wraps inside result card');
+          await page.screenshot({ path: path.join(output, `${engine}-${width}-recursive-search.png`), fullPage: true });
+          await page.getByRole('button', { name: 'Далее', exact: true }).click();
+          await page.getByRole('navigation', { name: `Расположение «${secondMaterial.title}»`, exact: true }).waitFor();
+          assert.equal(lastListRequest().searchParams.get('after'), String(deepMaterial.id), 'second search page sends cursor');
+          assert.equal(lastListRequest().searchParams.get('search'), 'командировочные', 'pagination preserves the search');
+          await page.getByRole('button', { name: 'Назад', exact: true }).click();
+          await resultPath.waitFor();
+          assert.equal(lastListRequest().searchParams.get('after'), null, 'previous search page restores first-page cursor');
+          await resultPath.getByRole('button', { name: deepFolder.title, exact: true }).focus();
+          await resultPath.getByRole('button', { name: deepFolder.title, exact: true }).press('Enter');
+          await page.getByRole('heading', { name: deepFolder.title, exact: true }).waitFor();
+          await page.getByRole('button', { name: deepMaterial.title, exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), String(deepFolder.id), 'result path opens the selected real parent');
+          assert.equal(await searchBox.inputValue(), '', 'path navigation clears search');
+          assert.equal(lastListRequest().searchParams.get('search'), null);
+          assert.equal(lastListRequest().searchParams.get('after'), null);
+          assert.equal(await page.getByRole('navigation', { name: /^Расположение/ }).count(), 0, 'path navigation returns to ordinary folder listing');
+          await page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: folder.title, exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
+          await searchFor('командировочные');
+          await resultPath.waitFor();
+          assert.equal(lastListRequest().searchParams.get('parentId'), String(folder.id), 'folder search stays rooted at the selected folder');
+          assert.equal(await page.getByRole('searchbox', { name: 'Поиск в папке и вложенных папках', exact: true }).count(), 1);
+          await page.getByRole('button', { name: 'Далее', exact: true }).click();
+          await page.getByRole('navigation', { name: `Расположение «${secondMaterial.title}»`, exact: true }).waitFor();
+          assert.equal(await page.getByRole('button', { name: 'Далее', exact: true }).isDisabled(), true, 'subtree search has no sibling-folder page');
+          await page.getByRole('button', { name: 'Сбросить поиск', exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
+          assert.equal(lastListRequest().searchParams.get('search'), null, 'clear search restores ordinary folder listing');
+          assert.equal(lastListRequest().searchParams.get('after'), null, 'clear search resets pagination');
+          assert.equal(await page.getByRole('button', { name: deepMaterial.title, exact: true }).count(), 0, 'clear does not keep descendant results in direct folder view');
+          assert.equal(await page.getByText('Страница 2', { exact: true }).count(), 0);
+          await searchFor('командировочные');
+          await resultPath.waitFor();
+          await searchBox.fill('');
+          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
+          assert.equal(lastListRequest().searchParams.get('search'), null, 'empty input, including native search clear, immediately clears the applied query');
+          await searchFor('командировочные');
+          await resultPath.waitFor();
+          await page.getByRole('button', { name: 'Архив', exact: true }).click();
+          await page.getByRole('searchbox', { name: 'Поиск в архиве текущей папки', exact: true }).waitFor();
+          await page.getByText('Ничего не найдено', { exact: true }).waitFor();
+          assert.equal(lastListRequest().searchParams.get('archived'), '1');
+          assert.equal(await page.getByRole('navigation', { name: /^Расположение/ }).count(), 0, 'archive keeps direct-folder search and does not show active-tree results');
+          await page.getByRole('button', { name: 'К материалам', exact: true }).click();
+          await resultPath.waitFor();
+          await page.getByRole('button', { name: 'Сбросить поиск', exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
+          let markStarted = () => {}, releaseDelayed = () => {};
+          delayedSearch = { started: new Promise<void>((resolve) => { markStarted = resolve; }), onStart: () => markStarted(),
+            release: new Promise<void>((resolve) => { releaseDelayed = resolve; }), finish: () => releaseDelayed() };
+          await searchBox.fill('отложенный');
+          await page.getByRole('button', { name: 'Найти', exact: true }).click();
+          await delayedSearch.started;
+          await page.getByRole('button', { name: 'Сбросить поиск', exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
+          delayedSearch.finish();
+          await page.waitForLoadState('networkidle');
+          delayedSearch = null;
+          assert.equal(await page.getByRole('button', { name: 'Устаревший результат', exact: true }).count(), 0, 'late cancelled search cannot overwrite the normal listing');
+          assert.equal(await searchBox.inputValue(), '');
+          assert.deepEqual(errors, []);
+          searchFixture = false;
 
           // All moving uses a separate mutable local fixture, without real documents or employees.
           console.log(`${engine}/${width}: testing move UI`);

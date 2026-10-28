@@ -106,6 +106,43 @@ test('KB read accepts all authenticated employee roles; Admin/Admin TOP/TOP mana
   }
 });
 
+test('KB search forwards the current actor, subtree and cursor without adding client-supplied access scope', async () => {
+  for (const role of roles) {
+    const h = harness({ role });
+    const params = new URLSearchParams({ parentId: '19', after: '25', search: 'командиро', user: 'other', actorKey: 'admin:primary' });
+    const response = await h.base.GET(req(`?${params}`));
+    assert.equal(response.status, 200, role);
+    privateResponse(response);
+    assert.deepEqual(h.calls, ['listKnowledgeBase']);
+    assert.deepEqual(h.inputs[0].slice(1), [{ parentId: 19, after: 25, search: 'командиро', archived: false }]);
+  }
+  const root = harness({ role: 'manager' });
+  assert.equal((await root.base.GET(req('?search=командиро'))).status, 200);
+  assert.deepEqual(root.inputs[0].slice(1), [{ parentId: null, after: undefined, search: 'командиро', archived: false }]);
+});
+
+test('KB search retains private denials and validates subtree/cursor before repository access', async () => {
+  const anonymous = harness({ role: null });
+  const unauthenticated = await anonymous.base.GET(req('?search=командиро'));
+  assert.equal(unauthenticated.status, 401);
+  privateResponse(unauthenticated);
+  assert.deepEqual(anonymous.calls, []);
+  const denied = harness({ role: 'manager', denied: true });
+  const unavailable = await denied.base.GET(req('?parentId=19&search=командиро'));
+  assert.equal(unavailable.status, 404);
+  privateResponse(unavailable);
+  assert.doesNotMatch(await unavailable.text(), /storage_path|actor_keys|breadcrumbs/);
+  for (const field of ['parentId', 'after']) {
+    for (const value of ['0', '-1', '01', '1.5', '9007199254740992']) {
+      const h = harness({ role: 'manager' });
+      const response = await h.base.GET(req(`?search=командиро&${field}=${value}`));
+      assert.equal(response.status, 400, `${field}=${value}`);
+      privateResponse(response);
+      assert.deepEqual(h.calls, []);
+    }
+  }
+});
+
 test('KB upload, rename, ACL, archive and restore enforce the same three-role management boundary', async () => {
   for (const role of [...roles, null]) {
     const h = harness({ role });

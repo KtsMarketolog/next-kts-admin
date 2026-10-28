@@ -1,24 +1,54 @@
 import type { AdminSession } from '../adminAuth';
 import { assertKnowledgeBaseId, isKnowledgeBaseActorKey, knowledgeBaseInvalid, knowledgeBaseNotFound, parseKnowledgeBaseSearch,
-  KNOWLEDGE_BASE_PAGE_SIZE, type KnowledgeBaseActor, type KnowledgeBaseList } from '../knowledgeBase';
+  KNOWLEDGE_BASE_MAX_DEPTH, KNOWLEDGE_BASE_PAGE_SIZE, type KnowledgeBaseActor, type KnowledgeBaseList, type KnowledgeBaseListNode } from '../knowledgeBase';
 import { assertKnowledgeBaseManage, KB_COLUMNS, mapKnowledgeBaseNode, requireKnowledgeBasePath, withKnowledgeBase, type KnowledgeBaseRow } from './knowledgeBaseRepo.shared';
+
+type KnowledgeBaseListRow = KnowledgeBaseRow & { search_path?: NonNullable<KnowledgeBaseListNode['path']> };
+// Some PostgreSQL clusters use the C locale, whose lower() leaves Russian capitals unchanged.
+const SEARCHABLE_TITLE = "translate(lower(n.title),'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')";
 
 export async function listKnowledgeBase(session: AdminSession, input: { parentId?: number | null; after?: number; search?: string; archived?: boolean } = {}): Promise<KnowledgeBaseList> {
   const parentId = input.parentId ?? null;
   if (parentId !== null) assertKnowledgeBaseId(parentId);
   if (input.after !== undefined) assertKnowledgeBaseId(input.after);
-  const search = parseKnowledgeBaseSearch(input.search);
+  const search = parseKnowledgeBaseSearch(input.search).toLowerCase();
   return withKnowledgeBase(session, 'read', async context => {
     if (input.archived) assertKnowledgeBaseManage(context);
     const path = parentId === null ? [] : await requireKnowledgeBasePath(context, parentId);
     if (path.length && path.at(-1)!.kind !== 'folder') throw knowledgeBaseNotFound();
-    const result = await context.client.query<KnowledgeBaseRow>(`select ${KB_COLUMNS} from knowledge_base_nodes n
+    const recursiveSearch = search !== '' && !input.archived;
+    // Prune inaccessible/archived ancestors before descending, regardless of matching descendants.
+    // Title/cursor filters apply only after traversal so an older, nonmatching parent cannot hide a result.
+    const result = recursiveSearch
+      ? await context.client.query<KnowledgeBaseListRow>(`with recursive visible_tree as (
+        select n.id,n.kind,n.title,$6::jsonb as search_path,$7::bigint[]||n.id as visited,$8::int as depth
+        from knowledge_base_nodes n
+        where n.parent_id is not distinct from $1::bigint and n.archived_at is null
+          and ($2::boolean or n.acl_mode='inherit' or exists(select 1 from knowledge_base_grants where node_id=n.id and actor_key=$3))
+          and $8::int <= $9::int + case when n.kind='file' then 1 else 0 end and not n.id=any($7::bigint[])
+        union all
+        select n.id,n.kind,n.title,
+          visible_tree.search_path||jsonb_build_array(jsonb_build_object('id',visible_tree.id,'title',visible_tree.title)),
+          visible_tree.visited||n.id,visible_tree.depth+1
+        from visible_tree join knowledge_base_nodes n on n.parent_id=visible_tree.id
+        where visible_tree.kind='folder' and visible_tree.depth<$9::int + case when n.kind='file' then 1 else 0 end
+          and not n.id=any(visible_tree.visited)
+          and n.archived_at is null
+          and ($2::boolean or n.acl_mode='inherit' or exists(select 1 from knowledge_base_grants where node_id=n.id and actor_key=$3))
+      ) select ${KB_COLUMNS},visible_tree.search_path from visible_tree join knowledge_base_nodes n on n.id=visible_tree.id
+        where ($5::bigint is null or n.id>$5) and position($4 in ${SEARCHABLE_TITLE})>0
+        order by n.id limit 51`, [parentId, context.manages, context.actorKey, search, input.after ?? null,
+        JSON.stringify(path.map(row => ({ id: Number(row.id), title: row.title }))), path.map(row => row.id), path.length + 1, KNOWLEDGE_BASE_MAX_DEPTH])
+      : await context.client.query<KnowledgeBaseListRow>(`select ${KB_COLUMNS} from knowledge_base_nodes n
       where n.parent_id is not distinct from $1::bigint and ($2::bigint is null or n.id>$2)
         and (n.archived_at is not null)=$3::boolean
         and ($4::boolean or n.acl_mode='inherit' or exists(select 1 from knowledge_base_grants where node_id=n.id and actor_key=$5))
-        and ($6::text='' or position(lower($6) in lower(n.title))>0)
+        and ($6::text='' or position($6 in ${SEARCHABLE_TITLE})>0)
       order by n.id limit 51`, [parentId, input.after ?? null, input.archived ?? false, context.manages, context.actorKey, search]);
-    const nodes = result.rows.slice(0, KNOWLEDGE_BASE_PAGE_SIZE).map(row => mapKnowledgeBaseNode(row, context.manages));
+    const nodes: KnowledgeBaseListNode[] = result.rows.slice(0, KNOWLEDGE_BASE_PAGE_SIZE).map(row => ({
+      ...mapKnowledgeBaseNode(row, context.manages),
+      ...(row.search_path === undefined ? {} : { path: row.search_path }),
+    }));
     return { nodes, nextCursor: result.rows.length > KNOWLEDGE_BASE_PAGE_SIZE ? nodes.at(-1)!.id : null,
       breadcrumbs: path.map(row => mapKnowledgeBaseNode(row, context.manages)), canManage: context.manages };
   });

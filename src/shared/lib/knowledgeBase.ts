@@ -13,7 +13,11 @@ export type KnowledgeBaseNode = {
   access?: KnowledgeBaseAccess;
 };
 export type KnowledgeBaseActor = { actorKey: string; actorName: string; actorRole: string };
-export type KnowledgeBaseList = { nodes: KnowledgeBaseNode[]; nextCursor: number | null; breadcrumbs: KnowledgeBaseNode[]; canManage: boolean };
+export type KnowledgeBaseListNode = KnowledgeBaseNode & {
+  /** Accessible ancestor folders, from the root; returned for active recursive search only. */
+  path?: Array<{ id: number; title: string }>;
+};
+export type KnowledgeBaseList = { nodes: KnowledgeBaseListNode[]; nextCursor: number | null; breadcrumbs: KnowledgeBaseNode[]; canManage: boolean };
 export type KnowledgeBaseStatsRow = {
   key: string; title: string; role?: string; sectionOpens: number; folderOpens: number;
   fileViews: number; downloadsStarted: number; lastVisitAt: string; totalEvents: number;

@@ -25,6 +25,9 @@
 .folderNavigation { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 16px 0; }
 .folderBack { flex-shrink: 0; }
 .breadcrumbs { display: flex; flex-wrap: wrap; gap: 5px 10px; align-items: center; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.searchPath { color: #687082; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere;
+  button.text { display: inline; line-height: inherit; overflow-wrap: anywhere; }
+}
 .folderHeader { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin: 16px 0; h2 { font-size: 22px; margin: 0; overflow-wrap: anywhere; } }
 .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 20px 0; }
 .card { min-width: 0; border: 1px solid #e0e2ee; border-radius: 12px; background: white; padding: 18px; display: flex; flex-direction: column; gap: 12px;

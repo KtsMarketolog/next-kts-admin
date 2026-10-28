@@ -38,6 +38,7 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
   const currentFolder = data?.breadcrumbs.at(-1);
   const parentFolder = currentFolder?.id === parentId ? data?.breadcrumbs.at(-2) : undefined;
   const backLabel = parentFolder ? `Назад в папку «${parentFolder.title}»` : 'Назад к списку папок';
+  const searchLabel = archived ? 'Поиск в архиве текущей папки' : parentId ? 'Поиск в папке и вложенных папках' : 'Поиск по всей Базе знаний';
   useEffect(() => {
     const pop = () => {
       const raw = new URLSearchParams(location.search).get('folder');
@@ -117,7 +118,11 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
         {canManage && currentFolder && !archived && <button type="button" onClick={() => setEditor({ node: currentFolder })}>Доступ к папке</button>}</div>
       <div className={styles.toolbar}>
         <form className={styles.search} onSubmit={(event) => { event.preventDefault(); setQuery(search.trim()); setPages([null]); }}>
-          <label>Поиск в текущей папке<input type="search" value={search} maxLength={100} onChange={(event) => setSearch(event.target.value)} /></label><button type="submit">Найти</button>
+          <label>{searchLabel}<input type="search" value={search} maxLength={100} onChange={(event) => {
+            setSearch(event.target.value);
+            if (!event.target.value.trim()) { setQuery(''); setPages([null]); }
+          }} /></label><button type="submit">Найти</button>
+          {(search || query) && <button type="button" onClick={() => { setSearch(''); setQuery(''); setPages([null]); }}>Сбросить поиск</button>}
         </form>
         <button type="button" disabled={loading} onClick={() => setRefresh((n) => n + 1)}>Обновить</button>
         {canManage && <><button type="button" onClick={() => { setArchived(!archived); setPages([null]); }}>{archived ? 'К материалам' : 'Архив'}</button>
@@ -143,6 +148,11 @@ export function KnowledgeBase({ initialCanManage, initialParentId = null }: { in
         </div>
         <h3>{archived || node.kind === 'folder' ? node.title : <button className={`${styles.text} ${styles.cardTitle}`} type="button"
           onClick={() => setPreview({ node, eventId: crypto.randomUUID() })}>{node.title}</button>}</h3>
+        {query && !archived && node.path && <nav className={styles.searchPath} aria-label={`Расположение «${node.title}»`}>
+          <button type="button" className={styles.text} onClick={() => navigate(null)}>База знаний</button>
+          {node.path.map((ancestor) => <span key={ancestor.id}><span aria-hidden="true"> / </span>
+            <button type="button" className={styles.text} onClick={() => navigate(ancestor.id)}>{ancestor.title}</button></span>)}
+        </nav>}
         <div><p className={styles.muted}>{node.kind === 'file' ? `${kbSize(node.size)} · ` : ''}{kbDate(node.updatedAt)} МСК</p>
           {canManage && <span className={styles.badge}>{node.access?.mode === 'inherit' ? 'Доступ как у папки' : `Выбрано сотрудников: ${node.access?.actorKeys.length ?? 0}`}</span>}</div>
         <div className={styles.cardActions}>{!archived && node.kind === 'folder' && <button type="button" className={`${styles.primary} ${styles.openFolder}`}
