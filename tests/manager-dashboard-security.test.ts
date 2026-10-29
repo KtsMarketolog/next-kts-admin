@@ -289,7 +289,10 @@ test('support shared frame uses only dedicated routes and keeps the opaque sandb
   assert.match(html, /\/shared\/snapshots\?snapshot=23/);
   assert.doesNotMatch(html, /audience=|managerId=|manager-dashboard\/snapshots/);
   assert.match(html, /sandbox="allow-scripts"/);
-  assert.doesNotMatch(html, /allow-same-origin|allow-popups/);
+  const authorFrame = html.match(/<iframe\b[^>]*id="personal"[^>]*>/)?.[0] ?? '';
+  assert.ok(authorFrame);
+  assert.doesNotMatch(authorFrame, /allow-same-origin|allow-popups|allow-modals/);
+  assert.match(html, /printFrame\.setAttribute\('sandbox', 'allow-same-origin allow-modals'\)/);
   assert.match(csp, /script-src 'sha256-/);
   for (const [, script] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) new Script(script);
   const preview = buildSupportSharedDashboardFrame({versionId: 9, preview: true});
@@ -444,7 +447,7 @@ test('outer frame delivers once regardless of snapshot/iframe readiness order an
         addEventListener: (_type: string, callback: (event: Message) => void) => listeners.push(callback),
       },
       fetch: (url: string) => { assert.equal(url, '/api/admin/manager-dashboard/snapshots?snapshot=23'); return responsePromise; },
-      Blob, navigator: { userActivation: { isActive: false } },
+      Blob, HTMLIFrameElement: Object, navigator: { userActivation: { isActive: false } },
     });
     new Script(source).runInContext(context);
     const sendReady = (origin = 'null', sender: unknown = contentWindow) => {
@@ -480,7 +483,7 @@ test('HTML-only frames never request or deliver personal bytes, even with a snap
           addEventListener: (_type: string, callback: (event: Message) => void) => listeners.push(callback),
         },
         fetch: () => { assert.fail('Empty HTML frame must not fetch personal data'); },
-        Blob, navigator: { userActivation: { isActive: false } },
+        Blob, HTMLIFrameElement: Object, navigator: { userActivation: { isActive: false } },
       }));
       assert.equal(delivered.length, 0);
       assert.match(status.textContent, /HTML дашборда доступен/);

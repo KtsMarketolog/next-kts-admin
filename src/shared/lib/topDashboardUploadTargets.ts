@@ -1,5 +1,6 @@
 import sanitizeHtml from 'sanitize-html';
 import { TOP_DASHBOARD_UPLOAD_MAX_DISCOVERED_TARGETS } from './topDashboardLimits';
+import { getTopDashboardUploadLabel } from './topDashboardUploadLabels';
 
 import {
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX,
@@ -82,12 +83,15 @@ export function detectTopDashboardUploadTargets(htmlContent: string): TopDashboa
       multiple: Object.hasOwn(input, 'multiple'),
       directory: Object.hasOwn(input, 'webkitdirectory') || Object.hasOwn(input, 'directory'),
       accept: displayText(input.accept, 512),
-      label: displayText(displayText(input['aria-label'])
-        || (rawId ? labels.get(rawId) : '')
-        || displayText(input.title)
-        || rawId
-        || rawName
-        || `Данные ${index + 1}`),
+      label: getTopDashboardUploadLabel({
+        ariaLabel: input['aria-label'],
+        label: rawId ? labels.get(rawId) : undefined,
+        title: input.title,
+        accept: input.accept ?? '',
+        multiple: Object.hasOwn(input, 'multiple'),
+        directory: Object.hasOwn(input, 'webkitdirectory') || Object.hasOwn(input, 'directory'),
+        index,
+      }),
     };
   }).filter((entry) => !Object.hasOwn(inputs[entry.target.index]!, 'disabled'))
     .slice(0, TOP_DASHBOARD_UPLOAD_MAX_DISCOVERED_TARGETS);

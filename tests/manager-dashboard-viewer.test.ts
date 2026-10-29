@@ -135,7 +135,7 @@ test('support viewer selects its own audience and preserves password flow, empty
   assert.equal(frameUrl(html).searchParams.get('audience'), 'support');
   assert.equal(frameUrl(html).searchParams.get('snapshot'), '17');
   assert.match(html, /введите пароль от файла/);
-  assert.match(html, /sandbox="allow-scripts allow-same-origin"/);
+  assert.match(html, /sandbox="allow-scripts allow-same-origin allow-modals"/);
   assert.doesNotMatch(html, /allow-popups/);
   const empty = render({ ...support, htmlVersion: null });
   assert.doesNotMatch(empty, /<iframe/);
@@ -167,7 +167,7 @@ test('leader own viewer uses the isolated own frame and retains personal history
     assert.equal(url.searchParams.has('preview'), false);
     assert.equal(url.searchParams.has('snapshot'), bindingStatus === 'matched');
     assert.equal(html.includes('previous.ktsp'), bindingStatus === 'matched');
-    assert.match(html, /sandbox="allow-scripts allow-same-origin"/);
+    assert.match(html, /sandbox="allow-scripts allow-same-origin allow-modals"/);
     assert.doesNotMatch(html, /\/review\/|type="file"/);
   }
 });

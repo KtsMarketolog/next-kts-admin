@@ -117,7 +117,7 @@ async function runScope(scope: DashboardScope) {
   const synthetic = syntheticSnapshot(EMAIL, scope);
   const receivedPaths: string[] = [];
   const receivedRequests: Array<{url: string; method: string; body: string}> = [];
-  const shell = (emptyState?: EmptyState, preview = false) => `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}#shell{width:100%;height:100%;border:0}</style></head><body><div id="parent-secret" hidden>synthetic-parent-only</div><iframe id="shell" sandbox="allow-scripts allow-same-origin" src="${FRAME_PATH}?version=1&amp;snapshot=1${emptyState ? `&amp;empty=${emptyState}` : ''}${preview ? '&amp;preview=1' : ''}"></iframe><script>
+  const shell = (emptyState?: EmptyState, preview = false) => `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}#shell{width:100%;height:100%;border:0}</style></head><body><div id="parent-secret" hidden>synthetic-parent-only</div><iframe id="shell" sandbox="allow-scripts allow-same-origin allow-modals" src="${FRAME_PATH}?version=1&amp;snapshot=1${emptyState ? `&amp;empty=${emptyState}` : ''}${preview ? '&amp;preview=1' : ''}"></iframe><script>
     window.fixtureViewerEmail = ${JSON.stringify(VIEWER_EMAIL)};
     window.fixtureDownloads = [];
     window.fixtureMessages = [];
@@ -330,7 +330,7 @@ async function runScope(scope: DashboardScope) {
         })()`);
         assert.deepEqual(isolation, { origin: 'null', parentBlocked: true, storageBlocked: true, networkBlocked: true });
         assert.equal(receivedPaths.includes('/forbidden-network-probe'), false, 'CSP prevents network probe reaching HTTP server');
-        assert.equal(await integrated.locator('#shell').getAttribute('sandbox'), 'allow-scripts allow-same-origin', 'trusted wrapper stays same origin without popup permission');
+        assert.equal(await integrated.locator('#shell').getAttribute('sandbox'), 'allow-scripts allow-same-origin allow-modals', 'trusted wrapper permits scriptless printing without popup permission');
         const wrapper = integrated.frames().find((candidate: { url(): string }) => candidate.url().includes(FRAME_PATH));
         assert.ok(wrapper);
         assert.equal(await wrapper.title(), shared ? 'Общий дашборд сопровождения' : 'Личный дашборд продаж');
@@ -342,12 +342,13 @@ async function runScope(scope: DashboardScope) {
           probe.addEventListener('click', () => {
             const blank = window.open('about:blank', '_blank');
             const network = window.open(${JSON.stringify(`${origin}/forbidden-popup-probe`)}, '_blank');
-            probe.dataset.blocked = String(blank === null && network === null);
+            probe.dataset.blocked = String(blank !== null && !(blank instanceof Window) && typeof blank.print === 'function' && network === null);
+            if (blank) blank.close();
           });
           document.body.append(probe);
         })()`);
         await content.locator('#synthetic-popup-probe').click();
-        assert.equal(await content.locator('#synthetic-popup-probe').getAttribute('data-blocked'), 'true', 'even a real user gesture cannot open a blank or network popup');
+        assert.equal(await content.locator('#synthetic-popup-probe').getAttribute('data-blocked'), 'true', 'blank printing gets only an inert handle; even a real gesture cannot open a network popup');
         assert.equal(context.pages().length, pageCountBeforePopupProbe, 'popup probe creates no browser page');
         assert.equal(receivedPaths.includes('/forbidden-popup-probe'), false, 'popup probe makes no HTTP request');
         await content.locator('#synthetic-popup-probe').evaluate((node: HTMLElement) => node.remove());

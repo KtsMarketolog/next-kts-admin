@@ -111,7 +111,7 @@ export function DashboardFrame({
         key={params.toString()}
         src={`/api/admin/manager-dashboard/${own ? 'own/' : reviewManagerId ? 'review/' : ''}frame?${params.toString()}`}
         title={preview ? 'Предпросмотр HTML личного дашборда' : own ? 'Мой личный дашборд МР' : 'Личный дашборд менеджера'}
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-modals"
         referrerPolicy="same-origin"
         allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'; fullscreen *"
         allowFullScreen

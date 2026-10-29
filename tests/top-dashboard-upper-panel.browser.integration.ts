@@ -13,6 +13,13 @@ import { pathToFileURL } from 'node:url';
 
 import { build } from 'esbuild';
 import { compile } from 'sass';
+import { detectTopDashboardUploadTargets } from '../src/shared/lib/topDashboardUploadTargets';
+
+const calendarTargets = detectTopDashboardUploadTargets(`
+  <input id="fi" type="file" accept=".xlsx,.xls,.xlsm" multiple hidden>
+  <input id="fd" type="file" webkitdirectory multiple hidden>
+  <input id="fs" type="file" accept=".json" hidden>
+`);
 
 const fixtureEntry = `
 import React from 'react';
@@ -24,7 +31,7 @@ const date='2026-09-17T06:00:00Z';
 const scenario=new URLSearchParams(location.search).get('case')||'multiple';
 const access=new URLSearchParams(location.search).get('access')||'hidden';
 const target=(id,index,multiple=false)=>({target:{id,name:null,index},multiple,directory:false,accept:'.json,.json.gz',label:id==='sales'?'Продажи':'Остатки'});
-const targets=scenario==='multiple'?[target('sales',0,true)]:[target('sales',0),target('inventory',1,true)];
+const targets=scenario==='calendar'?${JSON.stringify(calendarTargets)}:scenario==='multiple'?[target('sales',0,true)]:[target('sales',0),target('inventory',1,true)];
 const version=(id,status)=>({id,status,originalName:'synthetic-'+id+'.html',fileSize:1000,sha256:'a'.repeat(64),uploadedByName:'Тест',firstPublishedByName:'Тест',firstPublishedAt:date,createdAt:date});
 const snapshot=id=>({id,originalName:'synthetic-'+id+'.ktsmf',fileSize:1000,uncompressedSize:900,sha256:'b'.repeat(64),snapshotFormat:'multi-file-v1',boundHtmlVersionId:10,status:'active',uploadedByName:'Тест',createdAt:date});
 window.fixtureOverview={block:{id:7,title:'Синтетический обзор',createdAt:date},activeVersionId:10,previousVersionId:9,updatedAt:date,versions:[version(10,'active'),version(11,'draft'),version(9,'archived'),version(8,'archived')],data:{activeVersionId:200,previousVersionId:199,updatedAt:date,versions:[snapshot(200),{...snapshot(199),status:'previous'},{...snapshot(198),status:'archived'},{...snapshot(190),status:'archived',boundHtmlVersionId:9}]},activeDataContract:{htmlVersionId:10,mode:'generic',snapshotFormat:'multi-file-v1',profile:'generic',directUploadTarget:null,uploadTargets:scenario==='runtime'?[]:targets}};
@@ -204,6 +211,21 @@ async function main() {
             assert.equal(await page.evaluate(() => (window as any).fixtureFrame === document.querySelector('.topDashboardLayout iframe')), true, 'access filtering never remounts the report');
           }
         }
+        await page.goto(`${origin}/?case=calendar`);
+        await page.waitForSelector('.topDashboardMultiUploadControls');
+        assert.deepEqual(await page.locator('.topDashboardUploadTarget > strong').allTextContents(),
+          ['Excel-файлы', 'Папка с файлами', 'JSON-снимок']);
+        const calendarInputs = page.locator('.topDashboardUploadTarget input[type="file"]');
+        assert.equal(await calendarInputs.nth(0).getAttribute('accept'), '.xlsx,.xls,.xlsm');
+        assert.equal(await calendarInputs.nth(1).getAttribute('webkitdirectory'), '');
+        assert.equal(await calendarInputs.nth(2).getAttribute('accept'), '.json');
+        for (const width of [1440, 390]) {
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+          await page.locator('.topDashboardDataUploadCard').screenshot({ path: path.join(screenshots, `${engine}-${width}-calendar-labels.png`) });
+        }
+        assert.equal(await page.evaluate(() => (window as any).fixtureUploads.length), 0,
+          'Discovering readable labels does not upload or replace data');
         await page.setViewportSize({ width: 1440, height: 1000 });
         await page.goto(`${origin}/?case=multiple`);
         await page.waitForSelector('#top-dashboard-data-history .topDashboardVersionRow');

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { PersonalDashboardAudience } from './managerDashboardAudience';
 import { dashboardUsageRelayScript } from './dashboardUsageBridge';
 import { instrumentReviewedDashboardUsage } from './dashboardUsageProfiles';
+import { personalDashboardFramePrintScript, personalDashboardPrintAdapterScript } from './managerDashboardPrint';
 
 import { buildTopDashboardContentSecurityPolicy, buildTopDashboardFrameSecurityPolicy, getTopDashboardDataAdapterScript } from './topDashboardContentSecurity';
 import { TOP_DASHBOARD_DOWNLOAD_MESSAGE_MARKER, TOP_DASHBOARD_DOWNLOAD_MAX_BYTES, TOP_DASHBOARD_DOWNLOAD_MAX_NAME_LENGTH, TOP_DASHBOARD_DOWNLOAD_NAME_PATTERN_SOURCE, TOP_DASHBOARD_DOWNLOAD_INVALID_NAME_PATTERN_SOURCE } from './topDashboardDownloadBridge';
@@ -151,7 +152,7 @@ export function getPersonalDashboardAdapterScript(scope: DashboardScope = 'perso
 export function injectPersonalDashboardAdapter(html: string, scope: DashboardScope = 'personal') {
   if (!isPersonalDashboardHtml(html)) throw new Error('HTML не поддерживает контракт личного снимка kts-personal v1');
   html = instrumentReviewedDashboardUsage(html);
-  const script = `<script data-kts-personal-download-adapter="1">${getTopDashboardDataAdapterScript(null, null, true)}</script><script data-kts-personal-adapter="1">${getPersonalDashboardAdapterScript(scope)}</script>`;
+  const script = `<script data-kts-personal-download-adapter="1">${getTopDashboardDataAdapterScript(null, null, true)}</script><script data-kts-personal-print-adapter="1">${personalDashboardPrintAdapterScript()}</script><script data-kts-personal-adapter="1">${getPersonalDashboardAdapterScript(scope)}</script>`;
   const index = html.toLowerCase().lastIndexOf('</body>');
   return index >= 0 ? html.slice(0, index) + script + html.slice(index) : html + script;
 }
@@ -206,6 +207,7 @@ function buildDashboardFrame(input: DashboardFrameInput, scope: DashboardScope, 
     'use strict';
     const frame = document.getElementById('personal');
     ${dashboardUsageRelayScript('frame')}
+    ${personalDashboardFramePrintScript()}
     const status = document.getElementById('status');
     const preview = ${input.preview};
     const emptyState = ${JSON.stringify(input.emptyState ?? null)};
@@ -251,6 +253,6 @@ function buildDashboardFrame(input: DashboardFrameInput, scope: DashboardScope, 
       }).catch((error) => {status.textContent = error.message;});
     }
   })();`;
-  const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${title}</title><style>html,body{margin:0;height:100%;font-family:Arial,sans-serif}#status{padding:12px;background:#f5f3ff;color:#271078}iframe{border:0;width:100%;height:100%;display:block}</style></head><body><div id="status">${shared ? 'Загрузка общего снимка…' : 'Загрузка личного снимка…'}</div><iframe id="personal" title="${title}" sandbox="allow-scripts" referrerpolicy="same-origin" src="${contentPath.replace(/&/g, '&amp;')}"></iframe><script>${script}</script></body></html>`;
+  const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${title}</title><style>html,body{margin:0;height:100%;font-family:Arial,sans-serif}#status,#print-notice{padding:12px;background:#f5f3ff;color:#271078}iframe{border:0;width:100%;height:100%;display:block}</style></head><body><div id="status">${shared ? 'Загрузка общего снимка…' : 'Загрузка личного снимка…'}</div><div id="print-notice" role="alert" hidden></div><iframe id="personal" title="${title}" sandbox="allow-scripts" referrerpolicy="same-origin" src="${contentPath.replace(/&/g, '&amp;')}"></iframe><script>${script}</script></body></html>`;
   return { html, csp: buildTopDashboardFrameSecurityPolicy(script) };
 }

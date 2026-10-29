@@ -25,13 +25,14 @@ const contentPath = '/api/admin/top-dashboard/blocks/7/versions/51/content';
 type Target = { id: string | null; name: string | null; index: number };
 type SelectedFile = { name: string; type: string; lastModified: number; webkitRelativePath: string; text: string };
 type Selection = { target: Target; files: SelectedFile[] };
-type Message = { type: string; requestId?: string; ok?: boolean; warnings?: string[]; targets?: Array<{target: Target; multiple: boolean; directory: boolean}> };
+type Message = { type: string; requestId?: string; ok?: boolean; warnings?: string[]; targets?: Array<{target: Target; multiple: boolean; directory: boolean; accept: string; label: string}> };
 type Fixture = { name: string; markup: string; dynamic?: boolean; count: number; directory?: boolean };
 const fixtures: Fixture[] = [
   { name: 'static-multiple', markup: '<label for="source">Продажи и остатки</label><input id="source" name="sources" type="file" multiple accept=".json,.json.gz">', count: 1 },
   { name: 'multiple-targets', markup: '<input id="sales" type="file" accept=".json"><input id="stock" type="file" accept=".json">', count: 2 },
   { name: 'directory', markup: '<input id="folder" type="file" webkitdirectory multiple>', count: 1, directory: true },
   { name: 'dynamic', markup: '', dynamic: true, count: 1 },
+  { name: 'calendar-readable-labels', markup: '<input id="fi" type="file" accept=".xlsx,.xls,.xlsm" multiple hidden><input id="fd" type="file" webkitdirectory multiple hidden><input id="fs" type="file" accept=".json" hidden>', count: 3 },
 ];
 
 function reportHtml(fixture: Fixture) {
@@ -180,9 +181,16 @@ window.__messages=[];window.addEventListener('message',e=>{if(e.source===documen
           const descriptors = await targets();
           assert.ok(gets > 0);
           assert.equal(descriptors[0].directory, !!fixture.directory);
+          if (fixture.name === 'calendar-readable-labels') {
+            assert.deepEqual(descriptors, [
+              { target: { id: 'fi', name: null, index: 0 }, multiple: true, directory: false, accept: '.xlsx,.xls,.xlsm', label: 'Excel-файлы' },
+              { target: { id: 'fd', name: null, index: 1 }, multiple: true, directory: true, accept: '', label: 'Папка с файлами' },
+              { target: { id: 'fs', name: null, index: 2 }, multiple: false, directory: false, accept: '.json', label: 'JSON-снимок' },
+            ], 'Readable labels do not alter destinations or accepted formats from the uploaded HTML');
+          }
           const selected: Selection[] = descriptors.map((descriptor, index) => ({
             target: descriptor.target,
-            files: [{name: `${index}-snapshot.json`, type: 'application/json', lastModified: 1788888888888, webkitRelativePath: fixture.directory ? `snapshots/${index}-snapshot.json` : '', text: JSON.stringify({sum: index + 1, source: fixture.name})}],
+            files: [{name: `${index}-snapshot.json`, type: 'application/json', lastModified: 1788888888888, webkitRelativePath: descriptor.directory ? `snapshots/${index}-snapshot.json` : '', text: JSON.stringify({sum: index + 1, source: fixture.name})}],
           }));
           assert.equal((await upload('invalid-target', [{...selected[0], target: {...selected[0].target, index: 30}}])).ok, false);
           assert.equal((await upload('stale-version', selected, 999)).ok, false);

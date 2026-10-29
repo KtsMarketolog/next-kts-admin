@@ -1,4 +1,5 @@
 import { TOP_DASHBOARD_UPLOAD_MAX_DISCOVERED_TARGETS } from '../../topDashboardLimits';
+import { getTopDashboardUploadLabel } from '../../topDashboardUploadLabels';
 import {
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_FILES_PER_TARGET,
   TOP_DASHBOARD_MULTI_FILE_SNAPSHOT_MAX_INPUT_INDEX,
@@ -12,7 +13,8 @@ import {
  * Emitted into the enclosing runtime's lexical scope; preserve statement order.
  */
 export function multiFileAdapterScript() {
-  return String.raw`  function isFileInput(value) {
+  return String.raw`  const uploadInputLabel = ${getTopDashboardUploadLabel.toString()};
+  function isFileInput(value) {
     return value instanceof HTMLInputElement && value.type === 'file';
   }
 
@@ -58,7 +60,15 @@ export function multiFileAdapterScript() {
       multiple: input.multiple,
       directory: input.hasAttribute('webkitdirectory') || input.hasAttribute('directory'),
       accept: (input.accept || '').slice(0, 512),
-      label: (input.getAttribute('aria-label') || (input.labels && input.labels[0] && input.labels[0].textContent) || input.id || input.name || 'Данные отчёта').trim().slice(0, 160),
+      label: uploadInputLabel({
+        ariaLabel: input.getAttribute('aria-label'),
+        label: input.labels && input.labels[0] && input.labels[0].textContent,
+        title: input.title,
+        accept: input.accept || '',
+        multiple: input.multiple,
+        directory: input.hasAttribute('webkitdirectory') || input.hasAttribute('directory'),
+        index: allFileInputs().indexOf(input),
+      }),
     })).filter((entry) => entry.target);
     const fingerprint = JSON.stringify(targets);
     if (!force && fingerprint === uploadTargetsFingerprint) return;
@@ -75,8 +85,8 @@ export function multiFileAdapterScript() {
       }, 100);
     });
     targetsObserver.observe(document.documentElement, {
-      childList: true, subtree: true, attributes: true,
-      attributeFilter: ['id', 'name', 'type', 'multiple', 'webkitdirectory', 'directory', 'accept', 'disabled', 'aria-label'],
+      childList: true, subtree: true, characterData: true, attributes: true,
+      attributeFilter: ['id', 'name', 'type', 'multiple', 'webkitdirectory', 'directory', 'accept', 'disabled', 'aria-label', 'title', 'for'],
     });
   }
 
