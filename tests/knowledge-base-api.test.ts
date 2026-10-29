@@ -93,8 +93,9 @@ function privateResponse(response: Response) {
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(response.headers.get('vary'), 'Cookie');
 }
-function uploadRequest() { return req(`/upload?parentId=19&operationId=${uuid}`, 'POST', 'synthetic', {
+function uploadRequest(parentId: string | null = '19', access?: unknown) { return req(`/upload?operationId=${uuid}${parentId === null ? '' : `&parentId=${parentId}`}`, 'POST', 'synthetic', {
   'x-kb-file-name': encodeURIComponent('doc.pdf'), 'x-kb-title': encodeURIComponent('Инструкция'), 'content-type': 'application/octet-stream',
+  ...(access === undefined ? {} : { 'x-kb-access': encodeURIComponent(JSON.stringify(access)) }),
 }); }
 
 test('KB read accepts all authenticated employee roles; Admin/Admin TOP/TOP manage and inspect people/statistics', async () => {
@@ -358,6 +359,36 @@ test('KB UI cannot forge successful file events, and scoped parent is checked be
   }
   const h = harness({ denied: true }); assert.equal((await h.upload.POST(uploadRequest())).status, 404);
   assert.deepEqual(h.calls, ['getKnowledgeBaseNode']);
+});
+
+test('KB root upload needs management permission and defaults to a private custom ACL without a fake parent', async () => {
+  for (const role of [...roles, null]) {
+    const h = harness({ role });
+    const response = await h.upload.POST(uploadRequest(null));
+    const manage = role === 'admin' || role === 'admintop' || role === 'top';
+    assert.equal(response.status, manage ? 200 : role ? 403 : 401, String(role));
+    privateResponse(response);
+    if (!manage) { assert.deepEqual(h.calls, []); continue; }
+    assert.deepEqual(h.calls, ['save', 'createKnowledgeBaseFile']);
+    assert.equal((h.inputs[0][1] as { parentId: unknown }).parentId, null);
+    assert.deepEqual((h.inputs[0][1] as { access: unknown }).access, { mode: 'custom', actorKeys: [] });
+    assert.equal(h.released(), 1);
+  }
+  const h = harness();
+  const access = { mode: 'custom', actorKeys: ['manager:7'] };
+  assert.equal((await h.upload.POST(uploadRequest(null, access))).status, 200);
+  assert.deepEqual((h.inputs[0][1] as { access: unknown }).access, access);
+});
+
+test('KB root upload rejects inherit ACL and malformed parent IDs before storing any bytes', async () => {
+  const h = harness();
+  assert.equal((await h.upload.POST(uploadRequest(null, { mode: 'inherit', actorKeys: [] }))).status, 400);
+  assert.deepEqual(h.calls, []); assert.equal(h.released(), 0);
+  for (const value of ['', 'null', 'undefined', '0', '01', '-1', '19.0', '9007199254740992']) {
+    const bad = harness();
+    assert.equal((await bad.upload.POST(uploadRequest(value))).status, 400, value);
+    assert.deepEqual(bad.calls, []); assert.equal(bad.released(), 0);
+  }
 });
 
 test('KB uploads release every slot; uncertain DB commits preserve bytes and duplicate retries discard only the new file', async () => {

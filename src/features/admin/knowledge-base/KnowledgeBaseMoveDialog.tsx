@@ -68,7 +68,7 @@ export function KnowledgeBaseMoveDialog({ node, initialTargetParentId, onClose, 
   const selfPath = listing?.breadcrumbs.some((folder) => folder.id === node.id) ?? false;
   const currentFolder = listing?.breadcrumbs.at(-1);
   const parentFolder = listing?.breadcrumbs.at(-2);
-  const canChoose = !!listing && !loading && !selfPath && folderId !== node.parentId && (folderId !== null || node.kind === 'folder');
+  const canChoose = !!listing && !loading && !selfPath && folderId !== node.parentId;
   const commit = async () => {
     if (!preview || !target || busy || mustReload || pending.current) return;
     pending.current = true; setBusy(true); setError('');
@@ -105,13 +105,15 @@ export function KnowledgeBaseMoveDialog({ node, initialTargetParentId, onClose, 
               ? `База знаний / ${preview.destinationBreadcrumbs.map((folder) => folder.title).join(' / ')}` : 'Корень Базы знаний'}</dd>
               <dt>Затронуто материалов</dt><dd>{preview.affectedCount}</dd></dl>
             <div className={styles.moveWarning} role="note"><strong>Проверьте изменение доступа</strong><p>{preview.accessWarning}</p></div>
-            <p className={styles.muted}>Содержимое файлов, история и собственные настройки доступа сохраняются. Перемещение выполняется только после подтверждения.</p>
+            <p className={styles.muted}>{node.kind === 'file' && target.parentId === null
+              ? 'Содержимое файла и история сохраняются. В корне прежний доступ сотрудников будет закреплён отдельным списком, без расширения доступа.'
+              : 'Содержимое файлов, история и собственные настройки доступа сохраняются.'} Перемещение выполняется только после подтверждения.</p>
           </>}
           <div className={styles.actions}><button type="button" disabled={busy} onClick={() => { setTarget(null); setPreview(null); setError(''); }}>Выбрать другую папку</button>
             <button type="button" disabled={busy} onClick={onClose}>Отмена</button>
             {preview && <button type="button" className={styles.primary} disabled={busy} onClick={() => void commit()}>Подтвердить перемещение</button>}</div>
         </> : <>
-          <p className={styles.muted}>Выберите папку назначения. {node.kind === 'file' ? 'Файл нельзя переместить в корень.' : 'Папку нельзя переместить внутрь самой себя.'}</p>
+          <p className={styles.muted}>Выберите папку назначения или корень Базы знаний. {node.kind === 'folder' ? 'Папку нельзя переместить внутрь самой себя.' : 'При переносе в корень прежний доступ сотрудников будет сохранён отдельным списком.'}</p>
           <nav className={styles.moveBreadcrumbs} aria-label="Папка назначения"><button type="button" onClick={() => navigate(null)}>В корень</button>
             {folderId !== null && <button type="button" disabled={loading} onClick={() => navigate(parentFolder?.id ?? null)}>На уровень выше</button>}
             <span>{currentFolder?.title ?? (folderId === null ? 'База знаний' : 'Загрузка папки…')}</span></nav>

@@ -14,8 +14,9 @@ export async function listKnowledgeBase(session: AdminSession, input: { parentId
   const search = parseKnowledgeBaseSearch(input.search).toLowerCase();
   return withKnowledgeBase(session, 'read', async context => {
     if (input.archived) assertKnowledgeBaseManage(context);
-    const path = parentId === null ? [] : await requireKnowledgeBasePath(context, parentId);
+    const path = parentId === null ? [] : await requireKnowledgeBasePath(context, parentId, Boolean(input.archived));
     if (path.length && path.at(-1)!.kind !== 'folder') throw knowledgeBaseNotFound();
+    const parentArchived = Boolean(input.archived && path.some(row => row.archived_at));
     const recursiveSearch = search !== '' && !input.archived;
     // Prune inaccessible/archived ancestors before descending, regardless of matching descendants.
     // Title/cursor filters apply only after traversal so an older, nonmatching parent cannot hide a result.
@@ -23,7 +24,7 @@ export async function listKnowledgeBase(session: AdminSession, input: { parentId
       ? await context.client.query<KnowledgeBaseListRow>(`with recursive visible_tree as (
         select n.id,n.kind,n.title,$6::jsonb as search_path,$7::bigint[]||n.id as visited,$8::int as depth
         from knowledge_base_nodes n
-        where n.parent_id is not distinct from $1::bigint and n.archived_at is null
+        where n.parent_id is not distinct from $1::bigint and n.archived_at is null and n.deleted_at is null
           and ($2::boolean or n.acl_mode='inherit' or exists(select 1 from knowledge_base_grants where node_id=n.id and actor_key=$3))
           and $8::int <= $9::int + case when n.kind='file' then 1 else 0 end and not n.id=any($7::bigint[])
         union all
@@ -33,7 +34,7 @@ export async function listKnowledgeBase(session: AdminSession, input: { parentId
         from visible_tree join knowledge_base_nodes n on n.parent_id=visible_tree.id
         where visible_tree.kind='folder' and visible_tree.depth<$9::int + case when n.kind='file' then 1 else 0 end
           and not n.id=any(visible_tree.visited)
-          and n.archived_at is null
+          and n.archived_at is null and n.deleted_at is null
           and ($2::boolean or n.acl_mode='inherit' or exists(select 1 from knowledge_base_grants where node_id=n.id and actor_key=$3))
       ) select ${KB_COLUMNS},visible_tree.search_path from visible_tree join knowledge_base_nodes n on n.id=visible_tree.id
         where ($5::bigint is null or n.id>$5) and position($4 in ${SEARCHABLE_TITLE})>0
@@ -41,10 +42,10 @@ export async function listKnowledgeBase(session: AdminSession, input: { parentId
         JSON.stringify(path.map(row => ({ id: Number(row.id), title: row.title }))), path.map(row => row.id), path.length + 1, KNOWLEDGE_BASE_MAX_DEPTH])
       : await context.client.query<KnowledgeBaseListRow>(`select ${KB_COLUMNS} from knowledge_base_nodes n
       where n.parent_id is not distinct from $1::bigint and ($2::bigint is null or n.id>$2)
-        and (n.archived_at is not null)=$3::boolean
+        and n.deleted_at is null and ($7::boolean or (n.archived_at is not null)=$3::boolean)
         and ($4::boolean or n.acl_mode='inherit' or exists(select 1 from knowledge_base_grants where node_id=n.id and actor_key=$5))
         and ($6::text='' or position($6 in ${SEARCHABLE_TITLE})>0)
-      order by n.id limit 51`, [parentId, input.after ?? null, input.archived ?? false, context.manages, context.actorKey, search]);
+      order by n.id limit 51`, [parentId, input.after ?? null, input.archived ?? false, context.manages, context.actorKey, search, parentArchived]);
     const nodes: KnowledgeBaseListNode[] = result.rows.slice(0, KNOWLEDGE_BASE_PAGE_SIZE).map(row => ({
       ...mapKnowledgeBaseNode(row, context.manages),
       ...(row.search_path === undefined ? {} : { path: row.search_path }),

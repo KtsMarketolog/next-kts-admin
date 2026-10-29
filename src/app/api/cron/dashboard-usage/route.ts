@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { pruneExpiredDashboardUsage } from '@/shared/lib/db/dashboardUsageRepo';
+import { processKnowledgeBaseDeletionCleanup } from '@/shared/lib/db/knowledgeBaseDeletionCleanup';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,10 +53,20 @@ export async function POST(request: Request) {
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return Response.json({ error: 'Unauthorized' }, { status: 401, headers });
   // The cutoff and deletion scope are server-defined, never supplied by callers.
   if (!await hasEmptyBody(request)) return Response.json({ error: 'Request body is not accepted' }, { status: 400, headers });
-  try {
-    return Response.json(await pruneExpiredDashboardUsage(), { headers });
-  } catch {
+  // Independent maintenance: an unrelated journal failure must not strand files
+  // explicitly deleted by an authorized administrator. This never scans archives.
+  const [retention, cleanup] = await Promise.allSettled([
+    pruneExpiredDashboardUsage(),
+    processKnowledgeBaseDeletionCleanup({ limit: 25, budgetMs: 5_000 }),
+  ]);
+  const knowledgeBaseCleanup = cleanup.status === 'fulfilled' ? cleanup.value
+    : { processed: 0, completed: 0, failed: 0, pending: true, exhausted: 0, error: true };
+  if (cleanup.status === 'rejected') console.error('KNOWLEDGE_BASE_DELETION_CLEANUP_FAILED');
+  if (retention.status === 'rejected') {
     console.error('DASHBOARD_USAGE_RETENTION_FAILED');
     return Response.json({ error: 'Usage retention failed; retry later' }, { status: 503, headers });
   }
+  // A pending file job is observable and retryable, not a failure of the already
+  // committed deletion or of the independent journal-retention operation.
+  return Response.json({ ...retention.value, knowledgeBaseCleanup }, { headers });
 }

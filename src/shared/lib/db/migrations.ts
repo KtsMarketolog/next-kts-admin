@@ -25,6 +25,8 @@ import { applyEmployeeIdentifierMigration } from './employeeIdentifierMigration'
 import { applyPriceRequestOutboxMigration } from './priceRequestOutboxMigration';
 import { applyLoginCredentialMigration } from './loginCredentialMigration';
 import { applyKnowledgeBaseMigration } from './knowledgeBaseMigration';
+import { applyKnowledgeBaseRootFilesMigration } from './knowledgeBaseRootFilesMigration';
+import { applyKnowledgeBaseDeletionMigration } from './knowledgeBaseDeletionMigration';
 import { applyPriceBuildMigration } from './priceBuildMigration';
 import { applyClientChatReceiptsMigration } from './clientChatReceiptsMigration';
 import { applyTopDashboardHtmlReadinessMigration } from './topDashboardHtmlReadinessMigration';
@@ -881,6 +883,8 @@ const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   {id: '202610230001_client_chat_message_receipts', description: 'Exact client chat read receipts without changing correspondence or legacy read state', apply: applyClientChatReceiptsMigration},
   {id: '202610230002_top_dashboard_html_readiness', description: 'Versioned derived HTML readiness without changing reports, publications or snapshots', apply: applyTopDashboardHtmlReadinessMigration},
   {id: '202610270001_support_shared_json_500_mib', description: 'Allow route-planner JSON snapshots up to 500 MiB without changing saved files or publications', apply: applySupportSharedJsonLimitMigration},
+  {id: '202610300001_knowledge_base_root_files', description: 'Allow explicitly restricted files at the knowledge base root without changing existing materials or access', apply: applyKnowledgeBaseRootFilesMigration},
+  {id: '202610300002_knowledge_base_explicit_deletion', description: 'Add explicit archive deletion receipts and bounded file cleanup without deleting existing materials or usage history', apply: applyKnowledgeBaseDeletionMigration},
 ];
 
 async function ensureSchemaMigrationsTable() {

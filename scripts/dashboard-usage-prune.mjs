@@ -26,7 +26,14 @@ try {
   const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
   if (result.ok !== true || !Number.isSafeInteger(result.deleted) || result.deleted < 0 || result.deleted > 10000
     || ![null, 'running'].includes(result.skipped) || ![null, true, false].includes(result.remaining)) throw new Error('Unexpected retention response');
-  console.log(JSON.stringify({ ok: true, deleted: result.deleted, remaining: result.remaining, skipped: result.skipped }));
+  const cleanup = result.knowledgeBaseCleanup;
+  // Optional for rolling deployments with the previous application version.
+  if (cleanup !== undefined && (!cleanup || typeof cleanup !== 'object'
+    || ['processed', 'completed', 'failed', 'exhausted'].some(key => !Number.isSafeInteger(cleanup[key]) || cleanup[key] < 0)
+    || typeof cleanup.pending !== 'boolean' || typeof cleanup.error !== 'boolean')) throw new Error('Unexpected cleanup response');
+  console.log(JSON.stringify({ ok: true, deleted: result.deleted, remaining: result.remaining, skipped: result.skipped,
+    ...(cleanup ? { knowledgeBaseCleanup: { processed: cleanup.processed, completed: cleanup.completed, failed: cleanup.failed,
+      pending: cleanup.pending, exhausted: cleanup.exhausted, error: cleanup.error } } : {}) }));
 } catch (error) {
   console.error(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : 'Usage retention failed' }));
   process.exitCode = 1;

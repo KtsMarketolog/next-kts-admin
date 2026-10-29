@@ -33,7 +33,7 @@ export const KNOWLEDGE_BASE_ACTIONS = ['section_open', 'folder_open', 'file_view
 export type KnowledgeBaseAction = typeof KNOWLEDGE_BASE_ACTIONS[number];
 export type KnowledgeBaseCreate = { operationId: string; parentId: number | null; title: string; access?: KnowledgeBaseAccess };
 export type KnowledgeBaseFileCreate = KnowledgeBaseCreate & {
-  parentId: number; originalName: string; mimeType: string; size: number; storagePath: string; sha256: string;
+  originalName: string; mimeType: string; size: number; storagePath: string; sha256: string;
 };
 export type KnowledgeBaseUpdate = { expectedRevision: string; title?: string; access?: KnowledgeBaseAccess };
 export type KnowledgeBaseMoveInput = { expectedRevision: string; targetParentId: number | null };

@@ -37,7 +37,7 @@ async function actor(role: AdminSessionRole): Promise<AdminSession> {
 async function folder(session: AdminSession, parentId: number | null, access?: KnowledgeBaseAccess) {
   return (await createKnowledgeBaseFolder(session, { parentId, operationId: randomUUID(), title: `Move folder ${randomUUID()}`, access })).node;
 }
-const fileInput = (parentId: number) => ({ parentId, operationId: randomUUID(), title: 'Synthetic guide',
+const fileInput = (parentId: number | null) => ({ parentId, operationId: randomUUID(), title: 'Synthetic guide',
   originalName: 'guide.pdf', mimeType: 'application/pdf', size: 20,
   storagePath: `knowledge-base/${randomUUID()}.pdf`, sha256: 'a'.repeat(64) });
 async function preview(session: AdminSession, source: KnowledgeBaseNode, targetParentId: number | null) {
@@ -166,13 +166,51 @@ test('knowledge base move real PostgreSQL atomicity, tree safety, access and his
       assert.ok(await getKnowledgeBaseNode(purchaser, source.id));
     });
 
-    await t.test('self, descendant, current parent, target file, root file and missing targets fail without changes', async () => {
+    await t.test('root file moves freeze all effective restrictions, preserve dormant grants, bytes and event history', async () => {
+      for (const mode of ['inherit', 'custom'] as const) {
+        const disabled = await actor('manager'), deleted = await actor('purchaser');
+        const allowed = [key(manager), key(disabled), key(deleted)].sort();
+        const root = await folder(admin, null, acl(manager, purchaser, disabled, deleted));
+        const child = await folder(admin, root.id, acl(manager, support, disabled, deleted));
+        const upload = { ...fileInput(child.id), access: mode === 'inherit'
+          ? { mode: 'inherit' as const, actorKeys: [] } : acl(manager, purchaser, disabled, deleted) };
+        const source = (await createKnowledgeBaseFile(admin, upload)).node;
+        await recordKnowledgeBaseEvent(manager, { eventId: randomUUID(), nodeId: source.id, action: 'file_view' });
+        const before = await row(source.id);
+        const events = (await query('select * from knowledge_base_events where node_id=$1 order by id', [source.id])).rows;
+        await query('update wholesale_managers set is_active=false where id=$1', [disabled.managerId]);
+        await query('delete from admin_users where id=$1', [deleted.adminUserId]);
+        const plan = await preview(top, source, null);
+        assert.equal(plan.affectedCount, 1); assert.equal(plan.destination, null);
+        assert.match(plan.accessWarning, /Файл.*сохранён отдельным списком.*Дополнительные сотрудники доступ не получат/);
+        const changed = await moveKnowledgeBaseNode(top, source.id, { expectedRevision: source.revision, targetParentId: null, previewToken: plan.previewToken });
+        assert.deepEqual(changed.access, { mode: 'custom', actorKeys: allowed });
+        assert.equal(changed.parentId, null); assert.equal(Number(changed.revision), Number(source.revision) + 1);
+        assert.deepEqual(immutableRow(await row(source.id)), immutableRow(before));
+        assert.deepEqual((await query('select * from knowledge_base_events where node_id=$1 order by id', [source.id])).rows, events);
+        assert.equal((await getKnowledgeBaseFileForRead(manager, source.id))?.storagePath, upload.storagePath);
+        assert.equal(await getKnowledgeBaseFileForRead(purchaser, source.id), null);
+        assert.equal(await getKnowledgeBaseFileForRead(support, source.id), null);
+        assert.ok((await listKnowledgeBase(manager)).nodes.some(node => node.id === source.id));
+        await query('update wholesale_managers set is_active=true where id=$1', [disabled.managerId]);
+        assert.ok(await getKnowledgeBaseFileForRead(disabled, source.id));
+        await updateKnowledgeBaseNode(admin, root.id, { expectedRevision: root.revision, access: acl(purchaser) });
+        assert.ok(await getKnowledgeBaseFileForRead(manager, source.id));
+        assert.equal(await getKnowledgeBaseFileForRead(purchaser, source.id), null);
+        await assert.rejects(preview(admin, changed, null), code('SAME_PARENT'));
+      }
+      const emptyRoot = await folder(admin, null);
+      const privateFile = (await createKnowledgeBaseFile(admin, fileInput(emptyRoot.id))).node;
+      assert.deepEqual((await move(admin, privateFile, null)).access, { mode: 'custom', actorKeys: [] });
+    });
+
+    await t.test('self, descendant, current parent, target file and missing targets fail without changes', async () => {
       const source = await folder(admin, null), child = await folder(admin, source.id);
       const file = (await createKnowledgeBaseFile(admin, fileInput(child.id))).node;
       const before = await Promise.all([source.id, child.id, file.id].map(row));
       for (const [node, destination, expectedCode] of [
         [source, source.id, 'MOVE_CYCLE'], [source, child.id, 'MOVE_CYCLE'], [source, null, 'SAME_PARENT'],
-        [child, source.id, 'SAME_PARENT'], [source, file.id, 'NOT_A_FOLDER'], [file, null, 'PARENT_REQUIRED'],
+        [child, source.id, 'SAME_PARENT'], [source, file.id, 'NOT_A_FOLDER'],
       ] as const) await assert.rejects(preview(admin, node, destination), code(expectedCode));
       await assert.rejects(preview(admin, child, 99999999), status(404));
       await assert.rejects(previewKnowledgeBaseMove(admin, child.id, { expectedRevision: '0', targetParentId: null }), status(400));

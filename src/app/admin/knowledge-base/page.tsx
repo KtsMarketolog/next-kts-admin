@@ -5,10 +5,11 @@ import { KnowledgeBase } from '@/features/admin/knowledge-base/KnowledgeBase';
 
 export const dynamic = 'force-dynamic';
 
-export default async function KnowledgeBasePage({ searchParams }: { searchParams: Promise<{ folder?: string }> }) {
+export default async function KnowledgeBasePage({ searchParams }: { searchParams: Promise<{ folder?: string; archived?: string }> }) {
   const session = await getAdminSession();
   if (!canAccessKnowledgeBase(session)) redirect('/login?mode=employee');
-  const { folder } = await searchParams;
+  const { folder, archived } = await searchParams;
   const parentId = typeof folder === 'string' && /^[1-9]\d*$/.test(folder) && Number.isSafeInteger(Number(folder)) ? Number(folder) : null;
-  return <KnowledgeBase initialCanManage={canManageKnowledgeBase(session)} initialParentId={parentId} />;
+  return <KnowledgeBase initialCanManage={canManageKnowledgeBase(session)} initialParentId={parentId}
+    initialArchived={canManageKnowledgeBase(session) && archived === '1'} />;
 }

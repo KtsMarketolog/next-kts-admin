@@ -79,6 +79,43 @@ export async function removeUncommittedKnowledgeBaseFile(storagePath: string) {
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
 }
 
+/** Only for a durable deletion-outbox entry whose node is already irreversibly deleted. */
+export async function removeDeletedKnowledgeBaseFile(storagePath: string, expectedSize: number, expectedSha256: string) {
+  const name = safeStorageName(storagePath);
+  if (!/^[0-9a-f]{64}$/.test(expectedSha256)) throw new Error('Invalid cleanup digest');
+  // A missing mount/storage directory is not proof that this exact file was deleted.
+  const directory = await privateDirectory(false);
+  const fullPath = path.join(directory, name);
+  let file: FileHandle | null = null;
+  try {
+    file = await openKnowledgeBaseFile(storagePath, expectedSize);
+    const before = await file.stat();
+    const hash = createHash('sha256');
+    const bytes = new Uint8Array(64 * 1024);
+    let position = 0;
+    while (true) {
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, position);
+      if (!bytesRead) break;
+      position += bytesRead;
+      if (position > expectedSize) throw new Error('Cleanup file changed');
+      hash.update(bytes.subarray(0, bytesRead));
+    }
+    if (position !== expectedSize || hash.digest('hex') !== expectedSha256) throw new Error('Cleanup file changed');
+    const current = await lstat(/*turbopackIgnore: true*/ fullPath);
+    if (!current.isFile() || current.isSymbolicLink() || current.ino !== before.ino || current.dev !== before.dev) {
+      throw new Error('Cleanup file changed');
+    }
+    await unlink(/*turbopackIgnore: true*/ fullPath);
+  } catch (error) {
+    // A crash after unlink but before the outbox acknowledgement is safe to retry.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if (await privateDirectory(false) !== directory) throw error;
+    try { await lstat(/*turbopackIgnore: true*/ fullPath); }
+    catch (missing) { if ((missing as NodeJS.ErrnoException).code === 'ENOENT') return; throw missing; }
+    throw error;
+  } finally { await file?.close(); }
+}
+
 export function knowledgeBaseHtmlPolicy(html: string) {
   // Bound work before the shared HTML tokenizer/hash builder; many unterminated tags or
   // hundreds of thousands of tiny handlers must not amplify parser work.

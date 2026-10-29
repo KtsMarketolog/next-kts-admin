@@ -119,9 +119,49 @@ One transaction deletes at most 10 batches of 1,000 expired usage events using
 the `(created_at,id)` index. A non-blocking advisory lock excludes concurrent jobs;
 SQL lock/statement timeouts bound contention. Associated invoice, filename and
 visible-time detail rows are removed with their expired usage event through foreign
-keys. No HTML versions,
-snapshots, employees, security audit or other application data are deleted. If a backlog
+keys. No report HTML versions,
+snapshots, employees or security audit are deleted. If a backlog
 exceeds 10,000 entries, subsequent runs continue clearing it.
+
+The same authenticated maintenance call independently drains the Knowledge Base
+file-deletion outbox: at most 25 files and a 5-second admission budget per run.
+Only a prior, explicit permanent deletion confirmed by Admin, Admin TOP or TOP
+creates these jobs. There is no directory scan, archive expiry, orphan cleanup or
+automatic deletion of existing materials. A job checks the deleted node, absence
+of live references, private path, file size and digest before unlinking; it keeps
+the receipt until the filesystem result is acknowledged. Usage history and the
+deletion audit remain in the database. The two maintenance tasks run independently;
+a journal failure does not prevent file cleanup, and pending file cleanup does not
+turn an already committed user deletion into an error.
+
+Cleanup uses bounded exponential retries (8 attempts, up to 1 hour between
+attempts). Sanitized `knowledge_base_deletion_cleanup_pending` logs and the
+`knowledgeBaseCleanup` scheduler summary distinguish pending work from exhausted
+jobs. Inspect only the relevant receipts when troubleshooting:
+
+```sql
+SELECT node_id, deletion_id, attempts, next_attempt_at, failed_at, last_error
+FROM knowledge_base_file_deletions
+WHERE completed_at IS NULL
+ORDER BY next_attempt_at, node_id
+LIMIT 100;
+```
+
+After diagnosing and correcting the underlying storage problem, an operator may
+explicitly requeue the exact confirmed job, in a transaction, by its verified
+`node_id` and `deletion_id`: set `attempts=0`, `failed_at=NULL`,
+`next_attempt_at=clock_timestamp()` and `last_error=NULL`, restricted to
+`completed_at IS NULL AND failed_at IS NOT NULL`. Do not reset all jobs, bypass
+the path/hash/reference checks, or manually delete files by a directory glob.
+Missing files after a previous successful unlink are acknowledged idempotently.
+An unavailable storage directory is not treated as a successfully removed file.
+
+After the first permanent Knowledge Base deletion, a rollback to a release that
+does not understand `deleted_at` may display deleted rows in its archive. The
+database prevents their restoration and every deleted descendant has an archive
+marker, so legacy file reads remain denied. Keep the additive migration in place;
+use a compatible release for the normal interface rather than clearing deletion
+flags or attempting to restore through an older application.
 
 `kts-dashboard-usage.timer` runs every 15 minutes, independently of browsers and
 the currency scheduler. `Persistent=true` catches up after server downtime. The

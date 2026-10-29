@@ -10,6 +10,8 @@ import { createKnowledgeBaseFile, createKnowledgeBaseFolder, getKnowledgeBaseFil
   listKnowledgeBase, listKnowledgeBaseActors, listKnowledgeBaseStats, recordKnowledgeBaseEvent,
   setKnowledgeBaseArchive, updateKnowledgeBaseNode } from '../src/shared/lib/db/knowledgeBaseRepo';
 import { KNOWLEDGE_BASE_LOCK } from '../src/shared/lib/db/knowledgeBaseRepo.shared';
+import { applyKnowledgeBaseMigration } from '../src/shared/lib/db/knowledgeBaseMigration';
+import { applyKnowledgeBaseRootFilesMigration } from '../src/shared/lib/db/knowledgeBaseRootFilesMigration';
 
 function guard() {
   assert.equal(process.env.KTS_KNOWLEDGE_BASE_TEST, '1');
@@ -32,7 +34,7 @@ async function actor(role: AdminSessionRole): Promise<AdminSession> {
 }
 const status = (expected: number) => (error: unknown) => (error as { status?: number }).status === expected;
 const folderInput = (parentId: number | null, title = `Folder ${++seq}`) => ({ parentId, title, operationId: randomUUID() });
-const fileInput = (parentId: number) => ({ ...folderInput(parentId, 'Guide'), parentId, originalName: 'guide.pdf', mimeType: 'application/pdf',
+const fileInput = (parentId: number | null) => ({ ...folderInput(parentId, 'Guide'), parentId, originalName: 'guide.pdf', mimeType: 'application/pdf',
   size: 100, storagePath: `knowledge-base/${randomUUID()}.pdf`, sha256: 'a'.repeat(64) });
 function safeDto(value: unknown) {
   assert.doesNotMatch(JSON.stringify(value), /storagePath|storage_path|operation_digest|session_hash|password|@synthetic|"sha256"/);
@@ -48,6 +50,62 @@ test('knowledge base real PostgreSQL permissions, conflicts, retry and accountin
     let root: KnowledgeBaseNode = (await createKnowledgeBaseFolder(admin, folderInput(null, 'Knowledge root'))).node;
     const child = (await createKnowledgeBaseFolder(admin, folderInput(root.id, 'Team folder'))).node;
     const file = (await createKnowledgeBaseFile(admin, fileInput(child.id))).node;
+
+    await t.test('additive root migration finds the legacy rule by meaning and preserves old files, grants, history and other checks', async () => {
+      const rollback = new Error('rollback synthetic legacy migration fixture');
+      await assert.rejects(withTransaction(async client => {
+        // All fixture DDL/data is transaction-local and rolled back; public application rows are never touched.
+        await client.query('create schema kb_root_files_migration_fixture');
+        await client.query('set local search_path to kb_root_files_migration_fixture,pg_catalog');
+        await applyKnowledgeBaseMigration(client);
+        const oldRoot = await client.query<{ id: string }>(`insert into knowledge_base_nodes
+          (kind,title,acl_mode,created_by,operation_id,operation_digest) values ('folder','Legacy root','custom','admin:1',$1,$2) returning id::text`,
+        [randomUUID(), 'a'.repeat(64)]);
+        const insertFile = (parentId: string | null, mode = 'inherit') => client.query<{ id: string }>(`insert into knowledge_base_nodes
+          (parent_id,kind,title,acl_mode,original_name,mime_type,file_size,storage_path,sha256,created_by,operation_id,operation_digest)
+          values($1,'file','Existing guide',$2,'guide.pdf','application/pdf',100,'knowledge-base/legacy.pdf',$3,'admin:1',$4,$3) returning id::text`,
+        [parentId, mode, 'a'.repeat(64), randomUUID()]);
+        const oldFile = await insertFile(oldRoot.rows[0].id);
+        await client.query("insert into knowledge_base_grants(node_id,actor_key) values($1,'manager:1')", [oldRoot.rows[0].id]);
+        await client.query(`insert into knowledge_base_events(actor_key,actor_role,event_id,node_id,action)
+          values('manager:1','manager',$1,$2,'file_view')`, [randomUUID(), oldFile.rows[0].id]);
+        const snapshot = async () => (await client.query(`select
+          (select jsonb_agg(to_jsonb(n) order by id) from knowledge_base_nodes n) as nodes,
+          (select jsonb_agg(to_jsonb(g) order by node_id,actor_key) from knowledge_base_grants g) as grants,
+          (select jsonb_agg(to_jsonb(e) order by id) from knowledge_base_events e) as events`)).rows[0];
+        await client.query('savepoint rejected_legacy_root');
+        await assert.rejects(insertFile(null, 'custom'), (error: unknown) => (error as { code: string }).code === '23514');
+        await client.query('rollback to savepoint rejected_legacy_root');
+        const oldCheck = (await client.query<{ name: string }>(`select conname as name from pg_constraint
+          where conrelid='knowledge_base_nodes'::regclass and contype='c'
+            and pg_get_expr(conbin,conrelid) like '%parent_id%folder%custom%'`)).rows;
+        assert.equal(oldCheck.length, 1);
+        const oldIdentifier = '"' + oldCheck[0].name.replace(/"/g, '""') + '"';
+        await client.query(`alter table knowledge_base_nodes rename constraint ${oldIdentifier} to renamed_legacy_root_check`);
+        await client.query(`alter table knowledge_base_nodes drop constraint renamed_legacy_root_check,
+          add constraint differently_grouped_root_check check ((parent_id is not null or kind='folder') and acl_mode='custom') not valid`);
+        const constraintSnapshot = async () => (await client.query(`select conname,pg_get_expr(conbin,conrelid) as expression
+          from pg_constraint where conrelid='knowledge_base_nodes'::regclass order by conname`)).rows;
+        const unknownChecks = await constraintSnapshot();
+        await assert.rejects(applyKnowledgeBaseRootFilesMigration(client), /Unexpected knowledge base root constraint/);
+        assert.deepEqual(await constraintSnapshot(), unknownChecks, 'unknown grouping must fail before changing any constraint');
+        await client.query(`alter table knowledge_base_nodes drop constraint differently_grouped_root_check,
+          add constraint renamed_legacy_root_check check (parent_id is not null or (kind='folder' and acl_mode='custom'))`);
+        const otherChecks = (await client.query<{ name: string }>(`select conname as name from pg_constraint
+          where conrelid='knowledge_base_nodes'::regclass and contype='c' and conname<>'renamed_legacy_root_check' order by conname`)).rows;
+        const before = await snapshot();
+        await applyKnowledgeBaseRootFilesMigration(client);
+        await applyKnowledgeBaseRootFilesMigration(client);
+        assert.deepEqual(await snapshot(), before);
+        assert.deepEqual((await client.query(`select conname as name from pg_constraint where conrelid='knowledge_base_nodes'::regclass
+          and contype='c' and conname<>'knowledge_base_nodes_root_access_check' order by conname`)).rows, otherChecks);
+        assert.equal((await insertFile(null, 'custom')).rows.length, 1);
+        await client.query('savepoint rejected_new_root');
+        await assert.rejects(insertFile(null), (error: unknown) => (error as { code: string }).code === '23514');
+        await client.query('rollback to savepoint rejected_new_root');
+        throw rollback;
+      }), (error: unknown) => error === rollback);
+    });
 
     await t.test('private by default for ordinary employees; admin, admintop and top manage without grants', async () => {
       assert.deepEqual((await listKnowledgeBase(purchaser)).nodes, []);
@@ -174,14 +232,38 @@ test('knowledge base real PostgreSQL permissions, conflicts, retry and accountin
       assert.deepEqual((await query('select row_to_json(n) as row from knowledge_base_nodes n where id=$1', [file.id])).rows[0].row, before);
     });
 
-    await t.test('folder depth, root files, oversize metadata and malformed inputs are rejected without writes', async () => {
+    await t.test('root files are private by default, explicit recipients work and retries keep the original bytes', async () => {
+      for (const supervisor of [admin, admintop, top]) {
+        const input = fileInput(null);
+        const created = await createKnowledgeBaseFile(supervisor, input);
+        assert.equal(created.node.parentId, null); assert.equal(created.node.kind, 'file');
+        assert.deepEqual(created.node.access, { mode: 'custom', actorKeys: [] });
+        assert.equal(await getKnowledgeBaseFileForRead(manager, created.node.id), null);
+        const retried = await createKnowledgeBaseFile(supervisor, { ...input, storagePath: `knowledge-base/${randomUUID()}.pdf` });
+        assert.equal(retried.created, false); assert.equal(retried.node.id, created.node.id);
+        assert.equal((await getKnowledgeBaseFileForRead(supervisor, created.node.id))?.storagePath, input.storagePath);
+      }
+      const granted = (await createKnowledgeBaseFile(admin, { ...fileInput(null),
+        access: { mode: 'custom', actorKeys: [knowledgeBaseActorKey(manager)] } })).node;
+      assert.ok((await listKnowledgeBase(manager)).nodes.some(node => node.id === granted.id));
+      assert.ok(await getKnowledgeBaseFileForRead(manager, granted.id));
+      assert.equal(await getKnowledgeBaseFileForRead(support, granted.id), null);
+      for (const employee of employees) await assert.rejects(createKnowledgeBaseFile(employee, fileInput(null)), status(403));
+      await assert.rejects(createKnowledgeBaseFile(admin, { ...fileInput(null), access: { mode: 'inherit', actorKeys: [] } }), status(400));
+      await assert.rejects(updateKnowledgeBaseNode(admin, granted.id, { expectedRevision: granted.revision,
+        access: { mode: 'inherit', actorKeys: [] } }), status(400));
+      await assert.rejects(query("update knowledge_base_nodes set acl_mode='inherit' where id=$1", [granted.id]),
+        (error: unknown) => (error as { code: string }).code === '23514', 'DB still prevents unscoped root inheritance');
+    });
+
+    await t.test('folder depth, oversize metadata and malformed inputs are rejected without writes', async () => {
       let deep = (await createKnowledgeBaseFolder(admin, folderInput(null))).node;
       for (let level = 2; level <= 12; level++) deep = (await createKnowledgeBaseFolder(admin, folderInput(deep.id))).node;
       await assert.rejects(createKnowledgeBaseFolder(admin, folderInput(deep.id)), status(400));
       const leaf = await createKnowledgeBaseFile(admin, fileInput(deep.id));
       assert.ok(await getKnowledgeBaseFileForRead(admin, leaf.node.id));
       await assert.rejects(createKnowledgeBaseFolder(admin, folderInput(leaf.node.id)), status(404));
-      await assert.rejects(createKnowledgeBaseFile(admin, { ...fileInput(root.id), parentId: null as unknown as number }), status(400));
+      await assert.rejects(createKnowledgeBaseFile(admin, { ...fileInput(root.id), parentId: 0 }), status(400));
       await assert.rejects(createKnowledgeBaseFile(admin, { ...fileInput(root.id), size: 25 * 1024 * 1024 + 1 }), status(400));
       await assert.rejects(createKnowledgeBaseFile(admin, { ...fileInput(root.id), storagePath: '../secret.pdf' }), status(400));
     });

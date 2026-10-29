@@ -75,7 +75,7 @@ export function KnowledgeBaseAccessEditor({ value, onChange, parentId, disabled 
       </div> : <p role="status">Рассчитываем общий доступ…</p>}
     </div>
     <p className={styles.muted}>Админ, Админ ТОП и ТОП всегда имеют доступ. {parentId === null
-      ? 'Без выбранных сотрудников папку видят только они.'
+      ? 'Без выбранных сотрудников материал видят только они.'
       : 'Доступ к родительской папке обязателен. Отдельный список ниже может сузить, но не расширить его.'}</p>
     {value.mode === 'custom' && <>
       <div className={styles.toolbar}>

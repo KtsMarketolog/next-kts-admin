@@ -40,7 +40,7 @@ export async function listKnowledgeBaseStats(session: AdminSession, input: Stats
     // Each selected row still counts its entire filtered history in the same SQL snapshot.
     const label = input.view === 'employees'
       ? "coalesce(nullif(u.name,''),nullif(m.name,''),case when counts.key='admin:primary' then 'Основной администратор' else counts.key end)"
-      : "coalesce(n.title,'База знаний')";
+      : "coalesce(n.title||case when n.deleted_at is not null then ' (удалено)' else '' end,'База знаний')";
     const joins = input.view === 'employees'
       ? "left join admin_users u on counts.key='admin:'||u.id::text left join wholesale_managers m on counts.key='manager:'||m.id::text"
       : "left join knowledge_base_nodes n on counts.key=n.id::text";

@@ -17,7 +17,8 @@ import ts from 'typescript';
 
 const secret = 'synthetic_http_retention_secret_0000000000';
 const path = '/api/cron/dashboard-usage';
-const expectedResult = { ok: true, deleted: 25, remaining: false, skipped: null, cutoff: '2026-09-08T00:00:00Z' };
+const cleanupResult = { processed: 0, completed: 0, failed: 0, pending: false, exhausted: 0, error: false };
+const expectedResult = { ok: true, deleted: 25, remaining: false, skipped: null, cutoff: '2026-09-08T00:00:00Z', knowledgeBaseCleanup: cleanupResult };
 const routeCode = ts.transpileModule(readFileSync('src/app/api/cron/dashboard-usage/route.ts', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -35,6 +36,7 @@ async function main() {
       if (failPrune) throw new Error('synthetic private database detail');
       return expectedResult;
     } },
+    '@/shared/lib/db/knowledgeBaseDeletionCleanup': { processKnowledgeBaseDeletionCleanup: async () => cleanupResult },
   };
   const routeExports: Record<string, (request: Request) => Promise<Response>> = {};
   runInNewContext(routeCode, {
@@ -150,7 +152,7 @@ async function main() {
       child.on('close', (status) => resolve({ status, stdout, stderr }));
     });
     assert.equal(childResult.status, 0, childResult.stderr);
-    assert.deepEqual(JSON.parse(childResult.stdout), { ok: true, deleted: 25, remaining: false, skipped: null });
+    assert.deepEqual(JSON.parse(childResult.stdout), { ok: true, deleted: 25, remaining: false, skipped: null, knowledgeBaseCleanup: cleanupResult });
     assert.equal(childResult.stderr, '');
     assert.equal(calls, 5);
     assert.ok(observations.every((item) => item.bodyPresent), 'all real Next.js POST requests have a body stream');

@@ -24,7 +24,6 @@ async function saveGrants(context: KnowledgeBaseContext, id: number, access: Kno
 }
 async function creationParent(context: KnowledgeBaseContext, parentId: number | null, kind: 'folder' | 'file') {
   if (parentId === null) {
-    if (kind === 'file') throw new KnowledgeBaseError(400, 'PARENT_REQUIRED', 'Сначала выберите папку для файла');
     return;
   }
   const path = await requireKnowledgeBasePath(context, parentId);
@@ -39,7 +38,7 @@ function normalizedCreate(input: KnowledgeBaseCreate) {
     title: parseKnowledgeBaseTitle(input.title), access: parseKnowledgeBaseAccess(input.access, input.parentId === null) };
 }
 function normalizedFile(input: KnowledgeBaseFileCreate) {
-  assertKnowledgeBaseId(input.parentId);
+  if (input.parentId !== null) assertKnowledgeBaseId(input.parentId);
   if (typeof input.originalName !== 'string' || !input.originalName.trim() || input.originalName.length > 255
     || /[\u0000-\u001f\u007f\\/]/.test(input.originalName)
     || typeof input.mimeType !== 'string' || !input.mimeType || input.mimeType.length > 160 || /[\u0000-\u0020\u007f]/.test(input.mimeType)
@@ -59,7 +58,11 @@ async function createNode(session: AdminSession, input: KnowledgeBaseCreate, fil
       where created_by=$1 and operation_id=$2::uuid`, [context.actorKey, data.operationId]);
     if (existing.rows[0]) {
       if (existing.rows[0].operation_digest !== digest) throw operationConflict();
-      return { node: mapKnowledgeBaseNode((await readKnowledgeBaseRow(context.client, Number(existing.rows[0].id)))!, true), created: false };
+      const existingNode = await readKnowledgeBaseRow(context.client, Number(existing.rows[0].id));
+      // A deleted operation remains reserved: a delayed upload retry must not
+      // recreate a deleted material or return a successful phantom save.
+      if (!existingNode) throw operationConflict();
+      return { node: mapKnowledgeBaseNode(existingNode, true), created: false };
     }
     await creationParent(context, data.parentId, kind);
     await assertActiveGrants(context, data.access);

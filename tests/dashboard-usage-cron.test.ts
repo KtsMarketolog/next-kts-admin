@@ -10,8 +10,9 @@ const code = ts.transpileModule(readFileSync('src/app/api/cron/dashboard-usage/r
 }).outputText;
 const secret = 'synthetic_usage_retention_secret_00000000';
 
-function harness(configured: string | undefined, fail = false) {
+function harness(configured: string | undefined, fail = false, failCleanup = false) {
   let calls = 0;
+  let cleanupCalls = 0;
   const messages: string[] = [];
   const modules: Record<string, unknown> = {
     'node:crypto': { timingSafeEqual },
@@ -20,6 +21,13 @@ function harness(configured: string | undefined, fail = false) {
       if (fail) throw new Error('private database details');
       return { ok: true, deleted: 25, remaining: false, skipped: null, cutoff: '2026-09-08T00:00:00Z' };
     } },
+    '@/shared/lib/db/knowledgeBaseDeletionCleanup': { processKnowledgeBaseDeletionCleanup: async (options: { limit: number; budgetMs: number }) => {
+      cleanupCalls++;
+      assert.equal(options.limit, 25);
+      assert.equal(options.budgetMs, 5_000);
+      if (failCleanup) throw new Error('private storage details');
+      return { processed: 1, completed: 1, failed: 0, pending: false, exhausted: 0, error: false };
+    } },
   };
   const exports: Record<string, (request: Request) => Promise<Response>> = {};
   runInNewContext(code, { exports, Buffer, Response, setTimeout, clearTimeout,
@@ -27,7 +35,7 @@ function harness(configured: string | undefined, fail = false) {
     process: { env: { DASHBOARD_USAGE_CRON_SECRET: configured } },
     require: (name: string) => { assert.ok(name in modules, name); return modules[name]; },
   });
-  return { exports, messages, calls: () => calls };
+  return { exports, messages, calls: () => calls, cleanupCalls: () => cleanupCalls };
 }
 
 function request(token: string, body?: string) {
@@ -140,6 +148,7 @@ test('retention endpoint is POST-only with a dedicated bounded secret before any
     assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
     assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
     assert.equal(h.calls(), status === 200 ? 1 : 0);
+    assert.equal(h.cleanupCalls(), status === 200 ? 1 : 0);
     assert.equal((await response.text()).includes(secret), false);
   }
 });
@@ -149,11 +158,27 @@ test('retention caller cannot supply a cutoff, actor or table and errors disclos
   const response = await h.exports.POST(request(secret, '{"cutoff":"2100-01-01","table":"admin_users"}'));
   assert.equal(response.status, 400);
   assert.equal(h.calls(), 0);
+  assert.equal(h.cleanupCalls(), 0);
   const failing = harness(secret, true);
   const failure = await failing.exports.POST(request(secret));
   assert.equal(failure.status, 503);
   assert.equal((await failure.text()).includes('private'), false);
   assert.deepEqual(failing.messages, ['DASHBOARD_USAGE_RETENTION_FAILED']);
+  assert.equal(failing.cleanupCalls(), 1, 'journal failure cannot block confirmed file cleanup');
+});
+
+test('confirmed file cleanup is bounded and its failure does not fail the independent retention job', async () => {
+  const h = harness(secret, false, true);
+  const response = await h.exports.POST(request(secret));
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.ok, true);
+  assert.equal(result.deleted, 25);
+  assert.equal(result.knowledgeBaseCleanup.error, true);
+  assert.equal(result.knowledgeBaseCleanup.pending, true);
+  assert.equal(h.cleanupCalls(), 1);
+  assert.deepEqual(h.messages, ['KNOWLEDGE_BASE_DELETION_CLEANUP_FAILED']);
+  assert.doesNotMatch(JSON.stringify(result), /private storage/);
 });
 
 test('standard release packages and installs independent retention before reload, activates only after success', () => {

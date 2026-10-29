@@ -12,7 +12,7 @@ export function useKnowledgeBaseDrag(enabled: boolean, onDrop: (node: KnowledgeB
   const [overId, setOverId] = useState<number | 'root' | null>(null);
   const clear = () => { source.current = null; setDraggedId(null); setOverId(null); };
   const valid = (parentId: number | null) => enabled && !!source.current && source.current.id !== parentId
-    && source.current.parentId !== parentId && (parentId !== null || source.current.kind === 'folder');
+    && source.current.parentId !== parentId;
   const start = (node: KnowledgeBaseNode, event: DragEvent) => {
     if (!enabled || node.archivedAt) { event.preventDefault(); return; }
     source.current = node; setDraggedId(node.id);

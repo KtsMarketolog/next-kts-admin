@@ -9,11 +9,11 @@ export const KNOWLEDGE_BASE_LOCK = 'kts:knowledge-base-tree-v1';
 export type KnowledgeBaseContext = { client: PoolClient; session: AdminSession; actorKey: string; manages: boolean };
 export type KnowledgeBaseRow = {
   id: string; parent_id: string | null; kind: 'folder' | 'file'; title: string; revision: string;
-  archived_at: Date | null; created_at: Date; updated_at: Date; acl_mode: 'inherit' | 'custom';
+  archived_at: Date | null; deleted_at: Date | null; created_at: Date; updated_at: Date; acl_mode: 'inherit' | 'custom';
   original_name: string | null; mime_type: string | null; file_size: string | null; storage_path: string | null; sha256: string | null;
   actor_keys: string[]; operation_digest: string;
 };
-export const KB_COLUMNS = `n.id::text,n.parent_id::text,n.kind,n.title,n.revision::text,n.archived_at,n.created_at,n.updated_at,n.acl_mode,
+export const KB_COLUMNS = `n.id::text,n.parent_id::text,n.kind,n.title,n.revision::text,n.archived_at,n.deleted_at,n.created_at,n.updated_at,n.acl_mode,
   n.original_name,n.mime_type,n.file_size::text,n.storage_path,n.sha256,n.operation_digest,
   array(select actor_key from knowledge_base_grants where node_id=n.id order by actor_key) as actor_keys`;
 
@@ -54,7 +54,7 @@ export function mapKnowledgeBaseNode(row: KnowledgeBaseRow, manages: boolean): K
   };
 }
 export async function readKnowledgeBaseRow(client: PoolClient, id: number) {
-  return (await client.query<KnowledgeBaseRow>(`select ${KB_COLUMNS} from knowledge_base_nodes n where n.id=$1`, [id])).rows[0] ?? null;
+  return (await client.query<KnowledgeBaseRow>(`select ${KB_COLUMNS} from knowledge_base_nodes n where n.id=$1 and n.deleted_at is null`, [id])).rows[0] ?? null;
 }
 /** Root-to-leaf chain; each custom ACL intersects every custom ancestor ACL. */
 export async function requireKnowledgeBasePath(context: KnowledgeBaseContext, id: number, allowArchived = false) {
@@ -68,7 +68,7 @@ export async function requireKnowledgeBasePath(context: KnowledgeBaseContext, id
   const rows = result.rows;
   if (!rows.length || rows[0].parent_id !== null
     || rows.some((row, index) => (index < rows.length - 1 && row.kind !== 'folder')
-      || (row.archived_at && !(manages && allowArchived))
+      || row.deleted_at || (row.archived_at && !(manages && allowArchived))
       || (!manages && row.acl_mode === 'custom' && !row.actor_keys.includes(actorKey)))) throw knowledgeBaseNotFound();
   return rows;
 }

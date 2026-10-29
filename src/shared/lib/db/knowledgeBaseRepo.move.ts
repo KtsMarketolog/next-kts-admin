@@ -25,10 +25,10 @@ function validateInput(id: number, input: KnowledgeBaseMoveInput) {
 
 async function readSubtree(context: KnowledgeBaseContext, id: number) {
   const result = await context.client.query<SubtreeRow>(`with recursive subtree as (
-    select id,1 as depth,array[id] as visited,false as cycle from knowledge_base_nodes where id=$1
+    select id,1 as depth,array[id] as visited,false as cycle from knowledge_base_nodes where id=$1 and deleted_at is null
     union all select child.id,tree.depth+1,tree.visited||child.id,child.id=any(tree.visited)
       from subtree tree join knowledge_base_nodes child on child.parent_id=tree.id
-      where not tree.cycle and tree.depth<$2
+      where not tree.cycle and tree.depth<$2 and child.deleted_at is null
   ), bounded as (select id,depth,cycle from subtree limit $3)
   select n.id::text,n.parent_id::text,n.kind,n.title,n.revision::text,n.archived_at,n.acl_mode,
     n.original_name,n.mime_type,n.file_size::text,n.storage_path,n.sha256,n.operation_digest,b.depth,b.cycle,
@@ -64,7 +64,6 @@ async function planMove(context: KnowledgeBaseContext, id: number, input: Knowle
   if ((source.parent_id === null ? null : Number(source.parent_id)) === input.targetParentId) {
     throw invalidMove('SAME_PARENT', 'Материал уже находится в этой папке.');
   }
-  if (input.targetParentId === null && source.kind === 'file') throw invalidMove('PARENT_REQUIRED', 'Для файла нужно выбрать папку назначения.');
   const destinationPath = input.targetParentId === null ? [] : await requireKnowledgeBasePath(context, input.targetParentId);
   const destination = destinationPath.at(-1) ?? null;
   if (destination && destination.kind !== 'folder') throw invalidMove('NOT_A_FOLDER', 'Выберите папку назначения, а не файл.');
@@ -73,8 +72,14 @@ async function planMove(context: KnowledgeBaseContext, id: number, input: Knowle
   if (subtree.some(row => destinationPath.length + row.depth > KNOWLEDGE_BASE_MAX_DEPTH + (row.kind === 'file' ? 1 : 0))) {
     throw invalidMove('MAX_DEPTH', 'После переноса будет больше 12 уровней папок, включая архивные вложенные папки.');
   }
-  const rootRecipients = input.targetParentId === null && source.acl_mode === 'inherit' ? effectiveRecipients(sourcePath) : null;
-  const accessWarning = rootRecipients !== null
+  // Root files have no parent ACL to inherit. Preserve their effective access,
+  // including a custom file ACL intersected with all former ancestor ACLs.
+  // Existing folder-move semantics deliberately remain unchanged.
+  const rootRecipients = input.targetParentId === null && (source.kind === 'file' || source.acl_mode === 'inherit')
+    ? effectiveRecipients(sourcePath) : null;
+  const accessWarning = input.targetParentId === null && source.kind === 'file'
+    ? 'Файл будет перемещён в корень. Текущий доступ с учётом всех родительских папок и собственных ограничений файла будет сохранён отдельным списком сотрудников. Дополнительные сотрудники доступ не получат; изменения прав прежней родительской папки больше не будут влиять на этот файл.'
+    : rootRecipients !== null
     ? 'Папка будет перемещена в корень. Текущий доступ по всей цепочке родительских папок будет сохранён отдельным списком сотрудников; собственные ограничения вложенных материалов сохранятся. Изменения прав прежней родительской папки больше не будут влиять на эту папку.'
     : input.targetParentId === null
       ? 'Папка будет перемещена в корень с её собственным списком доступа. Ограничения прежних родительских папок перестанут действовать: часть сотрудников может получить доступ к папке и вложенным материалам. Собственные ограничения вложенных материалов сохранятся.'

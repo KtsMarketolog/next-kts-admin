@@ -25,7 +25,7 @@ async function main() {
     const folder=new URLSearchParams(location.search).get('folder');
     const parentId=folder&&/^[1-9]\\d*$/.test(folder)&&Number.isSafeInteger(Number(folder))?Number(folder):null;
     const session=location.search.includes('reader=1')?{role:'manager',managerId:1,canManageTopDashboard:true,sessionId:'00000000-0000-4000-8000-000000000001'}:{role:'top',adminUserId:7,sessionId:'00000000-0000-4000-8000-000000000007'};
-    createRoot(document.getElementById('root')).render(<><Header/><KnowledgeBase initialCanManage={canManageKnowledgeBase(session)} initialParentId={parentId}/></>);
+    createRoot(document.getElementById('root')).render(<><Header/><KnowledgeBase initialCanManage={canManageKnowledgeBase(session)} initialParentId={parentId} initialArchived={new URLSearchParams(location.search).get('archived')==='1'}/></>);
   ` }, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     define: { 'process.env.NODE_ENV': '"test"' }, alias: { '@': path.join(root, 'src') }, plugins: [{ name: 'fixtures', setup(plugin) {
       plugin.onResolve({ filter: /^next\/(link|navigation|dynamic)$/ }, ({ path: name }) => ({ path: name, namespace: 'fixture' }));
@@ -80,6 +80,22 @@ async function main() {
   let moveFailure: 'none' | 'conflict' | 'unknown' = 'none';
   let movePreviewConflict = false;
   let moveNodes: KnowledgeBaseNode[] = [];
+  let deleteFixture = false, deletePreviewConflict = false;
+  let deleteFailure: 'none' | 'conflict' | 'unknown' = 'none';
+  let deleteNodes: KnowledgeBaseNode[] = [];
+  const archivedChildFolder = { ...nestedFolder, id: 16, parentId: archivedFolder.id, title: 'Вложенная архивная папка' };
+  const archivedChildFile = { ...material, id: 17, parentId: archivedChildFolder.id, title: 'Файл внутри архивной папки' };
+  const archivedOwnFile = { ...material, id: 18, parentId: archivedFolder.id, title: 'Отдельно архивированный файл', archivedAt: stamp };
+  const archivedRootFile = { ...material, id: 19, parentId: null, title: 'Архивный файл в корне', archivedAt: stamp, access: { mode: 'custom' as const, actorKeys: ['manager:1'] } };
+  const resetDeletes = () => {
+    deleteFixture = true; moveFixture = false; deletePreviewConflict = false; deleteFailure = 'none';
+    deleteNodes = structuredClone([archivedFolder, archivedChildFolder, archivedChildFile, archivedOwnFile, archivedRootFile, folder]);
+  };
+  const deletePath = (id: number | null): KnowledgeBaseNode[] => {
+    if (id === null) return [];
+    const node = deleteNodes.find((item) => item.id === id)!;
+    return [...deletePath(node.parentId), node];
+  };
   const resetMoves = () => {
     moveFixture = true; movePagination = false; moveFailure = 'none'; movePreviewConflict = false;
     moveNodes = structuredClone([folder, nestedFolder, longFolder, material]) as KnowledgeBaseNode[];
@@ -138,6 +154,33 @@ async function main() {
     if (url.pathname.endsWith('/usage')) return void json({ rows: [{ key: url.searchParams.get('view') === 'employees' ? 'manager:1' : '2',
       title: url.searchParams.get('view') === 'employees' ? 'Тестовый сотрудник' : material.title, role: 'manager', sectionOpens: 2,
       folderOpens: 3, fileViews: 4, downloadsStarted: 1, totalEvents: 10, lastVisitAt: stamp }], nextCursor: null });
+    if (url.pathname.endsWith('/delete')) {
+      assert.equal(deleteFixture, true);
+      assert.equal(readOnly, false);
+      const id = Number(url.pathname.split('/').at(-2));
+      const source = deleteNodes.find((node) => node.id === id)!;
+      assert.equal(body.expectedRevision, source.revision);
+      assert.ok(deletePath(id).some((node) => !!node.archivedAt), 'only effectively archived fixtures can be deleted');
+      const affected = deleteNodes.filter((node) => deletePath(node.id).some((ancestor) => ancestor.id === id));
+      const counts = { affectedCount: affected.length, fileCount: affected.filter((node) => node.kind === 'file').length,
+        folderCount: affected.filter((node) => node.kind === 'folder').length, totalBytes: affected.reduce((sum, node) => sum + (node.size ?? 0), 0) };
+      if (body.action === 'preview') {
+        if (deletePreviewConflict) return void json({ error: 'Материал уже изменён. Обновите список.' }, 409);
+        return void json({ source, previewToken: `delete-${id}-${source.revision}`, ...counts });
+      }
+      assert.equal(body.action, 'commit');
+      assert.equal(body.confirmationTitle, source.title);
+      assert.equal(body.previewToken, `delete-${id}-${source.revision}`);
+      assert.match(body.operationId, /^[0-9a-f-]{36}$/);
+      if (deleteFailure === 'conflict') return void json({ error: 'Состав папки изменился.' }, 409);
+      const affectedIds = new Set(affected.map((node) => node.id));
+      deleteNodes = deleteNodes.filter((node) => !affectedIds.has(node.id));
+      if (deleteFailure === 'unknown') {
+        response.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '1000' });
+        response.write('{'); setTimeout(() => response.destroy(), 30); return;
+      }
+      return void json({ deleted: true, nodeId: id, cleanupPending: false, ...counts });
+    }
     if (url.pathname.endsWith('/move')) {
       assert.equal(moveFixture, true);
       const id = Number(url.pathname.split('/').at(-2));
@@ -147,7 +190,6 @@ async function main() {
       assert.equal(body.expectedRevision, source.revision);
       assert.notEqual(body.targetParentId, source.id, 'self is not a move target');
       assert.notEqual(body.targetParentId, source.parentId, 'current parent is not a move target');
-      assert.ok(source.kind === 'folder' || body.targetParentId !== null, 'files cannot move to root');
       assert.equal(movePath(body.targetParentId).some((node) => node.id === source.id), false, 'descendants cannot be targets');
       if (body.action === 'preview') {
         if (movePreviewConflict) return void json({ error: 'Материал уже изменён. Обновите список.' }, 409);
@@ -159,6 +201,7 @@ async function main() {
       assert.equal(body.previewToken, `preview-${source.id}-${source.revision}-${body.targetParentId}`);
       if (moveFailure === 'conflict') return void json({ error: 'Данные уже изменены другим пользователем.' }, 409);
       source.parentId = body.targetParentId; source.revision = String(Number(source.revision) + 1);
+      if (source.kind === 'file' && body.targetParentId === null) source.access = { mode: 'custom', actorKeys: ['manager:1'] };
       if (moveFailure === 'unknown') {
         // Send headers before breaking the body: avoids a browser transport-level retry of
         // an entirely unanswered reused connection, and exercises an unknown application result.
@@ -174,6 +217,13 @@ async function main() {
     }
     if (failList) return void json({ error: 'Не удалось загрузить папку' }, 503);
     const parent = url.searchParams.get('parentId');
+    if (deleteFixture) {
+      const breadcrumbs = deletePath(parent === null ? null : Number(parent));
+      const inArchive = url.searchParams.get('archived') === '1';
+      const nodes = deleteNodes.filter((node) => node.parentId === (parent === null ? null : Number(parent)))
+        .filter((node) => inArchive ? breadcrumbs.some((item) => !!item.archivedAt) || !!node.archivedAt : !node.archivedAt);
+      return void json({ nodes, nextCursor: null, breadcrumbs, canManage: canManageKnowledgeBase(readOnly ? readerSession : topSession) });
+    }
     if (accessFixture) return void json({ nodes: [{ ...(parent ? nestedFolder : folder),
       access: { mode: 'custom', actorKeys: accessSelections } }], nextCursor: null,
       breadcrumbs: parent ? [folder] : [], canManage: true });
@@ -219,7 +269,7 @@ async function main() {
       const browser = await playwright[engine].launch({ headless: true });
       try {
         for (const width of [1440, 390, 320]) {
-          readOnly = false; failList = false; failSave = false; archived = false; moveFixture = false; searchFixture = false;
+          readOnly = false; failList = false; failSave = false; archived = false; moveFixture = false; searchFixture = false; deleteFixture = false;
           accessFixture = false; failAccessPreview = false; delayedAccess = null; calls.length = 0;
           const page = await browser.newPage({ viewport: { width, height: 1000 } });
           page.setDefaultTimeout(10_000);
@@ -236,6 +286,7 @@ async function main() {
           await gotoPage(origin + '/admin/knowledge-base');
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(await page.getByRole('button', { name: 'Создать папку', exact: true }).isEnabled(), true, 'TOP can create folders');
+          assert.equal(await page.getByRole('button', { name: 'Загрузить файл', exact: true }).isEnabled(), true, 'TOP can upload at root');
           assert.equal(await page.getByRole('button', { name: 'Статистика использования', exact: true }).isVisible(), true, 'TOP sees usage statistics');
           assert.ok(await page.getByRole('button', { name: 'Настроить', exact: true }).count() > 0, 'TOP can edit folder settings');
           assert.equal(await page.getByRole('button', { name: /^Назад (к списку папок|в папку)/ }).count(), 0, 'root has no folder-back button');
@@ -257,6 +308,17 @@ async function main() {
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'no page overflow');
           assert.ok(await page.getByRole('button', { name: 'Обновить', exact: true }).evaluate((node: HTMLElement) => node.getBoundingClientRect().height) < 60, 'toolbar buttons do not stretch to search form height');
           await page.screenshot({ path: path.join(output, `${engine}-${width}-root.png`), fullPage: true });
+          await page.getByRole('button', { name: 'Загрузить файл', exact: true }).click();
+          const rootUploadDialog = page.getByRole('dialog');
+          assert.equal(await rootUploadDialog.getByRole('option', { name: /Как у родительской/ }).count(), 0, 'root upload cannot inherit absent folder rights');
+          const editorBox = await rootUploadDialog.boundingBox();
+          assert.ok(editorBox && editorBox.width <= 660, 'editor remains narrow');
+          await rootUploadDialog.getByLabel('Файл', { exact: true }).setInputFiles({ name: 'root.html', mimeType: 'text/html', buffer: Buffer.from('<!doctype html><h1>Корень</h1>') });
+          await rootUploadDialog.getByRole('button', { name: 'Загрузить файл', exact: true }).click();
+          await page.getByText('Файл загружен.', { exact: true }).waitFor();
+          const rootUpload = calls.filter((call) => call.path.includes('/upload?')).at(-1)!;
+          assert.equal(new URL(rootUpload.path, origin).searchParams.get('parentId'), null, 'root upload omits parent id');
+          assert.deepEqual(JSON.parse(decodeURIComponent(String(rootUpload.headers['x-kb-access']))), { mode: 'custom', actorKeys: [] }, 'root upload defaults to managers only');
           await page.getByRole('button', { name: 'Создать папку', exact: true }).click();
           let dialog = page.getByRole('dialog');
           await dialog.getByLabel('Название', { exact: true }).fill('Новая папка');
@@ -302,21 +364,23 @@ async function main() {
           await searchResponse;
           await page.getByRole('heading', { name: nestedFolder.title, exact: true }).waitFor();
           await page.getByRole('button', { name: 'Архив', exact: true }).click();
-          await page.getByRole('heading', { name: 'Архив', exact: true }).waitFor();
+          await page.getByRole('heading', { name: `Архив / ${nestedFolder.title}`, exact: true }).waitFor();
           await backToParent.focus(); await backToParent.press('Enter');
-          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
+          await page.getByRole('heading', { name: `Архив / ${folder.title}`, exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), '1', 'nested folder-back opens its actual parent');
-          assert.equal(await page.getByRole('searchbox', { name: 'Поиск в папке и вложенных папках', exact: true }).inputValue(), '', 'back clears folder search');
-          assert.equal(await page.getByRole('button', { name: 'К материалам', exact: true }).count(), 0, 'back leaves archive mode');
+          assert.equal(await page.getByRole('searchbox', { name: 'Поиск в архиве текущей папки', exact: true }).inputValue(), '', 'back clears folder search');
+          assert.equal(await page.getByRole('button', { name: 'К материалам', exact: true }).count(), 1, 'back preserves archive mode');
           const parentReload = new URL(calls.filter((call) => call.method === 'GET' && new URL(call.path, origin).pathname === '/api/admin/knowledge-base').at(-1)!.path, origin);
           assert.equal(parentReload.searchParams.get('search'), null, 'parent list does not inherit search filter');
-          assert.equal(parentReload.searchParams.get('archived'), null, 'parent list loads live materials');
+          assert.equal(parentReload.searchParams.get('archived'), '1', 'parent list stays in archive');
+          await page.getByRole('button', { name: 'К материалам', exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(nestedFolder.title), exact: true }).waitFor();
           await page.getByRole('button', { name: 'Загрузить файл', exact: true }).click();
           dialog = page.getByRole('dialog');
           await dialog.getByLabel('Файл', { exact: true }).setInputFiles({ name: 'instruction.html', mimeType: 'text/html', buffer: Buffer.from('<!doctype html><h1>Тест</h1>') });
           await dialog.getByRole('button', { name: 'Загрузить файл', exact: true }).click();
           await page.getByText('Файл загружен.', { exact: true }).waitFor();
-          const upload = calls.find((call) => call.path.includes('/upload?'))!;
+          const upload = calls.filter((call) => call.path.includes('/upload?')).at(-1)!;
           assert.match(String(upload.headers['content-type']), /application\/octet-stream/);
           assert.equal(upload.headers['x-kb-file-name'], 'instruction.html');
           assert.match(String(upload.body), /<h1>Тест<\/h1>/);
@@ -328,8 +392,17 @@ async function main() {
           await page.frameLocator('dialog iframe').getByRole('button', { name: 'Проверить' }).click();
           await page.frameLocator('dialog iframe').getByRole('button', { name: 'Работает' }).waitFor();
           assert.equal(await page.evaluate(() => document.body.dataset.exposed), undefined, 'HTML cannot access parent');
+          const previewBox = await dialog.boundingBox(), frameBox = await frame.boundingBox();
+          assert.ok(previewBox && Math.abs(previewBox.x) <= 1 && Math.abs(previewBox.y) <= 1
+            && Math.abs(previewBox.width - width) <= 1 && Math.abs(previewBox.height - 1000) <= 1, 'HTML preview fills the viewport');
+          assert.ok(frameBox && Math.abs(frameBox.width - width) <= 1 && Math.abs(frameBox.y + frameBox.height - 1000) <= 1, 'iframe fills available viewport area');
           await page.screenshot({ path: path.join(output, `${engine}-${width}-preview.png`), fullPage: true });
-          await dialog.getByRole('button', { name: 'Закрыть', exact: true }).click();
+          // Keyboard events inside an opaque sandbox iframe do not reach the outer
+          // dialog. Its persistent Close button and Escape in dialog chrome remain
+          // available without adding a new cross-frame messaging capability.
+          await dialog.press('Escape');
+          await dialog.waitFor({ state: 'detached' });
+          assert.equal(await page.getByRole('button', { name: material.title, exact: true }).evaluate((node: HTMLElement) => node === document.activeElement), true, 'Escape returns focus to file');
           await page.getByRole('article').filter({ has: page.getByRole('heading', { name: material.title, exact: true }) }).getByRole('button', { name: 'В архив', exact: true }).click();
           await page.getByRole('dialog').getByRole('button', { name: 'В архив', exact: true }).click();
           await page.getByText('Материал перенесён в архив. Файлы и история сохранены.', { exact: true }).waitFor();
@@ -337,13 +410,15 @@ async function main() {
           await page.getByRole('button', { name: 'Восстановить', exact: true }).click();
           await page.getByRole('dialog').getByRole('button', { name: 'Восстановить', exact: true }).click();
           await page.getByText('Материал восстановлен.', { exact: true }).waitFor();
+          await page.getByRole('button', { name: 'К материалам', exact: true }).click();
+          await page.getByRole('button', { name: material.title, exact: true }).waitFor();
           await backToRoot.click();
           await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
           assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'first-level back returns to root');
           assert.equal(await page.getByRole('button', { name: /^Назад (к списку папок|в папку)/ }).count(), 0);
           await page.getByRole('button', { name: 'Архив', exact: true }).click();
           await page.getByRole('heading', { name: archivedFolder.title, exact: true }).waitFor();
-          assert.equal(await page.getByRole('button', { name: /^Открыть папку/ }).count(), 0, 'archived folders cannot be opened');
+          assert.equal(await page.getByRole('button', { name: /^Открыть папку/ }).count(), 1, 'managers can inspect archived folders');
           assert.equal(await page.getByRole('button', { name: /^Переместить «|^Перетащить «/ }).count(), 0, 'archive has no move controls');
           assert.equal(await page.getByRole('button', { name: 'Восстановить', exact: true }).count(), 1, 'archived folder can be restored');
           await page.getByRole('button', { name: 'Статистика использования', exact: true }).click();
@@ -650,19 +725,45 @@ async function main() {
           await moveButton(longFolder.title).waitFor();
           assert.equal(await moveButton(folder.title).count(), 0, 'successful move refreshes source list');
 
-          // Root/ancestor breadcrumb drops and no root destination for a file.
+          // Root/ancestor breadcrumb drops and root destination for a file.
           scenario = 'move root/ancestor';
           resetMoves();
           await gotoMovePage(origin + '/admin/knowledge-base?folder=1');
           await grip(material.title).waitFor();
           await dropOn(grip(material.title), page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: 'База знаний', exact: true }));
-          assert.equal(await page.getByRole('dialog').count(), 0, 'file cannot be dropped at root');
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).waitFor();
+          assert.equal((moveRequests('preview').at(-1)!.body as { targetParentId: number | null }).targetParentId, null, 'root breadcrumb previews file move');
+          await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
           await moveButton(material.title).click();
           dialog = page.getByRole('dialog');
           await dialog.getByRole('button', { name: 'В корень', exact: true }).click();
           await dialog.getByRole('button', { name: `Выбрать расположение внутри «${longFolder.title}»`, exact: true }).waitFor();
-          assert.equal(await dialog.getByRole('button', { name: 'Переместить сюда', exact: true }).isDisabled(), true, 'picker forbids file at root too');
-          await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+          assert.equal(await dialog.getByRole('button', { name: 'Переместить сюда', exact: true }).isEnabled(), true, 'picker allows file at root');
+          await dialog.getByRole('button', { name: 'Переместить сюда', exact: true }).click();
+          await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).click();
+          await page.getByRole('status').filter({ hasText: 'в корень Базы знаний' }).waitFor();
+          assert.equal(moveNodes.find((node) => node.id === material.id)!.parentId, null, 'root file move commits after preview');
+          // A fresh page checks persisted root placement independently of earlier
+          // dialogs and SPA navigation. Assert concrete title, frame content, and
+          // Close behavior instead of the unrelated global networkidle state.
+          const rootPreviewPage = await browser.newPage({ viewport: { width, height: 1000 } });
+          try {
+            rootPreviewPage.setDefaultTimeout(10_000);
+            rootPreviewPage.on('pageerror', (error: Error) => errors.push(error.message));
+            await rootPreviewPage.route('**/*', (route: { request(): { url(): string }; continue(): Promise<void>; abort(): Promise<void> }) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
+            await rootPreviewPage.goto(origin + '/admin/knowledge-base');
+            const rootFile = rootPreviewPage.getByRole('button', { name: material.title, exact: true });
+            await rootFile.click();
+            const rootDialog = rootPreviewPage.getByRole('dialog');
+            assert.equal(await rootDialog.locator('iframe').getAttribute('sandbox'), 'allow-scripts', 'root HTML remains isolated');
+            await rootPreviewPage.frameLocator('dialog iframe').getByRole('heading', { name: 'Тестовый регламент', exact: true }).waitFor();
+            await rootDialog.getByRole('button', { name: 'Закрыть', exact: true }).click();
+            await rootDialog.waitFor({ state: 'detached' });
+            assert.equal(await rootFile.isVisible(), true, 'closing root preview returns to the root file list');
+          } finally { await rootPreviewPage.close(); }
+          resetMoves();
+          await gotoMovePage(origin + '/admin/knowledge-base?folder=1');
           await dropOn(grip(nestedFolder.title), page.getByRole('navigation', { name: 'Путь папки', exact: true }).getByRole('button', { name: 'База знаний', exact: true }));
           dialog = page.getByRole('dialog');
           await dialog.getByRole('button', { name: 'Подтвердить перемещение', exact: true }).waitFor();
@@ -735,6 +836,103 @@ async function main() {
           assert.deepEqual(errors, []);
           await page.waitForLoadState('networkidle');
           moveFixture = false;
+
+          scenario = 'archive navigation and guarded permanent delete';
+          resetDeletes();
+          const deleteButton = (title: string) => page.getByRole('button', { name: `Удалить навсегда «${title}»`, exact: true });
+          const deleteRequests = (action: string) => calls.filter((call) => call.path.endsWith('/delete') && (call.body as { action: string }).action === action);
+          await gotoPage(origin + '/admin/knowledge-base');
+          assert.equal(await page.getByRole('button', { name: /^Удалить навсегда/ }).count(), 0, 'active materials never expose permanent delete');
+          await page.getByRole('button', { name: 'Архив', exact: true }).click();
+          await deleteButton(archivedFolder.title).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('archived'), '1');
+          await page.getByRole('button', { name: openFolderName(archivedFolder.title), exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(archivedChildFolder.title), exact: true }).waitFor();
+          assert.equal(await page.getByRole('button', { name: 'Восстановить', exact: true }).count(), 0, 'children of archived parent cannot be restored independently');
+          await page.goBack();
+          await deleteButton(archivedFolder.title).waitFor();
+          await page.goForward();
+          await page.getByRole('button', { name: openFolderName(archivedChildFolder.title), exact: true }).waitFor();
+          await page.reload();
+          await page.getByRole('button', { name: openFolderName(archivedChildFolder.title), exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('archived'), '1', 'reload and browser history preserve archive context');
+          await page.getByRole('button', { name: openFolderName(archivedChildFolder.title), exact: true }).click();
+          await deleteButton(archivedChildFile.title).click();
+          dialog = page.getByRole('dialog');
+          const confirmation = () => dialog.getByRole('textbox', { name: /^Для подтверждения введите название/ });
+          await confirmation().waitFor();
+          assert.deepEqual(await dialog.locator('dd').allTextContents(), ['1', '0', '1', '1 КБ']);
+          assert.equal(await dialog.getByRole('button', { name: 'Удалить навсегда', exact: true }).isDisabled(), true);
+          await confirmation().fill('неверное название');
+          assert.equal(await dialog.getByRole('button', { name: 'Удалить навсегда', exact: true }).isDisabled(), true, 'exact name is mandatory');
+          await confirmation().fill(archivedChildFile.title);
+          const beforeChildDelete = deleteRequests('commit').length;
+          await dialog.getByRole('button', { name: 'Удалить навсегда', exact: true }).evaluate((node: HTMLButtonElement) => { node.click(); node.click(); });
+          await page.getByRole('status').filter({ hasText: 'Через сайт восстановить нельзя.' }).waitFor();
+          assert.equal(deleteRequests('commit').length, beforeChildDelete + 1, 'double click causes only one deletion commit');
+          assert.equal(deleteNodes.some((node) => node.id === archivedChildFile.id), false);
+          assert.ok(deleteNodes.some((node) => node.id === archivedFolder.id && node.archivedAt === stamp), 'deleting a child does not restore or delete its parent');
+          await page.getByRole('button', { name: 'К материалам', exact: true }).click();
+          await page.getByRole('button', { name: openFolderName(folder.title), exact: true }).waitFor();
+          assert.equal(new URL(page.url()).searchParams.get('folder'), null, 'leaving archived subtree opens nearest live ancestor');
+          assert.equal(new URL(page.url()).searchParams.get('archived'), null);
+
+          resetDeletes();
+          await gotoPage(origin + '/admin/knowledge-base?archived=1');
+          await deleteButton(archivedFolder.title).click();
+          dialog = page.getByRole('dialog');
+          await confirmation().waitFor();
+          assert.deepEqual(await dialog.locator('dd').allTextContents(), ['4', '2', '2', '2 КБ'], 'folder preview includes all nested descendants');
+          assert.match(await dialog.getByRole('note').innerText(), /всё её содержимое/);
+          assert.equal(await dialog.evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth), true);
+          await dialog.screenshot({ path: path.join(output, `${engine}-${width}-delete-confirmation.png`) });
+          const beforeCancelledDelete = deleteRequests('commit').length;
+          await dialog.press('Escape');
+          assert.equal(deleteRequests('commit').length, beforeCancelledDelete, 'cancel never deletes');
+          await deleteButton(archivedFolder.title).click();
+          dialog = page.getByRole('dialog');
+          await confirmation().fill(archivedFolder.title);
+          await dialog.getByRole('button', { name: 'Удалить навсегда', exact: true }).click();
+          await page.getByRole('status').filter({ hasText: 'вместе с содержимым' }).waitFor();
+          assert.deepEqual(deleteNodes.map((node) => node.id).sort((a, b) => a - b), [folder.id, archivedRootFile.id], 'only confirmed archived subtree disappears');
+
+          scenario = 'delete conflict and lost response';
+          resetDeletes();
+          await gotoPage(origin + '/admin/knowledge-base?archived=1');
+          await deleteButton(archivedRootFile.title).click();
+          dialog = page.getByRole('dialog');
+          await confirmation().fill(archivedRootFile.title);
+          deleteFailure = 'conflict';
+          await dialog.getByRole('button', { name: 'Удалить навсегда', exact: true }).click();
+          await dialog.getByRole('alert').filter({ hasText: 'Состав материалов или права доступа изменились' }).waitFor();
+          assert.equal(await dialog.getByRole('button', { name: 'Удалить навсегда', exact: true }).count(), 0, 'stale preview cannot be retried');
+          await dialog.getByRole('button', { name: 'Закрыть и обновить список', exact: true }).click();
+          await deleteButton(archivedRootFile.title).waitFor();
+          deleteFailure = 'none'; deletePreviewConflict = true;
+          const beforeFailedPreview = deleteRequests('commit').length;
+          await deleteButton(archivedRootFile.title).click();
+          dialog = page.getByRole('dialog');
+          await dialog.getByRole('alert').filter({ hasText: 'Материал уже изменён' }).waitFor();
+          assert.equal(await confirmation().count(), 0);
+          assert.equal(deleteRequests('commit').length, beforeFailedPreview);
+          await dialog.getByRole('button', { name: 'Закрыть и обновить список', exact: true }).click();
+          await deleteButton(archivedRootFile.title).waitFor();
+          deletePreviewConflict = false; deleteFailure = 'unknown';
+          await deleteButton(archivedRootFile.title).click();
+          dialog = page.getByRole('dialog');
+          await confirmation().fill(archivedRootFile.title);
+          const beforeUnknownDelete = deleteRequests('commit').length;
+          await dialog.getByRole('button', { name: 'Удалить навсегда', exact: true }).click();
+          await dialog.getByRole('alert').filter({ hasText: 'Удаление могло уже выполниться' }).waitFor();
+          assert.equal(await dialog.getByRole('button', { name: 'Удалить навсегда', exact: true }).count(), 0, 'unknown result never offers a blind retry');
+          await dialog.getByRole('button', { name: 'Закрыть и обновить список', exact: true }).click();
+          await deleteButton(archivedRootFile.title).waitFor({ state: 'detached' });
+          await deleteButton(archivedFolder.title).waitFor();
+          assert.equal(await deleteButton(archivedRootFile.title).count(), 0, 'refresh discovers successful deletion after lost response');
+          assert.equal(deleteRequests('commit').length, beforeUnknownDelete + 1, 'refresh does not repeat deletion');
+          assert.deepEqual(errors, []);
+          await page.waitForLoadState('networkidle');
+          deleteFixture = false;
           readOnly = true;
           calls.length = 0;
           await gotoPage(origin + '/admin/knowledge-base?reader=1');
@@ -743,6 +941,7 @@ async function main() {
           assert.equal(await page.getByRole('button', { name: 'Статистика использования', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Настроить', exact: true }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'Архив', exact: true }).count(), 0);
+          assert.equal(await page.getByRole('button', { name: /^Удалить навсегда/ }).count(), 0, 'reader cannot permanently delete');
           assert.equal(await page.getByRole('button', { name: /^Переместить «|^Перетащить «/ }).count(), 0, 'read-only employees have no move or drag controls');
           const readerOpen = page.getByRole('button', { name: openFolderName(folder.title), exact: true });
           assert.equal(await readerOpen.isEnabled(), true, 'read-only employee can open granted folder');

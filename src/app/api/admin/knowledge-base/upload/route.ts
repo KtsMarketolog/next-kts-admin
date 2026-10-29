@@ -13,16 +13,18 @@ function header(request: Request, name: string) {
 export async function POST(request: Request) {
   return knowledgeBaseRoute(request, { manage: true, mutation: true, action: 'upload', limit: 60 }, async session => {
     const query = new URL(request.url).searchParams;
-    const parentId = knowledgeBaseQueryId(query.get('parentId'))!;
+    const parentId = knowledgeBaseQueryId(query.get('parentId'), true) ?? null;
     const operationId = query.get('operationId'); assertKnowledgeBaseUuid(operationId);
     const title = parseKnowledgeBaseTitle(header(request, 'x-kb-title'));
-    let access;
+    let access = parseKnowledgeBaseAccess(undefined, parentId === null);
     if (request.headers.has('x-kb-access')) {
-      try { access = parseKnowledgeBaseAccess(JSON.parse(header(request, 'x-kb-access'))); } catch { throw knowledgeBaseInvalid(); }
+      try { access = parseKnowledgeBaseAccess(JSON.parse(header(request, 'x-kb-access')), parentId === null); } catch { throw knowledgeBaseInvalid(); }
     }
     const originalName = header(request, 'x-kb-file-name');
-    const parent = await getKnowledgeBaseNode(session, parentId);
-    if (!parent || parent.kind !== 'folder' || parent.archivedAt) throw new KnowledgeBaseError(404, 'NOT_FOUND', 'Раздел не найден или недоступен');
+    if (parentId !== null) {
+      const parent = await getKnowledgeBaseNode(session, parentId);
+      if (!parent || parent.kind !== 'folder' || parent.archivedAt) throw new KnowledgeBaseError(404, 'NOT_FOUND', 'Раздел не найден или недоступен');
+    }
     const release = await acquireKnowledgeBaseUploadSlot();
     if (!release) return Response.json({ error: 'Сейчас загружаются другие файлы. Повторите через минуту.' }, { status: 429, headers: { 'Retry-After': '30' } });
     let file: SavedKnowledgeBaseFile | null = null;

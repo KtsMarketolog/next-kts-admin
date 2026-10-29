@@ -23,7 +23,7 @@ export function KnowledgeBaseEditor({ node, parentId, upload, onClose, onSaved }
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (pending.current) return;
     if (!title.trim()) { setError('Введите название.'); return; }
-    if (upload && (!file || !parentId)) { setError('Выберите файл внутри папки.'); return; }
+    if (upload && !file) { setError('Выберите файл.'); return; }
     if (file && (file.size === 0 || file.size > 25 * 1024 * 1024)) { setError('Выберите непустой файл размером не больше 25 МБ.'); return; }
     pending.current = true; setBusy(true); setError('');
     const nextSignature = JSON.stringify([title.trim(), access, parentId, file?.name, file?.size, file?.lastModified]);
@@ -31,7 +31,8 @@ export function KnowledgeBaseEditor({ node, parentId, upload, onClose, onSaved }
     try {
       let response: Response;
       if (upload && file) {
-        const query = new URLSearchParams({ parentId: String(parentId), operationId: operation.current });
+        const query = new URLSearchParams({ operationId: operation.current });
+        if (parentId !== null) query.set('parentId', String(parentId));
         response = await request(`${KB_API}/upload?${query}`, { method: 'POST', body: file,
           headers: { 'Content-Type': 'application/octet-stream', 'X-KB-File-Name': encodeURIComponent(file.name),
             'X-KB-Title': encodeURIComponent(title.trim()), 'X-KB-Access': encodeURIComponent(JSON.stringify(access)) } }, { timeoutMs: ADMIN_UPLOAD_TIMEOUT_MS });
