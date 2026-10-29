@@ -429,7 +429,7 @@ async function main() {
           await page.getByRole('button', { name: 'Тестовый сотрудник', exact: true }).waitFor();
           assert.ok(calls.some((call) => call.path.includes('/usage?') && call.path.includes('nodeId=2')));
           await page.screenshot({ path: path.join(output, `${engine}-${width}-stats.png`), fullPage: true });
-          assert.deepEqual(errors, []);
+          assert.equal(errors.length, 0, errors.join('\n'));
           // A direct link has no parent-folder entry in browser history.
           await gotoPage(origin + '/unrelated-history-entry');
           await gotoPage(origin + '/admin/knowledge-base?folder=4');
@@ -535,7 +535,7 @@ async function main() {
           assert.equal(await dialog.getByRole('checkbox').count(), 0, 'inherited access has a summary without an individual-selection list');
           await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
           accessFixture = false;
-          assert.deepEqual(errors, []);
+          assert.equal(errors.length, 0, errors.join('\n'));
 
           scenario = 'recursive search';
           searchFixture = true;
@@ -622,7 +622,7 @@ async function main() {
           delayedSearch = null;
           assert.equal(await page.getByRole('button', { name: 'Устаревший результат', exact: true }).count(), 0, 'late cancelled search cannot overwrite the normal listing');
           assert.equal(await searchBox.inputValue(), '');
-          assert.deepEqual(errors, []);
+          assert.equal(errors.length, 0, errors.join('\n'));
           searchFixture = false;
 
           // All moving uses a separate mutable local fixture, without real documents or employees.
@@ -833,7 +833,7 @@ async function main() {
           await moveButton(longFolder.title).waitFor();
           assert.equal(await moveButton(folder.title).count(), 0, 'refresh discovers successful move after lost response');
           assert.equal(moveRequests('commit').length, beforeUnknown + 1, 'refresh did not retry commit');
-          assert.deepEqual(errors, []);
+          assert.equal(errors.length, 0, errors.join('\n'));
           await page.waitForLoadState('networkidle');
           moveFixture = false;
 
@@ -930,7 +930,7 @@ async function main() {
           await deleteButton(archivedFolder.title).waitFor();
           assert.equal(await deleteButton(archivedRootFile.title).count(), 0, 'refresh discovers successful deletion after lost response');
           assert.equal(deleteRequests('commit').length, beforeUnknownDelete + 1, 'refresh does not repeat deletion');
-          assert.deepEqual(errors, []);
+          assert.equal(errors.length, 0, errors.join('\n'));
           await page.waitForLoadState('networkidle');
           deleteFixture = false;
           readOnly = true;
