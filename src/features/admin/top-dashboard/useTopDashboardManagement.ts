@@ -64,7 +64,7 @@ export function useTopDashboardManagement(blockId: number, previewFrameRef: RefO
           versions: Array.isArray(data.data?.versions) ? data.data.versions : [],
         },
         activeDataContract: normalizeTopDashboardDataContract(data.activeDataContract),
-        instruction: data.instruction === 'sales-analytics' ? data.instruction : null,
+        instruction: data.instruction === 'sales-analytics' || data.instruction === 'deal-profitability' ? data.instruction : null,
       };
       setLoadError(null);
       setOverview(normalized);

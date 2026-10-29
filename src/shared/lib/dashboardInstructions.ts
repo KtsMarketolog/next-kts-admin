@@ -22,16 +22,27 @@ export const DASHBOARD_INSTRUCTIONS = {
       duration: '5:23',
     },
   },
+  'deal-profitability': {
+    title: 'Рентабельность сделок', version: 'v25', pages: 20,
+    filename: 'deal-profitability-v25.pdf',
+    downloadName: 'Рентабельность_сделок_V25_инструкция_для_менеджеров.pdf',
+    video: {
+      filename: 'deal-profitability-v25.mp4',
+      downloadName: 'Рентабельность_сделок_V25_видеообзор.mp4',
+      duration: '4:28',
+    },
+  },
 } as const;
 
 export type DashboardInstructionKind = keyof typeof DASHBOARD_INSTRUCTIONS;
+export type TopDashboardInstructionKind = Exclude<DashboardInstructionKind, 'personal-sales'>;
 export type DashboardInstructionFormat = 'pdf' | 'video';
 
 export function resolveDashboardInstruction(kind: string, dashboardKey: string) {
   if (kind === 'personal-sales' && ['manager:development', 'manager:support'].includes(dashboardKey)) {
     return DASHBOARD_INSTRUCTIONS[kind];
   }
-  if (kind === 'sales-analytics' && validDashboardKey(dashboardKey) && dashboardKey.startsWith('top:')) {
+  if ((kind === 'sales-analytics' || kind === 'deal-profitability') && validDashboardKey(dashboardKey) && dashboardKey.startsWith('top:')) {
     return DASHBOARD_INSTRUCTIONS[kind];
   }
   return null;

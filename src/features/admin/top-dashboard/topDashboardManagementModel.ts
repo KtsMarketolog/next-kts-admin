@@ -1,4 +1,5 @@
 import { normalizeTopDashboardUploadTargets, type TopDashboardUploadTarget } from './topDashboardUploadSelection';
+import type { TopDashboardInstructionKind } from '@/shared/lib/dashboardInstructions';
 
 export type TopDashboardVersionStatus = 'active' | 'draft' | 'archived';
 
@@ -64,7 +65,7 @@ export type TopDashboardOverview = {
   versions: TopDashboardVersion[];
   data: TopDashboardDataOverview;
   activeDataContract: TopDashboardDataContract;
-  instruction: 'sales-analytics' | null;
+  instruction: TopDashboardInstructionKind | null;
 };
 
 export async function readError(response: Response, fallback: string) {

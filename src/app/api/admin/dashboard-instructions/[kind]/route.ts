@@ -1,9 +1,9 @@
 import { getAdminSession } from '@/shared/lib/adminAuth';
 import { canViewDashboardKey } from '@/shared/lib/dashboardPermissions';
 import { dashboardInstructionDownload } from '@/shared/lib/dashboardInstructionDownload';
+import { resolveTopDashboardInstructionKind } from '@/shared/lib/dashboardInstructionProfile';
 import { DASHBOARD_INSTRUCTION_HEADERS, resolveDashboardInstruction, type DashboardInstructionKind } from '@/shared/lib/dashboardInstructions';
 import { getActiveTopDashboardBlockHtmlContent } from '@/shared/lib/db/topDashboardBlocksRepo';
-import { detectTopDashboardExpectedProfile } from '@/shared/lib/topDashboardContentSecurity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,11 +28,11 @@ async function serve(request: Request, context: Context) {
     const key = query.get('dashboardKey')!;
     if (!resolveDashboardInstruction(kind, key)) return error('Инструкция не найдена', 404);
     if (!canViewDashboardKey(session, key)) return error('Нет доступа к этому отчёту', 403);
-    if (kind === 'sales-analytics') {
+    if (kind === 'sales-analytics' || kind === 'deal-profitability') {
       // A grant for some other TOP report must not expose this manual. Titles and
       // numeric block IDs are mutable; identify the currently published HTML.
       const publishedHtml = await getActiveTopDashboardBlockHtmlContent(Number(key.slice(4)));
-      if (!publishedHtml || detectTopDashboardExpectedProfile(publishedHtml) !== 'sales-analytics') {
+      if (!publishedHtml || resolveTopDashboardInstructionKind(publishedHtml) !== kind) {
         return error('Инструкция не найдена для этого отчёта', 404);
       }
     }

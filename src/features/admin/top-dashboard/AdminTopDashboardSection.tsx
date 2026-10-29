@@ -54,7 +54,7 @@ export function AdminTopDashboardSection({ blockId, showStatus, canAssignAccess 
     <div className={styles.topDashboardLayout}>
       {busyAction ? <div role="status"><button type="button" className={styles.secondary} onClick={cancelPendingOperation}>Прервать ожидание</button><p>Прерывание ожидания не отменяет уже сохранённые данные. Перед повторной отправкой проверьте историю.</p></div> : null}
       <TopDashboardManagementPreview management={management} html={html} data={data} selectedVersion={selectedVersion} previewCardRef={previewCardRef} />
-      {overview?.instruction === 'sales-analytics' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
+      {overview?.instruction === 'sales-analytics' || overview?.instruction === 'deal-profitability' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
       <TopDashboardDataPanel management={management} data={data} previewCardRef={previewCardRef} />
       <TopDashboardHtmlPanel management={management} html={html} settings={settings} />
       {canAssignAccess ? <DashboardAudienceEditor dashboardKey={`top:${blockId}`} /> : null}

@@ -1,4 +1,5 @@
 import { canReadTopDashboardBlock } from '@/shared/lib/dashboardAccess';
+import { resolveTopDashboardInstructionKind } from '@/shared/lib/dashboardInstructionProfile';
 import {
   getTopDashboardActor,
   isTopDashboardManagementSession,
@@ -19,7 +20,7 @@ import {
 import { recordSecurityEvent } from '@/shared/lib/db/securityAuditRepo';
 import { enforceSameOriginRequest } from '@/shared/lib/originProtection';
 import { getClientIp } from '@/shared/lib/rateLimit';
-import { detectTopDashboardDataContract, detectTopDashboardExpectedProfile } from '@/shared/lib/topDashboardContentSecurity';
+import { detectTopDashboardDataContract } from '@/shared/lib/topDashboardContentSecurity';
 import { deleteTopDashboardDataFiles } from '@/shared/lib/topDashboardDataStorage';
 import { detectTopDashboardUploadTargets } from '@/shared/lib/topDashboardUploadTargets';
 
@@ -52,8 +53,7 @@ export async function GET(_request: Request, context: Context) {
     const activeHtml = overview.activeVersionId
       ? await getTopDashboardBlockVersionContent(blockId, overview.activeVersionId)
       : null;
-    const instruction = activeHtml && detectTopDashboardExpectedProfile(activeHtml.htmlContent) === 'sales-analytics'
-      ? 'sales-analytics' : null;
+    const instruction = activeHtml ? resolveTopDashboardInstructionKind(activeHtml.htmlContent) : null;
     if (!isTopDashboardManagementSession(session)) {
       return Response.json({ ...overview, instruction }, {
         headers: { 'Cache-Control': 'private, no-store' },

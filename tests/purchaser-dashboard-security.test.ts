@@ -12,6 +12,7 @@ import * as security from '../src/shared/lib/topDashboardContentSecurity';
 import * as preparedHtml from '../src/shared/lib/topDashboardContentSecurity/preparedHtml';
 import * as officeView from '../src/shared/lib/dashboardOfficeView';
 import * as profitability from '../src/shared/lib/dashboardProfitabilityHtml';
+import * as instructionProfile from '../src/shared/lib/dashboardInstructionProfile';
 import * as dashboardLimits from '../src/shared/lib/topDashboardLimits';
 import * as uploadRequestGuard from '../src/shared/lib/uploadRequestGuard';
 import { parsePositiveId } from '../src/app/api/admin/top-dashboard/blocks/routeUtils';
@@ -102,6 +103,7 @@ function harness(relative: string, session: AdminSession | null, published = tru
   const dependencies: Record<string, unknown> = {
     'node:stream': { Readable },
     '@/shared/lib/dashboardAccess': access,
+    '@/shared/lib/dashboardInstructionProfile': instructionProfile,
     '@/shared/lib/dashboardUploadUsage': infrastructure,
     '@/shared/lib/dashboardOfficeView': officeView,
     '@/shared/lib/dashboardProfitabilityHtml': {

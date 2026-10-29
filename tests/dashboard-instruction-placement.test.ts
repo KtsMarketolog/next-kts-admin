@@ -60,9 +60,9 @@ test('personal management keeps main panels and preview ahead of audience-scoped
 });
 
 for (const component of ['TopDashboardViewer', 'AdminTopDashboardSection']) {
-  test(`${component} puts sales help after and outside the fullscreen report card`, () => {
+  test(`${component} puts sales and profitability help after and outside the fullscreen report card`, () => {
     const result = placement(`top-dashboard/${component}`);
-    assert.match(result.child.getText(result.source), /overview\?\.instruction === 'sales-analytics'/);
+    assert.match(result.child.getText(result.source), /overview\?\.instruction === 'sales-analytics' \|\| overview\?\.instruction === 'deal-profitability'/);
     assert.match(result.help.attributes.getText(result.source), /dashboardKey=\{`top:\$\{blockId\}`\}/);
     if (component === 'AdminTopDashboardSection') {
       assert.ok(ts.isJsxSelfClosingElement(result.previous));
@@ -84,3 +84,8 @@ for (const component of ['TopDashboardViewer', 'AdminTopDashboardSection']) {
     }
   });
 }
+
+test('management metadata accepts only the two supported TOP instruction families', () => {
+  const hook = readFileSync(new URL('../src/features/admin/top-dashboard/useTopDashboardManagement.ts', import.meta.url), 'utf8');
+  assert.match(hook, /instruction: data\.instruction === 'sales-analytics' \|\| data\.instruction === 'deal-profitability' \? data\.instruction : null/);
+});

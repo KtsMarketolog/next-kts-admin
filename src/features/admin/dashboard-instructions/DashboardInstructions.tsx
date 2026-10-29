@@ -32,7 +32,9 @@ function InstructionPanel({ dashboardKey, kind }: Props) {
         <div className={styles.material}>
           <span className={styles.badge}>PDF · {instruction.pages} стр.</span>
           <h3>Подробная инструкция</h3>
-          <p>Как читать показатели, пользоваться фильтрами и работать с отчётом.</p>
+          <p>{kind === 'deal-profitability'
+            ? 'Как загрузить счёт или КП, рассчитать рентабельность и подготовить лист согласования.'
+            : 'Как читать показатели, пользоваться фильтрами и работать с отчётом.'}</p>
           <div className={styles.actions}>
             <a className={styles.primary} href={href} target="_blank" rel="noopener noreferrer" aria-label={`Открыть инструкцию «${instruction.title}» (PDF, новая вкладка)`}>Открыть PDF</a>
             <a href={`${href}&download=1`} download={instruction.downloadName} aria-label={`Скачать инструкцию «${instruction.title}» (PDF)`}>Скачать PDF</a>

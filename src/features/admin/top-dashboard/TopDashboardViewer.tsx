@@ -12,6 +12,7 @@ import { DashboardDataDates } from './DashboardDataDates';
 import { useDashboardUsage } from '@/features/admin/dashboard-usage/useDashboardUsage';
 import { requestProfitabilityFrameChange } from '@/features/admin/dashboard-usage/useProfitabilityAuditGuard';
 import { formatDashboardTimestamp } from '@/shared/lib/dashboardDates';
+import type { TopDashboardInstructionKind } from '@/shared/lib/dashboardInstructions';
 
 type TopDashboardPublishedOverview = {
   block: {
@@ -24,7 +25,7 @@ type TopDashboardPublishedOverview = {
   dataUploadedAt?: string | null;
   dataAsOf?: string | null;
   htmlPublishedAt?: string | null;
-  instruction: 'sales-analytics' | null;
+  instruction: TopDashboardInstructionKind | null;
 };
 
 type TopDashboardViewerProps = {
@@ -266,7 +267,7 @@ export function TopDashboardViewer({ blockId, showStatus }: TopDashboardViewerPr
           </div>
         ) : null}
       </section>
-      {overview?.instruction === 'sales-analytics' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
+      {overview?.instruction === 'sales-analytics' || overview?.instruction === 'deal-profitability' ? <DashboardInstructions dashboardKey={`top:${blockId}`} kind={overview.instruction} /> : null}
     </div>
   );
 }

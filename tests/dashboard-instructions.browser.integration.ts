@@ -26,6 +26,7 @@ async function main() {
         <article><h2>Дашборды МР</h2><iframe title="Отчёт МР" src="/frame"/><DashboardInstructions dashboardKey="manager:development" kind="personal-sales" /></article>
         <article><h2>Дашборды МС</h2><iframe title="Отчёт МС" src="/frame"/><DashboardInstructions dashboardKey="manager:support" kind="personal-sales" /></article>
         <article><h2>Аналитика продаж</h2><iframe title="Отчёт аналитики продаж" src="/frame"/><DashboardInstructions dashboardKey="top:4" kind="sales-analytics" /></article>
+        <article><h2>Рентабельность сделок</h2><iframe title="Отчёт рентабельности сделок" src="/frame"/><DashboardInstructions dashboardKey="top:10" kind="deal-profitability" /></article>
       </main>);
     ` }, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     define: { 'process.env.NODE_ENV': '"test"' }, alias: { '@': path.join(root, 'src') },
@@ -76,21 +77,27 @@ async function main() {
         const initialRequests = mediaRequests.length;
         page.on('pageerror', (error: Error) => errors.push(error.message));
         await page.goto(origin);
-        const groups = page.getByRole('group'); await groups.nth(2).waitFor();
-        assert.equal(await groups.count(), 3);
+        const groups = page.getByRole('group'); await groups.nth(3).waitFor();
+        assert.equal(await groups.count(), 4);
+        assert.match(await groups.nth(3).innerText(), /Рентабельность сделок · материалы к версии v25/);
+        assert.match(await groups.nth(3).innerText(), /PDF · 20 стр\./);
+        assert.match(await groups.nth(3).innerText(), /ВИДЕО · 4:28/);
+        assert.match(await groups.nth(3).innerText(), /Как загрузить счёт или КП, рассчитать рентабельность и подготовить лист согласования\./);
+        assert.match(await groups.nth(2).innerText(), /Как читать показатели, пользоваться фильтрами и работать с отчётом\./);
         assert.equal(await page.locator('video').count(), 0, 'No video or media request before user action');
         assert.equal(mediaRequests.length, initialRequests);
-        for (const [index, key] of ['manager:development', 'manager:support', 'top:4'].entries()) {
+        for (const [index, key] of ['manager:development', 'manager:support', 'top:4', 'top:10'].entries()) {
           const open = groups.nth(index).getByRole('link', { name: /Открыть/ });
           assert.equal(await open.getAttribute('target'), '_blank');
           assert.match(await open.getAttribute('rel'), /noopener/);
           assert.equal(new URL(await open.getAttribute('href'), origin).searchParams.get('dashboardKey'), key);
           const [download] = await Promise.all([page.waitForEvent('download'), groups.nth(index).getByRole('link', { name: /Скачать инструкцию/ }).click()]);
-          assert.match(download.suggestedFilename().normalize('NFC'), index < 2 ? /Личный_дашборд_продаж_v34\.pdf$/ : /Аналитика_продаж_v94\.pdf$/);
+          assert.match(download.suggestedFilename().normalize('NFC'), index < 2 ? /Личный_дашборд_продаж_v34\.pdf$/
+            : index === 2 ? /Аналитика_продаж_v94\.pdf$/ : /Рентабельность_сделок_V25_инструкция_для_менеджеров\.pdf$/);
           assert.equal(await download.failure(), null);
         }
         await page.screenshot({ path: path.join(screenshots, `${engineName}-desktop.png`), fullPage: true });
-        for (const index of [0, 2]) {
+        for (const index of [0, 2, 3]) {
           const group = groups.nth(index);
           await group.getByRole('button', { name: 'Смотреть видео', exact: true }).click();
           const video = group.locator('video');
@@ -100,23 +107,25 @@ async function main() {
             element.addEventListener('error', () => reject(Error(`Media error ${element.error?.code}: ${element.error?.message}`)), { once: true });
           }));
           const duration = await video.evaluate((element: HTMLVideoElement) => element.duration);
-          assert.ok(Math.abs(duration - (index === 0 ? 207.296 : 322.96)) < 0.5);
+          assert.ok(Math.abs(duration - (index === 0 ? 207.296 : index === 2 ? 322.96 : 267.88)) < 0.5);
           assert.equal(await video.evaluate((element: HTMLVideoElement) => element.paused), true, 'No autoplay');
           await video.evaluate(async (element: HTMLVideoElement) => { element.muted = true; await element.play(); });
           await page.waitForFunction(() => { const v = document.querySelector('video')!; return v.currentTime > 0.15 && !v.paused; });
           await video.evaluate((element: HTMLVideoElement) => { element.pause(); element.currentTime = element.duration * 0.8; });
           await page.waitForFunction(() => { const v = document.querySelector('video')!; return !v.seeking && v.readyState >= 2 && v.currentTime > v.duration * 0.7; });
-          assert.ok(mediaRequests.slice(initialRequests).some((r) => r.format === 'video' && r.range), 'Browser seeks with byte ranges');
+          const expectedKind = index === 0 ? 'personal-sales' : index === 2 ? 'sales-analytics' : 'deal-profitability';
+          assert.ok(mediaRequests.slice(initialRequests).some((r) => r.kind === expectedKind && r.format === 'video' && r.range), 'Browser seeks each video with byte ranges');
           await group.screenshot({ path: path.join(screenshots, `${engineName}-${index}-video.png`) });
           await group.getByRole('button', { name: 'Закрыть видео', exact: true }).click();
           assert.equal(await page.locator('video').count(), 0, 'Close unmounts playback');
           const [download] = await Promise.all([page.waitForEvent('download'), group.getByRole('link', { name: /Скачать видеообзор/ }).click()]);
-          assert.match(download.suggestedFilename().normalize('NFC'), /Видеообзор_КРАТКИЙ_.*\.mp4$/);
+          assert.match(download.suggestedFilename().normalize('NFC'), index === 3 ? /Рентабельность_сделок_V25_видеообзор\.mp4$/ : /Видеообзор_КРАТКИЙ_.*\.mp4$/);
           assert.equal(await download.failure(), null);
         }
         await page.setViewportSize({ width: 360, height: 800 });
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         await page.screenshot({ path: path.join(screenshots, `${engineName}-mobile.png`), fullPage: true });
+        await groups.nth(3).screenshot({ path: path.join(screenshots, `${engineName}-profitability-mobile.png`) });
         assert.deepEqual(errors, []);
         await context.close();
       } finally { await browser.close(); }

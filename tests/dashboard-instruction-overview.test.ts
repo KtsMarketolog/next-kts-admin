@@ -5,9 +5,11 @@ import ts from 'typescript';
 
 import { isTopDashboardManagementSession, isTopDashboardSession, type AdminSession } from '../src/shared/lib/adminAuth';
 import { canReadTopDashboardBlock } from '../src/shared/lib/dashboardAccess';
-import { detectTopDashboardDataContract, detectTopDashboardExpectedProfile } from '../src/shared/lib/topDashboardContentSecurity';
+import { detectTopDashboardDataContract } from '../src/shared/lib/topDashboardContentSecurity';
+import { resolveTopDashboardInstructionKind } from '../src/shared/lib/dashboardInstructionProfile';
 
 const salesHtml = `<html><script>const DASH_NAME='аналитика_продаж';</script></html>`;
+const profitabilityHtml = '<!doctype html><title>Рентабельность сделок V25</title><script>const format = "kts-rent-snapshot"; function parseInvoiceFile(file) { return file; }</script>';
 const viewer: AdminSession = { role: 'purchaser', adminUserId: 41, sessionId: 'synthetic-viewer', dashboardAccess: ['top:7'] };
 const administrator: AdminSession = { role: 'admin', sessionId: 'synthetic-admin' };
 
@@ -47,7 +49,8 @@ function overviewRoute(session: AdminSession | null, fixture: Fixture = {}) {
       },
       TopDashboardBlockNotFoundError: class extends Error {},
     },
-    '@/shared/lib/topDashboardContentSecurity': { detectTopDashboardExpectedProfile, detectTopDashboardDataContract },
+    '@/shared/lib/topDashboardContentSecurity': { detectTopDashboardDataContract },
+    '@/shared/lib/dashboardInstructionProfile': { resolveTopDashboardInstructionKind },
     '@/shared/lib/topDashboardUploadTargets': { detectTopDashboardUploadTargets: () => [] },
     '@/shared/lib/adminSecurity': {},
     '@/shared/lib/db/securityAuditRepo': {},
@@ -92,11 +95,31 @@ test('viewer and management overview identify the sales instruction from active 
   }
 });
 
-test('a sales title, unavailable HTML or unrelated profile never adds a sales instruction', async () => {
+test('profitability instructions follow published invoice HTML independently of mutable block titles and legacy versions', async () => {
+  for (const session of [viewer, administrator]) {
+    for (const html of [profitabilityHtml, profitabilityHtml.replace('Рентабельность сделок V25', 'Рентабельность счетов V24.4')]) {
+      const route = overviewRoute(session, { title: 'Другой заголовок раздела', html });
+      const response = await route.get();
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
+      const body = await response.json();
+      assert.equal(body.instruction, 'deal-profitability');
+      assert.equal('activeDataContract' in body, session === administrator);
+      assert.equal('htmlContent' in body, false);
+      assert.doesNotMatch(JSON.stringify(body), /parseInvoiceFile/);
+      assert.deepEqual(route.calls, [session === administrator ? 'management:7' : 'published:7', 'html:7:19']);
+    }
+  }
+});
+
+test('a manual title, unavailable HTML, incomplete/mixed signatures or unrelated profile never adds an instruction', async () => {
   for (const session of [viewer, administrator]) {
     for (const fixture of [
       { html: `<script>const DASH_NAME='оптимизация_ассортимента';</script>` },
       { html: '<html><body>Обычный отчёт</body></html>' },
+      { html: '<html><title>Рентабельность сделок V25</title></html>' },
+      { html: '<title>Рентабельность сделок</title><script>const format="kts-rent-snapshot";</script>' },
+      { html: salesHtml + profitabilityHtml },
       { html: null },
       { activeVersionId: null },
     ]) {
