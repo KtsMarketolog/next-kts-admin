@@ -1,4 +1,5 @@
 import { removeDeletedKnowledgeBaseFile } from '../knowledgeBaseStorage';
+import { withDashboardBackupLock } from '../dashboardFileCleanup';
 import { ensureSiteSchema } from './schema';
 import { query, withTransaction } from './client';
 import { KNOWLEDGE_BASE_LOCK } from './knowledgeBaseRepo.shared';
@@ -18,7 +19,9 @@ export async function processKnowledgeBaseDeletionCleanup(input: { deletionId?: 
   try {
     await ensureSiteSchema();
     while (result.processed < limit && Date.now() < deadline) {
-      const outcome = await withTransaction(async client => {
+      // The same shared nonblocking lock protects all private-file cleanup from
+      // racing the installed backup runner's DB snapshot and file capture.
+      const outcome = await withDashboardBackupLock(() => withTransaction(async client => {
         await client.query("set local statement_timeout='3s'; set local lock_timeout='500ms'");
         const selected = await client.query<CleanupJob>(`select node_id::text,storage_path,file_size::text,sha256,attempts
           from knowledge_base_file_deletions where completed_at is null and failed_at is null and next_attempt_at<=clock_timestamp()
@@ -42,7 +45,8 @@ export async function processKnowledgeBaseDeletionCleanup(input: { deletionId?: 
           next_attempt_at=clock_timestamp()+make_interval(secs=>least(3600,60*power(2,least(attempts,6)))::int),
           last_error=case when $2 then 'PRIVATE_FILE_CLEANUP_FAILED' else null end where node_id=$1`, [job.node_id, failure, MAX_ATTEMPTS]);
         return failure ? 'failed' : 'completed';
-      }, { profile: 'interactive', trackCommitOutcome: true });
+      }, { profile: 'interactive', trackCommitOutcome: true }));
+      // Busy backups leave the durable job untouched, including its retry count.
       if (outcome === null) break;
       result.processed++; result[outcome]++;
     }

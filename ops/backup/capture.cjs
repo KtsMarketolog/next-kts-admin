@@ -7,6 +7,7 @@ const { createHash, randomBytes } = require('node:crypto');
 
 const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/u;
 const TOP_PATH = /^[0-9a-f]{2}\/[0-9a-f]{64}-[0-9a-f-]{36}\.bin$/u;
+const KNOWLEDGE_BASE_PATH = /^knowledge-base\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.[a-z0-9]+$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 
 function fail(code) {
@@ -204,11 +205,35 @@ async function inspectReferences(client) {
     select file_path as path, file_size::text as size
     from public.client_documents order by file_path collate "C", id
   `)).rows.map((row) => ({ ...row, size: Number(row.size) }));
-  return { topDashboard, clientDocuments };
+  // Preserve the exact reference shape of older snapshots/restores. The deletion
+  // column is the schema feature marker: archives predating it had no KB key.
+  const knowledgeBaseSchema = await client.query(`select 1 from information_schema.columns
+    where table_schema='public' and table_name='knowledge_base_nodes' and column_name='deleted_at'`);
+  if (!knowledgeBaseSchema.rows.length) return { topDashboard, clientDocuments };
+  const knowledgeBase = (await client.query(`select storage_path as path,file_size::text as size,sha256
+    from public.knowledge_base_nodes where kind='file' and deleted_at is null
+    order by storage_path collate "C",id`)).rows.map((row) => ({ ...row, size: Number(row.size) }));
+  // Archived files remain restorable and therefore required. Only irreversible
+  // tombstones may lack bytes; node metadata, deletion audit and outbox stay in the dump.
+  return { topDashboard, clientDocuments, knowledgeBase };
+}
+
+function verifyKnowledgeBaseReferences(byPath, references) {
+  if (!Object.hasOwn(references, 'knowledgeBase')) return;
+  if (!Array.isArray(references.knowledgeBase)) throw fail('INVALID_KNOWLEDGE_BASE_REFERENCE');
+  for (const reference of references.knowledgeBase) {
+    if (!reference || !KNOWLEDGE_BASE_PATH.test(reference.path) || !SHA256.test(reference.sha256)
+        || !Number.isSafeInteger(reference.size) || reference.size <= 0 || reference.size > 25 * 1024 * 1024) {
+      throw fail('INVALID_KNOWLEDGE_BASE_REFERENCE');
+    }
+    const file = byPath.get(`uploads/${reference.path}`);
+    if (!file || file.size !== reference.size || file.sha256 !== reference.sha256) throw fail('KNOWLEDGE_BASE_REFERENCE_MISMATCH');
+  }
 }
 
 function verifyReferences(files, references) {
   const byPath = new Map(files.map((file) => [`${file.source}/${file.path}`, file]));
+  verifyKnowledgeBaseReferences(byPath, references);
   for (const reference of references.topDashboard) {
     if (!TOP_PATH.test(reference.path) || !SHA256.test(reference.sha256)
         || !Number.isSafeInteger(reference.size) || reference.size <= 0) throw fail('INVALID_TOP_REFERENCE');
@@ -382,4 +407,4 @@ async function capture(ctx) {
   }
 }
 
-module.exports = { capture, inspectSchema, schemaFingerprint, inspectReferences };
+module.exports = { capture, inspectSchema, schemaFingerprint, inspectReferences, verifyKnowledgeBaseReferences };

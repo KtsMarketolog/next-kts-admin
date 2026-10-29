@@ -96,3 +96,52 @@ test('KB physical deletion validates immutable private bytes, rejects symlinks/t
     assert.match(root, /kts-kb-delete-unit-/); await rm(root, { recursive: true, force: true });
   }
 });
+
+function cleanupHarness(backupBusy: boolean) {
+  const steps: string[] = [];
+  let locked = false, acknowledgements = 0;
+  const job = { node_id: '10', storage_path: 'knowledge-base/00112233-4455-4677-8899-aabbccddeeff.txt', file_size: '4', sha256: 'a'.repeat(64), attempts: 0 };
+  const client = { query: async (sql: string) => {
+    assert.ok(locked, 'all job operations stay inside the backup lock');
+    if (sql.startsWith('set local')) return { rows: [] };
+    if (sql.includes('select node_id::text')) { steps.push('select'); return { rows: [job] }; }
+    if (sql.includes('pg_advisory_xact_lock_shared')) { steps.push('tree-lock'); return { rows: [] }; }
+    if (sql.includes('select n.id')) { steps.push('references'); return { rows: [{ id: '10' }], rowCount: 1 }; }
+    if (sql.includes('update knowledge_base_file_deletions')) { steps.push('ack'); acknowledgements++; return { rows: [], rowCount: 1 }; }
+    throw new Error('Unexpected SQL');
+  } };
+  const cleanup = load<typeof import('../src/shared/lib/db/knowledgeBaseDeletionCleanup')>('../src/shared/lib/db/knowledgeBaseDeletionCleanup.ts', {
+    '../knowledgeBaseStorage': { removeDeletedKnowledgeBaseFile: async () => { assert.ok(locked); steps.push('unlink'); } },
+    '../dashboardFileCleanup': { withDashboardBackupLock: async (action: () => Promise<unknown>) => {
+      steps.push('backup-lock');
+      if (backupBusy) return null;
+      locked = true;
+      try { return await action(); } finally { locked = false; steps.push('backup-unlock'); }
+    } },
+    './schema': { ensureSiteSchema: async () => {} },
+    './knowledgeBaseRepo.shared': { KNOWLEDGE_BASE_LOCK: 'synthetic-tree-lock' },
+    './client': {
+      withTransaction: async (action: (value: typeof client) => Promise<unknown>) => {
+        assert.ok(locked); steps.push('begin'); const result = await action(client);
+        assert.ok(locked); steps.push('commit'); return result;
+      },
+      query: async () => { assert.equal(locked, false); steps.push('state'); return { rows: [{ pending: backupBusy, exhausted: '0' }] }; },
+    },
+  });
+  return { cleanup, steps, acknowledged: () => acknowledgements };
+}
+
+test('KB cleanup defers a busy backup without selecting, unlinking, acknowledging or consuming a retry', async () => {
+  const h = cleanupHarness(true);
+  const result = await h.cleanup.processKnowledgeBaseDeletionCleanup({ limit: 1 });
+  assert.deepEqual(result, { processed: 0, completed: 0, failed: 0, pending: true, exhausted: 0, error: false });
+  assert.deepEqual(h.steps, ['backup-lock', 'state']); assert.equal(h.acknowledged(), 0);
+});
+
+test('KB cleanup holds the backup lock through reference check, unlink, outbox acknowledgement and transaction commit', async () => {
+  const h = cleanupHarness(false);
+  const result = await h.cleanup.processKnowledgeBaseDeletionCleanup({ limit: 1 });
+  assert.deepEqual(result, { processed: 1, completed: 1, failed: 0, pending: false, exhausted: 0, error: false });
+  assert.deepEqual(h.steps, ['backup-lock', 'begin', 'select', 'tree-lock', 'references', 'unlink', 'ack', 'commit', 'backup-unlock', 'state']);
+  assert.equal(h.acknowledged(), 1);
+});

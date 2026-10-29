@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,12 @@ import { createKnowledgeBaseFile, createKnowledgeBaseFolder, getKnowledgeBaseFil
 import { processKnowledgeBaseDeletionCleanup } from '../src/shared/lib/db/knowledgeBaseDeletionCleanup';
 import { KNOWLEDGE_BASE_LOCK } from '../src/shared/lib/db/knowledgeBaseRepo.shared';
 import { saveKnowledgeBaseUpload } from '../src/shared/lib/knowledgeBaseStorage';
+import type { PoolClient } from 'pg';
+
+type BackupReference = { path: string; size: number; sha256?: string };
+const backupCapture = createRequire(import.meta.url)('../ops/backup/capture.cjs') as {
+  inspectReferences(client: PoolClient): Promise<{ topDashboard: BackupReference[]; clientDocuments: BackupReference[]; knowledgeBase?: BackupReference[] }>;
+};
 
 function guard() {
   assert.equal(process.env.KTS_KNOWLEDGE_BASE_TEST, '1');
@@ -218,6 +225,39 @@ test('knowledge base explicit archive deletion: permissions, complete previews, 
       const result = await waiting;
       assert.equal(result.completed, 0); assert.equal(result.failed, 1);
       assert.equal(await readFile(join(storage, document.input.storagePath), 'utf8'), 'synthetic guide');
+    });
+
+    await t.test('backup PostgreSQL references include live and archived files, exclude physically removed tombstones, and retain legacy shape', async () => {
+      const active = await file(admin, null), archivedFile = await file(admin, null);
+      const archived = await archive(admin, archivedFile.node);
+      const toDelete = await file(admin, null), deleted = await archive(admin, toDelete.node);
+      const removed = await deleteKnowledgeBaseNode(admin, deleted.id, await confirmation(admin, deleted));
+      assert.equal(removed.cleanupPending, false);
+      await assert.rejects(readFile(join(storage, toDelete.input.storagePath)), { code: 'ENOENT' });
+      const references = await withTransaction(client => backupCapture.inspectReferences(client));
+      assert.ok(Array.isArray(references.knowledgeBase));
+      for (const expected of [active, archivedFile]) {
+        assert.deepEqual(references.knowledgeBase.find(ref => ref.path === expected.input.storagePath),
+          { path: expected.input.storagePath, size: expected.input.size, sha256: expected.input.sha256 });
+      }
+      assert.ok((await getKnowledgeBaseNode(admin, archived.id, { archived: true }))?.archivedAt);
+      assert.ok(!references.knowledgeBase.some(ref => ref.path === toDelete.input.storagePath));
+      assert.ok((await query('select deleted_at from knowledge_base_nodes where id=$1', [deleted.id])).rows[0].deleted_at,
+        'the tombstone remains in the database backup, only its physical file reference is excluded');
+      assert.equal((await query('select count(*)::int as n from knowledge_base_deletions where node_id=$1', [deleted.id])).rows[0].n, 1);
+      assert.equal((await query('select count(*)::int as n from knowledge_base_file_deletions where node_id=$1 and completed_at is not null', [deleted.id])).rows[0].n, 1);
+      // This is only the disposable guarded cluster. Rename the feature column
+      // within one transaction to execute the actual old-schema discovery path,
+      // then restore it; no rows, constraints or history are dropped.
+      const legacy = await withTransaction(async client => {
+        await client.query('alter table knowledge_base_nodes rename column deleted_at to legacy_deleted_at_fixture');
+        try { return await backupCapture.inspectReferences(client); }
+        finally { await client.query('alter table knowledge_base_nodes rename column legacy_deleted_at_fixture to deleted_at'); }
+      });
+      assert.deepEqual(Object.keys(legacy), ['topDashboard', 'clientDocuments']);
+      assert.deepEqual(legacy.topDashboard, references.topDashboard); assert.deepEqual(legacy.clientDocuments, references.clientDocuments);
+      assert.deepEqual(await withTransaction(client => backupCapture.inspectReferences(client)), references,
+        'feature restoration recovers the exact complete reference set');
     });
   } finally {
     if (previousStorage === undefined) delete process.env.UPLOAD_DIR; else process.env.UPLOAD_DIR = previousStorage;

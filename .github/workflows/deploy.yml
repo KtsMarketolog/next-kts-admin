@@ -449,6 +449,10 @@ jobs:
             echo 'Production backup gate is not installed; refusing migration.'
             exit 1
           fi
+          # The separately installed backup runtime must understand live KB file
+          # references before deletion becomes available. Never bypass this gate:
+          # a DB snapshot may otherwise refer to a file removed before copying it.
+          /usr/bin/node -e 'const backup = require("/home/kts/.local/lib/kts-backup/capture.cjs"); if (typeof backup.verifyKnowledgeBaseReferences !== "function") throw new Error("Update the installed backup runtime before enabling knowledge-base deletion"); backup.verifyKnowledgeBaseReferences(new Map(), {knowledgeBase: []});'
           if ! "$BACKUP_RUNNER" predeploy; then
             echo 'Pre-migration backup failed or cloud policy is not approved; deployment stopped.'
             /usr/bin/node /home/kts/.local/lib/kts-backup/notify.cjs predeploy || true

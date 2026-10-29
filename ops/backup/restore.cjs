@@ -346,6 +346,7 @@ async function validateDatabase(ctx, client, manifest, files) {
   compareRows(migrations, manifest.migrations, 'RESTORE_MIGRATIONS_MISMATCH');
   const references = await capture.inspectReferences(client);
   compareRows(references, manifest.references, 'RESTORE_REFERENCES_MISMATCH');
+  capture.verifyKnowledgeBaseReferences(files, references);
   const top = references.topDashboard;
   for (const ref of top) {
     const file = files.get('top-dashboard/' + relativeName(ref.path));
@@ -365,7 +366,8 @@ async function validateDatabase(ctx, client, manifest, files) {
   if (invalidTop.rows[0].count !== '0') throw fail('RESTORE_TOP_PAYLOAD_INVARIANT');
   return { tables: tables.length, rows: rowCount.toString(), migrations: migrations.length,
     topFiles: top.length, clientDocuments: documents.length, schemaFingerprint: actualLogicalFingerprint,
-    sourceSchemaFingerprint: manifest.schemaFingerprint };
+    sourceSchemaFingerprint: manifest.schemaFingerprint,
+    ...(Object.hasOwn(references, 'knowledgeBase') ? { knowledgeBaseFiles: references.knowledgeBase.length } : {}) };
 }
 
 async function restore(ctx, manifest, downloadedRoot) {
