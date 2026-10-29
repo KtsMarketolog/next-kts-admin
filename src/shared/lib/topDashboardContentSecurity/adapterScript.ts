@@ -74,6 +74,8 @@ export function getTopDashboardDataAdapterScript(
   let legacyRestoreId = 0;
   let legacySnapshotRestoreSequence = 0;
   let legacySnapshotPending = false;
+  let documentReady = document.readyState === 'complete';
+  let documentReadyTimer = 0;
 
   function dispatchDashboardReady(restoreId) {
     if (!validRestoreId(restoreId)) return;
@@ -253,6 +255,9 @@ ${multiFileAdapterScript()}${readOnlyAdapterScript()}  function stopWaitingForIn
     if (event.source !== window.parent) return;
     const data = event.data;
     if (!data || typeof data !== 'object' || LOCAL_INVOICE_MODE) return;
+    // The trusted bridge waits for adapter-ready before delivering data. Do not
+    // accept early deliveries or retain a queue of potentially large snapshots.
+    if (!documentReady) return;
     if (data.marker === MULTI_FILE_MARKER && data.type === 'probe-upload-targets') {
       reportUploadTargets(true, data.requestId);
       return;
@@ -279,7 +284,7 @@ ${multiFileAdapterScript()}${readOnlyAdapterScript()}  function stopWaitingForIn
   });
 
   function ready() {
-    if (LOCAL_INVOICE_MODE) return;
+    if (LOCAL_INVOICE_MODE || !documentReady) return;
     send('adapter-ready', {
       expectedFormat: EXPECTED_FORMAT,
       expectedProfile: EXPECTED_PROFILE,
@@ -287,10 +292,25 @@ ${multiFileAdapterScript()}${readOnlyAdapterScript()}  function stopWaitingForIn
     });
     reportUploadTargets(true);
   }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', ready, { once: true });
-  } else {
+  function scheduleDocumentReady() {
+    if (documentReady || documentReadyTimer) return;
+    // The adapter runs in <head>. File inputs may exist before the author's
+    // scripts, and "interactive" still precedes deferred scripts. A new task
+    // also lets later DOMContentLoaded listeners finish binding their handlers.
+    documentReadyTimer = window.setTimeout(() => {
+      documentReadyTimer = 0;
+      documentReady = true;
+      document.removeEventListener('DOMContentLoaded', scheduleDocumentReady);
+      window.removeEventListener('load', scheduleDocumentReady);
+      ready();
+    }, 0);
+  }
+  if (documentReady) {
     ready();
+  } else {
+    document.addEventListener('DOMContentLoaded', scheduleDocumentReady, { once: true });
+    // Covers an adapter evaluated after DOMContentLoaded but before load.
+    window.addEventListener('load', scheduleDocumentReady, { once: true });
   }
 })();`;
 }
