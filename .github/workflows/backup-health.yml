@@ -3,14 +3,6 @@ name: KTS backup monitor
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: Verify backups or download and restore from Yandex
-        required: true
-        default: check
-        type: choice
-        options:
-          - check
-          - restore
       test_email:
         description: Send a test email after a successful check
         required: true
@@ -18,7 +10,6 @@ on:
         type: boolean
   schedule:
     - cron: '45 3 * * *'
-    - cron: '30 4 * * 0'
 
 permissions:
   contents: read
@@ -34,105 +25,44 @@ jobs:
   monitor:
     name: Verify KTS backups independently
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-    env:
-      KTS_MONITOR_MODE: ${{ github.event.schedule == '30 4 * * 0' && 'restore' || inputs.mode || 'check' }}
-      VPS_HOST: ${{ secrets.VPS_HOST }}
-      VPS_USER: ${{ secrets.VPS_USER }}
-      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    timeout-minutes: 10
     steps:
-      - name: Checkout trusted monitoring code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified 2026-09-12
-        with:
-          persist-credentials: false
-
-      - name: Configure SSH with the independently verified host key
+      - name: Verify the latest local and Yandex restores on the REG server
         shell: bash
+        env:
+          REG_BACKUP_MONITOR_KEY: ${{ secrets.REG_BACKUP_MONITOR_KEY }}
+          REG_BACKUP_MONITOR_HOSTKEY: ${{ secrets.REG_BACKUP_MONITOR_HOSTKEY }}
         run: |
           set -Eeuo pipefail
           umask 077
-          test "$VPS_HOST" = '62.217.177.155' || { echo '::error::VPS_HOST does not match the audited KTS server'; exit 1; }
-          test "$VPS_USER" = 'kts' || { echo '::error::VPS_USER does not match the audited KTS user'; exit 1; }
-          test -n "$VPS_SSH_KEY" || { echo '::error::VPS_SSH_KEY is missing'; exit 1; }
-          KTS_SSH_DIR="$(mktemp -d "${RUNNER_TEMP}/kts-backup-ssh.XXXXXX")"
-          printf 'KTS_SSH_DIR=%s\n' "$KTS_SSH_DIR" >> "$GITHUB_ENV"
-          printf '%s\n' "$VPS_SSH_KEY" > "$KTS_SSH_DIR/id_ed25519"
-          install -m 600 .github/kts_known_hosts "$KTS_SSH_DIR/known_hosts"
-          test "$(ssh-keygen -lf "$KTS_SSH_DIR/known_hosts" | awk '{print $2}')" = 'SHA256:DDxou0OZtl7QjNnx8PrZbTv40iOs5wlH0Swfu3h51VA'
-
-      - name: Check backup health and optionally restore the cloud copy
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          case "$KTS_MONITOR_MODE" in check|restore) ;; *) echo '::error::Unsupported monitor mode'; exit 1 ;; esac
-          # Fixed command arguments; credentials remain only in the private key file.
-          timeout --signal=TERM --kill-after=15s 170m \
-            ssh -T -i "$KTS_SSH_DIR/id_ed25519" \
-              -o BatchMode=yes -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile="$KTS_SSH_DIR/known_hosts" \
-              -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
-              -o HostKeyAlgorithms=ssh-ed25519 \
-              -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-              -o LogLevel=ERROR \
-              "$VPS_USER@$VPS_HOST" "bash -se -- $KTS_MONITOR_MODE" <<'REMOTE'
-          set -Eeuo pipefail
-          umask 077
-          export PATH=/usr/bin:/bin
-          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-          export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
-          test "$(id -un)" = kts
-          test -x /home/kts/.local/lib/kts-backup/run.sh
-          if [[ "$1" = restore ]]; then
-            # Separate from the common operation lock held by each run.sh action.
-            exec 7>/home/kts/backups/kts-next-admin/.monitor-restore.lock
-            flock --exclusive --wait 60 7
-            started_epoch="$(date -u +%s)"
-            # systemctl start waits for each oneshot to finish. Never use --no-block.
-            systemctl --user start kts-backup-fetch-restore.service
-            test "$(systemctl --user show kts-backup-fetch-restore.service --property=Result --value)" = success
-            systemctl --user start kts-backup-restore.service
-            test "$(systemctl --user show kts-backup-restore.service --property=Result --value)" = success
-            /usr/bin/node - "$started_epoch" <<'NODE'
-          const fs = require('node:fs');
-          const filename = '/home/kts/backups/kts-next-admin/state/restore.json';
-          try {
-            const stat = fs.lstatSync(filename);
-            if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid() || (stat.mode & 0o777) !== 0o600) throw new Error();
-            const result = JSON.parse(fs.readFileSync(filename, 'utf8'));
-            const at = Date.parse(result.at);
-            if (result.ok !== true || result.origin !== 'yandex' || !Number.isFinite(at)
-                || at < Number(process.argv[2]) * 1000 || at > Date.now() + 60000
-                || result.report?.source !== 'yandex-object-storage'
-                || result.report?.project !== 'kts-next-admin'
-                || result.report?.id !== result.id
-                || !/^kts-next-admin-\d{8}T\d{6}Z-[a-f0-9]+$/.test(result.id)) throw new Error();
-            console.log(JSON.stringify({ status: 'restore-verified', id: result.id, origin: result.origin,
-              at: result.at, tables: result.report.tables, rows: result.report.rows,
-              files: result.report.files?.count, configFiles: result.report.configFiles?.count,
-              artifacts: result.report.artifacts }));
-          } catch {
-            console.error('Fresh successful Yandex restore report is missing or invalid');
-            process.exitCode = 1;
-          }
-          NODE
-          fi
-          # Full health includes a fresh successful cloud drill. Run it after
-          # the drill so missing/stale/failed evidence can recover on this run.
-          /home/kts/.local/lib/kts-backup/run.sh check
-          REMOTE
-
-      - name: Remove temporary SSH credentials
-        if: ${{ always() }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          if [[ -n "${KTS_SSH_DIR:-}" ]]; then
-            test "$(dirname "$KTS_SSH_DIR")" = "$RUNNER_TEMP"
-            [[ "$(basename "$KTS_SSH_DIR")" == kts-backup-ssh.* ]]
-            rm -f -- "$KTS_SSH_DIR/id_ed25519" "$KTS_SSH_DIR/known_hosts"
-            rmdir -- "$KTS_SSH_DIR"
-          fi
+          keydir="$(mktemp -d "$RUNNER_TEMP/reg-backup.XXXXXX")"
+          trap 'rm -f -- "$keydir/id" "$keydir/known_hosts" "$keydir/status"; rmdir -- "$keydir"' EXIT
+          test -n "$REG_BACKUP_MONITOR_KEY" || { echo '::error::REG_BACKUP_MONITOR_KEY is missing'; exit 1; }
+          printf '%s\n' "$REG_BACKUP_MONITOR_KEY" > "$keydir/id"
+          unset REG_BACKUP_MONITOR_KEY
+          read -r host algorithm host_key extra <<< "$REG_BACKUP_MONITOR_HOSTKEY"
+          [[ "$host" =~ ^[0-9]+(\.[0-9]+){3}$ && "$algorithm" == ssh-ed25519 && -n "$host_key" && -z "$extra" ]]
+          printf '%s %s %s\n' "$host" "$algorithm" "$host_key" > "$keydir/known_hosts"
+          # The key is restricted to a single read-only command on the VPS.
+          timeout 4m ssh -F /dev/null -nT -i "$keydir/id" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$keydir/known_hosts" -o GlobalKnownHostsFile=/dev/null \
+            -o HostKeyAlgorithms=ssh-ed25519 -o ConnectTimeout=15 \
+            "kts-backup-monitor@$host" backup-status > "$keydir/status"
+          # Compare the VPS timestamps to the runner's independent UTC clock.
+          python3 - "$keydir/status" <<'PY'
+          import datetime as dt, json, sys
+          with open(sys.argv[1]) as stream:
+              report = json.load(stream)
+          if report.get('ok') is not True:
+              sys.exit('Incomplete REG backup verification')
+          now = dt.datetime.now(dt.timezone.utc)
+          for field in ('capture', 'localRestore', 'cloudRestore', 'health'):
+              stamp = dt.datetime.fromisoformat(report[field].replace('Z', '+00:00'))
+              if not -300 <= (now - stamp).total_seconds() < (2700 if field == 'health' else 108000):
+                  sys.exit('Stale REG backup evidence: ' + field)
+              print(field, stamp.isoformat())
+          PY
 
   notify:
     name: Independent failure email
