@@ -9,7 +9,7 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: '45 3 * * *'
+    - cron: '45 6 * * *'
 
 permissions:
   contents: read
@@ -26,8 +26,12 @@ jobs:
     name: Verify KTS backups independently
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      local_restore: ${{ steps.check.outputs.local_restore }}
+      failed_stage: ${{ steps.check.outputs.failed_stage }}
     steps:
       - name: Verify the latest local and Yandex restores on the REG server
+        id: check
         shell: bash
         env:
           REG_BACKUP_MONITOR_KEY: ${{ secrets.REG_BACKUP_MONITOR_KEY }}
@@ -51,17 +55,25 @@ jobs:
             "kts-backup-monitor@$host" backup-status > "$keydir/status"
           # Compare the VPS timestamps to the runner's independent UTC clock.
           python3 - "$keydir/status" <<'PY'
-          import datetime as dt, json, sys
+          import datetime as dt, json, os, sys
           with open(sys.argv[1]) as stream:
               report = json.load(stream)
-          if report.get('ok') is not True:
-              sys.exit('Incomplete REG backup verification')
           now = dt.datetime.now(dt.timezone.utc)
-          for field in ('capture', 'localRestore', 'cloudRestore', 'health'):
-              stamp = dt.datetime.fromisoformat(report[field].replace('Z', '+00:00'))
-              if not -300 <= (now - stamp).total_seconds() < (2700 if field == 'health' else 108000):
-                  sys.exit('Stale REG backup evidence: ' + field)
-              print(field, stamp.isoformat())
+          intervals = {'capture': 108000, 'localRestore': 108000, 'health': 2700, 'cloudRestore': 108000}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for field, limit in intervals.items():
+                  if field not in report:
+                      break
+                  stamp = dt.datetime.fromisoformat(report[field].replace('Z', '+00:00'))
+                  if not -300 <= (now - stamp).total_seconds() < limit:
+                      sys.exit('Stale REG backup evidence: ' + field)
+                  print(field, stamp.isoformat())
+                  if field == 'localRestore':
+                      print('local_restore=' + stamp.astimezone(dt.timezone.utc).isoformat(), file=output)
+              if report.get('stage') in ('local', 'health', 'cloud'):
+                  print('failed_stage=' + report['stage'], file=output)
+          if report.get('ok') is not True or any(key not in report for key in intervals):
+              sys.exit('Incomplete REG backup verification')
           PY
 
   notify:
@@ -104,6 +116,8 @@ jobs:
       - name: Send email without depending on production SSH or SMTP configuration
         env:
           KTS_ALERT_SOURCE: github
+          KTS_VERIFIED_LOCAL_RESTORE: ${{ needs.monitor.outputs.local_restore }}
+          KTS_FAILED_BACKUP_STAGE: ${{ needs.monitor.outputs.failed_stage }}
           SMTP_HOST: ${{ secrets.BACKUP_SMTP_HOST }}
           SMTP_PORT: ${{ secrets.BACKUP_SMTP_PORT }}
           SMTP_SECURE: ${{ secrets.BACKUP_SMTP_SECURE }}

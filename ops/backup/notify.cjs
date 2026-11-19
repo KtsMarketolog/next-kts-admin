@@ -37,6 +37,16 @@ function formatDeliveryError(error) {
   return `KTS backup email delivery FAILED [${details.join(' ')}]; check SMTP settings and independent monitor`;
 }
 
+function externalStatus(env) {
+  const recorded=env.KTS_VERIFIED_LOCAL_RESTORE;
+  const latest=typeof recorded==='string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?\+00:00$/.test(recorded)
+    ? 'Локальная копия проверена восстановлением: '+recorded+' (UTC).'
+    : 'Независимая проверка не получила подтверждение текущей локальной копии.';
+  const stages={local:'Проверьте локальную копию на VPS.',health:'Проверьте контроль состояния на VPS.',
+    cloud:'Восстановление из Яндекс Object Storage для этой копии не подтверждено.'};
+  return [latest,stages[env.KTS_FAILED_BACKUP_STAGE]].filter(Boolean).join('\n');
+}
+
 async function main() {
   const local=process.env.KTS_ALERT_SOURCE!=='github';
   let env=process.env,mailer;
@@ -50,9 +60,10 @@ async function main() {
   const event=String(process.argv[2]||'backup-check').replace(/[^a-zA-Z0-9_.@-]/g,'').slice(0,120);
   let latest='не подтверждена';
   if(local)try{const s=JSON.parse(await fs.readFile('/home/kts/backups/kts-next-admin/state/capture.json','utf8'));latest=s.ok?s.at:'последняя попытка завершилась ошибкой';}catch{}
+  const status=local?'Последний успешный локальный бэкап: '+latest:externalStatus(env);
   const runUrl=process.env.GITHUB_SERVER_URL&&process.env.GITHUB_REPOSITORY&&process.env.GITHUB_RUN_ID?`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`:'';
   const transport=mailer.createTransport({host:env.SMTP_HOST,port:Number(env.SMTP_PORT||465),secure:env.SMTP_SECURE==='true'||String(env.SMTP_PORT||465)==='465',auth:{user:env.SMTP_USER,pass:env.SMTP_PASSWORD},connectionTimeout:15000,socketTimeout:30000,tls:{rejectUnauthorized:true}});
-  try {await transport.sendMail({from:env.SMTP_FROM||env.SMTP_USER,to:'ktsmarketolog@yandex.ru',subject:event==='test'?'KTS: проверка уведомлений о бэкапах':'KTS: ошибка резервного копирования',text:`Проект: kts-next-admin\nПроверка: ${event}\nВремя UTC: ${new Date().toISOString()}\nПоследний успешный локальный бэкап: ${latest}\n${runUrl?`Проверка GitHub: ${runUrl}\n`:''}Проверьте резервные копии. Это письмо не содержит паролей, ключей или данных клиентов.`});console.log('KTS backup email sent');}
+  try {await transport.sendMail({from:env.SMTP_FROM||env.SMTP_USER,to:'ktsmarketolog@yandex.ru',subject:event==='test'?'KTS: проверка уведомлений о бэкапах':'KTS: ошибка резервного копирования',text:`Проект: kts-next-admin\nПроверка: ${event}\nВремя UTC: ${new Date().toISOString()}\n${status}\n${runUrl?`Проверка GitHub: ${runUrl}\n`:''}Проверьте резервные копии. Это письмо не содержит паролей, ключей или данных клиентов.`});console.log('KTS backup email sent');}
   finally {transport.close();}
 }
 if (require.main === module) {
